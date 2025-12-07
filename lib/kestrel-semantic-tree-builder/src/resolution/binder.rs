@@ -146,6 +146,7 @@ impl<'a> SemanticBinder<'a> {
     /// Map symbol kind to syntax kind for resolver lookup
     fn symbol_kind_to_syntax_kind(kind: KestrelSymbolKind) -> Option<SyntaxKind> {
         match kind {
+            KestrelSymbolKind::AssociatedType => Some(SyntaxKind::TypeAliasDeclaration),
             KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
             KestrelSymbolKind::Initializer => Some(SyntaxKind::InitializerDeclaration),
             KestrelSymbolKind::Protocol => Some(SyntaxKind::ProtocolDeclaration),

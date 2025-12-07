@@ -403,6 +403,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
 /// Format a symbol kind for error messages
 pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
     match kind {
+        KestrelSymbolKind::AssociatedType => "associated type".to_string(),
         KestrelSymbolKind::Field => "field".to_string(),
         KestrelSymbolKind::Function => "function".to_string(),
         KestrelSymbolKind::Import => "import".to_string(),

@@ -5,10 +5,12 @@
 //! - Functions and methods
 //! - Protocols and inheritance
 //! - Type aliases
+//! - Associated types
 //! - Import statements
 
 mod structs;
 mod functions;
 mod protocols;
 mod type_aliases;
+mod associated_types;
 mod imports;

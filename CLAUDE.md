@@ -8,3 +8,4 @@ index.md
 patterns.md
 quick-reference.md
 workflows.md
+- never change a test unless it uses invalid syntax. dont change a test to make it pass. Dont ignore one either
