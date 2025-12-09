@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -103,13 +105,9 @@ impl Resolver for ProtocolResolver {
         // Get file_id and source for this symbol
         let (file_id, source) = context.get_file_context(symbol);
 
-        // Extract type parameters and resolve where clause bounds
-        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
-
-        // Add GenericsBehavior
-        symbol.metadata().add_behavior(generics_behavior);
-
-        // Resolve inherited protocols from syntax and add as behavior
+        // Resolve inherited protocols FIRST, before where clause
+        // This is needed so that where clause can reference associated types from inherited protocols
+        // e.g., protocol SortedIterator: Iterator where Iterator.Item: Comparable { }
         resolve_conformance_list(
             syntax,
             &source,
@@ -119,6 +117,13 @@ impl Resolver for ProtocolResolver {
             file_id,
             NotAProtocolContext::Inheritance,
         );
+
+        // Extract type parameters and resolve where clause bounds
+        // Now inherited protocols are available for associated type path resolution
+        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context, symbol);
+
+        // Add GenericsBehavior
+        symbol.metadata().add_behavior(generics_behavior);
     }
 }
 
@@ -128,13 +133,8 @@ fn resolve_generics(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> GenericsBehavior {
-    // Get type parameters from the symbol's children (they were added during BUILD)
-    let symbol = match ctx.db.symbol_by_id(context_id) {
-        Some(s) => s,
-        None => return GenericsBehavior::empty(),
-    };
-
     let type_parameters: Vec<Arc<TypeParameterSymbol>> = symbol
         .metadata()
         .children()
@@ -149,7 +149,8 @@ fn resolve_generics(
         .collect();
 
     // Now resolve the where clause with fully resolved protocol types
-    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters);
+    // Inherited protocols are already resolved (ConformancesBehavior is attached)
+    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters, symbol);
 
     GenericsBehavior::new(type_parameters, where_clause)
 }
@@ -161,6 +162,7 @@ fn resolve_where_clause(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> WhereClause {
     let where_clause_node = match find_child(syntax, SyntaxKind::WhereClause) {
         Some(node) => node,
@@ -175,7 +177,7 @@ fn resolve_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id) {
+            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id, symbol) {
                 constraints.push(constraint);
             }
         }
@@ -185,6 +187,10 @@ fn resolve_where_clause(
 }
 
 /// Resolve a single TypeBound, resolving protocol paths to actual types.
+///
+/// Handles both:
+/// - Simple type parameters: `T: Protocol`
+/// - Inherited protocol associated types: `Iterator.Item: Comparable`
 fn resolve_type_bound(
     syntax: &SyntaxNode,
     source: &str,
@@ -192,26 +198,125 @@ fn resolve_type_bound(
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
     file_id: usize,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<Constraint> {
-    // Find the Name node and extract the type parameter name and span
+    // Check if this is an AssociatedTypeTarget (for paths like Iterator.Item)
+    if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
+        // Associated type path: Iterator.Item
+        // For protocols, this could be an inherited protocol's associated type
+        let path_node = find_child(&target_node, SyntaxKind::Path)?;
+        let segments = extract_path_segments(&path_node);
+
+        if segments.len() >= 2 {
+            let protocol_name = &segments[0];
+            let assoc_type_name = &segments[1];
+
+            // Check if the first segment refers to an inherited protocol
+            if let Some(inherited_protocol) = find_inherited_protocol(symbol, protocol_name) {
+                // Validate that the associated type exists in the inherited protocol
+                let has_assoc_type = inherited_protocol
+                    .metadata()
+                    .children()
+                    .iter()
+                    .any(|child| {
+                        child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                            && &child.metadata().name().value == assoc_type_name
+                    });
+
+                if has_assoc_type {
+                    // Resolve the bounds and create an InheritedAssociatedTypeBound constraint
+                    let bounds = resolve_bounds(syntax, source, context_id, ctx, file_id);
+                    let span = get_node_span(&target_node, source);
+                    let full_name = segments.join(".");
+
+                    // Create a constraint that represents the inherited associated type bound
+                    // This is valid and should NOT be flagged as undeclared
+                    return Some(Constraint::inherited_assoc_type_bound(
+                        full_name,
+                        span,
+                        bounds,
+                    ));
+                }
+                // If associated type doesn't exist, fall through to produce an error
+            }
+        }
+
+        // If we get here, it's an unresolved associated type path
+        let full_name = segments.join(".");
+        let span = get_node_span(&target_node, source);
+        let bounds = resolve_bounds(syntax, source, context_id, ctx, file_id);
+
+        if !bounds.is_empty() {
+            return Some(Constraint::unresolved_type_bound(full_name, span, bounds));
+        }
+        return None;
+    }
+
+    // Simple type parameter: T
     let name_node = find_child(syntax, SyntaxKind::Name)?;
     let name_token = name_node
         .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Identifier)?;
 
-    let param_name = name_token.text().to_string();
+    let name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+    let span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
         .iter()
-        .find(|p| p.metadata().name().value == param_name)
+        .find(|p| p.metadata().name().value == name)
         .map(|p| p.metadata().id());
 
-    // Resolve each Path to a protocol type
-    let bounds: Vec<Ty> = syntax
+    // Resolve the bounds
+    let bounds = resolve_bounds(syntax, source, context_id, ctx, file_id);
+
+    if bounds.is_empty() {
+        None
+    } else {
+        match param_id {
+            Some(id) => Some(Constraint::type_bound(id, name, span, bounds)),
+            None => Some(Constraint::unresolved_type_bound(name, span, bounds)),
+        }
+    }
+}
+
+/// Find an inherited protocol by name from the symbol's ConformancesBehavior
+fn find_inherited_protocol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    protocol_name: &str,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    // Get the ConformancesBehavior which contains inherited protocols
+    let behaviors = symbol.metadata().behaviors();
+    let conformances_behavior = behaviors
+        .iter()
+        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Conformances))?;
+
+    let conformances = conformances_behavior
+        .as_ref()
+        .downcast_ref::<ConformancesBehavior>()?;
+
+    // Find the protocol with matching name
+    for ty in conformances.conformances() {
+        if let TyKind::Protocol { symbol: proto_sym, .. } = ty.kind() {
+            if proto_sym.metadata().name().value == protocol_name {
+                return Some(proto_sym.clone() as Arc<dyn Symbol<KestrelLanguage>>);
+            }
+        }
+    }
+    None
+}
+
+/// Resolve bounds from Path children in a TypeBound node
+fn resolve_bounds(
+    syntax: &SyntaxNode,
+    source: &str,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    file_id: usize,
+) -> Vec<Ty> {
+    syntax
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
@@ -272,14 +377,5 @@ fn resolve_type_bound(
                 }
             }
         })
-        .collect();
-
-    if bounds.is_empty() {
-        None
-    } else {
-        match param_id {
-            Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
-            None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
-        }
-    }
+        .collect()
 }

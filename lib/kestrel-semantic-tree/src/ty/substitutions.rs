@@ -108,6 +108,17 @@ impl Substitutions {
                 Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
             }
 
+            // Associated type - apply substitutions to container if present
+            TyKind::AssociatedType { symbol, container } => {
+                match container {
+                    Some(container_ty) => {
+                        let new_container = self.apply(container_ty);
+                        Ty::qualified_associated_type(symbol.clone(), new_container, ty.span().clone())
+                    }
+                    None => ty.clone(),
+                }
+            }
+
             // Base types and special types - return as-is
             TyKind::Unit
             | TyKind::Never

@@ -1,3 +1,4 @@
+pub mod associated_type;
 pub mod field;
 pub mod function;
 pub mod import;

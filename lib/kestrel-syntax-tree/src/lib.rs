@@ -69,7 +69,11 @@ pub enum SyntaxKind {
     // Where clause nodes
     WhereClause,         // where T: Proto, U: Other
     TypeBound,           // T: Proto and Proto2
-    TypeEquality,        // T.Item = U (future)
+    TypeEquality,        // T.Item == U (associated type equality constraint)
+    AssociatedTypeBound, // T.Item: Proto (associated type bound constraint)
+
+    // Associated type nodes
+    AssociatedTypeTarget, // Iterator.Item or Add[Int].Output (qualified target in type binding)
 
     // Conformance nodes
     ConformanceList,     // : Proto1, Proto2 (after struct/protocol name)
@@ -341,6 +345,8 @@ impl Language for KestrelLanguage {
         const WHERE_CLAUSE: u16 = SyntaxKind::WhereClause as u16;
         const TYPE_BOUND: u16 = SyntaxKind::TypeBound as u16;
         const TYPE_EQUALITY: u16 = SyntaxKind::TypeEquality as u16;
+        const ASSOCIATED_TYPE_BOUND: u16 = SyntaxKind::AssociatedTypeBound as u16;
+        const ASSOCIATED_TYPE_TARGET: u16 = SyntaxKind::AssociatedTypeTarget as u16;
         const CONFORMANCE_LIST: u16 = SyntaxKind::ConformanceList as u16;
         const CONFORMANCE_ITEM: u16 = SyntaxKind::ConformanceItem as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
@@ -487,6 +493,8 @@ impl Language for KestrelLanguage {
             WHERE_CLAUSE => SyntaxKind::WhereClause,
             TYPE_BOUND => SyntaxKind::TypeBound,
             TYPE_EQUALITY => SyntaxKind::TypeEquality,
+            ASSOCIATED_TYPE_BOUND => SyntaxKind::AssociatedTypeBound,
+            ASSOCIATED_TYPE_TARGET => SyntaxKind::AssociatedTypeTarget,
             CONFORMANCE_LIST => SyntaxKind::ConformanceList,
             CONFORMANCE_ITEM => SyntaxKind::ConformanceItem,
             TY => SyntaxKind::Ty,

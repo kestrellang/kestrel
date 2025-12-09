@@ -3,6 +3,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -18,7 +19,7 @@ use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type
 use crate::resolution::type_resolver::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::syntax::{
     extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility, find_child,
-    find_visibility_scope, get_node_span, get_visibility_span, parse_visibility,
+    find_visibility_scope, get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility,
 };
 
 /// Resolver for function declarations
@@ -118,17 +119,17 @@ impl Resolver for FunctionResolver {
         // Get file_id and source for this symbol
         let (file_id, source) = context.get_file_context(symbol);
 
-        // Extract and resolve parameters from syntax
+        // Extract type parameters and resolve where clause bounds FIRST
+        // This must happen before resolving parameter/return types so that
+        // T.Item paths can find the protocol bounds for T
+        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
+        symbol.metadata().add_behavior(generics_behavior);
+
+        // Now extract and resolve parameters from syntax (T.Item will work)
         let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context, file_id);
 
-        // Extract and resolve return type from syntax
+        // Extract and resolve return type from syntax (T.Item will work)
         let resolved_return = resolve_return_type_from_syntax(syntax, &source, symbol_id, context, file_id);
-
-        // Extract type parameters and resolve where clause bounds
-        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
-
-        // Add GenericsBehavior
-        symbol.metadata().add_behavior(generics_behavior);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
@@ -195,9 +196,14 @@ fn resolve_where_clause(
 
     let mut constraints = Vec::new();
 
+    // Get file_id for diagnostics
+    let file_id = ctx.db.symbol_by_id(context_id)
+        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
+        .unwrap_or(0);
+
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params) {
+            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id, &constraints) {
                 constraints.push(constraint);
             }
         }
@@ -207,14 +213,96 @@ fn resolve_where_clause(
 }
 
 /// Resolve a single TypeBound, resolving protocol paths to actual types.
+///
+/// Handles both simple bounds (T: Protocol) and associated type bounds (T.Item: Protocol).
 fn resolve_type_bound(
     syntax: &SyntaxNode,
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
+    file_id: usize,
+    already_collected: &[Constraint],
 ) -> Option<Constraint> {
-    // Find the Name node and extract the type parameter name and span
+    use crate::diagnostics::WhereClauseAssociatedTypeNotFoundError;
+
+    // Check for AssociatedTypeTarget first (T.Item: Protocol syntax)
+    if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
+        // Extract path segments from the target (e.g., ["T", "Item"])
+        let path_segments = extract_path_from_node(&target_node);
+
+        if path_segments.len() >= 2 {
+            let type_param_name = &path_segments[0];
+            let assoc_type_name = &path_segments[1];
+
+            // Find the type parameter
+            let type_param = type_params
+                .iter()
+                .find(|p| &p.metadata().name().value == type_param_name);
+
+            if let Some(type_param) = type_param {
+                let param_id = type_param.metadata().id();
+
+                // Get protocol bounds from already-collected constraints
+                let bounds: Vec<&Ty> = already_collected
+                    .iter()
+                    .filter_map(|c| {
+                        if c.param_id() == Some(param_id) {
+                            match c {
+                                Constraint::TypeBound { bounds, .. } => Some(bounds.iter().collect::<Vec<_>>()),
+                                // InheritedAssociatedTypeBound has param_id() = None, so won't match
+                                Constraint::InheritedAssociatedTypeBound { .. } => None,
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .collect();
+
+                // Check if any bound protocol has this associated type
+                let mut found_assoc_type = false;
+                let mut protocol_name = String::new();
+
+                for bound in &bounds {
+                    if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                        protocol_name = symbol.metadata().name().value.clone();
+                        let protocol_dyn = symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+                        // Check direct children for the associated type
+                        let has_type = protocol_dyn.metadata().children().iter().any(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                                && &child.metadata().name().value == assoc_type_name
+                        });
+
+                        if has_type {
+                            found_assoc_type = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !found_assoc_type && !bounds.is_empty() {
+                    let target_span = get_node_span(&target_node, source);
+                    ctx.diagnostics.throw(
+                        WhereClauseAssociatedTypeNotFoundError {
+                            span: target_span,
+                            type_param: type_param_name.clone(),
+                            assoc_type_name: assoc_type_name.clone(),
+                            protocol_name,
+                        },
+                        file_id,
+                    );
+                }
+            }
+        }
+
+        // Associated type bounds don't create constraints in the same way
+        // They're validated above but don't need to be added to the constraint list
+        return None;
+    }
+
+    // Simple bound: T: Protocol
     let name_node = find_child(syntax, SyntaxKind::Name)?;
     let name_token = name_node
         .children_with_tokens()
@@ -270,6 +358,28 @@ fn resolve_type_bound(
             None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
         }
     }
+}
+
+/// Extract path segments from an AssociatedTypeTarget or Path node
+fn extract_path_from_node(node: &SyntaxNode) -> Vec<String> {
+    let mut segments = Vec::new();
+
+    // Try to find a Path child
+    if let Some(path_node) = find_child(node, SyntaxKind::Path) {
+        for child in path_node.children() {
+            if child.kind() == SyntaxKind::PathElement {
+                for elem in child.children_with_tokens() {
+                    if let Some(token) = elem.into_token() {
+                        if token.kind() == SyntaxKind::Identifier {
+                            segments.push(token.text().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    segments
 }
 
 /// Resolve a function's body and attach ExecutableBehavior to the symbol

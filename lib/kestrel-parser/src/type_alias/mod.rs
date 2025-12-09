@@ -2,6 +2,30 @@
 //!
 //! This module is the single source of truth for type alias declaration parsing.
 //! Type aliases support generics with type parameters.
+//!
+//! # Supported Syntax
+//!
+//! ## Regular type aliases (module/file level)
+//! ```text
+//! type Alias = Type;
+//! type Box[T] = T;
+//! public type MyInt = Int;
+//! ```
+//!
+//! ## Associated types in protocols
+//! ```text
+//! type Item                        // Abstract associated type
+//! type Item: Equatable             // With constraint bounds
+//! type Item = Int                  // With default
+//! type Item: Equatable = Int       // With bounds and default
+//! ```
+//!
+//! ## Associated type bindings in structs
+//! ```text
+//! type Item = Int                  // Simple binding
+//! type Iterator.Item = Int         // Qualified (multiple conformances)
+//! type Add[Int].Output = Int       // Qualified with type arguments
+//! ```
 
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
@@ -12,9 +36,9 @@ use crate::event::{EventSink, TreeBuilder};
 use crate::common::{
     visibility_parser_internal, token, identifier,
     emit_type_alias_declaration,
-    TypeAliasDeclarationData,
+    TypeAliasDeclarationData, AssociatedTypeTargetData, AssociatedTypeBoundsData,
 };
-use crate::ty::ty_parser;
+use crate::ty::{ty_parser, TyVariant};
 use crate::type_param::type_parameter_list_parser;
 
 /// Represents a type alias declaration: (visibility)? type Name[T]? = Type;
@@ -113,25 +137,99 @@ impl TypeAliasDeclaration {
     }
 }
 
+/// Parser for associated type bounds (: Equatable, Hashable)
+fn associated_type_bounds_parser() -> impl Parser<Token, AssociatedTypeBoundsData, Error = Simple<Token>> + Clone {
+    token(Token::Colon)
+        .then(
+            ty_parser()
+                .separated_by(just(Token::Comma))
+                .at_least(1)
+        )
+        .map(|(colon_span, bounds)| AssociatedTypeBoundsData { colon_span, bounds })
+}
+
+/// Parser for associated type target (simple name or qualified path)
+///
+/// Supports:
+/// - Simple: `Item`
+/// - Qualified: `Iterator.Item` or `Add[Int].Output`
+///
+/// Strategy: Parse an identifier first, then check if there's more (dot + name).
+/// If we see a dot, we need to determine if it's part of a type path or the
+/// associated type accessor. The key insight is that the qualified form always
+/// ends with `.Name` where Name is a simple identifier.
+fn associated_type_target_parser() -> impl Parser<Token, AssociatedTypeTargetData, Error = Simple<Token>> + Clone {
+    // Simple approach: parse identifier, optionally followed by more path segments
+    // and a final .name
+    //
+    // For now, support:
+    // - Simple: identifier
+    // - Qualified: identifier.identifier (one level)
+    // - Qualified with generics: identifier[types].identifier
+    //
+    // We use try_map to collect all segments and separate the last one
+    identifier()
+        .then(
+            // Optional: generic args followed by dot and name
+            // Or just: dot and name
+            just(Token::LBracket)
+                .ignore_then(ty_parser().separated_by(just(Token::Comma)).at_least(1))
+                .then_ignore(just(Token::RBracket))
+                .or_not()
+                .then(token(Token::Dot))
+                .then(identifier())
+                .or_not()
+        )
+        .map(|(first_name, rest)| {
+            match rest {
+                None => {
+                    // Simple case: just an identifier
+                    AssociatedTypeTargetData::Simple(first_name)
+                }
+                Some(((type_args, dot_span), name_span)) => {
+                    // Qualified case: first_name[type_args]?.name
+                    // Reconstruct protocol_path as a TyVariant::Path
+                    let protocol_path = TyVariant::Path {
+                        segments: vec![first_name.clone()],
+                        args: type_args,
+                    };
+                    AssociatedTypeTargetData::Qualified {
+                        protocol_path,
+                        dot_span,
+                        name_span,
+                    }
+                }
+            }
+        })
+}
+
 /// Internal Chumsky parser for type alias declaration
 ///
 /// This is the single source of truth for type alias declaration parsing.
+/// Supports all variants:
+/// - Regular: `type Alias = Type;`
+/// - Associated type (protocol): `type Item;` or `type Item: Bound;` or `type Item = Default;`
+/// - Qualified binding (struct): `type Iterator.Item = Int;`
 pub fn type_alias_declaration_parser_internal() -> impl Parser<Token, TypeAliasDeclarationData, Error = Simple<Token>> + Clone {
     visibility_parser_internal()
         .then(token(Token::Type))
-        .then(identifier())
+        .then(associated_type_target_parser())
         .then(type_parameter_list_parser().or_not())
-        .then(token(Token::Equals))
-        .then(ty_parser())
+        .then(associated_type_bounds_parser().or_not())
+        .then(
+            token(Token::Equals)
+                .then(ty_parser())
+                .or_not()
+        )
         .then(token(Token::Semicolon))
-        .map(|((((((visibility, type_span), name_span), type_params), equals_span), aliased_type), semicolon_span)| {
+        .map(|((((((visibility, type_span), target), type_params), bounds), aliased), semicolon_span)| {
             TypeAliasDeclarationData {
                 visibility,
                 type_span,
-                name_span,
+                target,
                 type_params,
-                equals_span,
-                aliased_type,
+                bounds,
+                aliased,
                 semicolon_span,
             }
         })
@@ -227,6 +325,31 @@ mod tests {
 
         assert_eq!(decl.name(), Some("Box".to_string()));
         assert!(decl.has_type_parameters());
+    }
+
+    #[test]
+    fn test_type_alias_abstract_associated_type() {
+        // Associated type in protocol without default: type Item;
+        let source = "type Item;";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = TypeAliasDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("Item".to_string()));
+        // No aliased type for abstract associated types
+        assert_eq!(decl.aliased_type(), None);
+        // No AliasedType node should exist
+        assert!(!decl.syntax.children().any(|c| c.kind() == SyntaxKind::AliasedType));
     }
 
     #[test]

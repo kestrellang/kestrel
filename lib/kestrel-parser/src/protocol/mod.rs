@@ -1,7 +1,9 @@
 //! Protocol declaration parsing
 //!
 //! This module is the single source of truth for protocol declaration parsing.
-//! Protocol bodies can only contain function declarations (methods).
+//! Protocol bodies can contain:
+//! - Function declarations (methods)
+//! - Associated type declarations
 
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
@@ -13,8 +15,9 @@ use crate::common::{
     visibility_parser_internal, token, identifier,
     function_declaration_parser_internal,
     emit_protocol_declaration,
-    ProtocolDeclarationData,
+    ProtocolDeclarationData, ProtocolBodyItem,
 };
+use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{type_parameter_list_parser, where_clause_parser, conformance_list_parser};
 use crate::common::ConformanceListData;
 
@@ -87,6 +90,21 @@ impl ProtocolDeclaration {
     }
 }
 
+/// Parser for protocol body items (functions or associated types)
+fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = Simple<Token>> + Clone {
+    let function = function_declaration_parser_internal()
+        .map(ProtocolBodyItem::Function);
+
+    let associated_type = type_alias_declaration_parser_internal()
+        .map(ProtocolBodyItem::AssociatedType);
+
+    // Try function first, then associated type
+    // This works because function starts with visibility? followed by 'func'
+    // while associated type starts with visibility? followed by 'type'
+    // Chumsky will backtrack correctly when the keyword doesn't match
+    function.or(associated_type)
+}
+
 /// Internal Chumsky parser for protocol declaration
 ///
 /// This is the single source of truth for protocol declaration parsing.
@@ -98,7 +116,7 @@ pub fn protocol_declaration_parser_internal() -> impl Parser<Token, ProtocolDecl
         .then(conformance_list_parser().or_not())
         .then(where_clause_parser().or_not())
         .then(token(Token::LBrace))
-        .then(function_declaration_parser_internal().repeated())
+        .then(protocol_body_item_parser().repeated())
         .then(token(Token::RBrace))
         .map(|((((((((visibility, protocol_span), name_span), type_params), inherited), where_clause), lbrace_span), body), rbrace_span)| {
             ProtocolDeclarationData {
@@ -229,6 +247,16 @@ mod tests {
         let has_type_params = methods[0].children()
             .any(|child| child.kind() == SyntaxKind::TypeParameterList);
         assert!(has_type_params, "Expected TypeParameterList on method");
+    }
+
+    #[test]
+    fn test_protocol_with_associated_type() {
+        let decl = parse("protocol Iterator { type Item; }");
+        assert_eq!(decl.name(), Some("Iterator".to_string()));
+        // Check that the body contains the TypeAliasDeclaration
+        let body = decl.body().expect("Protocol should have body");
+        let has_type_alias = body.children().any(|c| c.kind() == SyntaxKind::TypeAliasDeclaration);
+        assert!(has_type_alias, "Protocol body should contain TypeAliasDeclaration for associated type");
     }
 
     #[test]

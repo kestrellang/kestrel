@@ -36,23 +36,44 @@ pub struct TypeArgumentData {
 }
 
 /// Raw parsed data for a type bound
-/// Syntax: T: Proto and Proto2 or T: Container[Int]
+/// Syntax: T: Proto and Proto2 or T: Container[Int] or T.Item: Proto
 #[derive(Debug, Clone)]
 pub struct TypeBoundData {
-    /// The type parameter being constrained
-    pub param: Span,
+    /// The constrained path - either simple (T) or associated type path (T.Item)
+    pub path: Vec<Span>,
     /// The protocols/bounds (connected by `and`), with optional type arguments
     pub bounds: Vec<TypeArgumentData>,
 }
 
+/// Raw parsed data for a type equality constraint
+/// Syntax: T.Item == Type or T.Item == U.Item
+#[derive(Debug, Clone)]
+pub struct TypeEqualityData {
+    /// The left side path (e.g., T.Item)
+    pub left: Vec<Span>,
+    /// The equals span (==)
+    pub equals_span: Span,
+    /// The right side type
+    pub right: crate::ty::TyVariant,
+}
+
+/// A constraint in a where clause - either a bound or equality
+#[derive(Debug, Clone)]
+pub enum WhereConstraintData {
+    /// Type bound: T: Proto or T.Item: Proto
+    Bound(TypeBoundData),
+    /// Type equality: T.Item == Type
+    Equality(TypeEqualityData),
+}
+
 /// Raw parsed data for a where clause
-/// Syntax: where T: Proto, U: Other
+/// Syntax: where T: Proto, U: Other, T.Item == Int
 #[derive(Debug, Clone)]
 pub struct WhereClauseData {
     /// The `where` keyword span
     pub where_span: Span,
-    /// The type bounds
-    pub bounds: Vec<TypeBoundData>,
+    /// The constraints (bounds and equalities)
+    pub constraints: Vec<WhereConstraintData>,
 }
 
 /// Parser for a path (used in type positions): Ident or Ident.Ident.Ident
@@ -163,15 +184,10 @@ pub fn type_parameter_list_parser() -> impl Parser<Token, (Span, Vec<TypeParamet
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
 }
 
-/// Parser for a single type bound: T: Proto and Proto2 or T: Container[Int]
+/// Parser for a single type bound: T: Proto and Proto2 or T.Item: Proto
 fn type_bound_parser() -> impl Parser<Token, TypeBoundData, Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(
-            filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            })
-        )
+        .ignore_then(path_parser())
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::Colon))
         .then(
@@ -184,19 +200,38 @@ fn type_bound_parser() -> impl Parser<Token, TypeBoundData, Error = Simple<Token
                 )
                 .at_least(1)
         )
-        .map(|(param, bounds)| TypeBoundData { param, bounds })
+        .map(|(path, bounds)| TypeBoundData { path, bounds })
 }
 
-/// Parser for where clause: where T: Proto, U: Other
+/// Parser for a type equality constraint: T.Item == Type
+fn type_equality_parser() -> impl Parser<Token, TypeEqualityData, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(path_parser())
+        .then_ignore(skip_trivia())
+        .then(just(Token::EqualsEquals).map_with_span(|_, span| span))
+        .then_ignore(skip_trivia())
+        .then(crate::ty::ty_parser())
+        .map(|((left, equals_span), right)| TypeEqualityData { left, equals_span, right })
+}
+
+/// Parser for a single where clause constraint (either bound or equality)
+fn where_constraint_parser() -> impl Parser<Token, WhereConstraintData, Error = Simple<Token>> + Clone {
+    // Try equality first (T.Item == Type), then bound (T: Proto)
+    // This order matters because path_parser is greedy
+    type_equality_parser().map(WhereConstraintData::Equality)
+        .or(type_bound_parser().map(WhereConstraintData::Bound))
+}
+
+/// Parser for where clause: where T: Proto, U: Other, T.Item == Int
 pub fn where_clause_parser() -> impl Parser<Token, WhereClauseData, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Where).map_with_span(|_, span| span))
         .then(
-            type_bound_parser()
+            where_constraint_parser()
                 .separated_by(just(Token::Comma))
                 .at_least(1)
         )
-        .map(|(where_span, bounds)| WhereClauseData { where_span, bounds })
+        .map(|(where_span, constraints)| WhereClauseData { where_span, constraints })
 }
 
 /// Parser for conformance list: : Proto1, Proto2[T]
@@ -254,9 +289,30 @@ pub fn emit_where_clause(sink: &mut EventSink, data: WhereClauseData) {
     sink.start_node(SyntaxKind::WhereClause);
     sink.add_token(SyntaxKind::Where, data.where_span);
 
-    for bound in data.bounds {
-        emit_type_bound(sink, bound);
+    for constraint in data.constraints {
+        match constraint {
+            WhereConstraintData::Bound(bound) => emit_type_bound(sink, bound),
+            WhereConstraintData::Equality(equality) => emit_type_equality(sink, equality),
+        }
     }
+
+    sink.finish_node();
+}
+
+/// Emit events for a type equality constraint
+fn emit_type_equality(sink: &mut EventSink, equality: TypeEqualityData) {
+    sink.start_node(SyntaxKind::TypeEquality);
+
+    // Emit the left path (T.Item)
+    sink.start_node(SyntaxKind::AssociatedTypeTarget);
+    emit_path(sink, &equality.left);
+    sink.finish_node();
+
+    // Emit ==
+    sink.add_token(SyntaxKind::EqualsEquals, equality.equals_span);
+
+    // Emit the right type
+    crate::ty::emit_ty_variant(sink, &equality.right);
 
     sink.finish_node();
 }
@@ -279,10 +335,18 @@ pub fn emit_conformance_list(sink: &mut EventSink, colon_span: Span, conformance
 fn emit_type_bound(sink: &mut EventSink, bound: TypeBoundData) {
     sink.start_node(SyntaxKind::TypeBound);
 
-    // Emit the constrained parameter name
-    sink.start_node(SyntaxKind::Name);
-    sink.add_token(SyntaxKind::Identifier, bound.param);
-    sink.finish_node();
+    // Emit the constrained path (T or T.Item)
+    if bound.path.len() == 1 {
+        // Simple type parameter: T
+        sink.start_node(SyntaxKind::Name);
+        sink.add_token(SyntaxKind::Identifier, bound.path[0].clone());
+        sink.finish_node();
+    } else {
+        // Associated type path: T.Item or similar
+        sink.start_node(SyntaxKind::AssociatedTypeTarget);
+        emit_path(sink, &bound.path);
+        sink.finish_node();
+    }
 
     // Emit each bound with optional type arguments
     for bound_type in bound.bounds {

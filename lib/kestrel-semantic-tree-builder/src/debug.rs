@@ -130,6 +130,13 @@ pub fn format_type(ty: &Ty) -> String {
         TyKind::Error => "<error>".to_string(),
         TyKind::SelfType => "Self".to_string(),
         TyKind::Inferred => "_".to_string(),
+        TyKind::AssociatedType { symbol, container } => {
+            let name = symbol.metadata().name().value.clone();
+            match container {
+                Some(container_ty) => format!("{}.{}", format_type(container_ty), name),
+                None => name,
+            }
+        }
     }
 }
 

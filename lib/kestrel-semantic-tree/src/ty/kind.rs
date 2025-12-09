@@ -1,3 +1,4 @@
+use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
@@ -92,5 +93,17 @@ pub enum TyKind {
     TypeAlias {
         symbol: Arc<TypeAliasSymbol>,
         substitutions: Substitutions,
+    },
+
+    /// Associated type reference
+    /// Used when referencing an associated type from a protocol, either:
+    /// - Within the protocol itself (e.g., `func next() -> Item` in Iterator protocol)
+    /// - Via a qualified path (e.g., `T.Item` where T: Iterator)
+    AssociatedType {
+        /// The associated type symbol from the protocol
+        symbol: Arc<AssociatedTypeSymbol>,
+        /// The type that contains this associated type (e.g., `T` in `T.Item`)
+        /// None when used within the protocol itself
+        container: Option<Box<Ty>>,
     },
 }

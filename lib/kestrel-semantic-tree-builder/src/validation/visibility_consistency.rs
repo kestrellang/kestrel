@@ -166,6 +166,19 @@ fn find_less_visible_type(
             }
             find_less_visible_type(return_type, required_level)
         }
+        TyKind::AssociatedType { symbol: assoc_symbol, container } => {
+            let level = get_visibility_level_from_symbol(assoc_symbol);
+            if level < required_level {
+                return Some((assoc_symbol.metadata().name().value.clone(), level));
+            }
+            // Also check visibility of container type if present
+            if let Some(container_ty) = container {
+                if let Some(result) = find_less_visible_type(container_ty, required_level) {
+                    return Some(result);
+                }
+            }
+            None
+        }
         // Primitive types and special types don't have visibility issues
         TyKind::Unit
         | TyKind::Never

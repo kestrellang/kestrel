@@ -125,3 +125,57 @@ impl IntoDiagnostic for StaticInWrongContextError {
             ])
     }
 }
+
+/// Error when a type alias requires a type but none was provided.
+pub struct TypeAliasRequiresTypeError {
+    pub span: Span,
+    pub name: String,
+    pub context: TypeAliasContext,
+}
+
+/// The context where type alias is used.
+pub enum TypeAliasContext {
+    /// Type alias at module level (requires `= Type`)
+    ModuleLevel,
+    /// Type alias in struct body without conformance (requires `= Type`)
+    StructWithoutConformance,
+}
+
+impl IntoDiagnostic for TypeAliasRequiresTypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let (main_msg, context_msg) = match self.context {
+            TypeAliasContext::ModuleLevel => (
+                format!("type alias requires a type: '{}'", self.name),
+                "must specify a type",
+            ),
+            TypeAliasContext::StructWithoutConformance => (
+                format!("associated type binding requires a type: '{}'", self.name),
+                "must specify a type with = Type",
+            ),
+        };
+
+        Diagnostic::error()
+            .with_message(main_msg)
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(context_msg)
+            ])
+    }
+}
+
+/// Error when associated type bounds are used at module level.
+pub struct AssociatedTypeBoundsInWrongContextError {
+    pub span: Span,
+    pub name: String,
+}
+
+impl IntoDiagnostic for AssociatedTypeBoundsInWrongContextError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("type alias cannot have bounds: '{}'", self.name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("bounds are only allowed on associated types in protocols")
+            ])
+    }
+}

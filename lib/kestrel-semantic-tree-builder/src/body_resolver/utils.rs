@@ -355,6 +355,12 @@ pub fn format_type(ty: &Ty) -> String {
         TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
         TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::AssociatedType { symbol, container } => {
+            match container {
+                Some(container_ty) => format!("{}.{}", format_type(container_ty), symbol.metadata().name().value),
+                None => symbol.metadata().name().value.clone(),
+            }
+        }
         TyKind::SelfType => "Self".to_string(),
         TyKind::Inferred => "_".to_string(),
         TyKind::Error => "<error>".to_string(),

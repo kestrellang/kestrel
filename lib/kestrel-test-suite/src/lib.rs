@@ -679,7 +679,13 @@ impl Behavior {
                 Ok(())
             }
             Behavior::ChildCount(expected) => {
-                let count = symbol.metadata().children().len();
+                // Count children excluding type parameters (they're structural, not semantic)
+                let count = symbol
+                    .metadata()
+                    .children()
+                    .iter()
+                    .filter(|c| c.metadata().kind() != SymbolKind::TypeParameter)
+                    .count();
                 if count != *expected {
                     return Err(format!(
                         "Symbol '{}' has {} children, expected {}",

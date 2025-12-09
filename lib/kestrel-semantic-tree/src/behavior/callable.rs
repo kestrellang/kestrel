@@ -182,6 +182,10 @@ impl SignatureType {
                 // (could also resolve to underlying type)
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }
+            TyKind::AssociatedType { symbol, .. } => {
+                // For associated types, use the associated type name
+                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
+            }
         }
     }
 }

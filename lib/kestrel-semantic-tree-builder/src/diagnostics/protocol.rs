@@ -26,17 +26,26 @@ pub enum NotAProtocolContext {
 
 impl IntoDiagnostic for NotAProtocolError {
     fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
-        let context_msg = match self.context {
-            NotAProtocolContext::Bound => "cannot be used as a type bound",
-            NotAProtocolContext::Conformance => "cannot be used as a conformance",
-            NotAProtocolContext::Inheritance => "cannot be inherited by a protocol",
+        let (main_msg, label_msg) = match self.context {
+            NotAProtocolContext::Bound => (
+                format!("'{}' is not a protocol; bound must be a protocol", self.name),
+                "cannot be used as a type bound",
+            ),
+            NotAProtocolContext::Conformance => (
+                format!("'{}' is not a protocol", self.name),
+                "cannot be used as a conformance",
+            ),
+            NotAProtocolContext::Inheritance => (
+                format!("'{}' is not a protocol", self.name),
+                "cannot be inherited by a protocol",
+            ),
         };
 
         Diagnostic::error()
-            .with_message(format!("'{}' is not a protocol", self.name))
+            .with_message(main_msg)
             .with_labels(vec![
                 Label::primary(file_id, self.span.clone())
-                    .with_message(context_msg)
+                    .with_message(label_msg)
             ])
     }
 }
@@ -87,6 +96,28 @@ impl IntoDiagnostic for MissingProtocolMethodError {
     }
 }
 
+/// Error when a struct doesn't provide a required associated type.
+pub struct MissingAssociatedTypeError {
+    pub span: Span,
+    pub struct_name: String,
+    pub protocol_name: String,
+    pub type_name: String,
+}
+
+impl IntoDiagnostic for MissingAssociatedTypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type '{}' does not provide associated type '{}' from protocol '{}'",
+                self.struct_name, self.type_name, self.protocol_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("missing associated type '{}'", self.type_name))
+            ])
+    }
+}
+
 /// Error when an implemented method has the wrong return type.
 pub struct WrongMethodReturnTypeError {
     pub span: Span,
@@ -130,6 +161,124 @@ impl IntoDiagnostic for ProtocolMethodHasBodyError {
             .with_labels(vec![
                 Label::primary(file_id, self.span.clone())
                     .with_message("body not allowed in protocol method")
+            ])
+    }
+}
+
+/// Error when an associated type binding is ambiguous (multiple protocols have same associated type).
+pub struct AmbiguousAssociatedTypeError {
+    pub span: Span,
+    pub type_name: String,
+    pub protocols: Vec<String>,
+}
+
+impl IntoDiagnostic for AmbiguousAssociatedTypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let protocols_str = self.protocols.join("', '");
+        Diagnostic::error()
+            .with_message(format!(
+                "ambiguous associated type '{}' - use qualified syntax to disambiguate",
+                self.type_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("ambiguous binding")
+            ])
+            .with_notes(vec![
+                format!("'{}' is declared in protocols: '{}'", self.type_name, protocols_str),
+                format!("use qualified syntax like 'type {}.{} = ...' to specify which protocol", self.protocols[0], self.type_name),
+            ])
+    }
+}
+
+/// Error when a qualified binding references a protocol the struct doesn't conform to.
+pub struct QualifiedBindingNotConformingError {
+    pub span: Span,
+    pub struct_name: String,
+    pub protocol_name: String,
+}
+
+impl IntoDiagnostic for QualifiedBindingNotConformingError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "'{}' does not conform to '{}'",
+                self.struct_name, self.protocol_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("struct does not conform to '{}'", self.protocol_name))
+            ])
+    }
+}
+
+/// Error when a qualified binding references an associated type that doesn't exist in the protocol.
+pub struct QualifiedBindingWrongProtocolError {
+    pub span: Span,
+    pub protocol_name: String,
+    pub type_name: String,
+}
+
+impl IntoDiagnostic for QualifiedBindingWrongProtocolError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "protocol '{}' does not have associated type '{}'",
+                self.protocol_name, self.type_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("'{}' not found in '{}'", self.type_name, self.protocol_name))
+            ])
+    }
+}
+
+/// Error when a where clause references an associated type that doesn't exist.
+pub struct WhereClauseAssociatedTypeNotFoundError {
+    pub span: Span,
+    pub type_param: String,
+    pub assoc_type_name: String,
+    pub protocol_name: String,
+}
+
+impl IntoDiagnostic for WhereClauseAssociatedTypeNotFoundError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "no associated type '{}' in protocol '{}'",
+                self.assoc_type_name, self.protocol_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("'{}.{}' does not exist", self.type_param, self.assoc_type_name))
+            ])
+    }
+}
+
+/// Error when an associated type binding doesn't satisfy the required protocol constraints.
+pub struct AssociatedTypeConstraintNotSatisfiedError {
+    pub span: Span,
+    pub type_name: String,
+    pub bound_type: String,
+    pub required_protocol: String,
+}
+
+impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type '{}' does not satisfy bound",
+                self.bound_type
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!(
+                        "type '{}' does not conform to required protocol '{}'",
+                        self.bound_type, self.required_protocol
+                    ))
+            ])
+            .with_notes(vec![
+                format!("associated type '{}' requires conformance to '{}'", self.type_name, self.required_protocol)
             ])
     }
 }

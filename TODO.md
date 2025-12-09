@@ -55,15 +55,20 @@ func addThem[T](a: T, b: T) -> T where T: Add {
 ```
 
 ### Associated Types
-**Status**: TODO
+**Status**: ✅ DONE
 
 Protocol-level type placeholders that conforming types must specify.
 
-**Tasks**:
-- [ ] Parser support for `type Item` declarations in protocols
-- [ ] Associated type symbol representation
-- [ ] Associated type resolution in conforming types
-- [ ] Associated type constraints (`where T.Item: Equatable`)
+**What was done**:
+- [x] Parser support for `type Item` declarations in protocols
+- [x] Associated type symbol representation (`AssociatedTypeSymbol`)
+- [x] Associated type resolution in conforming types
+- [x] Associated type constraints (`where T.Item: Equatable`)
+- [x] Qualified bindings (`type Iterator.Item = Int`)
+- [x] Protocol inheritance with associated type constraints
+- [x] Nested associated type paths (`C.Iter.Item`)
+- [x] Constraint satisfaction validation
+- [x] Default associated types with override support
 
 **Example**:
 ```kestrel

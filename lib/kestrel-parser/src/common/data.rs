@@ -117,6 +117,7 @@ pub enum StructBodyItem {
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
     Struct(StructDeclarationData),
+    TypeAlias(TypeAliasDeclarationData), // Associated type bindings
     Module(Span, Vec<Span>), // module_span, path_segments
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>), // import_span, path, alias, items
 }
@@ -131,7 +132,7 @@ pub struct ProtocolDeclarationData {
     pub inherited: Option<ConformanceListData>, // Inherited protocols (protocol A: B { })
     pub where_clause: Option<WhereClauseData>,
     pub lbrace_span: Span,
-    pub body: Vec<FunctionDeclarationData>, // Protocol body only contains function declarations
+    pub body: Vec<ProtocolBodyItem>, // Protocol body: functions and associated types
     pub rbrace_span: Span,
 }
 
@@ -140,9 +141,44 @@ pub struct ProtocolDeclarationData {
 pub struct TypeAliasDeclarationData {
     pub visibility: Option<(Token, Span)>,
     pub type_span: Span,
-    pub name_span: Span,
+    /// The target of the type alias - simple name or qualified path
+    pub target: AssociatedTypeTargetData,
     pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub equals_span: Span,
-    pub aliased_type: TyVariant,
+    /// Optional bounds for associated types (: Equatable, Hashable)
+    pub bounds: Option<AssociatedTypeBoundsData>,
+    /// Optional equals span and aliased type (= Type)
+    /// For associated types in protocols, this may be None (abstract associated type)
+    pub aliased: Option<(Span, TyVariant)>,
     pub semicolon_span: Span,
+}
+
+/// Target for type alias - either simple name or qualified path
+#[derive(Debug, Clone)]
+pub enum AssociatedTypeTargetData {
+    /// Simple name: `type Item`
+    Simple(Span),
+    /// Qualified path: `type Iterator.Item` or `type Add[Int].Output`
+    Qualified {
+        /// The protocol path (may include type arguments)
+        protocol_path: TyVariant,
+        /// The dot before the name
+        dot_span: Span,
+        /// The associated type name
+        name_span: Span,
+    },
+}
+
+/// Bounds for associated types (: Equatable, Hashable)
+#[derive(Debug, Clone)]
+pub struct AssociatedTypeBoundsData {
+    pub colon_span: Span,
+    /// The bound types (protocols)
+    pub bounds: Vec<TyVariant>,
+}
+
+/// Items that can appear in a protocol body
+#[derive(Debug, Clone)]
+pub enum ProtocolBodyItem {
+    Function(FunctionDeclarationData),
+    AssociatedType(TypeAliasDeclarationData),
 }

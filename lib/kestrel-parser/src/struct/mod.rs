@@ -17,6 +17,7 @@ use crate::common::{
     emit_struct_declaration,
     StructDeclarationData, StructBodyItem,
 };
+use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{type_parameter_list_parser, where_clause_parser, conformance_list_parser};
 use crate::common::ConformanceListData;
 
@@ -96,7 +97,7 @@ impl StructDeclaration {
 
 /// Internal parser for struct body items
 ///
-/// Struct bodies can contain: fields, functions, initializers, nested structs, modules, and imports.
+/// Struct bodies can contain: fields, functions, initializers, nested structs, type aliases, modules, and imports.
 fn struct_body_item_parser_internal(
     struct_parser: impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone
 ) -> impl Parser<Token, StructBodyItem, Error = Simple<Token>> + Clone {
@@ -112,12 +113,15 @@ fn struct_body_item_parser_internal(
 
     let function_parser = function_declaration_parser_internal().map(StructBodyItem::Function);
 
+    let type_alias_parser = type_alias_declaration_parser_internal().map(StructBodyItem::TypeAlias);
+
     let field_parser = field_declaration_parser_internal().map(StructBodyItem::Field);
 
     module_parser
         .or(import_parser)
         .or(nested_struct_parser)
         .or(initializer_parser)
+        .or(type_alias_parser) // Check type alias before function (both can have visibility)
         .or(function_parser)
         .or(field_parser)
 }

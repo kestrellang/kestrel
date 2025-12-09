@@ -210,6 +210,8 @@ pub fn resolve_conformance_list(
     file_id: usize,
     error_context: NotAProtocolContext,
 ) {
+    use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+
     let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
         Some(node) => node,
         None => return,
@@ -229,66 +231,36 @@ pub fn resolve_conformance_list(
 
         let span = get_node_span(&ty_node, source);
 
-        let ty_path = match ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
-            Some(node) => node,
-            None => continue,
-        };
+        // Use full type resolution (handles type arguments like Add[MyInt])
+        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
-        let path_node = match find_child(&ty_path, SyntaxKind::Path) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        let segments = extract_path_segments(&path_node);
-        if segments.is_empty() {
-            continue;
-        }
-
-        let type_name = segments.join(".");
-
-        match ctx.db.resolve_type_path(segments.clone(), context_id) {
-            TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
-                TyKind::Protocol { .. } => {
-                    resolved.push(resolved_ty);
-                }
-                TyKind::Struct { symbol, .. } => {
-                    ctx.diagnostics.throw(
-                        NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: error_context,
-                        },
-                        file_id,
-                    );
-                    resolved.push(Ty::error(span));
-                }
-                _ => {
-                    ctx.diagnostics.throw(
-                        NotAProtocolError {
-                            span: span.clone(),
-                            name: type_name.clone(),
-                            context: error_context,
-                        },
-                        file_id,
-                    );
-                    resolved.push(Ty::error(span));
-                }
-            },
-            TypePathResolution::NotFound { .. } => {
+        // Validate that it's a protocol
+        match resolved_ty.kind() {
+            TyKind::Protocol { .. } => {
+                resolved.push(resolved_ty);
+            }
+            TyKind::Struct { symbol: struct_sym, .. } => {
                 ctx.diagnostics.throw(
-                    UnresolvedTypeError {
+                    NotAProtocolError {
                         span: span.clone(),
-                        type_name: type_name.clone(),
+                        name: struct_sym.metadata().name().value.clone(),
+                        context: error_context,
                     },
                     file_id,
                 );
                 resolved.push(Ty::error(span));
             }
-            TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
+            TyKind::Error => {
+                // Error already reported by type resolver
+                resolved.push(resolved_ty);
+            }
+            _ => {
+                let type_name = format!("{:?}", resolved_ty.kind());
                 ctx.diagnostics.throw(
                     NotAProtocolError {
                         span: span.clone(),
-                        name: type_name.clone(),
+                        name: type_name,
                         context: error_context,
                     },
                     file_id,

@@ -44,6 +44,8 @@ impl WhereClause {
             .filter_map(|c| match c {
                 Constraint::TypeBound { param: Some(id), bounds, .. } if *id == param_id => Some(bounds),
                 Constraint::TypeBound { .. } => None,
+                // Inherited associated type bounds don't apply to type parameters
+                Constraint::InheritedAssociatedTypeBound { .. } => None,
             })
             .flatten()
             .collect()
@@ -69,6 +71,18 @@ pub enum Constraint {
         /// The bounds that the type parameter must satisfy
         bounds: Vec<Ty>,
     },
+    /// A constraint on an inherited protocol's associated type: `Iterator.Item: Comparable`
+    ///
+    /// This is used in protocol declarations to constrain associated types from parent protocols.
+    /// Example: `protocol SortedIterator: Iterator where Iterator.Item: Comparable { }`
+    InheritedAssociatedTypeBound {
+        /// The full path name (e.g., "Iterator.Item")
+        path: String,
+        /// The span of the path
+        span: Span,
+        /// The bounds that the associated type must satisfy
+        bounds: Vec<Ty>,
+    },
     // Future: TypeEquality for associated types
     // TypeEquality { left: TypePath, right: Ty }
 }
@@ -84,10 +98,18 @@ impl Constraint {
         Constraint::TypeBound { param: None, param_name, param_span, bounds }
     }
 
+    /// Create an inherited associated type bound constraint
+    ///
+    /// Used for protocol where clauses like `Iterator.Item: Comparable`
+    pub fn inherited_assoc_type_bound(path: String, span: Span, bounds: Vec<Ty>) -> Self {
+        Constraint::InheritedAssociatedTypeBound { path, span, bounds }
+    }
+
     /// Get the type parameter this constraint applies to (if resolved)
     pub fn param_id(&self) -> Option<SymbolId> {
         match self {
             Constraint::TypeBound { param, .. } => *param,
+            Constraint::InheritedAssociatedTypeBound { .. } => None,
         }
     }
 
@@ -95,6 +117,7 @@ impl Constraint {
     pub fn param_name(&self) -> &str {
         match self {
             Constraint::TypeBound { param_name, .. } => param_name,
+            Constraint::InheritedAssociatedTypeBound { path, .. } => path,
         }
     }
 
@@ -102,6 +125,7 @@ impl Constraint {
     pub fn param_span(&self) -> &Span {
         match self {
             Constraint::TypeBound { param_span, .. } => param_span,
+            Constraint::InheritedAssociatedTypeBound { span, .. } => span,
         }
     }
 
@@ -109,7 +133,14 @@ impl Constraint {
     pub fn is_unresolved(&self) -> bool {
         match self {
             Constraint::TypeBound { param, .. } => param.is_none(),
+            // Inherited associated type bounds are always resolved (they've been validated)
+            Constraint::InheritedAssociatedTypeBound { .. } => false,
         }
+    }
+
+    /// Check if this is an inherited associated type bound
+    pub fn is_inherited_assoc_type_bound(&self) -> bool {
+        matches!(self, Constraint::InheritedAssociatedTypeBound { .. })
     }
 }
 

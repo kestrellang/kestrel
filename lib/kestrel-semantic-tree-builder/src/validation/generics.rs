@@ -195,6 +195,14 @@ fn validate_constraint(
                 validate_bound_type(bound, ctx);
             }
         }
+        Constraint::InheritedAssociatedTypeBound { bounds, .. } => {
+            // Inherited associated type bounds are already validated during resolution
+            // (the associated type existence is checked in protocol.rs)
+            // Just validate the bound types themselves
+            for bound in bounds {
+                validate_bound_type(bound, ctx);
+            }
+        }
     }
 }
 

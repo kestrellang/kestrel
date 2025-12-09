@@ -256,12 +256,16 @@
   - [x] Eliminated RwLock<WhereClause> mutation pattern
   - [x] Resolvers add GenericsBehavior during BIND with resolved bounds
   - [x] Fallback to children for BUILD phase type parameter access
-- [ ] Associated Types
-  - [ ] Protocol associated type declarations (`protocol Iterator { type Item }`)
-  - [ ] AssociatedTypeSymbol representation
-  - [ ] Qualified type path resolution (`T.Item`)
-  - [ ] Associated type resolution in conforming types
-  - [ ] Associated type constraints (`where T.Item: Equatable`)
+- [x] Associated Types ✓
+  - [x] Protocol associated type declarations (`protocol Iterator { type Item }`)
+  - [x] AssociatedTypeSymbol representation
+  - [x] Qualified type path resolution (`T.Item`, `C.Iter.Item`)
+  - [x] Associated type resolution in conforming types
+  - [x] Associated type constraints (`where T.Item: Equatable`)
+  - [x] Qualified bindings for disambiguation (`type Iterator.Item = Int`)
+  - [x] Protocol inheritance with associated type constraints
+  - [x] Default associated types with override support
+  - [x] Constraint satisfaction validation
 - [ ] Protocol Method Linking
   - [ ] Track which protocol a method satisfies when struct conforms
   - [ ] Resolve protocol method calls to concrete implementations
@@ -353,7 +357,7 @@
 ## Current Status
 
 **Phase**: Phase 6 (Generics & Protocols) - IN PROGRESS
-**Progress**: Phases 1-5 complete. Phase 6 partially complete.
+**Progress**: Phases 1-5 complete. Phase 6 ~75% complete (3 of 4 major features done).
 
 **Recently Completed (Phase 6)**:
 
@@ -369,12 +373,20 @@
   - Type parameters and where clause now stored as behavior (like CallableBehavior)
   - Resolvers add GenericsBehavior during BIND with fully resolved protocol bounds
   - Fallback to children for type_parameters() during BUILD phase
+- Associated Types ✓
+  - Protocol associated type declarations (`type Item` in protocols)
+  - AssociatedTypeSymbol representation with constraints and defaults
+  - Qualified type path resolution (`T.Item`, `C.Iter.Item`)
+  - Associated type bindings in conforming structs (`type Item = Int`)
+  - Qualified bindings for disambiguation (`type Iterator.Item = Int`)
+  - Protocol inheritance with where clause constraints (`where Iterator.Item: Comparable`)
+  - Constraint satisfaction validation for bindings
+  - New diagnostics: AmbiguousAssociatedTypeError, QualifiedBindingNotConformingError, QualifiedBindingWrongProtocolError, WhereClauseAssociatedTypeNotFoundError, AssociatedTypeConstraintNotSatisfiedError
 
 **Next Tasks**:
 
-1. Associated types (Phase 6)
-2. Protocol method linking (Phase 6)
-3. Extensions with conformances (Phase 6)
+1. Protocol method linking (Phase 6)
+2. Extensions with conformances (Phase 6)
 
 ## Notes
 

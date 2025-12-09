@@ -12,6 +12,7 @@ use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, SignatureType};
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -22,7 +23,8 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::database::{Db, SemanticDatabase};
 use crate::diagnostics::{
-    CircularProtocolInheritanceError, MissingProtocolMethodError, WrongMethodReturnTypeError,
+    AssociatedTypeConstraintNotSatisfiedError, CircularProtocolInheritanceError,
+    MissingAssociatedTypeError, MissingProtocolMethodError, WrongMethodReturnTypeError,
 };
 use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
@@ -120,6 +122,11 @@ impl Validator for ConformanceValidator {
             check_circular_inheritance(&collected.protocol, &collected.symbol, db, diagnostics);
         }
 
+        // Check protocols for associated type default satisfaction
+        for collected in self.protocols.lock().unwrap().iter() {
+            check_protocol_associated_type_defaults(&collected.protocol, &collected.symbol, diagnostics);
+        }
+
         // Check structs for protocol conformance
         for collected in self.structs.lock().unwrap().iter() {
             check_struct_conformance(&collected.struct_sym, &collected.symbol, db, diagnostics);
@@ -207,6 +214,18 @@ fn check_struct_conformance(
     let struct_id = struct_sym.metadata().id();
     let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
+    // Collect associated type bindings from the struct (e.g., type Item = Int)
+    // We need to downcast from StructSymbol reference to get Arc<StructSymbol>
+    let struct_arc = symbol
+        .clone()
+        .into_any_arc()
+        .downcast::<StructSymbol>()
+        .ok();
+    let associated_type_bindings = struct_arc
+        .as_ref()
+        .map(|s| collect_associated_type_bindings(s))
+        .unwrap_or_default();
+
     // Collect all methods implemented by the struct
     let struct_methods = collect_methods_from_symbol(symbol);
     let struct_method_map: HashMap<CallableSignature, (&Arc<FunctionSymbol>, SignatureType)> = struct_methods
@@ -216,22 +235,70 @@ fn check_struct_conformance(
 
     // Check each conformance
     for conformance_ty in &conformances {
-        let protocol_symbol = match resolve_protocol_type(conformance_ty, struct_id, db) {
-            Some(proto) => proto,
-            None => continue,
-        };
+        let (protocol_symbol, type_param_bindings) =
+            match resolve_protocol_type(conformance_ty, struct_id, db) {
+                Some(result) => result,
+                None => continue,
+            };
 
         let protocol_name = &protocol_symbol.metadata().name().value;
+
+        // Collect all required associated types from the protocol (including defaults)
+        let protocol_associated_types = collect_protocol_associated_types_with_defaults(&protocol_symbol);
+
+        // Check each required associated type is provided by the struct
+        // (unless it has a default in the protocol)
+        for (type_name, default_type) in &protocol_associated_types {
+            if default_type.is_none() && !associated_type_bindings.contains_key(type_name) {
+                let span = struct_sym.metadata().declaration_span().clone();
+                diagnostics.throw(
+                    MissingAssociatedTypeError {
+                        span,
+                        struct_name: struct_name.clone(),
+                        protocol_name: protocol_name.clone(),
+                        type_name: type_name.clone(),
+                    },
+                    file_id,
+                );
+            }
+        }
+
+        // Create effective bindings: type params + struct bindings + protocol defaults + Self
+        let mut effective_bindings = type_param_bindings; // Start with protocol type parameter substitutions
+        // Add struct's associated type bindings
+        for (name, binding) in &associated_type_bindings {
+            effective_bindings.insert(name.clone(), binding.clone());
+        }
+        // Add protocol defaults for missing associated types
+        for (type_name, default_type) in &protocol_associated_types {
+            if !effective_bindings.contains_key(type_name) {
+                if let Some(default) = default_type {
+                    effective_bindings.insert(type_name.clone(), default.clone());
+                }
+            }
+        }
+        // Add Self -> struct type binding for protocol methods using Self type
+        // We need to get the struct's actual type and convert it to SignatureType
+        let self_type = symbol
+            .typed_behavior()
+            .map(|tb| SignatureType::from_ty(tb.ty()))
+            .unwrap_or_else(|| SignatureType::Named(vec![struct_name.clone()]));
+        effective_bindings.insert("Self".to_string(), self_type);
 
         // Collect all required methods from the protocol (including inherited)
         let required_methods = collect_all_protocol_methods(&protocol_symbol, db);
 
         // Check each required method
-        for (sig, method) in &required_methods {
+        for (protocol_sig, method) in &required_methods {
             let method_name = &method.metadata().name().value;
-            let required_return_type = SignatureType::from_ty(&method.return_type());
+            let raw_return_type = SignatureType::from_ty(&method.return_type());
+            // Substitute associated types with their bindings (including defaults)
+            let required_return_type = substitute_associated_types(&raw_return_type, &effective_bindings);
 
-            match struct_method_map.get(sig) {
+            // Substitute associated types in the signature for lookup
+            let substituted_sig = substitute_signature(protocol_sig, &effective_bindings);
+
+            match struct_method_map.get(&substituted_sig) {
                 None => {
                     let span = struct_sym.metadata().declaration_span().clone();
 
@@ -266,14 +333,29 @@ fn check_struct_conformance(
     }
 }
 
-/// Resolve a Ty to a ProtocolSymbol if it's a protocol type
+/// Resolve a Ty to a ProtocolSymbol and its substitutions if it's a protocol type
 fn resolve_protocol_type(
     ty: &Ty,
     _context: SymbolId,
     _db: &SemanticDatabase,
-) -> Option<Arc<ProtocolSymbol>> {
+) -> Option<(Arc<ProtocolSymbol>, HashMap<String, SignatureType>)> {
     match ty.kind() {
-        TyKind::Protocol { symbol, .. } => Some(symbol.clone()),
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            // Build a map of type parameter name -> substituted type
+            let mut type_param_bindings = HashMap::new();
+            let type_params = symbol.type_parameters();
+            for type_param in type_params.iter() {
+                let param_id = type_param.metadata().id();
+                if let Some(sub_ty) = substitutions.get(param_id) {
+                    let param_name = type_param.metadata().name().value.clone();
+                    type_param_bindings.insert(param_name, SignatureType::from_ty(sub_ty));
+                }
+            }
+            Some((symbol.clone(), type_param_bindings))
+        }
         _ => None,
     }
 }
@@ -287,6 +369,117 @@ fn collect_methods_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec
         .filter(|child| child.metadata().kind() == KestrelSymbolKind::Function)
         .filter_map(|child| child.into_any_arc().downcast::<FunctionSymbol>().ok())
         .collect()
+}
+
+/// Collect all associated types from a protocol, including their defaults if present
+/// Returns a map from associated type name to optional default type
+fn collect_protocol_associated_types_with_defaults(
+    protocol: &Arc<ProtocolSymbol>,
+) -> HashMap<String, Option<SignatureType>> {
+    use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
+
+    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+    let mut associated_types = HashMap::new();
+
+    for child in protocol_dyn.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::AssociatedType {
+            if let Ok(assoc_type) = child.into_any_arc().downcast::<AssociatedTypeSymbol>() {
+                let name = assoc_type.metadata().name().value.clone();
+                let default_type = assoc_type.default_type().map(|ty| SignatureType::from_ty(&ty));
+                associated_types.insert(name, default_type);
+            }
+        }
+    }
+
+    associated_types
+}
+
+/// Collect associated type bindings from a struct
+/// Returns a map from associated type name to the resolved SignatureType
+fn collect_associated_type_bindings(
+    struct_sym: &Arc<StructSymbol>,
+) -> HashMap<String, SignatureType> {
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
+
+    let struct_dyn = struct_sym.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+    let mut bindings = HashMap::new();
+
+    for child in struct_dyn.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::TypeAlias {
+            if let Ok(type_alias) = child.into_any_arc().downcast::<TypeAliasSymbol>() {
+                let name = type_alias.metadata().name().value.clone();
+
+                // Get the resolved type from TypeAliasTypedBehavior
+                let resolved_ty = type_alias
+                    .metadata()
+                    .behaviors()
+                    .iter()
+                    .find(|b| b.kind() == KestrelBehaviorKind::TypeAliasTyped)
+                    .and_then(|b| b.as_ref().downcast_ref::<TypeAliasTypedBehavior>())
+                    .map(|tb| SignatureType::from_ty(tb.resolved_ty()));
+
+                if let Some(sig_type) = resolved_ty {
+                    bindings.insert(name, sig_type);
+                }
+            }
+        }
+    }
+
+    bindings
+}
+
+/// Substitute associated type names in a SignatureType using the struct's bindings
+fn substitute_associated_types(
+    sig_type: &SignatureType,
+    bindings: &HashMap<String, SignatureType>,
+) -> SignatureType {
+    match sig_type {
+        SignatureType::Named(path) if path.len() == 1 => {
+            // Single-segment path might be an associated type
+            if let Some(bound_type) = bindings.get(&path[0]) {
+                bound_type.clone()
+            } else {
+                sig_type.clone()
+            }
+        }
+        SignatureType::Tuple(elements) => {
+            SignatureType::Tuple(
+                elements
+                    .iter()
+                    .map(|e| substitute_associated_types(e, bindings))
+                    .collect(),
+            )
+        }
+        SignatureType::Array(element) => {
+            SignatureType::Array(Box::new(substitute_associated_types(element, bindings)))
+        }
+        SignatureType::Function { params, return_type } => SignatureType::Function {
+            params: params
+                .iter()
+                .map(|p| substitute_associated_types(p, bindings))
+                .collect(),
+            return_type: Box::new(substitute_associated_types(return_type, bindings)),
+        },
+        // For other types, return as-is
+        _ => sig_type.clone(),
+    }
+}
+
+/// Substitute associated types in a CallableSignature
+fn substitute_signature(
+    sig: &CallableSignature,
+    bindings: &HashMap<String, SignatureType>,
+) -> CallableSignature {
+    CallableSignature {
+        name: sig.name.clone(),
+        labels: sig.labels.clone(),
+        param_types: sig
+            .param_types
+            .iter()
+            .map(|t| substitute_associated_types(t, bindings))
+            .collect(),
+    }
 }
 
 /// Collect all required methods from a protocol, including inherited protocols
@@ -319,7 +512,7 @@ fn collect_protocol_methods_recursive(
     // First, collect methods from inherited protocols
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
     for inherited_ty in get_conformances(&protocol_dyn) {
-        if let Some(inherited_protocol) = resolve_protocol_type(&inherited_ty, id, db) {
+        if let Some((inherited_protocol, _)) = resolve_protocol_type(&inherited_ty, id, db) {
             collect_protocol_methods_recursive(&inherited_protocol, db, methods, visited);
         }
     }
@@ -328,5 +521,105 @@ fn collect_protocol_methods_recursive(
     for method in collect_methods_from_symbol(&protocol_dyn) {
         let sig = method.signature();
         methods.insert(sig, method);
+    }
+}
+
+/// Check that associated type defaults in protocols satisfy their bounds
+fn check_protocol_associated_type_defaults(
+    protocol: &Arc<ProtocolSymbol>,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    diagnostics: &mut DiagnosticContext,
+) {
+    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+    let file_id = get_file_id_for_symbol(symbol, diagnostics);
+
+    // Check each associated type in the protocol
+    for child in protocol_dyn.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::AssociatedType {
+            if let Ok(assoc_type) = child.downcast_arc::<AssociatedTypeSymbol>() {
+                // Get the bounds (if any)
+                if let Some(bounds) = assoc_type.bounds() {
+                    // Get the default type (if any)
+                    if let Some(default_type) = assoc_type.default_type() {
+                        // Validate that the default satisfies the bounds
+                        validate_type_satisfies_protocol_bounds(
+                            &default_type,
+                            &bounds,
+                            &assoc_type.metadata().name().value,
+                            assoc_type.metadata().span().clone(),
+                            file_id,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Helper function to validate that a type satisfies protocol bounds
+fn validate_type_satisfies_protocol_bounds(
+    bound_type: &Ty,
+    required_bounds: &[Ty],
+    type_name: &str,
+    span: kestrel_span::Span,
+    file_id: usize,
+    diagnostics: &mut DiagnosticContext,
+) {
+    // Get the type name for error messages
+    let bound_type_name = match bound_type.kind() {
+        TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Error { .. } => return, // Skip error types
+        _ => format!("{:?}", bound_type.kind()),
+    };
+
+    // For each required protocol bound, check if the type conforms to it
+    for required_protocol in required_bounds {
+        // Skip error bounds
+        if matches!(required_protocol.kind(), TyKind::Error { .. }) {
+            continue;
+        }
+
+        if let TyKind::Protocol { symbol: required_proto_symbol, .. } = required_protocol.kind() {
+            let required_protocol_name = required_proto_symbol.metadata().name().value.clone();
+
+            // Check if the bound type conforms to this protocol
+            let conforms = match bound_type.kind() {
+                TyKind::Struct { symbol, .. } => {
+                    // Get the struct's conformances
+                    let conformances = symbol
+                        .conformances_behavior()
+                        .map(|cb| cb.conformances().to_vec())
+                        .unwrap_or_default();
+
+                    // Check if any conformance matches the required protocol (by ID)
+                    conformances.iter().any(|conf| {
+                        if let TyKind::Protocol { symbol: proto_sym, .. } = conf.kind() {
+                            proto_sym.metadata().id() == required_proto_symbol.metadata().id()
+                        } else {
+                            false
+                        }
+                    })
+                }
+                TyKind::TypeParameter(_) => true, // Type parameters might conform through bounds
+                TyKind::Error { .. } => true,      // Don't report additional errors
+                _ => false,                        // Other types don't have conformances
+            };
+
+            if !conforms {
+                diagnostics.throw(
+                    AssociatedTypeConstraintNotSatisfiedError {
+                        span,
+                        type_name: type_name.to_string(),
+                        bound_type: bound_type_name.clone(),
+                        required_protocol: required_protocol_name,
+                    },
+                    file_id,
+                );
+                return; // Only report the first violation
+            }
+        }
     }
 }

@@ -9,8 +9,9 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
+    AssociatedTypeBoundsData, AssociatedTypeTargetData,
     FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterData,
-    ProtocolDeclarationData, ReceiverModifier, StructBodyItem, StructDeclarationData,
+    ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructBodyItem, StructDeclarationData,
     TypeAliasDeclarationData,
 };
 use crate::block::emit_code_block;
@@ -322,6 +323,7 @@ fn emit_struct_body_item(sink: &mut EventSink, item: StructBodyItem) {
         StructBodyItem::Function(data) => emit_function_declaration(sink, data),
         StructBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
         StructBodyItem::Struct(data) => emit_struct_declaration(sink, data),
+        StructBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
         StructBodyItem::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
         }
@@ -356,8 +358,11 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
     sink.start_node(SyntaxKind::ProtocolBody);
     sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
 
-    for func_data in data.body {
-        emit_function_declaration(sink, func_data);
+    for item in data.body {
+        match item {
+            ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
+            ProtocolBodyItem::AssociatedType(type_data) => emit_type_alias_declaration(sink, type_data),
+        }
     }
 
     sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
@@ -366,25 +371,73 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
     sink.finish_node(); // ProtocolDeclaration
 }
 
+/// Emit events for an associated type target
+///
+/// Handles both simple names and qualified paths (e.g., `Iterator.Item`, `Add[Int].Output`).
+fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTargetData) {
+    match target {
+        AssociatedTypeTargetData::Simple(name_span) => {
+            emit_name(sink, name_span.clone());
+        }
+        AssociatedTypeTargetData::Qualified { protocol_path, dot_span, name_span } => {
+            sink.start_node(SyntaxKind::AssociatedTypeTarget);
+            emit_ty_variant(sink, protocol_path);
+            sink.add_token(SyntaxKind::Dot, dot_span.clone());
+            emit_name(sink, name_span.clone());
+            sink.finish_node();
+        }
+    }
+}
+
+/// Emit events for associated type bounds (: Equatable, Hashable)
+fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoundsData) {
+    sink.add_token(SyntaxKind::Colon, bounds.colon_span.clone());
+    for (i, bound) in bounds.bounds.iter().enumerate() {
+        if i > 0 {
+            // Emit comma between bounds (approximated span)
+            let prev_end = if i > 0 {
+                // This is approximate - we don't track comma positions
+                bounds.colon_span.end + i
+            } else {
+                bounds.colon_span.end
+            };
+            sink.add_token(SyntaxKind::Comma, prev_end..prev_end + 1);
+        }
+        emit_ty_variant(sink, bound);
+    }
+}
+
 /// Emit events for a type alias declaration
 ///
 /// This is the single source of truth for type alias declaration emission.
+/// Handles:
+/// - Regular type aliases: `type Alias = Type;`
+/// - Associated types: `type Item;`, `type Item: Bound;`, `type Item = Default;`
+/// - Qualified bindings: `type Iterator.Item = Int;`
 pub fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarationData) {
     sink.start_node(SyntaxKind::TypeAliasDeclaration);
 
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Type, data.type_span);
-    emit_name(sink, data.name_span);
+
+    emit_associated_type_target(sink, &data.target);
 
     if let Some((lbracket, params, rbracket)) = data.type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    sink.add_token(SyntaxKind::Equals, data.equals_span);
+    // Emit bounds if present (for associated types)
+    if let Some(ref bounds) = data.bounds {
+        emit_associated_type_bounds(sink, bounds);
+    }
 
-    sink.start_node(SyntaxKind::AliasedType);
-    emit_ty_variant(sink, &data.aliased_type);
-    sink.finish_node(); // AliasedType
+    // Emit aliased type if present (optional for abstract associated types)
+    if let Some((equals_span, ref aliased_type)) = data.aliased {
+        sink.add_token(SyntaxKind::Equals, equals_span);
+        sink.start_node(SyntaxKind::AliasedType);
+        emit_ty_variant(sink, aliased_type);
+        sink.finish_node(); // AliasedType
+    }
 
     sink.add_token(SyntaxKind::Semicolon, data.semicolon_span);
 

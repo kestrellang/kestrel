@@ -7,6 +7,7 @@ pub use substitutions::Substitutions;
 pub use where_clause::{Constraint, WhereClause};
 
 use crate::language::KestrelLanguage;
+use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
@@ -191,6 +192,32 @@ impl Ty {
             TyKind::TypeAlias {
                 symbol: type_alias_symbol,
                 substitutions,
+            },
+            span,
+        )
+    }
+
+    /// Create an associated type reference (within a protocol)
+    pub fn associated_type(symbol: Arc<AssociatedTypeSymbol>, span: Span) -> Self {
+        Self::new(
+            TyKind::AssociatedType {
+                symbol,
+                container: None,
+            },
+            span,
+        )
+    }
+
+    /// Create a qualified associated type reference (e.g., T.Item)
+    pub fn qualified_associated_type(
+        symbol: Arc<AssociatedTypeSymbol>,
+        container: Ty,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            TyKind::AssociatedType {
+                symbol,
+                container: Some(Box::new(container)),
             },
             span,
         )
@@ -404,6 +431,20 @@ impl Ty {
             (TyKind::SelfType, TyKind::Protocol { .. }) => true,
             (TyKind::Protocol { .. }, TyKind::SelfType) => true,
 
+            // Associated types - by symbol ID for now
+            // Full checking requires constraint verification
+            (
+                TyKind::AssociatedType { symbol: a_sym, .. },
+                TyKind::AssociatedType { symbol: b_sym, .. },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+            }
+
+            // Associated type can be assigned to anything (and vice versa) for now
+            // This allows generic code to compile before constraint checking
+            (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => true,
+
             // Everything else is not assignable
             _ => false,
         }
@@ -443,6 +484,8 @@ impl Ty {
         is_struct => TyKind::Struct { .. },
         /// Check if this is a type alias type
         is_type_alias => TyKind::TypeAlias { .. },
+        /// Check if this is an associated type reference
+        is_associated_type => TyKind::AssociatedType { .. },
     }
 
     // === Accessor methods ===
@@ -539,6 +582,24 @@ impl Ty {
     pub fn as_type_alias_with_subs(&self) -> Option<(&Arc<TypeAliasSymbol>, &Substitutions)> {
         match &self.kind {
             TyKind::TypeAlias { symbol, substitutions } => Some((symbol, substitutions)),
+            _ => None,
+        }
+    }
+
+    /// Get associated type symbol if this is an associated type reference
+    pub fn as_associated_type(&self) -> Option<&Arc<AssociatedTypeSymbol>> {
+        match &self.kind {
+            TyKind::AssociatedType { symbol, .. } => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get associated type symbol and container if this is an associated type reference
+    pub fn as_associated_type_with_container(&self) -> Option<(&Arc<AssociatedTypeSymbol>, Option<&Ty>)> {
+        match &self.kind {
+            TyKind::AssociatedType { symbol, container } => {
+                Some((symbol, container.as_ref().map(|b| b.as_ref())))
+            }
             _ => None,
         }
     }

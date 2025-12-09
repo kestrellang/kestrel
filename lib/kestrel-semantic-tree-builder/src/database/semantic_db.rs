@@ -14,6 +14,7 @@ use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::error::ModuleNotFoundError;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty};
@@ -189,6 +190,216 @@ impl SemanticDatabase {
             symbol_id: symbol.metadata().id(),
         }
     }
+
+    /// Search for a name in inherited protocols (for associated type inheritance)
+    fn find_in_inherited_protocols(
+        &self,
+        protocol: &Arc<dyn Symbol<KestrelLanguage>>,
+        name: &str,
+    ) -> Option<SymbolResolution> {
+        use kestrel_semantic_tree::ty::TyKind;
+
+        let conformances_beh = protocol.conformances_behavior()?;
+
+        for parent_ty in conformances_beh.conformances() {
+            if let TyKind::Protocol {
+                symbol: parent_proto,
+                ..
+            } = parent_ty.kind()
+            {
+                // Check direct children of parent protocol
+                let parent_dyn = parent_proto.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+                for child in parent_dyn.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                        && child.metadata().name().value == name
+                    {
+                        return Some(SymbolResolution::Found(vec![child.metadata().id()]));
+                    }
+                }
+
+                // Recursively check grandparent protocols
+                if let Some(result) = self.find_in_inherited_protocols(&parent_dyn, name) {
+                    return Some(result);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Resolve an associated type from a type parameter's protocol bounds.
+    ///
+    /// Given a type parameter T and a segment "Item", this looks up the where clause
+    /// bounds for T (e.g., `where T: Iterator`) and finds the associated type "Item"
+    /// from those protocol bounds.
+    ///
+    /// The context_id is the symbol where the type is being resolved (usually the function
+    /// that owns the type parameter). We use this instead of the type parameter's parent
+    /// because the parent may not be set correctly during the build phase.
+    ///
+    /// Returns None if no associated type is found, allowing the caller to fall back
+    /// to normal child lookup (which will fail with a proper error message).
+    fn resolve_associated_type_from_type_param_with_context(
+        &self,
+        type_param: &Arc<TypeParameterSymbol>,
+        segment: &str,
+        remaining_path: &[String],
+        _index: usize,
+        context_id: SymbolId,
+    ) -> Option<TypePathResolution> {
+        use kestrel_semantic_tree::ty::TyKind;
+
+        // Get the context symbol (the function/struct where this type is being resolved)
+        let context = self.symbol_by_id(context_id)?;
+
+        // Get the where clause from the context's GenericsBehavior
+        let generics_beh = context.generics_behavior()?;
+        let where_clause = generics_beh.where_clause();
+
+        // Get protocol bounds for this type parameter
+        let param_id = type_param.metadata().id();
+        let bounds = where_clause.bounds_for(param_id);
+
+        if bounds.is_empty() {
+            return None;
+        }
+
+        // Search protocol bounds for the associated type
+        for bound in bounds {
+            if let TyKind::Protocol { symbol: protocol, .. } = bound.kind() {
+                // Check direct children of protocol
+                let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+                for child in protocol_dyn.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                        && child.metadata().name().value == segment
+                    {
+                        // Found it! Create a qualified associated type
+                        if let Some(symbol) = self.symbol_by_id(child.metadata().id()) {
+                            if let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>() {
+                                let span = type_param.metadata().span().clone();
+                                let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
+
+                                // If there are more segments (e.g., T.Iter.Item), we need to handle
+                                // nested associated types - for now just handle one level
+                                if remaining_path.len() > 1 {
+                                    // For nested paths like C.Iter.Item, we need to recursively resolve
+                                    // First create T.Iter, then look up Item on that
+                                    let first_assoc_ty = Ty::qualified_associated_type(
+                                        assoc_type_arc.clone(),
+                                        container_ty.clone(),
+                                        span.clone(),
+                                    );
+
+                                    // Now we need to find "Item" in the bounds of "Iter"
+                                    // Check if the associated type has bounds that are protocols
+                                    if let Some(result) = self.resolve_nested_associated_type(
+                                        &assoc_type_arc,
+                                        first_assoc_ty,
+                                        &remaining_path[1..],
+                                    ) {
+                                        return Some(result);
+                                    }
+                                }
+
+                                let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
+                                return Some(TypePathResolution::Resolved(ty));
+                            }
+                        }
+                    }
+                }
+
+                // Check inherited protocols
+                if let Some(SymbolResolution::Found(ids)) = self.find_in_inherited_protocols(&protocol_dyn, segment) {
+                    if let Some(id) = ids.first() {
+                        if let Some(symbol) = self.symbol_by_id(*id) {
+                            if let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>() {
+                                let span = type_param.metadata().span().clone();
+                                let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
+                                let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
+                                return Some(TypePathResolution::Resolved(ty));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Resolve nested associated types (e.g., C.Iter.Item)
+    ///
+    /// Given an associated type like "Iter" with bounds "Iterator", and remaining path ["Item"],
+    /// find the "Item" associated type from the Iterator protocol bound.
+    fn resolve_nested_associated_type(
+        &self,
+        assoc_type: &Arc<AssociatedTypeSymbol>,
+        container_ty: Ty,
+        remaining_path: &[String],
+    ) -> Option<TypePathResolution> {
+        use kestrel_semantic_tree::ty::TyKind;
+
+        if remaining_path.is_empty() {
+            return None;
+        }
+
+        let segment = &remaining_path[0];
+
+        // Get the bounds of the associated type (e.g., type Iter: Iterator)
+        // Associated types use AssociatedTypeBoundsBehavior, not ConformancesBehavior
+        let bounds = assoc_type.bounds()?;
+
+        for bound in bounds.iter() {
+            if let TyKind::Protocol { symbol: protocol, .. } = bound.kind() {
+                let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+                // Look for the segment in this protocol
+                for child in protocol_dyn.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                        && child.metadata().name().value == *segment
+                    {
+                        if let Some(symbol) = self.symbol_by_id(child.metadata().id()) {
+                            if let Ok(inner_assoc_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>() {
+                                let span = container_ty.span().clone();
+
+                                // If there are still more segments, recurse
+                                if remaining_path.len() > 1 {
+                                    let nested_container = Ty::qualified_associated_type(
+                                        inner_assoc_arc.clone(),
+                                        container_ty,
+                                        span.clone(),
+                                    );
+                                    return self.resolve_nested_associated_type(
+                                        &inner_assoc_arc,
+                                        nested_container,
+                                        &remaining_path[1..],
+                                    );
+                                }
+
+                                let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
+                                return Some(TypePathResolution::Resolved(ty));
+                            }
+                        }
+                    }
+                }
+
+                // Check inherited protocols
+                if let Some(SymbolResolution::Found(ids)) = self.find_in_inherited_protocols(&protocol_dyn, segment) {
+                    if let Some(id) = ids.first() {
+                        if let Some(symbol) = self.symbol_by_id(*id) {
+                            if let Ok(inner_assoc_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>() {
+                                let span = container_ty.span().clone();
+                                let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
+                                return Some(TypePathResolution::Resolved(ty));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl Db for SemanticDatabase {
@@ -233,6 +444,16 @@ impl Db for SemanticDatabase {
                 } else {
                     SymbolResolution::Ambiguous(declared.clone())
                 };
+            }
+
+            // Check inherited associated types from parent protocols
+            // (conformances are resolved after scope computation, so we check at lookup time)
+            if let Some(symbol) = self.symbol_by_id(id) {
+                if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
+                    if let Some(result) = self.find_in_inherited_protocols(&symbol, &name) {
+                        return result;
+                    }
+                }
             }
 
             current = scope.parent;
@@ -398,6 +619,26 @@ impl Db for SemanticDatabase {
         // Subsequent segments: search visible children
         let checker = VisibilityChecker::new(&context_symbol);
         for (index, segment) in path.iter().enumerate().skip(1) {
+            // Special case: if current symbol is a TypeParameter, look up associated types
+            // from its protocol bounds (e.g., T.Item where T: Iterator)
+            if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                if let Some(type_param) = self.symbol_by_id(current_symbol.metadata().id()) {
+                    if let Ok(type_param_arc) = type_param.clone().into_any_arc().downcast::<TypeParameterSymbol>() {
+                        // Use context (the function/struct where this type is being resolved)
+                        // instead of type_param's parent, since the parent may not be set correctly
+                        if let Some(result) = self.resolve_associated_type_from_type_param_with_context(
+                            &type_param_arc,
+                            segment,
+                            &path[index..],
+                            index,
+                            context,
+                        ) {
+                            return result;
+                        }
+                    }
+                }
+            }
+
             let matches = checker.find_visible_children(&current_symbol, segment);
 
             match matches.len() {
@@ -426,6 +667,17 @@ impl Db for SemanticDatabase {
                 if let Ok(type_param_arc) = symbol.into_any_arc().downcast::<TypeParameterSymbol>() {
                     let span = type_param_arc.metadata().span().clone();
                     let ty = Ty::type_parameter(type_param_arc, span);
+                    return TypePathResolution::Resolved(ty);
+                }
+            }
+        }
+
+        // Handle AssociatedTypeSymbol specially
+        if current_symbol.metadata().kind() == KestrelSymbolKind::AssociatedType {
+            if let Some(symbol) = self.symbol_by_id(current_symbol.metadata().id()) {
+                if let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>() {
+                    let span = assoc_type_arc.metadata().span().clone();
+                    let ty = Ty::associated_type(assoc_type_arc, span);
                     return TypePathResolution::Resolved(ty);
                 }
             }

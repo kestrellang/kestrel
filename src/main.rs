@@ -471,6 +471,7 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
             TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
             TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::AssociatedType { symbol, .. } => symbol.metadata().name().value.clone(),
             TyKind::SelfType => "Self".to_string(),
             TyKind::Inferred => "_".to_string(),
             TyKind::Error => "<error>".to_string(),

@@ -12,7 +12,7 @@ mod protocol_declaration {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
         "#,
         )
@@ -30,8 +30,8 @@ mod protocol_declaration {
         Test::new(
             r#"module Test
             protocol Dictionary {
-                type Key
-                type Value
+                type Key;
+                type Value;
             }
         "#,
         )
@@ -50,7 +50,7 @@ mod protocol_declaration {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
                 func next() -> Item
                 func hasNext() -> Bool
             }
@@ -72,7 +72,7 @@ mod protocol_declaration {
         Test::new(
             r#"module Test
             protocol Converter[From] {
-                type Output
+                type Output;
                 func convert(input: From) -> Output
             }
         "#,
@@ -97,7 +97,7 @@ mod associated_type_constraints {
             r#"module Test
             protocol Equatable { }
             protocol Container {
-                type Item: Equatable
+                type Item: Equatable;
             }
         "#,
         )
@@ -112,7 +112,7 @@ mod associated_type_constraints {
             protocol Equatable { }
             protocol Hashable { }
             protocol Container {
-                type Item: Equatable, Hashable
+                type Item: Equatable, Hashable;
             }
         "#,
         )
@@ -126,7 +126,7 @@ mod associated_type_constraints {
             r#"module Test
             struct NotAProtocol { }
             protocol Container {
-                type Item: NotAProtocol
+                type Item: NotAProtocol;
             }
         "#,
         )
@@ -142,7 +142,7 @@ mod associated_type_defaults {
         Test::new(
             r#"module Test
             protocol Parser {
-                type Output = String
+                type Output = String;
                 func parse() -> Output
             }
         "#,
@@ -156,9 +156,9 @@ mod associated_type_defaults {
         Test::new(
             r#"module Test
             protocol Equatable { }
-            struct Int: Equatable { }
+            struct MyInt: Equatable { }
             protocol Container {
-                type Item: Equatable = Int
+                type Item: Equatable = MyInt;
             }
         "#,
         )
@@ -173,7 +173,7 @@ mod associated_type_defaults {
             protocol Equatable { }
             struct NotEquatable { }
             protocol Container {
-                type Item: Equatable = NotEquatable
+                type Item: Equatable = NotEquatable;
             }
         "#,
         )
@@ -193,11 +193,11 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
                 func next() -> Item
             }
             struct IntIterator: Iterator {
-                type Item = Int
+                type Item = Int;
                 func next() -> Int { 0 }
             }
         "#,
@@ -216,13 +216,13 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Dictionary {
-                type Key
-                type Value
+                type Key;
+                type Value;
                 func get(key: Key) -> Value
             }
             struct StringIntMap: Dictionary {
-                type Key = String
-                type Value = Int
+                type Key = String;
+                type Value = Int;
                 func get(key: String) -> Int { 0 }
             }
         "#,
@@ -237,7 +237,7 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
                 func next() -> Item
             }
             struct BadIterator: Iterator {
@@ -255,10 +255,10 @@ mod struct_binding {
             protocol Equatable { }
             struct NotEquatable { }
             protocol Container {
-                type Item: Equatable
+                type Item: Equatable;
             }
             struct BadContainer: Container {
-                type Item = NotEquatable
+                type Item = NotEquatable;
             }
         "#,
         )
@@ -270,7 +270,7 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Parser {
-                type Output = String
+                type Output = String;
                 func parse() -> Output
             }
             struct SimpleParser: Parser {
@@ -291,11 +291,11 @@ mod struct_binding {
         Test::new(
             r#"module Test
             protocol Parser {
-                type Output = String
+                type Output = String;
                 func parse() -> Output
             }
             struct IntParser: Parser {
-                type Output = Int
+                type Output = Int;
                 func parse() -> Int { 0 }
             }
         "#,
@@ -313,14 +313,14 @@ mod qualified_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol Container {
-                type Item
+                type Item;
             }
             struct Foo: Iterator, Container {
-                type Iterator.Item = Int
-                type Container.Item = String
+                type Iterator.Item = Int;
+                type Container.Item = String;
             }
         "#,
         )
@@ -337,13 +337,13 @@ mod qualified_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol Container {
-                type Item
+                type Item;
             }
             struct Foo: Iterator, Container {
-                type Item = Int
+                type Item = Int;
             }
         "#,
         )
@@ -355,11 +355,11 @@ mod qualified_binding {
         Test::new(
             r#"module Test
             protocol Add[Right] {
-                type Output
+                type Output;
                 func add(right: Right) -> Output
             }
             struct Int: Add[Int] {
-                type Add[Int].Output = Int
+                type Add[Int].Output = Int;
                 func add(right: Int) -> Int { 0 }
             }
         "#,
@@ -372,11 +372,11 @@ mod qualified_binding {
         Test::new(
             r#"module Test
             protocol Add[Right] {
-                type Output
+                type Output;
             }
             struct Int: Add[Int], Add[Float] {
-                type Add[Int].Output = Int
-                type Add[Float].Output = Float
+                type Add[Int].Output = Int;
+                type Add[Float].Output = Float;
             }
         "#,
         )
@@ -388,11 +388,11 @@ mod qualified_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol Other { }
             struct Foo: Iterator, Other {
-                type Other.Item = Int
+                type Other.Item = Int;
             }
         "#,
         )
@@ -404,10 +404,10 @@ mod qualified_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             struct Foo {
-                type Iterator.Item = Int
+                type Iterator.Item = Int;
             }
         "#,
         )
@@ -423,10 +423,10 @@ mod generic_struct_binding {
         Test::new(
             r#"module Test
             protocol Container {
-                type Item
+                type Item;
             }
             struct Box[T]: Container {
-                type Item = T
+                type Item = T;
             }
         "#,
         )
@@ -444,10 +444,10 @@ mod generic_struct_binding {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             struct ArrayIterator[T]: Iterator {
-                type Item = T
+                type Item = T;
             }
         "#,
         )
@@ -459,11 +459,11 @@ mod generic_struct_binding {
         Test::new(
             r#"module Test
             protocol Add[Right] {
-                type Output
+                type Output;
                 func add(right: Right) -> Output
             }
             struct Int: Add[Int] {
-                type Add[Int].Output = Int
+                type Add[Int].Output = Int;
                 func add(right: Int) -> Int { 0 }
             }
         "#,
@@ -485,7 +485,7 @@ mod where_clause_bounds {
             r#"module Test
             protocol Equatable { }
             protocol Iterator {
-                type Item
+                type Item;
             }
             func findEqual[T](iter: T) where T: Iterator, T.Item: Equatable { }
         "#,
@@ -500,7 +500,7 @@ mod where_clause_bounds {
             protocol Equatable { }
             protocol Hashable { }
             protocol Iterator {
-                type Item
+                type Item;
             }
             func process[T](iter: T) where T: Iterator, T.Item: Equatable, T.Item: Hashable { }
         "#,
@@ -514,7 +514,7 @@ mod where_clause_bounds {
             r#"module Test
             protocol Comparable { }
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol SortedIterator: Iterator where Iterator.Item: Comparable { }
         "#,
@@ -527,7 +527,7 @@ mod where_clause_bounds {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             func process[T](iter: T) where T: Iterator, T.Unknown: Equatable { }
         "#,
@@ -544,7 +544,7 @@ mod where_clause_equality {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             func intOnly[T](iter: T) where T: Iterator, T.Item == Int { }
         "#,
@@ -557,9 +557,12 @@ mod where_clause_equality {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
+                func next() -> Item
             }
-            func collect[T, U](iter: T) -> U where T: Iterator, T.Item == U { }
+            func collect[T, U](iter: T) -> U where T: Iterator, T.Item == U {
+                iter.next()
+            }
         "#,
         )
         .expect(Compiles);
@@ -570,7 +573,7 @@ mod where_clause_equality {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             func zip[A, B](a: A, b: B) where A: Iterator, B: Iterator, A.Item == B.Item { }
         "#,
@@ -591,16 +594,16 @@ mod type_resolution {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
                 func next() -> Item
             }
             struct IntIterator: Iterator {
-                type Item = Int
+                type Item = Int;
                 func next() -> Int { 0 }
             }
             func test() {
-                let iter = IntIterator()
-                let x: Int = iter.next()
+                let iter = IntIterator();
+                let x: Int = iter.next();
             }
         "#,
         )
@@ -612,16 +615,16 @@ mod type_resolution {
         Test::new(
             r#"module Test
             protocol Container {
-                type Item
+                type Item;
                 func add(item: Item)
             }
             struct IntContainer: Container {
-                type Item = Int
+                type Item = Int;
                 func add(item: Int) { }
             }
             func test() {
-                let c = IntContainer()
-                c.add(42)
+                let c = IntContainer();
+                c.add(42);
             }
         "#,
         )
@@ -636,15 +639,15 @@ mod type_resolution {
                 func eq(other: Self) -> Bool
             }
             protocol Iterator {
-                type Item
+                type Item;
                 func next() -> Item
             }
-            struct IntIterator: Iterator {
-                type Item = Int
-                func next() -> Int { 0 }
+            struct MyInt: Equatable {
+                func eq(other: MyInt) -> Bool { true }
             }
-            struct Int: Equatable {
-                func eq(other: Int) -> Bool { true }
+            struct IntIterator: Iterator {
+                type Item = MyInt;
+                func next() -> MyInt { MyInt() }
             }
             func contains[T](iter: T, value: T.Item) -> Bool where T: Iterator, T.Item: Equatable {
                 true
@@ -667,10 +670,10 @@ mod errors {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             struct Foo: Iterator {
-                type Item
+                type Item;
             }
         "#,
         )
@@ -703,7 +706,7 @@ mod errors {
         Test::new(
             r#"module Test
             struct Foo {
-                type Item = Int
+                type Item = Int;
             }
         "#,
         )
@@ -725,12 +728,12 @@ mod nested_associated_types {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol Container {
-                type Iter: Iterator
+                type Iter: Iterator;
             }
-            func getItem[C](c: C) -> C.Iter.Item where C: Container { }
+            func getItem[C](c: C, item: C.Iter.Item) -> C.Iter.Item where C: Container { item }
         "#,
         )
         .expect(Compiles);
@@ -742,10 +745,10 @@ mod nested_associated_types {
             r#"module Test
             protocol Equatable { }
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol Container {
-                type Iter: Iterator
+                type Iter: Iterator;
             }
             func findIn[C](c: C) where C: Container, C.Iter.Item: Equatable { }
         "#,
@@ -758,10 +761,10 @@ mod nested_associated_types {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol Container {
-                type Iter: Iterator
+                type Iter: Iterator;
             }
             func intContainer[C](c: C) where C: Container, C.Iter.Item == Int { }
         "#,
@@ -779,7 +782,7 @@ mod generic_defaults {
             r#"module Test
             struct Array[T] { }
             protocol Collection[T] {
-                type Storage = Array[T]
+                type Storage = Array[T];
             }
         "#,
         )
@@ -793,7 +796,7 @@ mod generic_defaults {
             r#"module Test
             struct Pair[A, B] { }
             protocol Mapping[K, V] {
-                type Entry = Pair[K, V]
+                type Entry = Pair[K, V];
             }
         "#,
         )
@@ -808,10 +811,10 @@ mod generic_defaults {
             struct Array[T] { }
             struct LinkedList[T] { }
             protocol Collection[T] {
-                type Storage = Array[T]
+                type Storage = Array[T];
             }
             struct MyCollection[T]: Collection[T] {
-                type Storage = LinkedList[T]
+                type Storage = LinkedList[T];
             }
         "#,
         )
@@ -825,7 +828,7 @@ mod generic_defaults {
             r#"module Test
             struct Array[T] { }
             protocol Collection[T] {
-                type Storage = Array[T]
+                type Storage = Array[T];
             }
             struct SimpleCollection[T]: Collection[T] { }
         "#,
@@ -839,7 +842,7 @@ mod generic_defaults {
             r#"module Test
             struct Array[T] { }
             protocol Collection[T] {
-                type Storage = Array[Unknown]
+                type Storage = Array[Unknown];
             }
         "#,
         )
@@ -855,7 +858,7 @@ mod protocol_inheritance {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol BidirectionalIterator: Iterator {
                 func prev() -> Item
@@ -875,14 +878,14 @@ mod protocol_inheritance {
         Test::new(
             r#"module Test
             protocol Iterator {
-                type Item
+                type Item;
                 func next() -> Item
             }
             protocol BidirectionalIterator: Iterator {
                 func prev() -> Item
             }
             struct IntBiIterator: BidirectionalIterator {
-                type Item = Int
+                type Item = Int;
                 func next() -> Int { 0 }
                 func prev() -> Int { 0 }
             }
@@ -897,7 +900,7 @@ mod protocol_inheritance {
             r#"module Test
             protocol Comparable { }
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol SortedIterator: Iterator where Iterator.Item: Comparable {
                 func min() -> Item
@@ -913,12 +916,12 @@ mod protocol_inheritance {
             r#"module Test
             protocol Comparable { }
             protocol Iterator {
-                type Item
+                type Item;
             }
             protocol SortedIterator: Iterator where Iterator.Item: Comparable { }
             struct NotComparable { }
             struct BadIterator: SortedIterator {
-                type Item = NotComparable
+                type Item = NotComparable;
             }
         "#,
         )
