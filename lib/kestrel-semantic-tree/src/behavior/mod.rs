@@ -4,6 +4,7 @@ pub mod conforms_to;
 pub mod executable;
 pub mod function_data;
 pub mod generics;
+pub mod implements;
 pub mod member_access;
 pub mod typed;
 pub mod valued;
@@ -19,6 +20,7 @@ pub enum KestrelBehaviorKind {
     FlattenedProtocol,
     FunctionData,
     Generics,
+    Implements,
     ImportData,
     MemberAccess,
     Typed,

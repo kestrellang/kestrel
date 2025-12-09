@@ -11,6 +11,7 @@
 mod structs;
 mod functions;
 mod protocols;
+mod protocol_method_linking;
 mod type_aliases;
 mod associated_types;
 mod imports;

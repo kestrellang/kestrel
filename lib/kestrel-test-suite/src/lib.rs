@@ -522,6 +522,10 @@ pub enum Behavior {
     ReceiverKind(Receiver),
     /// Check if symbol has children with a specific count
     ChildCount(usize),
+    /// Check if method implements a specific protocol method (protocol_name, method_name)
+    ImplementsProtocol(&'static str, &'static str),
+    /// Check if method does NOT implement any protocol method
+    ImplementsProtocolNone,
 }
 
 impl Behavior {
@@ -694,6 +698,36 @@ impl Behavior {
                 }
                 Ok(())
             }
+            Behavior::ImplementsProtocol(protocol_name, method_name) => {
+                let implements_info = get_implements_protocol_info(symbol);
+                match implements_info {
+                    Some((actual_protocol, actual_method)) => {
+                        if actual_protocol != *protocol_name || actual_method != *method_name {
+                            return Err(format!(
+                                "Symbol '{}' implements protocol method '{}.{}', expected '{}.{}'",
+                                path, actual_protocol, actual_method, protocol_name, method_name
+                            ));
+                        }
+                    }
+                    None => {
+                        return Err(format!(
+                            "Symbol '{}' does not implement any protocol method, expected '{}.{}'",
+                            path, protocol_name, method_name
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            Behavior::ImplementsProtocolNone => {
+                let implements_info = get_implements_protocol_info(symbol);
+                if let Some((protocol_name, method_name)) = implements_info {
+                    return Err(format!(
+                        "Symbol '{}' implements protocol method '{}.{}', expected it to implement no protocol methods",
+                        path, protocol_name, method_name
+                    ));
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -712,6 +746,8 @@ impl std::fmt::Debug for Behavior {
             Behavior::IsInstanceMethod(b) => write!(f, "IsInstanceMethod({})", b),
             Behavior::ReceiverKind(r) => write!(f, "ReceiverKind({:?})", r),
             Behavior::ChildCount(n) => write!(f, "ChildCount({})", n),
+            Behavior::ImplementsProtocol(p, m) => write!(f, "ImplementsProtocol({}, {})", p, m),
+            Behavior::ImplementsProtocolNone => write!(f, "ImplementsProtocolNone"),
         }
     }
 }
@@ -812,4 +848,58 @@ fn get_function_data_behavior(
         .into_iter()
         .find(|b| matches!(b.kind(), KestrelBehaviorKind::FunctionData))
         .and_then(|b| b.as_ref().downcast_ref::<FunctionDataBehavior>().cloned())
+}
+
+/// Helper to get ImplementsBehavior protocol and method name from a symbol
+/// Returns (protocol_name, method_name) if the symbol implements a protocol method
+fn get_implements_protocol_info(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+) -> Option<(String, String)> {
+    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+
+    // Look for ImplementsBehavior in the symbol's behaviors
+    let impl_behavior = symbol
+        .metadata()
+        .behaviors()
+        .into_iter()
+        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Implements))
+        .and_then(|b| b.as_ref().downcast_ref::<ImplementsBehavior>().cloned())?;
+
+    // We need to look up the symbols by ID to get their names
+    // Walk up to find the root
+    let protocol_id = impl_behavior.protocol();
+    let method_id = impl_behavior.protocol_method();
+
+    let mut current = symbol.clone();
+    while let Some(parent) = current.metadata().parent() {
+        current = parent;
+    }
+
+    // Find protocol and method symbols by ID
+    let protocol = find_symbol_by_id(&current, protocol_id)?;
+    let method = find_symbol_by_id(&current, method_id)?;
+
+    Some((
+        protocol.metadata().name().value.clone(),
+        method.metadata().name().value.clone(),
+    ))
+}
+
+/// Helper to find a symbol by ID in the tree
+fn find_symbol_by_id(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    id: semantic_tree::symbol::SymbolId,
+) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
+    if symbol.metadata().id() == id {
+        return Some(symbol.clone());
+    }
+
+    for child in symbol.metadata().children() {
+        if let Some(found) = find_symbol_by_id(&child, id) {
+            return Some(found);
+        }
+    }
+
+    None
 }

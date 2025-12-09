@@ -119,6 +119,9 @@ impl Resolver for StructResolver {
             file_id,
             NotAProtocolContext::Conformance,
         );
+
+        // Note: Protocol method linking happens in the ConformanceValidator
+        // during the VALIDATE phase, after all children are bound
     }
 }
 

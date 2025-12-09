@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::behavior::callable::{CallableSignature, SignatureType};
+use kestrel_semantic_tree::behavior::callable::{CallableSignature, MethodLookupKey, SignatureType};
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
@@ -131,6 +131,17 @@ impl Validator for ConformanceValidator {
         for collected in self.structs.lock().unwrap().iter() {
             check_struct_conformance(&collected.struct_sym, &collected.symbol, db, diagnostics);
         }
+
+        // Link protocol methods for all structs
+        // This happens AFTER all binding is complete, so method signatures are available
+        for collected in self.structs.lock().unwrap().iter() {
+            crate::resolvers::link_protocol_methods_for_struct(
+                &collected.struct_sym,
+                &collected.symbol,
+                db,
+                diagnostics,
+            );
+        }
     }
 }
 
@@ -230,10 +241,11 @@ fn check_struct_conformance(
         .unwrap_or_default();
 
     // Collect all methods implemented by the struct
+    // Use MethodLookupKey (without return type) for lookup, then validate return type separately
     let struct_methods = collect_methods_from_symbol(symbol);
-    let struct_method_map: HashMap<CallableSignature, (&Arc<FunctionSymbol>, SignatureType)> = struct_methods
+    let struct_method_map: HashMap<MethodLookupKey, (&Arc<FunctionSymbol>, SignatureType)> = struct_methods
         .iter()
-        .map(|f| (f.signature(), (f, SignatureType::from_ty(&f.return_type()))))
+        .map(|f| (f.signature().lookup_key(), (f, SignatureType::from_ty(&f.return_type()))))
         .collect();
 
     // Check each conformance
@@ -301,7 +313,8 @@ fn check_struct_conformance(
             // Substitute associated types in the signature for lookup
             let substituted_sig = substitute_signature(protocol_sig, &effective_bindings);
 
-            match struct_method_map.get(&substituted_sig) {
+            // Use lookup key (without return type) to find the method, then validate return type separately
+            match struct_method_map.get(&substituted_sig.lookup_key()) {
                 None => {
                     let span = struct_sym.metadata().declaration_span().clone();
 
@@ -482,6 +495,7 @@ fn substitute_signature(
             .iter()
             .map(|t| substitute_associated_types(t, bindings))
             .collect(),
+        return_type: substitute_associated_types(&sig.return_type, bindings),
     }
 }
 

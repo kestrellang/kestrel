@@ -17,6 +17,7 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata};
 use crate::behavior::callable::CallableBehavior;
 use crate::behavior::conformances::ConformancesBehavior;
 use crate::behavior::generics::GenericsBehavior;
+use crate::behavior::implements::ImplementsBehavior;
 use crate::behavior::typed::TypedBehavior;
 use crate::behavior::valued::ValueBehavior;
 use crate::behavior::visibility::VisibilityBehavior;
@@ -46,6 +47,9 @@ pub trait BehaviorExt {
 
     /// Get the FlattenedProtocolBehavior if present (cloned)
     fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior>;
+
+    /// Get the ImplementsBehavior if present (cloned)
+    fn implements_behavior(&self) -> Option<ImplementsBehavior>;
 }
 
 impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
@@ -97,6 +101,13 @@ impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
             .find(|b| matches!(b.kind(), KestrelBehaviorKind::FlattenedProtocol))
             .and_then(|b| b.as_ref().downcast_ref::<FlattenedProtocolBehavior>().cloned())
     }
+
+    fn implements_behavior(&self) -> Option<ImplementsBehavior> {
+        self.behaviors()
+            .into_iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Implements))
+            .and_then(|b| b.as_ref().downcast_ref::<ImplementsBehavior>().cloned())
+    }
 }
 
 /// Extension trait for accessing typed behaviors directly on symbols
@@ -121,6 +132,9 @@ pub trait SymbolBehaviorExt {
 
     /// Get the FlattenedProtocolBehavior if present (cloned)
     fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior>;
+
+    /// Get the ImplementsBehavior if present (cloned)
+    fn implements_behavior(&self) -> Option<ImplementsBehavior>;
 }
 
 impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
@@ -151,6 +165,10 @@ impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
     fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior> {
         self.metadata().flattened_protocol_behavior()
     }
+
+    fn implements_behavior(&self) -> Option<ImplementsBehavior> {
+        self.metadata().implements_behavior()
+    }
 }
 
 impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
@@ -180,5 +198,9 @@ impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
 
     fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior> {
         self.metadata().flattened_protocol_behavior()
+    }
+
+    fn implements_behavior(&self) -> Option<ImplementsBehavior> {
+        self.metadata().implements_behavior()
     }
 }

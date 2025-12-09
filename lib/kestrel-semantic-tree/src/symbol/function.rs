@@ -4,7 +4,7 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::callable::{CallableBehavior, CallableSignature},
+    behavior::callable::{CallableBehavior, CallableSignature, SignatureType},
     behavior::function_data::FunctionDataBehavior,
     behavior::visibility::VisibilityBehavior,
     behavior_ext::BehaviorExt,
@@ -168,7 +168,7 @@ impl FunctionSymbol {
     pub fn signature(&self) -> CallableSignature {
         self.get_callable()
             .map(|c| c.signature(&self.metadata.name().value))
-            .unwrap_or_else(|| CallableSignature::new(self.metadata.name().value.clone(), vec![], vec![]))
+            .unwrap_or_else(|| CallableSignature::new(self.metadata.name().value.clone(), vec![], vec![], SignatureType::Unit))
     }
 
     /// Get the function signature as a Ty::Function

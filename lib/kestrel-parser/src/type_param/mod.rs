@@ -485,8 +485,11 @@ mod tests {
         let result = parse_where("where T: Equatable");
         assert!(result.is_some());
         let data = result.unwrap();
-        assert_eq!(data.bounds.len(), 1);
-        assert_eq!(data.bounds[0].bounds.len(), 1);
+        assert_eq!(data.constraints.len(), 1);
+        match &data.constraints[0] {
+            WhereConstraintData::Bound(bound) => assert_eq!(bound.bounds.len(), 1),
+            _ => panic!("Expected Bound constraint"),
+        }
     }
 
     #[test]
@@ -494,8 +497,11 @@ mod tests {
         let result = parse_where("where T: Equatable and Hashable");
         assert!(result.is_some());
         let data = result.unwrap();
-        assert_eq!(data.bounds.len(), 1);
-        assert_eq!(data.bounds[0].bounds.len(), 2);
+        assert_eq!(data.constraints.len(), 1);
+        match &data.constraints[0] {
+            WhereConstraintData::Bound(bound) => assert_eq!(bound.bounds.len(), 2),
+            _ => panic!("Expected Bound constraint"),
+        }
     }
 
     #[test]
@@ -503,7 +509,7 @@ mod tests {
         let result = parse_where("where T: Equatable, U: Serializable");
         assert!(result.is_some());
         let data = result.unwrap();
-        assert_eq!(data.bounds.len(), 2);
+        assert_eq!(data.constraints.len(), 2);
     }
 
     #[test]

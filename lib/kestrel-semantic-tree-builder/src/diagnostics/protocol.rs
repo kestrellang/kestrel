@@ -313,3 +313,58 @@ impl IntoDiagnostic for InheritedAssociatedTypeConflictError {
             ])
     }
 }
+
+/// Error when a method's receiver kind doesn't match the protocol requirement
+pub struct ProtocolMethodReceiverMismatchError {
+    pub span: Span,
+    pub method_name: String,
+    pub protocol_name: String,
+    pub expected_receiver: String,
+    pub actual_receiver: String,
+}
+
+impl IntoDiagnostic for ProtocolMethodReceiverMismatchError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "method '{}' has incorrect receiver kind for protocol '{}'",
+                self.method_name, self.protocol_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!(
+                        "expected {} method, found {} method",
+                        self.expected_receiver, self.actual_receiver
+                    ))
+            ])
+            .with_notes(vec![
+                format!("protocol '{}' requires a {} method", self.protocol_name, self.expected_receiver)
+            ])
+    }
+}
+
+/// Error when a method would satisfy multiple protocol requirements (ambiguous)
+pub struct AmbiguousProtocolMethodError {
+    pub span: Span,
+    pub method_name: String,
+    pub protocols: Vec<String>,
+}
+
+impl IntoDiagnostic for AmbiguousProtocolMethodError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let protocols_str = self.protocols.join("', '");
+        Diagnostic::error()
+            .with_message(format!(
+                "method '{}' ambiguously implements protocol requirements",
+                self.method_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("ambiguous implementation")
+            ])
+            .with_notes(vec![
+                format!("this method would satisfy requirements from protocols: '{}'", protocols_str),
+                "consider using a different method name or refactoring the protocol design".to_string(),
+            ])
+    }
+}

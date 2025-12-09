@@ -95,6 +95,7 @@ impl CallableParameter {
 /// - The callable's name
 /// - The labels for each parameter (None = unlabeled positional parameter)
 /// - The parameter types (for type-based overloading)
+/// - The return type
 #[derive(Debug, Clone)]
 pub struct CallableSignature {
     /// Name of the callable
@@ -103,6 +104,8 @@ pub struct CallableSignature {
     pub labels: Vec<Option<String>>,
     /// Parameter types for type-based overloading
     pub param_types: Vec<SignatureType>,
+    /// Return type
+    pub return_type: SignatureType,
 }
 
 /// Simplified type representation for signature comparison.
@@ -195,6 +198,7 @@ impl PartialEq for CallableSignature {
         self.name == other.name
             && self.labels == other.labels
             && self.param_types == other.param_types
+            && self.return_type == other.return_type
     }
 }
 
@@ -205,16 +209,41 @@ impl Hash for CallableSignature {
         self.name.hash(state);
         self.labels.hash(state);
         self.param_types.hash(state);
+        self.return_type.hash(state);
     }
+}
+
+/// Lookup key for method matching without return type.
+///
+/// Used when we want to find a method by name/labels/params and then
+/// separately validate the return type for better error messages.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MethodLookupKey {
+    /// Name of the method
+    pub name: String,
+    /// Labels for each parameter
+    pub labels: Vec<Option<String>>,
+    /// Parameter types
+    pub param_types: Vec<SignatureType>,
 }
 
 impl CallableSignature {
     /// Create a new signature
-    pub fn new(name: String, labels: Vec<Option<String>>, param_types: Vec<SignatureType>) -> Self {
+    pub fn new(name: String, labels: Vec<Option<String>>, param_types: Vec<SignatureType>, return_type: SignatureType) -> Self {
         Self {
             name,
             labels,
             param_types,
+            return_type,
+        }
+    }
+
+    /// Get a lookup key for matching by name/labels/params only (ignoring return type)
+    pub fn lookup_key(&self) -> MethodLookupKey {
+        MethodLookupKey {
+            name: self.name.clone(),
+            labels: self.labels.clone(),
+            param_types: self.param_types.clone(),
         }
     }
 
@@ -350,7 +379,9 @@ impl CallableBehavior {
             .map(|p| SignatureType::from_ty(&p.ty))
             .collect();
 
-        CallableSignature::new(name.to_string(), labels, param_types)
+        let return_type = SignatureType::from_ty(&self.return_type);
+
+        CallableSignature::new(name.to_string(), labels, param_types, return_type)
     }
 
     /// Get the function type representation of this callable
@@ -384,11 +415,13 @@ mod tests {
             "add".to_string(),
             vec![None, None],
             vec![SignatureType::Int, SignatureType::Int],
+            SignatureType::Int,
         );
         let sig2 = CallableSignature::new(
             "add".to_string(),
             vec![None, None],
             vec![SignatureType::Int, SignatureType::Int],
+            SignatureType::Int,
         );
 
         assert_eq!(sig1, sig2);
@@ -401,11 +434,13 @@ mod tests {
             "add".to_string(),
             vec![Some("x".to_string()), Some("y".to_string())],
             vec![SignatureType::Int, SignatureType::Int],
+            SignatureType::Int,
         );
         let sig2 = CallableSignature::new(
             "add".to_string(),
             vec![Some("x".to_string()), Some("y".to_string())],
             vec![SignatureType::Int, SignatureType::Int],
+            SignatureType::Int,
         );
 
         assert_eq!(sig1, sig2);
@@ -417,11 +452,13 @@ mod tests {
             "greet".to_string(),
             vec![Some("with".to_string())],
             vec![SignatureType::Named(vec!["String".to_string()])],
+            SignatureType::Unit,
         );
         let sig2 = CallableSignature::new(
             "greet".to_string(),
             vec![Some("using".to_string())],
             vec![SignatureType::Named(vec!["String".to_string()])],
+            SignatureType::Unit,
         );
 
         assert_ne!(sig1, sig2); // Different labels = different signatures
@@ -434,11 +471,13 @@ mod tests {
             "foo".to_string(),
             vec![Some("x".to_string())],
             vec![SignatureType::Int],
+            SignatureType::Unit,
         );
         let sig2 = CallableSignature::new(
             "foo".to_string(),
             vec![None],
             vec![SignatureType::Int],
+            SignatureType::Unit,
         );
 
         assert_ne!(sig1, sig2); // Labeled vs unlabeled = different signatures
@@ -450,11 +489,13 @@ mod tests {
             "add".to_string(),
             vec![None, None],
             vec![SignatureType::Int, SignatureType::Int],
+            SignatureType::Int,
         );
         let sig2 = CallableSignature::new(
             "add".to_string(),
             vec![None, None],
             vec![SignatureType::Float, SignatureType::Float],
+            SignatureType::Float,
         );
 
         assert_ne!(sig1, sig2); // Different types = different signatures
@@ -466,11 +507,13 @@ mod tests {
             "add".to_string(),
             vec![None],
             vec![SignatureType::Int],
+            SignatureType::Int,
         );
         let sig2 = CallableSignature::new(
             "add".to_string(),
             vec![None, None],
             vec![SignatureType::Int, SignatureType::Int],
+            SignatureType::Int,
         );
 
         assert_ne!(sig1, sig2); // Different arity = different signatures

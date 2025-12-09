@@ -4,7 +4,7 @@ use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::callable::{CallableBehavior, CallableSignature},
+    behavior::callable::{CallableBehavior, CallableSignature, SignatureType},
     behavior::visibility::VisibilityBehavior,
     behavior_ext::BehaviorExt,
     language::KestrelLanguage,
@@ -111,7 +111,7 @@ impl InitializerSymbol {
     pub fn signature(&self) -> CallableSignature {
         self.get_callable()
             .map(|c| c.signature("init"))
-            .unwrap_or_else(|| CallableSignature::new("init".to_string(), vec![], vec![]))
+            .unwrap_or_else(|| CallableSignature::new("init".to_string(), vec![], vec![], SignatureType::Unit))
     }
 
     /// Get parameter labels for display/debugging
