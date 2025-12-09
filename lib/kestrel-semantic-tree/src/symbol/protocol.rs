@@ -1,16 +1,21 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_span::{Name, Span};
+use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
     behavior::visibility::VisibilityBehavior,
+    behavior::KestrelBehaviorKind,
     behavior_ext::BehaviorExt,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::type_parameter::TypeParameterSymbol,
     ty::WhereClause,
 };
+
+use super::associated_type::AssociatedTypeSymbol;
 
 /// Represents a protocol declaration in the semantic tree.
 ///
@@ -113,5 +118,75 @@ impl ProtocolSymbol {
             .generics_behavior()
             .map(|g| g.where_clause().clone())
             .unwrap_or_else(WhereClause::new)
+    }
+}
+
+/// Flattened view of a protocol's methods and associated types including inheritance.
+/// Computed during BIND phase to enable O(1) member lookups.
+#[derive(Debug, Clone)]
+pub struct FlattenedProtocolBehavior {
+    /// All methods (direct + inherited), grouped by name
+    methods: HashMap<String, Vec<FlattenedMethod>>,
+
+    /// All associated types (direct + inherited)
+    associated_types: HashMap<String, FlattenedAssociatedType>,
+
+    /// Maximum inheritance depth (for metrics/debugging)
+    inheritance_depth: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlattenedMethod {
+    /// The method symbol
+    pub symbol: Arc<dyn Symbol<KestrelLanguage>>,
+
+    /// Which protocol defined this method (for error messages)
+    pub source_protocol_name: String,
+
+    /// Span where the method was defined (for error messages)
+    pub definition_span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlattenedAssociatedType {
+    /// The associated type symbol
+    pub symbol: Arc<AssociatedTypeSymbol>,
+
+    /// Which protocol defined this (for error messages)
+    pub source_protocol_name: String,
+
+    /// Span where it was defined (for error messages)
+    pub definition_span: Span,
+}
+
+impl FlattenedProtocolBehavior {
+    pub fn new(
+        methods: HashMap<String, Vec<FlattenedMethod>>,
+        associated_types: HashMap<String, FlattenedAssociatedType>,
+        inheritance_depth: usize,
+    ) -> Self {
+        Self {
+            methods,
+            associated_types,
+            inheritance_depth,
+        }
+    }
+
+    pub fn methods(&self) -> &HashMap<String, Vec<FlattenedMethod>> {
+        &self.methods
+    }
+
+    pub fn associated_types(&self) -> &HashMap<String, FlattenedAssociatedType> {
+        &self.associated_types
+    }
+
+    pub fn inheritance_depth(&self) -> usize {
+        self.inheritance_depth
+    }
+}
+
+impl Behavior<KestrelLanguage> for FlattenedProtocolBehavior {
+    fn kind(&self) -> KestrelBehaviorKind {
+        KestrelBehaviorKind::FlattenedProtocol
     }
 }

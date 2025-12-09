@@ -56,9 +56,6 @@ impl Resolver for StructResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Extract type parameters (they'll have struct as parent later)
-        let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
-
         // Create the struct symbol (GenericsBehavior is added during BIND)
         let struct_symbol = StructSymbol::new(
             name,
@@ -75,7 +72,10 @@ impl Resolver for StructResolver {
 
         let struct_arc_dyn = struct_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
-        // Add type parameters as children of the struct (not the module)
+        // Extract type parameters with correct parent (the struct, not the module)
+        let type_parameters = extract_type_parameters(syntax, source, Some(struct_arc_dyn.clone()));
+
+        // Add type parameters as children of the struct
         // This ensures type parameters are in scope during type resolution
         add_type_params_as_children(&type_parameters, &struct_arc_dyn);
 

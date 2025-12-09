@@ -3,6 +3,7 @@
 //! This module provides `SemanticBinder` which orchestrates the bind phase
 //! of semantic analysis, resolving all references and establishing relationships.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -39,7 +40,7 @@ pub struct SemanticBinder<'a> {
     tree: &'a SemanticTree,
     db: SemanticDatabase,
     resolver_registry: ResolverRegistry,
-    cycle_detector: CycleDetector<SymbolId>,
+    cycle_detector: RefCell<CycleDetector<SymbolId>>,
 }
 
 impl<'a> SemanticBinder<'a> {
@@ -52,7 +53,7 @@ impl<'a> SemanticBinder<'a> {
             tree,
             db: SemanticDatabase::new(registry),
             resolver_registry: ResolverRegistry::new(),
-            cycle_detector: CycleDetector::new(),
+            cycle_detector: RefCell::new(CycleDetector::new()),
         }
     }
 
@@ -129,7 +130,7 @@ impl<'a> SemanticBinder<'a> {
                         db: &self.db,
                         diagnostics,
                         file_id,
-                        type_alias_cycle_detector: &mut self.cycle_detector,
+                        type_alias_cycle_detector: &self.cycle_detector,
                         sources: self.tree.sources(),
                     };
                     resolver.bind_declaration(symbol, syntax_node, &mut ctx);

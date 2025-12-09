@@ -3,6 +3,7 @@
 //! This module defines the `Resolver` trait for converting syntax nodes to symbols,
 //! and the `ResolverRegistry` which maps syntax kinds to their resolvers.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -58,8 +59,8 @@ pub struct BindingContext<'a> {
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Current file ID for error reporting
     pub file_id: usize,
-    /// Cycle detector for type alias resolution
-    pub type_alias_cycle_detector: &'a mut CycleDetector<SymbolId>,
+    /// Cycle detector for type alias resolution (uses RefCell for interior mutability)
+    pub type_alias_cycle_detector: &'a RefCell<CycleDetector<SymbolId>>,
     /// Source code by file name
     pub sources: &'a SourceMap,
 }

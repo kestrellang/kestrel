@@ -282,3 +282,34 @@ impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
             ])
     }
 }
+
+/// Error for conflicting associated types from multiple inherited protocols
+pub struct InheritedAssociatedTypeConflictError {
+    pub type_name: String,
+    pub span: Span,
+    pub protocol1: String,
+    pub protocol2: String,
+    pub definition_span1: Span,
+    pub definition_span2: Span,
+}
+
+impl IntoDiagnostic for InheritedAssociatedTypeConflictError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "conflicting associated type '{}' from inherited protocols",
+                self.type_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("conflicting associated type '{}'", self.type_name)),
+                Label::secondary(file_id, self.definition_span1.clone())
+                    .with_message(format!("first defined in '{}'", self.protocol1)),
+                Label::secondary(file_id, self.definition_span2.clone())
+                    .with_message(format!("also defined in '{}'", self.protocol2)),
+            ])
+            .with_notes(vec![
+                format!("protocols '{}' and '{}' both define associated type '{}'", self.protocol1, self.protocol2, self.type_name)
+            ])
+    }
+}

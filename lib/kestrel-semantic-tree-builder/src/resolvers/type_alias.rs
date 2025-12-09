@@ -94,9 +94,6 @@ impl Resolver for TypeAliasResolver {
                 let placeholder_type = Ty::error(full_span.clone());
                 let syntactic_typed_behavior = TypedBehavior::new(placeholder_type, full_span.clone());
 
-                // Extract type parameters
-                let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
-
                 // Create the type alias symbol
                 let type_alias_symbol = TypeAliasSymbol::new(
                     name.clone(),
@@ -116,6 +113,9 @@ impl Resolver for TypeAliasResolver {
                     .add_behavior(semantic_typed_behavior);
 
                 let type_alias_arc_dyn = type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+                // Extract type parameters with correct parent (the type alias, not the module)
+                let type_parameters = extract_type_parameters(syntax, source, Some(type_alias_arc_dyn.clone()));
 
                 // Add type parameters as children
                 add_type_params_as_children(&type_parameters, &type_alias_arc_dyn);
@@ -149,10 +149,11 @@ impl Resolver for TypeAliasResolver {
             }
             KestrelSymbolKind::TypeAlias => {
                 // Regular type alias or struct binding: resolve aliased type
-                // Enter cycle detector
-                if context.type_alias_cycle_detector.enter(symbol_id).is_err() {
-                    return;
-                }
+                // Enter cycle detector - guard automatically exits on drop
+                let _guard = match semantic_tree::cycle::CycleDetector::enter_ref(context.type_alias_cycle_detector, symbol_id) {
+                    Ok(guard) => guard,
+                    Err(_) => return,
+                };
 
                 // Determine context to check for validation
                 let alias_context = determine_context(symbol.metadata().parent().as_ref());
@@ -224,8 +225,7 @@ impl Resolver for TypeAliasResolver {
                     }
                 }
 
-                // Exit cycle detector
-                context.type_alias_cycle_detector.exit();
+                // Guard automatically calls exit() when dropped here
             }
             _ => {}
         }

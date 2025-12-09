@@ -16,6 +16,7 @@ pub enum KestrelBehaviorKind {
     Conformances,
     ConformsTo,
     Executable,
+    FlattenedProtocol,
     FunctionData,
     Generics,
     ImportData,

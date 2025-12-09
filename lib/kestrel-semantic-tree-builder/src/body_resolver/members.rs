@@ -308,6 +308,21 @@ fn collect_protocol_method_candidates(
     candidates: &mut Vec<ProtocolMethodCandidate>,
     _ctx: &BodyResolutionContext,
 ) {
+    // Use flattened behavior if available (normal case after BIND phase)
+    if let Some(flattened) = protocol.flattened_protocol_behavior() {
+        if let Some(methods) = flattened.methods().get(method_name) {
+            for method in methods {
+                candidates.push(ProtocolMethodCandidate {
+                    method_id: method.symbol.metadata().id(),
+                    protocol_name: method.source_protocol_name.clone(),
+                    definition_span: method.definition_span.clone(),
+                });
+            }
+        }
+        return;
+    }
+
+    // FALLBACK: Recursive traversal (for BUILD phase or if flattening failed)
     let proto_name = protocol.metadata().name().value.clone();
 
     // Search direct methods
@@ -629,6 +644,27 @@ fn collect_protocol_methods(
     candidates: &mut Vec<ConstrainedMethodCandidate>,
     ctx: &BodyResolutionContext,
 ) {
+    // Use flattened behavior if available (normal case after BIND phase)
+    if let Some(flattened) = protocol.flattened_protocol_behavior() {
+        if let Some(methods) = flattened.methods().get(method_name) {
+            for method in methods {
+                if let Some(callable) = get_callable_behavior(&method.symbol) {
+                    // Substitute Self with the receiver type
+                    let substituted_callable = substitute_callable_self(&callable, receiver_ty);
+
+                    candidates.push(ConstrainedMethodCandidate {
+                        method: method.symbol.clone(),
+                        callable: substituted_callable,
+                        protocol_name: method.source_protocol_name.clone(),
+                        definition_span: method.definition_span.clone(),
+                    });
+                }
+            }
+        }
+        return;
+    }
+
+    // FALLBACK: Recursive traversal (for BUILD phase or if flattening failed)
     let proto_name = protocol.metadata().name().value.clone();
 
     // Search direct methods

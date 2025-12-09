@@ -213,6 +213,26 @@ pub fn get_where_clause(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereCla
     None
 }
 
+/// Extract bounds for a specific type parameter from a where clause.
+///
+/// This is a low-level helper that collects all bounds for a given parameter
+/// from a single where clause.
+fn extract_bounds_for_param(where_clause: &WhereClause, param_id: semantic_tree::symbol::SymbolId) -> Vec<Ty> {
+    where_clause.bounds_for(param_id).into_iter().cloned().collect()
+}
+
+/// Filter and extract only resolved Protocol bounds for a type parameter.
+///
+/// The where clause stores bounds as Ty::error() placeholders during BUILD phase.
+/// This function filters to only include bounds that have been resolved to Protocol types.
+/// Unresolved bounds (Ty::error) are skipped - they'll be caught by validation.
+fn filter_resolved_bounds(where_clause: &WhereClause, param_id: semantic_tree::symbol::SymbolId) -> Vec<Ty> {
+    extract_bounds_for_param(where_clause, param_id)
+        .into_iter()
+        .filter(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
+        .collect()
+}
+
 /// Get the protocol bounds for a type parameter from the current resolution context.
 ///
 /// This looks up the where clause from the current function (and its parent struct/protocol)
@@ -232,9 +252,7 @@ pub fn get_type_parameter_bounds(
 
     while let Some(parent) = current {
         if let Some(where_clause) = get_where_clause(parent.as_ref()) {
-            for bound in where_clause.bounds_for(param_id) {
-                bounds.push(bound.clone());
-            }
+            bounds.extend(extract_bounds_for_param(&where_clause, param_id));
         }
         current = parent.metadata().parent();
     }
@@ -260,13 +278,13 @@ pub fn get_type_parameter_bounds_from_context(
     if let Some(function) = ctx.db.symbol_by_id(ctx.function_id) {
         // Check function's where clause
         if let Some(where_clause) = get_where_clause(function.as_ref()) {
-            collect_resolved_bounds(&where_clause, param_id, ctx, &mut bounds);
+            bounds.extend(filter_resolved_bounds(&where_clause, param_id));
         }
 
         // Also check parent (struct/protocol) where clause
         if let Some(parent) = function.metadata().parent() {
             if let Some(where_clause) = get_where_clause(parent.as_ref()) {
-                collect_resolved_bounds(&where_clause, param_id, ctx, &mut bounds);
+                bounds.extend(filter_resolved_bounds(&where_clause, param_id));
             }
         }
     }
@@ -274,31 +292,44 @@ pub fn get_type_parameter_bounds_from_context(
     bounds
 }
 
-/// Collect resolved bounds from a where clause for a specific type parameter.
+/// Recursively apply a transformation function to a type.
 ///
-/// The where clause stores bounds as Ty::error() placeholders. This function
-/// resolves them dynamically by re-resolving the bound names from the syntax.
+/// For composite types (Array, Tuple, Function), recursively applies the transformation
+/// to nested types. For base types, returns the type unchanged.
 ///
-/// Since we don't have access to the syntax here, we use the bound spans to
-/// look up the original path and resolve it.
-fn collect_resolved_bounds(
-    where_clause: &WhereClause,
-    param_id: semantic_tree::symbol::SymbolId,
-    _ctx: &BodyResolutionContext,
-    bounds: &mut Vec<Ty>,
-) {
-    for constraint in &where_clause.constraints {
-        if let kestrel_semantic_tree::ty::Constraint::TypeBound { param: Some(id), bounds: bound_tys, .. } = constraint {
-            if *id == param_id {
-                for bound_ty in bound_tys {
-                    // If the bound is already resolved (Protocol), use it directly
-                    if let TyKind::Protocol { .. } = bound_ty.kind() {
-                        bounds.push(bound_ty.clone());
-                    }
-                    // Unresolved bounds (Ty::error) are skipped - they'll be caught by validation
-                }
-            }
+/// The transformation function should return Some(new_type) to replace a type,
+/// or None to use default traversal.
+fn apply_type_transformation<F>(ty: &Ty, transform: &F) -> Ty
+where
+    F: Fn(&Ty) -> Option<Ty>,
+{
+    // Check if transform handles this type directly
+    if let Some(transformed) = transform(ty) {
+        return transformed;
+    }
+
+    // Otherwise, recursively traverse composite types
+    match ty.kind() {
+        TyKind::Array(element) => {
+            Ty::array(apply_type_transformation(element, transform), ty.span().clone())
         }
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| apply_type_transformation(e, transform))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        }
+        TyKind::Function { params, return_type } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| apply_type_transformation(p, transform))
+                .collect();
+            let new_return = apply_type_transformation(return_type, transform);
+            Ty::function(new_params, new_return, ty.span().clone())
+        }
+        // Base types - return as-is
+        _ => ty.clone(),
     }
 }
 
@@ -308,29 +339,13 @@ fn collect_resolved_bounds(
 /// Protocol methods use `Self` to refer to the conforming type, which
 /// needs to be replaced with the actual receiver type (e.g., `T`).
 pub fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
-    match ty.kind() {
-        TyKind::SelfType => replacement.clone(),
-        TyKind::Array(elem) => {
-            Ty::array(substitute_self(elem, replacement), ty.span().clone())
+    apply_type_transformation(ty, &|t| {
+        if matches!(t.kind(), TyKind::SelfType) {
+            Some(replacement.clone())
+        } else {
+            None
         }
-        TyKind::Tuple(elems) => {
-            let new_elems: Vec<_> = elems
-                .iter()
-                .map(|e| substitute_self(e, replacement))
-                .collect();
-            Ty::tuple(new_elems, ty.span().clone())
-        }
-        TyKind::Function { params, return_type } => {
-            let new_params: Vec<_> = params
-                .iter()
-                .map(|p| substitute_self(p, replacement))
-                .collect();
-            let new_ret = substitute_self(return_type, replacement);
-            Ty::function(new_params, new_ret, ty.span().clone())
-        }
-        // For other types, return as-is
-        _ => ty.clone(),
-    }
+    })
 }
 
 /// Format a type for error messages

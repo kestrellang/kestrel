@@ -17,6 +17,7 @@ use semantic_tree::symbol::Symbol;
 use crate::database::TypePathResolution;
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolver::{BindingContext, Resolver};
+use crate::resolvers::flatten_protocol;
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::syntax::{
     extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
@@ -58,9 +59,6 @@ impl Resolver for ProtocolResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Extract type parameters (they'll have protocol as parent later)
-        let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
-
         // Create the protocol symbol (GenericsBehavior is added during BIND)
         let protocol_symbol = ProtocolSymbol::new(
             name,
@@ -77,7 +75,10 @@ impl Resolver for ProtocolResolver {
 
         let protocol_arc_dyn = protocol_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
-        // Add type parameters as children of the protocol (not the module)
+        // Extract type parameters with correct parent (the protocol, not the module)
+        let type_parameters = extract_type_parameters(syntax, source, Some(protocol_arc_dyn.clone()));
+
+        // Add type parameters as children of the protocol
         // This ensures type parameters are in scope during type resolution
         add_type_params_as_children(&type_parameters, &protocol_arc_dyn);
 
@@ -124,6 +125,13 @@ impl Resolver for ProtocolResolver {
 
         // Add GenericsBehavior
         symbol.metadata().add_behavior(generics_behavior);
+
+        // Flatten protocol inheritance hierarchy
+        if let Ok(protocol_symbol) = symbol.clone().downcast_arc::<ProtocolSymbol>() {
+            if let Some(flattened) = flatten_protocol(&protocol_symbol, context, file_id) {
+                symbol.metadata().add_behavior(flattened);
+            }
+        }
     }
 }
 

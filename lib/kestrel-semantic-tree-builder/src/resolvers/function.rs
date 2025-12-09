@@ -73,9 +73,6 @@ impl Resolver for FunctionResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Extract type parameters (they'll have function as parent later)
-        let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
-
         // Create the function symbol (GenericsBehavior is added during BIND)
         let function_symbol = FunctionSymbol::with_generics(
             name,
@@ -90,7 +87,10 @@ impl Resolver for FunctionResolver {
         let function_arc = Arc::new(function_symbol);
         let function_arc_dyn = function_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
-        // Add type parameters as children of the function (not the module)
+        // Extract type parameters with correct parent (the function, not the module)
+        let type_parameters = extract_type_parameters(syntax, source, Some(function_arc_dyn.clone()));
+
+        // Add type parameters as children of the function
         // This ensures type parameters are in scope during type resolution
         add_type_params_as_children(&type_parameters, &function_arc_dyn);
 

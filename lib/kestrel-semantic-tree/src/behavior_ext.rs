@@ -22,6 +22,7 @@ use crate::behavior::valued::ValueBehavior;
 use crate::behavior::visibility::VisibilityBehavior;
 use crate::behavior::KestrelBehaviorKind;
 use crate::language::KestrelLanguage;
+use crate::symbol::protocol::FlattenedProtocolBehavior;
 
 /// Extension trait for accessing typed behaviors on Kestrel symbol metadata
 pub trait BehaviorExt {
@@ -42,6 +43,9 @@ pub trait BehaviorExt {
 
     /// Get the GenericsBehavior if present (cloned)
     fn generics_behavior(&self) -> Option<GenericsBehavior>;
+
+    /// Get the FlattenedProtocolBehavior if present (cloned)
+    fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior>;
 }
 
 impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
@@ -86,6 +90,13 @@ impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
             .find(|b| matches!(b.kind(), KestrelBehaviorKind::Generics))
             .and_then(|b| b.as_ref().downcast_ref::<GenericsBehavior>().cloned())
     }
+
+    fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior> {
+        self.behaviors()
+            .into_iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::FlattenedProtocol))
+            .and_then(|b| b.as_ref().downcast_ref::<FlattenedProtocolBehavior>().cloned())
+    }
 }
 
 /// Extension trait for accessing typed behaviors directly on symbols
@@ -107,6 +118,9 @@ pub trait SymbolBehaviorExt {
 
     /// Get the GenericsBehavior if present (cloned)
     fn generics_behavior(&self) -> Option<GenericsBehavior>;
+
+    /// Get the FlattenedProtocolBehavior if present (cloned)
+    fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior>;
 }
 
 impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
@@ -133,6 +147,10 @@ impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
     fn generics_behavior(&self) -> Option<GenericsBehavior> {
         self.metadata().generics_behavior()
     }
+
+    fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior> {
+        self.metadata().flattened_protocol_behavior()
+    }
 }
 
 impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
@@ -158,5 +176,9 @@ impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
 
     fn generics_behavior(&self) -> Option<GenericsBehavior> {
         self.metadata().generics_behavior()
+    }
+
+    fn flattened_protocol_behavior(&self) -> Option<FlattenedProtocolBehavior> {
+        self.metadata().flattened_protocol_behavior()
     }
 }
