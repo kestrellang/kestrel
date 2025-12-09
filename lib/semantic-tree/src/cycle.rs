@@ -13,24 +13,24 @@
 //!
 //! let mut detector = CycleDetector::new();
 //!
-//! // Enter a node - returns guard on success, Err if cycle detected
-//! let _guard_a = match detector.enter("A") {
-//!     Ok(guard) => guard,
-//!     Err(cycle) => {
-//!         // Handle cycle
-//!         return;
-//!     }
-//! };
+//! // Enter a node - returns Ok(()) on success, Err if cycle detected
+//! if let Err(cycle) = detector.enter("A") {
+//!     // Handle cycle
+//!     return;
+//! }
 //!
-//! // Nested entry - guard automatically exits in reverse order when dropped
-//! let _guard_b = detector.enter("B").unwrap();
+//! // Nested entry
+//! detector.enter("B").unwrap();
 //!
 //! // This would detect a cycle back to "A"
 //! if let Err(cycle) = detector.enter("A") {
 //!     // cycle.path() returns ["A", "B", "A"]
 //! }
 //!
-//! // Guards automatically call exit() when dropped (RAII pattern)
+//! // Must manually exit in reverse order
+//! detector.exit(); // exit "A" attempt (not entered due to cycle)
+//! detector.exit(); // exit "B"
+//! detector.exit(); // exit "A"
 //! ```
 
 use std::cell::RefCell;
@@ -153,12 +153,11 @@ impl<T: Clone + Eq + Hash + Debug> CycleDetector<T> {
 
     /// Enter a node in the traversal.
     ///
-    /// Returns `Ok(CycleGuard)` if the node hasn't been visited yet in the current path,
+    /// Returns `Ok(())` if the node hasn't been visited yet in the current path,
     /// or `Err(Cycle)` if entering this node would create a cycle.
     ///
-    /// The returned guard automatically calls `exit()` when dropped, ensuring proper
-    /// cleanup even if a panic or early return occurs.
-    pub fn enter(&mut self, node: T) -> Result<CycleGuard<'_, T>, Cycle<T>> {
+    /// You must call `exit()` manually when done processing the node.
+    pub fn enter(&mut self, node: T) -> Result<(), Cycle<T>> {
         if self.active.contains(&node) {
             // Found a cycle - build the cycle path
             let mut path = self.stack.clone();
@@ -175,17 +174,17 @@ impl<T: Clone + Eq + Hash + Debug> CycleDetector<T> {
 
         self.active.insert(node.clone());
         self.stack.push(node);
-        Ok(CycleGuard { detector: self })
+        Ok(())
     }
 
     /// Enter a node via RefCell (for interior mutability patterns).
     ///
     /// This is a convenience method for use with `RefCell<CycleDetector<T>>`.
-    /// Returns `Ok(CycleGuardRef)` if the node hasn't been visited yet,
+    /// Returns `Ok(())` if the node hasn't been visited yet,
     /// or `Err(Cycle)` if entering this node would create a cycle.
     ///
-    /// The returned guard automatically calls `exit()` when dropped.
-    pub fn enter_ref(detector_ref: &RefCell<Self>, node: T) -> Result<CycleGuardRef<'_, T>, Cycle<T>> {
+    /// You must call `exit_ref()` manually when done processing the node.
+    pub fn enter_ref(detector_ref: &RefCell<Self>, node: T) -> Result<(), Cycle<T>> {
         let mut detector = detector_ref.borrow_mut();
 
         if detector.active.contains(&node) {
@@ -204,14 +203,17 @@ impl<T: Clone + Eq + Hash + Debug> CycleDetector<T> {
 
         detector.active.insert(node.clone());
         detector.stack.push(node);
-        drop(detector); // Release the borrow
-        Ok(CycleGuardRef { detector: detector_ref })
+        Ok(())
+    }
+
+    /// Exit the current node via RefCell (for interior mutability patterns).
+    pub fn exit_ref(detector_ref: &RefCell<Self>) {
+        detector_ref.borrow_mut().exit();
     }
 
     /// Exit the current node in the traversal.
     ///
-    /// This is called automatically by `CycleGuard` when it is dropped.
-    /// You rarely need to call this manually - prefer using the guard returned by `enter()`.
+    /// Must be called after a successful `enter()` to maintain proper stack state.
     ///
     /// # Panics
     ///
@@ -265,14 +267,14 @@ mod tests {
     fn test_no_cycle() {
         let detector = RefCell::new(CycleDetector::new());
 
-        let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
-        let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
-        let _guard_c = CycleDetector::enter_ref(&detector, "C").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::enter_ref(&detector, "C").unwrap();
 
-        // Guards automatically exit in reverse order when dropped
-        drop(_guard_c);
-        drop(_guard_b);
-        drop(_guard_a);
+        // Must manually exit in reverse order
+        CycleDetector::exit_ref(&detector);
+        CycleDetector::exit_ref(&detector);
+        CycleDetector::exit_ref(&detector);
 
         assert!(detector.borrow().is_empty());
     }
@@ -281,7 +283,7 @@ mod tests {
     fn test_self_cycle() {
         let detector = RefCell::new(CycleDetector::new());
 
-        let _guard = CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
         let result = CycleDetector::enter_ref(&detector, "A");
 
         assert!(result.is_err());
@@ -296,9 +298,9 @@ mod tests {
     fn test_indirect_cycle() {
         let detector = RefCell::new(CycleDetector::new());
 
-        let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
-        let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
-        let _guard_c = CycleDetector::enter_ref(&detector, "C").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::enter_ref(&detector, "C").unwrap();
         let result = CycleDetector::enter_ref(&detector, "A");
 
         assert!(result.is_err());
@@ -314,10 +316,10 @@ mod tests {
     fn test_cycle_in_middle() {
         let detector = RefCell::new(CycleDetector::new());
 
-        let _guard_x = CycleDetector::enter_ref(&detector, "X").unwrap();
-        let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
-        let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
-        let _guard_c = CycleDetector::enter_ref(&detector, "C").unwrap();
+        CycleDetector::enter_ref(&detector, "X").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::enter_ref(&detector, "C").unwrap();
         let result = CycleDetector::enter_ref(&detector, "A");
 
         assert!(result.is_err());
@@ -331,11 +333,10 @@ mod tests {
     fn test_reuse_after_exit() {
         let detector = RefCell::new(CycleDetector::new());
 
-        {
-            let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
-            let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
-            // Guards dropped here
-        }
+        CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::exit_ref(&detector);
+        CycleDetector::exit_ref(&detector);
 
         // Should be able to enter "A" again after exiting
         assert!(CycleDetector::enter_ref(&detector, "A").is_ok());
@@ -348,15 +349,15 @@ mod tests {
 
         assert!(!detector.borrow().is_active(&"A"));
 
-        let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
         assert!(detector.borrow().is_active(&"A"));
         assert!(!detector.borrow().is_active(&"B"));
 
-        let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
         assert!(detector.borrow().is_active(&"A"));
         assert!(detector.borrow().is_active(&"B"));
 
-        drop(_guard_b);
+        CycleDetector::exit_ref(&detector);
         assert!(detector.borrow().is_active(&"A"));
         assert!(!detector.borrow().is_active(&"B"));
     }
@@ -367,16 +368,16 @@ mod tests {
 
         assert_eq!(detector.borrow().current_path(), &[] as &[&str]);
 
-        let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
         assert_eq!(detector.borrow().current_path(), &["A"]);
 
-        let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
         assert_eq!(detector.borrow().current_path(), &["A", "B"]);
 
-        let _guard_c = CycleDetector::enter_ref(&detector, "C").unwrap();
+        CycleDetector::enter_ref(&detector, "C").unwrap();
         assert_eq!(detector.borrow().current_path(), &["A", "B", "C"]);
 
-        drop(_guard_c);
+        CycleDetector::exit_ref(&detector);
         assert_eq!(detector.borrow().current_path(), &["A", "B"]);
     }
 
@@ -384,30 +385,28 @@ mod tests {
     fn test_clear() {
         let detector = RefCell::new(CycleDetector::new());
 
-        // Enter nodes, then drop guards to exit properly
-        {
-            let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
-            let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
-        }
+        // Enter nodes, then manually exit
+        CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::exit_ref(&detector);
+        CycleDetector::exit_ref(&detector);
 
-        // Verify nodes were entered (detector should be empty after guards drop)
+        // Verify nodes were entered (detector should be empty after exit)
         assert!(detector.borrow().is_empty());
 
         // Enter again
-        {
-            let _guard_a = CycleDetector::enter_ref(&detector, "A").unwrap();
-            let _guard_b = CycleDetector::enter_ref(&detector, "B").unwrap();
+        CycleDetector::enter_ref(&detector, "A").unwrap();
+        CycleDetector::enter_ref(&detector, "B").unwrap();
 
-            // Check they are active
-            assert!(detector.borrow().is_active(&"A"));
-            assert!(detector.borrow().is_active(&"B"));
+        // Check they are active
+        assert!(detector.borrow().is_active(&"A"));
+        assert!(detector.borrow().is_active(&"B"));
 
-            // Note: We can't call clear() while guards are active because when guards drop,
-            // they'll try to exit() and panic. The clear test validates that after normal usage,
-            // the detector is properly cleaned up through RAII.
-        }
+        // Exit them
+        CycleDetector::exit_ref(&detector);
+        CycleDetector::exit_ref(&detector);
 
-        // After guards drop, detector should be clean
+        // After exit, detector should be clean
         assert!(detector.borrow().is_empty());
         assert!(!detector.borrow().is_active(&"A"));
         assert!(!detector.borrow().is_active(&"B"));

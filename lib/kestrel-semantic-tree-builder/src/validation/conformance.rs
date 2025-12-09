@@ -189,12 +189,9 @@ fn check_inheritance_cycle(
     let id = protocol.metadata().id();
 
     // Try to enter - if it fails, we found a cycle
-    // Store the guard and forget it so we can manually call exit()
-    let guard = match detector.enter(id) {
-        Ok(guard) => guard,
-        Err(cycle) => return Some(cycle),
-    };
-    std::mem::forget(guard);
+    if let Err(cycle) = detector.enter(id) {
+        return Some(cycle);
+    }
 
     // Check all inherited protocols (via ConformancesBehavior)
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;

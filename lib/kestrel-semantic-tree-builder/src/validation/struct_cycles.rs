@@ -117,7 +117,7 @@ fn check_struct_for_cycles(
         let mut detector: CycleDetector<SymbolId> = CycleDetector::new();
 
         // Enter the current struct
-        if detector.enter(struct_id).is_err() {
+        if let Err(_) = detector.enter(struct_id) {
             // Shouldn't happen on first entry
             continue;
         }
@@ -166,6 +166,8 @@ fn check_struct_for_cycles(
                 );
             }
         }
+
+        detector.exit();
     }
 }
 

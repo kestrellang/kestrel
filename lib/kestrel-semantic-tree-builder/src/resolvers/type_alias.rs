@@ -149,11 +149,10 @@ impl Resolver for TypeAliasResolver {
             }
             KestrelSymbolKind::TypeAlias => {
                 // Regular type alias or struct binding: resolve aliased type
-                // Enter cycle detector - guard automatically exits on drop
-                let _guard = match semantic_tree::cycle::CycleDetector::enter_ref(context.type_alias_cycle_detector, symbol_id) {
-                    Ok(guard) => guard,
-                    Err(_) => return,
-                };
+                // Enter cycle detector
+                if let Err(_) = semantic_tree::cycle::CycleDetector::enter_ref(context.type_alias_cycle_detector, symbol_id) {
+                    return;
+                }
 
                 // Determine context to check for validation
                 let alias_context = determine_context(symbol.metadata().parent().as_ref());
@@ -225,7 +224,8 @@ impl Resolver for TypeAliasResolver {
                     }
                 }
 
-                // Guard automatically calls exit() when dropped here
+                // Exit cycle detector
+                semantic_tree::cycle::CycleDetector::exit_ref(context.type_alias_cycle_detector);
             }
             _ => {}
         }

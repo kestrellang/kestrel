@@ -87,10 +87,8 @@ fn flatten_protocol_recursive(
         return Ok(());
     }
 
-    // Enter the node - we'll manually manage exit to avoid borrow issues with the guard
-    let guard = cycle_detector.enter(protocol_id)?;
-    // Prevent the guard from auto-exiting when dropped - we'll call exit() manually
-    std::mem::forget(guard);
+    // Enter the node
+    cycle_detector.enter(protocol_id)?;
 
     // Mark as visited
     visited.insert(protocol_id);

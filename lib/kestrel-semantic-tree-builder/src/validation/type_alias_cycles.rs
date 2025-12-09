@@ -97,9 +97,12 @@ fn check_type_alias_for_cycles(
     let symbol_id = type_alias.metadata().id();
 
     // Enter this type alias into the detector
-    if visited.enter(symbol_id).is_ok() {
-        // Follow the type alias chain
-        if let Some(cycle) = follow_type_alias_chain(resolved.resolved_ty(), &mut visited) {
+    if let Err(_) = visited.enter(symbol_id) {
+        return; // Shouldn't happen on first entry
+    }
+
+    // Follow the type alias chain
+    if let Some(cycle) = follow_type_alias_chain(resolved.resolved_ty(), &mut visited) {
             // Build the error with cycle participants
             let origin = CycleParticipant {
                 name: type_alias.metadata().name().value.clone(),
@@ -128,7 +131,8 @@ fn check_type_alias_for_cycles(
                 file_id,
             );
         }
-    }
+
+    visited.exit();
 }
 
 /// Follow a type alias chain and detect cycles
