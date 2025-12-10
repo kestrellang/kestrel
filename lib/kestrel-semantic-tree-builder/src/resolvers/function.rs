@@ -201,11 +201,26 @@ fn resolve_where_clause(
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
+    // First pass: collect all TypeBound constraints
+    // These need to be processed first so that associated type resolution works
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
             if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id, &constraints) {
                 constraints.push(constraint);
             }
+        }
+    }
+
+    // Second pass: collect TypeEquality constraints
+    // Now that bounds are known, associated type resolution can work
+    // Store the nodes first, then process them
+    let equality_nodes: Vec<_> = where_clause_node.children()
+        .filter(|c| c.kind() == SyntaxKind::TypeEquality)
+        .collect();
+
+    for child in equality_nodes {
+        if let Some(constraint) = resolve_type_equality(&child, source, context_id, ctx, type_params, &constraints) {
+            constraints.push(constraint);
         }
     }
 
@@ -252,6 +267,8 @@ fn resolve_type_bound(
                                 Constraint::TypeBound { bounds, .. } => Some(bounds.iter().collect::<Vec<_>>()),
                                 // InheritedAssociatedTypeBound has param_id() = None, so won't match
                                 Constraint::InheritedAssociatedTypeBound { .. } => None,
+                                // TypeEquality doesn't contribute bounds
+                                Constraint::TypeEquality { .. } => None,
                             }
                         } else {
                             None
@@ -384,6 +401,144 @@ fn resolve_type_bound(
             None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
         }
     }
+}
+
+/// Resolve a type equality constraint: T.Item = Type or T = U
+///
+/// Returns a TypeEquality constraint with resolved types for both sides.
+/// The `already_collected` constraints are used to look up type parameter bounds
+/// for associated type resolution.
+fn resolve_type_equality(
+    syntax: &SyntaxNode,
+    source: &str,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    type_params: &[Arc<TypeParameterSymbol>],
+    already_collected: &[Constraint],
+) -> Option<Constraint> {
+    use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+
+    let span = get_node_span(syntax, source);
+    let file_id = ctx.db.symbol_by_id(context_id)
+        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
+        .unwrap_or(0);
+
+    // Extract left side from AssociatedTypeTarget
+    let left_target = find_child(syntax, SyntaxKind::AssociatedTypeTarget)?;
+    let left_path = extract_path_from_node(&left_target);
+    let left_span = get_node_span(&left_target, source);
+
+    // Resolve the left side to a type
+    let left_ty = resolve_path_in_where_clause(&left_path, &left_span, type_params, already_collected, ctx);
+
+    // Extract right side path from Ty node
+    let ty_node = find_child(syntax, SyntaxKind::Ty)?;
+
+    // Try to extract as a path first (for T or T.Item syntax)
+    let right_ty = if let Some(ty_path_node) = ty_node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::TyPath)
+    {
+        if let Some(path_node) = ty_path_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Path)
+        {
+            let right_path = crate::syntax::extract_path_segments(&path_node);
+            let right_span = get_node_span(&ty_node, source);
+
+            // Try resolving as type parameter or associated type first
+            let resolved = resolve_path_in_where_clause(&right_path, &right_span, type_params, already_collected, ctx);
+            if !resolved.is_error() {
+                resolved
+            } else {
+                // Fall back to regular type resolution (for concrete types like Int)
+                let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+                resolve_type_from_ty_node(&ty_node, &mut type_ctx)
+            }
+        } else {
+            let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+            resolve_type_from_ty_node(&ty_node, &mut type_ctx)
+        }
+    } else {
+        // Not a path type, resolve normally
+        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        resolve_type_from_ty_node(&ty_node, &mut type_ctx)
+    };
+
+    Some(Constraint::type_equality(left_ty, right_ty, span))
+}
+
+/// Resolve a path like T or T.Item in a where clause context
+/// using the already-collected constraints for associated type lookup.
+fn resolve_path_in_where_clause(
+    path: &[String],
+    span: &kestrel_span::Span,
+    type_params: &[Arc<TypeParameterSymbol>],
+    already_collected: &[Constraint],
+    _ctx: &BindingContext,
+) -> Ty {
+    if path.is_empty() {
+        return Ty::error(span.clone());
+    }
+
+    // Find the type parameter for the first segment
+    let param_name = &path[0];
+    let Some(type_param) = type_params.iter().find(|p| &p.metadata().name().value == param_name) else {
+        return Ty::error(span.clone());
+    };
+
+    if path.len() == 1 {
+        // Simple type parameter: T
+        return Ty::type_parameter(type_param.clone(), span.clone());
+    }
+
+    // Associated type path: T.Item
+    // Look up bounds from already_collected constraints
+    let param_id = type_param.metadata().id();
+    let bounds: Vec<&Ty> = already_collected
+        .iter()
+        .filter_map(|c| {
+            if c.param_id() == Some(param_id) {
+                match c {
+                    Constraint::TypeBound { bounds, .. } => Some(bounds.iter().collect::<Vec<_>>()),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+
+    // Search for associated type in the bounds
+    let assoc_type_name = &path[1];
+    for bound in bounds {
+        if let TyKind::Protocol { symbol, .. } = bound.kind() {
+            // Look for the associated type in this protocol
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == kestrel_semantic_tree::symbol::kind::KestrelSymbolKind::AssociatedType
+                    && child.metadata().name().value == *assoc_type_name
+                {
+                    // Found the associated type - create an AssociatedType Ty
+                    if let Ok(assoc_sym) = child.into_any_arc().downcast::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>() {
+                        let container = Ty::type_parameter(type_param.clone(), span.clone());
+                        return Ty::qualified_associated_type(assoc_sym, container, span.clone());
+                    }
+                }
+            }
+
+            // Also check inherited associated types (flattened behavior)
+            if let Some(flattened) = symbol.flattened_protocol_behavior() {
+                if let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name) {
+                    let container = Ty::type_parameter(type_param.clone(), span.clone());
+                    return Ty::qualified_associated_type(flattened_assoc.symbol.clone(), container, span.clone());
+                }
+            }
+        }
+    }
+
+    // Not found - return error
+    Ty::error(span.clone())
 }
 
 /// Extract path segments from an AssociatedTypeTarget or Path node

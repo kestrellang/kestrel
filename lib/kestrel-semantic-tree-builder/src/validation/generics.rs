@@ -203,6 +203,10 @@ fn validate_constraint(
                 validate_bound_type(bound, ctx);
             }
         }
+        Constraint::TypeEquality { .. } => {
+            // Type equality constraints are validated during type checking
+            // No additional validation needed here
+        }
     }
 }
 

@@ -996,6 +996,8 @@ fn validate_inherited_where_clause_constraints(
                                 }
                             }
                         }
+                        // TypeEquality constraints are handled during type checking, not here
+                        kestrel_semantic_tree::ty::Constraint::TypeEquality { .. } => {}
                     }
                 }
             }

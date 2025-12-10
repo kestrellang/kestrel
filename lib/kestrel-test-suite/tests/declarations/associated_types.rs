@@ -546,7 +546,7 @@ mod where_clause_equality {
             protocol Iterator {
                 type Item;
             }
-            func intOnly[T](iter: T) where T: Iterator, T.Item == Int { }
+            func intOnly[T](iter: T) where T: Iterator, T.Item = Int { }
         "#,
         )
         .expect(Compiles);
@@ -560,7 +560,7 @@ mod where_clause_equality {
                 type Item;
                 func next() -> Item
             }
-            func collect[T, U](iter: T) -> U where T: Iterator, T.Item == U {
+            func collect[T, U](iter: T) -> U where T: Iterator, T.Item = U {
                 iter.next()
             }
         "#,
@@ -575,7 +575,7 @@ mod where_clause_equality {
             protocol Iterator {
                 type Item;
             }
-            func zip[A, B](a: A, b: B) where A: Iterator, B: Iterator, A.Item == B.Item { }
+            func zip[A, B](a: A, b: B) where A: Iterator, B: Iterator, A.Item = B.Item { }
         "#,
         )
         .expect(Compiles);
@@ -766,7 +766,7 @@ mod nested_associated_types {
             protocol Container {
                 type Iter: Iterator;
             }
-            func intContainer[C](c: C) where C: Container, C.Iter.Item == Int { }
+            func intContainer[C](c: C) where C: Container, C.Iter.Item = Int { }
         "#,
         )
         .expect(Compiles);

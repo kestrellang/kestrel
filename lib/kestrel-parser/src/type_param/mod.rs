@@ -46,12 +46,12 @@ pub struct TypeBoundData {
 }
 
 /// Raw parsed data for a type equality constraint
-/// Syntax: T.Item == Type or T.Item == U.Item
+/// Syntax: T.Item = Type or T.Item = U.Item
 #[derive(Debug, Clone)]
 pub struct TypeEqualityData {
     /// The left side path (e.g., T.Item)
     pub left: Vec<Span>,
-    /// The equals span (==)
+    /// The equals span (=)
     pub equals_span: Span,
     /// The right side type
     pub right: crate::ty::TyVariant,
@@ -62,12 +62,12 @@ pub struct TypeEqualityData {
 pub enum WhereConstraintData {
     /// Type bound: T: Proto or T.Item: Proto
     Bound(TypeBoundData),
-    /// Type equality: T.Item == Type
+    /// Type equality: T.Item = Type
     Equality(TypeEqualityData),
 }
 
 /// Raw parsed data for a where clause
-/// Syntax: where T: Proto, U: Other, T.Item == Int
+/// Syntax: where T: Proto, U: Other, T.Item = Int
 #[derive(Debug, Clone)]
 pub struct WhereClauseData {
     /// The `where` keyword span
@@ -203,12 +203,12 @@ fn type_bound_parser() -> impl Parser<Token, TypeBoundData, Error = Simple<Token
         .map(|(path, bounds)| TypeBoundData { path, bounds })
 }
 
-/// Parser for a type equality constraint: T.Item == Type
+/// Parser for a type equality constraint: T.Item = Type
 fn type_equality_parser() -> impl Parser<Token, TypeEqualityData, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
-        .then(just(Token::EqualsEquals).map_with_span(|_, span| span))
+        .then(just(Token::Equals).map_with_span(|_, span| span))
         .then_ignore(skip_trivia())
         .then(crate::ty::ty_parser())
         .map(|((left, equals_span), right)| TypeEqualityData { left, equals_span, right })
@@ -216,13 +216,13 @@ fn type_equality_parser() -> impl Parser<Token, TypeEqualityData, Error = Simple
 
 /// Parser for a single where clause constraint (either bound or equality)
 fn where_constraint_parser() -> impl Parser<Token, WhereConstraintData, Error = Simple<Token>> + Clone {
-    // Try equality first (T.Item == Type), then bound (T: Proto)
+    // Try equality first (T.Item = Type), then bound (T: Proto)
     // This order matters because path_parser is greedy
     type_equality_parser().map(WhereConstraintData::Equality)
         .or(type_bound_parser().map(WhereConstraintData::Bound))
 }
 
-/// Parser for where clause: where T: Proto, U: Other, T.Item == Int
+/// Parser for where clause: where T: Proto, U: Other, T.Item = Int
 pub fn where_clause_parser() -> impl Parser<Token, WhereClauseData, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Where).map_with_span(|_, span| span))
@@ -308,8 +308,8 @@ fn emit_type_equality(sink: &mut EventSink, equality: TypeEqualityData) {
     emit_path(sink, &equality.left);
     sink.finish_node();
 
-    // Emit ==
-    sink.add_token(SyntaxKind::EqualsEquals, equality.equals_span);
+    // Emit =
+    sink.add_token(SyntaxKind::Equals, equality.equals_span);
 
     // Emit the right type
     crate::ty::emit_ty_variant(sink, &equality.right);

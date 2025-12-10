@@ -23,6 +23,7 @@ use crate::diagnostics::{
     TypeMismatchError,
 };
 use crate::validation::{BodyContext, Validator};
+use super::type_assignability::is_assignable_with_constraints;
 
 /// Validator for type checking
 pub struct TypeCheckValidator;
@@ -32,6 +33,12 @@ impl TypeCheckValidator {
 
     pub fn new() -> Self {
         Self
+    }
+
+    /// Check if a type is assignable to another, considering where clause constraints
+    fn is_assignable(&self, from: &Ty, to: &Ty, ctx: &BodyContext<'_>) -> bool {
+        let context_id = ctx.container.metadata().id();
+        is_assignable_with_constraints(from, to, ctx.db, context_id)
     }
 
     /// Get the return type of the containing function/initializer
@@ -157,7 +164,7 @@ impl TypeCheckValidator {
         match value {
             Some(value_expr) => {
                 // Check that return value matches expected return type
-                if !value_expr.ty.is_assignable_to(&expected_ty) {
+                if !self.is_assignable(&value_expr.ty, &expected_ty, ctx) {
                     ctx.diagnostics().get().throw(
                         TypeMismatchError {
                             span: value_expr.span.clone(),
@@ -193,7 +200,7 @@ impl TypeCheckValidator {
         value: &Expression,
         ctx: &BodyContext<'_>,
     ) {
-        if !value.ty.is_assignable_to(&target.ty) {
+        if !self.is_assignable(&value.ty, &target.ty, ctx) {
             ctx.diagnostics().get().throw(
                 TypeMismatchError {
                     span: value.span.clone(),
@@ -251,7 +258,7 @@ impl TypeCheckValidator {
         }
 
         // Check that branches have compatible types
-        if !then_ty.is_assignable_to(&else_ty) {
+        if !self.is_assignable(&then_ty, &else_ty, ctx) {
             let then_span = then_value
                 .map(|v| v.span.clone())
                 .unwrap_or_else(|| expr.span.clone());
@@ -302,7 +309,7 @@ impl TypeCheckValidator {
 
         // Check each argument against its parameter type
         for (i, (arg, param_ty)) in arguments.iter().zip(param_types.iter()).enumerate() {
-            if !arg.value.ty.is_assignable_to(param_ty) {
+            if !self.is_assignable(&arg.value.ty, param_ty, ctx) {
                 let context = if let Some(ref label) = arg.label {
                     format!("argument '{}'", label)
                 } else {
@@ -342,7 +349,7 @@ impl TypeCheckValidator {
                 continue;
             }
 
-            if !elem.ty.is_assignable_to(expected_ty) {
+            if !self.is_assignable(&elem.ty, expected_ty, ctx) {
                 ctx.diagnostics().get().throw(
                     ArrayElementTypeMismatchError {
                         array_span: expr.span.clone(),
@@ -416,7 +423,8 @@ impl Validator for TypeCheckValidator {
         if let Some(yield_expr) = executable.body().yield_expr() {
             // Unit functions can have any expression (result discarded)
             // Non-unit functions must return the correct type
-            if !expected_ty.is_unit() && !yield_expr.ty.is_assignable_to(&expected_ty) {
+            let context_id = ctx.symbol.metadata().id();
+            if !expected_ty.is_unit() && !is_assignable_with_constraints(&yield_expr.ty, &expected_ty, ctx.db, context_id) {
                 ctx.diagnostics().get().throw(
                     TypeMismatchError {
                         span: yield_expr.span.clone(),
@@ -481,7 +489,7 @@ impl Validator for TypeCheckValidator {
             }
 
             // Check that the value type matches the declared type
-            if !value.ty.is_assignable_to(declared_ty) {
+            if !self.is_assignable(&value.ty, declared_ty, ctx) {
                 ctx.diagnostics().get().throw(
                     TypeMismatchError {
                         span: value.span.clone(),

@@ -46,8 +46,21 @@ impl WhereClause {
                 Constraint::TypeBound { .. } => None,
                 // Inherited associated type bounds don't apply to type parameters
                 Constraint::InheritedAssociatedTypeBound { .. } => None,
+                // Type equality constraints don't contribute bounds
+                Constraint::TypeEquality { .. } => None,
             })
             .flatten()
+            .collect()
+    }
+
+    /// Get all equality constraints in this where clause
+    pub fn equality_constraints(&self) -> Vec<(&Ty, &Ty)> {
+        self.constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::TypeEquality { left, right, .. } => Some((left, right)),
+                _ => None,
+            })
             .collect()
     }
 }
@@ -83,8 +96,18 @@ pub enum Constraint {
         /// The bounds that the associated type must satisfy
         bounds: Vec<Ty>,
     },
-    // Future: TypeEquality for associated types
-    // TypeEquality { left: TypePath, right: Ty }
+    /// A type equality constraint: `T.Item = Int` or `T = U`
+    ///
+    /// This constrains a type or associated type to be equal to another type.
+    /// Used in where clauses: `where T.Item = Int, U = V`
+    TypeEquality {
+        /// The left side of the equality (type parameter or associated type path)
+        left: Ty,
+        /// The right side of the equality (the type it must equal)
+        right: Ty,
+        /// The span of the entire constraint
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -105,11 +128,19 @@ impl Constraint {
         Constraint::InheritedAssociatedTypeBound { path, span, bounds }
     }
 
+    /// Create a type equality constraint
+    ///
+    /// Used for where clauses like `T.Item = Int` or `T = U`
+    pub fn type_equality(left: Ty, right: Ty, span: Span) -> Self {
+        Constraint::TypeEquality { left, right, span }
+    }
+
     /// Get the type parameter this constraint applies to (if resolved)
     pub fn param_id(&self) -> Option<SymbolId> {
         match self {
             Constraint::TypeBound { param, .. } => *param,
             Constraint::InheritedAssociatedTypeBound { .. } => None,
+            Constraint::TypeEquality { .. } => None,
         }
     }
 
@@ -118,6 +149,7 @@ impl Constraint {
         match self {
             Constraint::TypeBound { param_name, .. } => param_name,
             Constraint::InheritedAssociatedTypeBound { path, .. } => path,
+            Constraint::TypeEquality { .. } => "",
         }
     }
 
@@ -126,6 +158,7 @@ impl Constraint {
         match self {
             Constraint::TypeBound { param_span, .. } => param_span,
             Constraint::InheritedAssociatedTypeBound { span, .. } => span,
+            Constraint::TypeEquality { span, .. } => span,
         }
     }
 
@@ -135,12 +168,19 @@ impl Constraint {
             Constraint::TypeBound { param, .. } => param.is_none(),
             // Inherited associated type bounds are always resolved (they've been validated)
             Constraint::InheritedAssociatedTypeBound { .. } => false,
+            // Type equality constraints are always resolved
+            Constraint::TypeEquality { .. } => false,
         }
     }
 
     /// Check if this is an inherited associated type bound
     pub fn is_inherited_assoc_type_bound(&self) -> bool {
         matches!(self, Constraint::InheritedAssociatedTypeBound { .. })
+    }
+
+    /// Check if this is a type equality constraint
+    pub fn is_type_equality(&self) -> bool {
+        matches!(self, Constraint::TypeEquality { .. })
     }
 }
 

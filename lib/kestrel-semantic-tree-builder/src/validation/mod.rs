@@ -32,6 +32,7 @@ mod protocol_method;
 mod static_context;
 mod struct_cycles;
 mod type_alias_cycles;
+pub mod type_assignability;
 mod type_check;
 mod visibility_consistency;
 

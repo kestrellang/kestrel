@@ -172,12 +172,20 @@ pub fn extract_where_clause(
 
     let mut constraints = Vec::new();
 
-    // Parse TypeBound nodes
+    // Parse TypeBound and TypeEquality nodes
     for child in where_clause_node.children() {
-        if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = parse_type_bound(&child, source, type_params) {
-                constraints.push(constraint);
+        match child.kind() {
+            SyntaxKind::TypeBound => {
+                if let Some(constraint) = parse_type_bound(&child, source, type_params) {
+                    constraints.push(constraint);
+                }
             }
+            SyntaxKind::TypeEquality => {
+                if let Some(constraint) = parse_type_equality(&child, source) {
+                    constraints.push(constraint);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -245,6 +253,43 @@ fn parse_type_bound(
             None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
         }
     }
+}
+
+/// Parse a TypeEquality syntax node.
+///
+/// TypeEquality syntax: `T.Item = Type` or `T = U`
+///
+/// The structure in the syntax tree is:
+/// ```text
+/// TypeEquality
+///   AssociatedTypeTarget
+///     Path
+///       PathElement Identifier "T"
+///       PathElement Identifier "Item"
+///   Equals "="
+///   Ty
+///     TyPath
+///       ...
+/// ```
+fn parse_type_equality(
+    syntax: &SyntaxNode,
+    source: &str,
+) -> Option<Constraint> {
+    let span = get_node_span(syntax, source);
+
+    // Extract left side (AssociatedTypeTarget contains Path)
+    let left_target = find_child(syntax, SyntaxKind::AssociatedTypeTarget)?;
+    let left_span = get_node_span(&left_target, source);
+    // Use error as placeholder - will be resolved during bind
+    let left = Ty::error(left_span);
+
+    // Extract right side (Ty node)
+    let right_node = find_child(syntax, SyntaxKind::Ty)?;
+    let right_span = get_node_span(&right_node, source);
+    // Use error as placeholder - will be resolved during bind
+    let right = Ty::error(right_span);
+
+    Some(Constraint::type_equality(left, right, span))
 }
 
 // Tests are in lib/kestrel-test-suite/tests/generics/ since they require
