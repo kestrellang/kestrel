@@ -266,10 +266,10 @@
   - [x] Protocol inheritance with associated type constraints
   - [x] Default associated types with override support
   - [x] Constraint satisfaction validation
-- [ ] Protocol Method Linking
-  - [ ] Track which protocol a method satisfies when struct conforms
-  - [ ] Resolve protocol method calls to concrete implementations
-  - [ ] ProtocolImplementationBehavior for method bindings
+- [x] Protocol Method Linking
+  - [x] Track which protocol a method satisfies when struct conforms
+  - [x] Resolve protocol method calls to concrete implementations
+  - [x] ProtocolImplementationBehavior for method bindings
 - [ ] Extensions with Conformances
   - [ ] `extend Type: Protocol { ... }` syntax
   - [ ] ExtensionSymbol and extension registry
