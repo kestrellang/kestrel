@@ -359,6 +359,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
         | ExprKind::Error => ReturnState::MayFallThrough,
     }
 }

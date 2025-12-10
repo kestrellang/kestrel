@@ -389,6 +389,7 @@ fn analyze_expression(
         ExprKind::LocalRef(_) => {}
         ExprKind::SymbolRef(_) => {}
         ExprKind::TypeRef(_) => {}
+        ExprKind::TypeParameterRef(_) => {}
         ExprKind::OverloadedRef(_) => {}
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);

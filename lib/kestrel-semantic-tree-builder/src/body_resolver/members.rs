@@ -11,7 +11,8 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
-use kestrel_semantic_tree::expr::{CallArgument, Expression, PrimitiveMethod};
+use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -31,7 +32,8 @@ use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, format_type, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_from_context, matches_signature, substitute_self,
+    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context,
+    matches_signature, substitute_self,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -66,6 +68,17 @@ pub fn resolve_member_access(
     let base_span = base.span.clone();
     let base_ty = &base.ty;
     let full_span = base_span.start..member_span.end;
+
+    // 0. Check if base is a TypeParameterRef (for static method access like T.create())
+    if let ExprKind::TypeParameterRef(symbol_id) = &base.kind {
+        return resolve_type_parameter_static_member(
+            *symbol_id,
+            member_name,
+            member_span,
+            full_span,
+            ctx,
+        );
+    }
 
     // 1. Check for primitive method (e.g., 5.toString, "hello".length)
     // Primitive methods can only be called, not used as first-class values
@@ -697,7 +710,7 @@ fn collect_protocol_methods(
 }
 
 /// Substitute Self with the receiver type in a CallableBehavior.
-fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -> CallableBehavior {
+pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -> CallableBehavior {
     use kestrel_semantic_tree::behavior::callable::CallableParameter;
 
     let new_params: Vec<CallableParameter> = callable
@@ -725,4 +738,151 @@ fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -> Ca
         ),
         None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
     }
+}
+
+/// Resolve static member access on a type parameter: `T.staticMethod`.
+///
+/// This looks up static methods from the type parameter's protocol bounds.
+fn resolve_type_parameter_static_member(
+    symbol_id: SymbolId,
+    member_name: &str,
+    _member_span: Span,
+    full_span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Get the type parameter symbol
+    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+        return Expression::error(full_span);
+    };
+
+    // Verify it's a type parameter and get Arc<TypeParameterSymbol>
+    let type_param_arc = match symbol.clone().downcast_arc::<TypeParameterSymbol>() {
+        Ok(arc) => arc,
+        Err(_) => return Expression::error(full_span),
+    };
+
+    let type_param_name = type_param_arc.metadata().name().value.clone();
+
+    // Get protocol bounds for this type parameter
+    let bounds = get_type_parameter_bounds_by_id(symbol_id, ctx);
+
+    if bounds.is_empty() {
+        // No bounds - cannot access static methods on unconstrained type parameter
+        let error = UnconstrainedTypeParameterMemberError {
+            span: full_span.clone(),
+            member_name: member_name.to_string(),
+            type_param_name,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // For Self substitution - use the type parameter type so T.create() returns T, not _
+    let type_param_ty = Ty::type_parameter(type_param_arc, full_span.clone());
+
+    // Collect static methods from all protocol bounds
+    let mut candidates: Vec<StaticMethodCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Collect static methods from this protocol
+            collect_protocol_static_methods(proto, member_name, &type_param_ty, &mut candidates);
+        }
+    }
+
+    if candidates.is_empty() {
+        // No static method found with that name in any bound
+        let error = MethodNotInBoundsError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            type_param_name,
+            bound_names,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // Check for ambiguity - same method in multiple protocols
+    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let unique_candidates: Vec<&StaticMethodCandidate> = candidates
+        .iter()
+        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
+        .collect();
+
+    if unique_candidates.len() > 1 {
+        // Multiple protocols have the same static method
+        let protocol_names: Vec<String> = unique_candidates
+            .iter()
+            .map(|c| c.protocol_name.clone())
+            .collect();
+        let definition_spans: Vec<(String, Span)> = unique_candidates
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
+            .collect();
+
+        let error = AmbiguousConstrainedMethodError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // Single method found - create method reference
+    // Note: If there are multiple overloads in the same protocol, we return all of them
+    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
+
+    // Use the type parameter type for the receiver so Self substitution works correctly
+    Expression::method_ref(
+        Expression::type_parameter_ref(symbol_id, type_param_ty.clone(), full_span.start..full_span.start),
+        method_ids,
+        member_name.to_string(),
+        full_span,
+    )
+}
+
+/// Candidate for static method resolution on type parameter
+struct StaticMethodCandidate {
+    method_id: SymbolId,
+    protocol_name: String,
+    definition_span: Span,
+}
+
+/// Collect static methods from a protocol.
+fn collect_protocol_static_methods(
+    protocol: &Arc<ProtocolSymbol>,
+    method_name: &str,
+    _self_replacement: &Ty,
+    candidates: &mut Vec<StaticMethodCandidate>,
+) {
+    let protocol_name = protocol.metadata().name().value.clone();
+
+    // Get all static methods with the given name from this protocol
+    for child in protocol.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Function
+            && child.metadata().name().value == method_name
+        {
+            if let Some(callable) = get_callable_behavior(&child) {
+                // Check if it's a static method (no receiver)
+                if callable.is_static() {
+                    candidates.push(StaticMethodCandidate {
+                        method_id: child.metadata().id(),
+                        protocol_name: protocol_name.clone(),
+                        definition_span: child.metadata().span().clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    // TODO: Also collect from inherited protocols
 }

@@ -339,3 +339,155 @@ impl IntoDiagnostic for UnsupportedGenericProtocolBoundError {
             ])
     }
 }
+
+// =============================================================================
+// Type Parameter Init/Static Method Errors
+// =============================================================================
+
+/// Error when calling init on a type parameter with no init in its bounds.
+pub struct NoInitInTypeParameterBoundsError {
+    /// Span of the init call expression
+    pub span: Span,
+    /// Name of the type parameter
+    pub type_param_name: String,
+    /// Names of the protocol bounds
+    pub bound_names: Vec<String>,
+}
+
+impl IntoDiagnostic for NoInitInTypeParameterBoundsError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let bounds_str = if self.bound_names.is_empty() {
+            "no protocol bounds".to_string()
+        } else {
+            self.bound_names.join(", ")
+        };
+
+        Diagnostic::error()
+            .with_message(format!(
+                "no initializer found for type parameter '{}'",
+                self.type_param_name
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("no matching initializer")])
+            .with_notes(vec![
+                format!("'{}' is constrained to: {}", self.type_param_name, bounds_str),
+                "none of these protocols have an initializer".to_string(),
+            ])
+    }
+}
+
+/// Error when calling init on a type parameter but no matching signature is found.
+pub struct NoMatchingTypeParameterInitError {
+    /// Span of the init call expression
+    pub span: Span,
+    /// Name of the type parameter
+    pub type_param_name: String,
+    /// The argument labels provided
+    pub provided_labels: Vec<Option<String>>,
+    /// Number of arguments provided
+    pub provided_arity: usize,
+    /// Available init overloads from protocol bounds
+    pub available_inits: Vec<super::call::OverloadDescription>,
+}
+
+impl IntoDiagnostic for NoMatchingTypeParameterInitError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let provided = super::call::format_argument_labels(&self.provided_labels);
+
+        let mut labels = vec![Label::primary(file_id, self.span.clone()).with_message(format!(
+            "no matching initializer for {} argument(s) with labels {}",
+            self.provided_arity, provided
+        ))];
+
+        // Add secondary labels for available initializers
+        for init in &self.available_inits {
+            if let (Some(span), Some(def_file_id)) = (&init.definition_span, init.definition_file_id)
+            {
+                labels.push(
+                    Label::secondary(def_file_id, span.clone())
+                        .with_message(format!("candidate: {}", init.display())),
+                );
+            }
+        }
+
+        let mut notes = vec![format!(
+            "type parameter '{}' has these available initializers:",
+            self.type_param_name
+        )];
+        for init in &self.available_inits {
+            notes.push(format!("  - {}", init.display()));
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "no matching initializer for type parameter '{}'",
+                self.type_param_name
+            ))
+            .with_labels(labels)
+            .with_notes(notes)
+    }
+}
+
+/// Error when multiple protocols have matching init with same signature.
+pub struct AmbiguousTypeParameterInitError {
+    /// Span of the init call expression
+    pub span: Span,
+    /// Name of the type parameter
+    pub type_param_name: String,
+    /// Names of the protocols that have matching init
+    pub protocol_names: Vec<String>,
+    /// Spans of the init definitions in each protocol
+    pub definition_spans: Vec<(String, Span)>,
+}
+
+impl IntoDiagnostic for AmbiguousTypeParameterInitError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let mut labels = vec![
+            Label::primary(file_id, self.span.clone()).with_message("ambiguous initializer call")
+        ];
+
+        // Add secondary labels for each definition
+        for (proto_name, span) in &self.definition_spans {
+            labels.push(
+                Label::secondary(file_id, span.clone())
+                    .with_message(format!("candidate from '{}'", proto_name)),
+            );
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "ambiguous initializer call on '{}': found in multiple protocols",
+                self.type_param_name
+            ))
+            .with_labels(labels)
+            .with_notes(vec![format!(
+                "initializer is defined in: {}",
+                self.protocol_names.join(", ")
+            )])
+    }
+}
+
+/// Error when a type parameter is used as a value without calling init or static method.
+pub struct TypeParameterCannotBeUsedAsValueError {
+    /// Span of the type parameter reference
+    pub span: Span,
+    /// Name of the type parameter
+    pub type_param_name: String,
+}
+
+impl IntoDiagnostic for TypeParameterCannotBeUsedAsValueError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type parameter '{}' cannot be used as a value",
+                self.type_param_name
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("not a value")])
+            .with_notes(vec![
+                format!("'{}' is a type parameter, not a value", self.type_param_name),
+                format!("hint: use '{}()' to call an initializer or '{}.staticMethod()' to call a static method",
+                    self.type_param_name, self.type_param_name),
+            ])
+    }
+}

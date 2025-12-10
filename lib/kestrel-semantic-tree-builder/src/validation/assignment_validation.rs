@@ -121,6 +121,7 @@ fn validate_assignment_target(
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
         | ExprKind::Assignment { .. }
         | ExprKind::If { .. }
         | ExprKind::While { .. }

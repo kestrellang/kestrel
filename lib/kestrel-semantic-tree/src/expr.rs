@@ -331,6 +331,10 @@ pub enum ExprKind {
     /// Reference to a type (struct, protocol, etc.) - used in call expressions.
     /// When calling a type name like `Point(x: 1, y: 2)`, this represents the struct.
     TypeRef(SymbolId),
+    /// Reference to a type parameter for static method/init calls.
+    /// When calling `T()` or `T.create()` where T is a type parameter.
+    /// Stores the SymbolId of the TypeParameterSymbol.
+    TypeParameterRef(SymbolId),
 
     // Member access
     /// Field access: `obj.field`
@@ -683,6 +687,21 @@ impl Expression {
     pub fn type_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
         Expression {
             kind: ExprKind::TypeRef(symbol_id),
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a type parameter reference expression.
+    /// Used when a path resolves to a type parameter for static method/init calls.
+    /// E.g., `T()` or `T.create()` where T is constrained by protocol bounds.
+    /// Type parameters used this way are not mutable lvalues.
+    /// The `ty` parameter should be the type parameter type (Ty::type_parameter(...))
+    /// so that Self substitution works correctly.
+    pub fn type_parameter_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
+        Expression {
+            kind: ExprKind::TypeParameterRef(symbol_id),
             ty,
             span,
             mutable: false,

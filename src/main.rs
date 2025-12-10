@@ -421,6 +421,7 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                     "return".to_string()
                 }
             }
+            ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
             ExprKind::Error => "<error>".to_string(),
         }
     }

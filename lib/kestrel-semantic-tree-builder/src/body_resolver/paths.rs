@@ -7,6 +7,7 @@ use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -156,6 +157,31 @@ pub fn resolve_path_expression(
             // This is a type reference (e.g., struct name) - may be used for initialization
             // The actual type resolution happens during call resolution
             Expression::type_ref(symbol_id, Ty::inferred(span.clone()), span)
+        }
+        ValuePathResolution::TypeParameter { symbol_id } => {
+            // This is a type parameter reference (e.g., T in `T()` or `T.create()`)
+            // For multi-segment paths like T.create, the db returns TypeParameter
+            // for just the first segment, and we need to handle the rest as member accesses
+
+            // Look up the type parameter symbol to create proper type
+            let type_param_ty = if let Some(symbol) = ctx.db.symbol_by_id(symbol_id) {
+                if let Ok(type_param_arc) = symbol.clone().downcast_arc::<TypeParameterSymbol>() {
+                    Ty::type_parameter(type_param_arc, first_span.clone())
+                } else {
+                    Ty::inferred(first_span.clone())
+                }
+            } else {
+                Ty::inferred(first_span.clone())
+            };
+
+            let base = Expression::type_parameter_ref(symbol_id, type_param_ty, first_span.clone());
+
+            // If there are more segments, resolve them as member accesses
+            if path_with_spans.len() > 1 {
+                resolve_member_chain(base, &path_with_spans[1..], ctx)
+            } else {
+                base
+            }
         }
     }
 }

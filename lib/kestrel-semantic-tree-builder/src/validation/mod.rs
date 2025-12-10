@@ -509,6 +509,7 @@ fn walk_expression(expr: &Expression, validators: &[&dyn Validator], ctx: &BodyC
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Return { value: None }

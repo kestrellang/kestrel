@@ -186,6 +186,13 @@ impl SemanticDatabase {
             };
         }
 
+        // Check if this is a type parameter (for static method/init calls like T.create() or T())
+        if symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
+            return ValuePathResolution::TypeParameter {
+                symbol_id: symbol.metadata().id(),
+            };
+        }
+
         ValuePathResolution::NotAValue {
             symbol_id: symbol.metadata().id(),
         }
@@ -786,7 +793,17 @@ impl Db for SemanticDatabase {
             };
         }
 
-        let mut current_symbol = first_symbols.into_iter().next().unwrap();
+        let current_symbol = first_symbols.into_iter().next().unwrap();
+
+        // Special case: if first segment is a type parameter, return it
+        // The remaining segments are member accesses that the caller should handle
+        if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
+            return ValuePathResolution::TypeParameter {
+                symbol_id: current_symbol.metadata().id(),
+            };
+        }
+
+        let mut current_symbol = current_symbol;
         let checker = VisibilityChecker::new(&context_symbol);
 
         for (index, segment) in path.iter().enumerate().skip(1) {

@@ -9,8 +9,10 @@ use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -19,10 +21,12 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::resolution::type_resolver::TypeResolver;
 
 use crate::diagnostics::{
-    FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
-    InstanceMethodOnTypeError, NoMatchingInitializerError, NoMatchingMethodError,
-    NoMatchingOverloadError, NotGenericError, OverloadDescription, TooFewTypeArgumentsError,
-    TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
+    AmbiguousTypeParameterInitError, FieldNotVisibleForInitError, ImplicitInitArityError,
+    ImplicitInitLabelError, InstanceMethodOnTypeError, NoInitInTypeParameterBoundsError,
+    NoMatchingInitializerError, NoMatchingMethodError, NoMatchingOverloadError,
+    NoMatchingTypeParameterInitError, NotGenericError, OverloadDescription,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
+    UnconstrainedTypeParameterMemberError,
 };
 use crate::resolution::visibility::is_visible_from;
 use crate::database::Db;
@@ -30,10 +34,10 @@ use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
-use super::members::resolve_member_call;
+use super::members::{resolve_member_call, substitute_callable_self};
 use super::utils::{
     create_generic_struct_type, create_struct_type, format_type, get_callable_behavior,
-    is_expression_kind, matches_signature, substitute_type,
+    get_type_parameter_bounds_by_id, is_expression_kind, matches_signature, substitute_type,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -222,6 +226,11 @@ pub fn resolve_call(
         // Type reference - struct instantiation
         ExprKind::TypeRef(symbol_id) => {
             resolve_struct_instantiation(symbol_id, arguments, arg_labels, span, ctx)
+        }
+
+        // Type parameter reference - init call on type parameter (T())
+        ExprKind::TypeParameterRef(symbol_id) => {
+            resolve_type_parameter_init_call(symbol_id, arguments, arg_labels, span, ctx)
         }
 
         // Local variable reference - could be calling a function stored in a variable
@@ -775,4 +784,194 @@ pub fn collect_overload_descriptions(candidates: &[SymbolId], db: &dyn Db) -> Ve
     }
 
     descriptions
+}
+
+/// Resolve an init call on a type parameter: `T()` where T is constrained by protocols.
+///
+/// This looks up init methods from the type parameter's protocol bounds and uses
+/// overload resolution to find a matching init.
+fn resolve_type_parameter_init_call(
+    symbol_id: SymbolId,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Get the type parameter symbol
+    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+        return Expression::error(span);
+    };
+
+    // Verify it's a type parameter and get Arc<TypeParameterSymbol>
+    let type_param_arc = match symbol.clone().downcast_arc::<TypeParameterSymbol>() {
+        Ok(arc) => arc,
+        Err(_) => return Expression::error(span),
+    };
+
+    let type_param_name = type_param_arc.metadata().name().value.clone();
+
+    // For Self substitution - use the type parameter type so T() returns T, not _
+    let type_param_ty = Ty::type_parameter(type_param_arc, span.clone());
+
+    // Get protocol bounds for this type parameter
+    let bounds = get_type_parameter_bounds_by_id(symbol_id, ctx);
+
+    if bounds.is_empty() {
+        // No bounds - cannot call init on unconstrained type parameter
+        let error = UnconstrainedTypeParameterMemberError {
+            span: span.clone(),
+            member_name: "init".to_string(),
+            type_param_name,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Collect init methods from all protocol bounds
+    let mut candidates: Vec<InitCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Collect initializers from this protocol
+            collect_protocol_initializers(proto, &type_param_ty, &mut candidates);
+        }
+    }
+
+    if candidates.is_empty() {
+        // No init methods found in any bound
+        let error = NoInitInTypeParameterBoundsError {
+            span: span.clone(),
+            type_param_name,
+            bound_names,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Find matching candidates by signature
+    let matching: Vec<&InitCandidate> = candidates
+        .iter()
+        .filter(|c| matches_signature(&c.callable, arguments.len(), arg_labels))
+        .collect();
+
+    if matching.is_empty() {
+        // No matching signature - collect available init signatures for error message
+        let available_inits: Vec<OverloadDescription> = candidates
+            .iter()
+            .map(|c| {
+                let labels: Vec<Option<String>> = c
+                    .callable
+                    .parameters()
+                    .iter()
+                    .map(|p| p.external_label().map(|s| s.to_string()))
+                    .collect();
+                let param_types: Vec<String> = c
+                    .callable
+                    .parameters()
+                    .iter()
+                    .map(|p| format_type(&p.ty))
+                    .collect();
+                OverloadDescription {
+                    name: type_param_name.clone(),
+                    labels,
+                    param_types,
+                    definition_span: Some(c.init.metadata().span().clone()),
+                    definition_file_id: Some(ctx.file_id),
+                }
+            })
+            .collect();
+
+        let error = NoMatchingTypeParameterInitError {
+            span: span.clone(),
+            type_param_name,
+            provided_labels: arg_labels.to_vec(),
+            provided_arity: arguments.len(),
+            available_inits,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Check for ambiguity - multiple protocols have matching init with same signature
+    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let unique_matching: Vec<&InitCandidate> = matching
+        .into_iter()
+        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
+        .collect();
+
+    if unique_matching.len() > 1 {
+        // Ambiguous - multiple protocols have matching init
+        let protocol_names: Vec<String> = unique_matching
+            .iter()
+            .map(|c| c.protocol_name.clone())
+            .collect();
+        let definition_spans: Vec<(String, Span)> = unique_matching
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.init.metadata().span().clone()))
+            .collect();
+
+        let error = AmbiguousTypeParameterInitError {
+            span: span.clone(),
+            type_param_name,
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Single matching init found
+    let winner = unique_matching[0];
+    let return_ty = type_param_ty; // Return type is T, not Self
+
+    // Create a call expression referencing the protocol's init
+    let init_id = winner.init.metadata().id();
+    let init_ref = Expression::symbol_ref(init_id, Ty::inferred(span.clone()), false, span.clone());
+
+    Expression::call(init_ref, arguments, return_ty, span)
+}
+
+/// Candidate for init resolution on type parameter
+struct InitCandidate {
+    /// The init symbol
+    init: Arc<dyn Symbol<KestrelLanguage>>,
+    /// The callable behavior (for signature matching)
+    callable: kestrel_semantic_tree::behavior::callable::CallableBehavior,
+    /// Protocol name (for ambiguity detection)
+    protocol_name: String,
+}
+
+/// Collect initializer methods from a protocol.
+fn collect_protocol_initializers(
+    protocol: &Arc<ProtocolSymbol>,
+    self_replacement: &Ty,
+    candidates: &mut Vec<InitCandidate>,
+) {
+    let protocol_name = protocol.metadata().name().value.clone();
+
+    // Get all initializers from this protocol
+    for child in protocol.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Initializer {
+            if let Some(callable) = get_callable_behavior(&child) {
+                // Substitute Self with the type parameter in the callable
+                let substituted = substitute_callable_self(&callable, self_replacement);
+
+                candidates.push(InitCandidate {
+                    init: child.clone(),
+                    callable: substituted,
+                    protocol_name: protocol_name.clone(),
+                });
+            }
+        }
+    }
+
+    // TODO: Also collect from inherited protocols
 }

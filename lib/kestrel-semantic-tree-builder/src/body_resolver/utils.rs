@@ -17,7 +17,7 @@ use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind, WhereClause};
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
-use semantic_tree::symbol::Symbol;
+use semantic_tree::symbol::{Symbol, SymbolId};
 
 use super::context::BodyResolutionContext;
 
@@ -271,7 +271,17 @@ pub fn get_type_parameter_bounds_from_context(
     type_param: &Arc<TypeParameterSymbol>,
     ctx: &BodyResolutionContext,
 ) -> Vec<Ty> {
-    let param_id = type_param.metadata().id();
+    get_type_parameter_bounds_by_id(type_param.metadata().id(), ctx)
+}
+
+/// Get the protocol bounds for a type parameter by its symbol ID.
+///
+/// This variant takes a SymbolId directly, useful when we don't have an
+/// Arc<TypeParameterSymbol> available.
+pub fn get_type_parameter_bounds_by_id(
+    param_id: SymbolId,
+    ctx: &BodyResolutionContext,
+) -> Vec<Ty> {
     let mut bounds = Vec::new();
 
     // Start from the current function

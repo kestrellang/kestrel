@@ -96,6 +96,11 @@ pub enum ValuePathResolution {
         /// The candidate symbol IDs (all have CallableBehavior)
         candidates: Vec<SymbolId>,
     },
+    /// Resolved to a type parameter (for static method calls like T.create())
+    TypeParameter {
+        /// The type parameter symbol ID
+        symbol_id: SymbolId,
+    },
     /// A segment in the path was not found
     NotFound {
         /// The segment that wasn't found
@@ -124,8 +129,23 @@ impl ValuePathResolution {
     pub fn is_resolved(&self) -> bool {
         matches!(
             self,
-            ValuePathResolution::Symbol { .. } | ValuePathResolution::Overloaded { .. }
+            ValuePathResolution::Symbol { .. }
+                | ValuePathResolution::Overloaded { .. }
+                | ValuePathResolution::TypeParameter { .. }
         )
+    }
+
+    /// Returns true if this resolved to a type parameter
+    pub fn is_type_parameter(&self) -> bool {
+        matches!(self, ValuePathResolution::TypeParameter { .. })
+    }
+
+    /// Returns the type parameter symbol ID if resolved to one
+    pub fn type_parameter_id(&self) -> Option<SymbolId> {
+        match self {
+            ValuePathResolution::TypeParameter { symbol_id } => Some(*symbol_id),
+            _ => None,
+        }
     }
 
     /// Returns the single resolved symbol if not overloaded

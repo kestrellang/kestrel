@@ -394,6 +394,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
         | ExprKind::Error => Divergence::None,
     }
 }
