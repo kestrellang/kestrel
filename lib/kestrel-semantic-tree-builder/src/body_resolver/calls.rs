@@ -216,7 +216,7 @@ pub fn resolve_call(
 
         // Method reference (from member access on a type)
         ExprKind::MethodRef { ref receiver, ref candidates, ref method_name } => {
-            resolve_method_call(receiver, candidates, method_name, arguments, arg_labels, span, ctx)
+            resolve_method_call(receiver, candidates, method_name, arguments, arg_labels, explicit_type_args, span, ctx)
         }
 
         // Field access - might be method call on struct
@@ -350,8 +350,8 @@ fn resolve_single_function_call(
         return Expression::error(span);
     }
 
-    // Get return type, applying explicit type arguments if provided
-    let return_ty = if let Some(ref type_args) = explicit_type_args {
+    // Get return type and substitutions, applying explicit type arguments if provided
+    let (return_ty, call_substitutions) = if let Some(ref type_args) = explicit_type_args {
         // Try to downcast to FunctionSymbol to access type parameters
         if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
             let type_params = func_sym.type_parameters();
@@ -403,15 +403,16 @@ fn resolve_single_function_call(
             }
 
             // Apply substitution to return type
-            substitute_type(callable.return_type(), &substitutions)
+            let return_ty = substitute_type(callable.return_type(), &substitutions);
+            (return_ty, substitutions)
         } else {
-            callable.return_type().clone()
+            (callable.return_type().clone(), Substitutions::new())
         }
     } else {
-        callable.return_type().clone()
+        (callable.return_type().clone(), Substitutions::new())
     };
 
-    Expression::call(callee, arguments, return_ty, span)
+    Expression::generic_call(callee, arguments, call_substitutions, return_ty, span)
 }
 
 /// Collect a single overload description from a symbol.
@@ -694,10 +695,12 @@ pub fn resolve_method_call(
     method_name: &str,
     arguments: Vec<CallArgument>,
     arg_labels: &[Option<String>],
+    explicit_type_args: Option<Vec<Ty>>,
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     use super::utils::substitute_self;
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
     // Find matching overload
     for &candidate_id in candidates {
@@ -713,7 +716,19 @@ pub fn resolve_method_call(
                     }
 
                     // Get return type, substituting Self with receiver type if needed
-                    let return_ty = substitute_self(callable.return_type(), &receiver.ty);
+                    let mut return_ty = substitute_self(callable.return_type(), &receiver.ty);
+
+                    // Build substitutions for explicit type arguments and apply to return type
+                    let mut call_substitutions = Substitutions::new();
+                    if let Some(ref type_args) = explicit_type_args {
+                        if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                            let type_params = func_sym.type_parameters();
+                            for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
+                                call_substitutions.insert(param.metadata().id(), arg_ty.clone());
+                            }
+                            return_ty = substitute_type(&return_ty, &call_substitutions);
+                        }
+                    }
 
                     // Create method ref and then call
                     let method_ref = Expression::method_ref(
@@ -723,7 +738,7 @@ pub fn resolve_method_call(
                         span.clone(),
                     );
 
-                    return Expression::call(method_ref, arguments, return_ty, span);
+                    return Expression::generic_call(method_ref, arguments, call_substitutions, return_ty, span);
                 }
             }
         }

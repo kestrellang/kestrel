@@ -282,7 +282,17 @@
   - [ ] ExtensionSymbol and extension registry
   - [ ] Methods in extension satisfy protocol requirements
   - [ ] Retroactive conformance (add conformance to types you don't own)
-- [ ] Tighter Type Parameter Assignability
+- [x] Tighter Type Parameter Assignability
+  - [x] Type parameters only assignable to themselves (same SymbolId)
+  - [x] `T` not assignable to `U`, `T` not assignable to `Int`
+  - [x] Substitutions stored in Call expression for type checking
+  - [x] Self substitution for protocol method calls
+  - [x] Generic struct field access applies substitutions
+- [ ] Where Clause Equality Constraints
+  - [ ] `TypeEquality` variant in `WhereClause::Constraint`
+  - [ ] Extract equality constraints from syntax (`where T.Item == Int`)
+  - [ ] Type checking consults where clause for equality
+  - [ ] Support `T == U`, `T.Item == Int`, `T.Item == U.Item`
 
 ## Phase 7: Type Inference
 
@@ -359,45 +369,41 @@
 
 ## Current Status
 
-**Phase**: Phase 6 (Generics & Protocols) - ~95% complete
-**Progress**: Phases 1-5 complete. Phase 6: 3 of 4 major features done, static methods on type parameters now complete.
+**Phase**: Phase 6 (Generics & Protocols) - ~98% complete
+**Progress**: Phases 1-5 complete. Phase 6: All major features done except extensions and equality constraints.
 
 **Recently Completed (Phase 6)**:
 
+- Tighter Type Parameter Assignability ✓
+  - Type parameters only assignable to themselves (same SymbolId)
+  - `T` not assignable to `U`, `T` not assignable to `Int`
+  - Substitutions stored in Call expression for type checking
+  - Self substitution for protocol method calls on type parameters
+  - Generic struct field access applies substitutions correctly
+- Protocol Method Linking ✓
+  - Track which protocol a method satisfies when struct conforms
+  - Resolve protocol method calls to concrete implementations
+  - `ProtocolImplementationBehavior` for method bindings
 - Generic Constraint Enforcement ✓
   - Method calls on type parameters via protocol bounds (`T.method()` where `T: Protocol`)
   - Self substitution in protocol method return types and parameters
   - Ambiguous method detection across multiple bounds
   - Protocol inheritance chain traversal for method lookup
   - Call-site constraint verification
-  - New diagnostics: UnconstrainedTypeParameterMemberError, MethodNotInBoundsError, AmbiguousConstrainedMethodError, ConstraintNotSatisfiedError, UnsupportedGenericProtocolBoundError
-- GenericsBehavior Refactor ✓
-  - Replaced RwLock<WhereClause> with clean GenericsBehavior pattern
-  - Type parameters and where clause now stored as behavior (like CallableBehavior)
-  - Resolvers add GenericsBehavior during BIND with fully resolved protocol bounds
-  - Fallback to children for type_parameters() during BUILD phase
 - Associated Types ✓
   - Protocol associated type declarations (`type Item` in protocols)
   - AssociatedTypeSymbol representation with constraints and defaults
   - Qualified type path resolution (`T.Item`, `C.Iter.Item`)
-  - Associated type bindings in conforming structs (`type Item = Int`)
-  - Qualified bindings for disambiguation (`type Iterator.Item = Int`)
-  - Protocol inheritance with where clause constraints (`where Iterator.Item: Comparable`)
-  - Constraint satisfaction validation for bindings
-  - New diagnostics: AmbiguousAssociatedTypeError, QualifiedBindingNotConformingError, QualifiedBindingWrongProtocolError, WhereClauseAssociatedTypeNotFoundError, AssociatedTypeConstraintNotSatisfiedError
+  - Associated type bindings and constraint satisfaction validation
 - Static Methods on Type Parameters ✓
   - Protocol initializer declarations (`init()` in protocols)
   - Calling initializers on type parameters: `T()`
-  - Calling static methods on type parameters: `T.create()`
-  - Inherited protocol method/init lookup (protocol hierarchies)
   - Type parameter validation (cannot be used as standalone values)
-  - Generic protocol bound detection and validation
-  - New diagnostics: TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError
 
 **Next Tasks**:
 
-1. Protocol method linking (Phase 6) - final remaining feature
-2. Extensions with conformances (Phase 6)
+1. Extensions with conformances (Phase 6) - `extend Type: Protocol { ... }`
+2. Where clause equality constraints (Phase 6) - `where T.Item == Int`
 
 ## Notes
 

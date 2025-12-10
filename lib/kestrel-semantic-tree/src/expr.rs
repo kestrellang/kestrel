@@ -9,7 +9,7 @@ use semantic_tree::symbol::SymbolId;
 
 use crate::stmt::{Statement, StatementKind};
 use crate::symbol::local::LocalId;
-use crate::ty::Ty;
+use crate::ty::{Substitutions, Ty};
 
 /// Compute the type of a block (statements + optional trailing value).
 ///
@@ -367,6 +367,10 @@ pub enum ExprKind {
     Call {
         callee: Box<Expression>,
         arguments: Vec<CallArgument>,
+        /// Type argument substitutions for generic calls (e.g., `identity[Int](42)`).
+        /// Maps the callee's type parameters to concrete types.
+        /// Empty for non-generic calls.
+        substitutions: Substitutions,
     },
 
     /// Primitive method call: `5.toString()`, `"hello".length()`
@@ -777,6 +781,28 @@ impl Expression {
             kind: ExprKind::Call {
                 callee: Box::new(callee),
                 arguments,
+                substitutions: Substitutions::new(),
+            },
+            ty: return_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a call expression with type argument substitutions for generic calls.
+    /// Return values are not mutable lvalues.
+    pub fn generic_call(
+        callee: Expression,
+        arguments: Vec<CallArgument>,
+        substitutions: Substitutions,
+        return_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::Call {
+                callee: Box::new(callee),
+                arguments,
+                substitutions,
             },
             ty: return_ty,
             span,

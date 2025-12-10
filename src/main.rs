@@ -353,7 +353,7 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             ExprKind::MethodRef { receiver, method_name, .. } => {
                 format!("{}.{}", format_expr_value(receiver), method_name)
             }
-            ExprKind::Call { callee, arguments } => {
+            ExprKind::Call { callee, arguments, .. } => {
                 let args: Vec<String> = arguments.iter()
                     .map(|a| {
                         if let Some(ref label) = a.label {

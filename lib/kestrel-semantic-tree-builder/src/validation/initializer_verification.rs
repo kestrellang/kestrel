@@ -358,7 +358,7 @@ fn analyze_expression(
                 state = analyze_expression(object, state, false, ctx);
             }
         }
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call { callee, arguments, .. } => {
             // Check if this is a method call on self
             if let ExprKind::MethodRef { receiver, .. } = &callee.kind {
                 if is_self_expr(receiver) {

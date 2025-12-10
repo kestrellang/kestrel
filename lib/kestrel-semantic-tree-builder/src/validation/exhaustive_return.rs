@@ -279,7 +279,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         }
 
         // Expressions that may contain nested returns
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call { callee, arguments, .. } => {
             let state = analyze_expression(callee);
             if state.definitely_returns() {
                 return state;

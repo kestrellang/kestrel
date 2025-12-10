@@ -124,15 +124,16 @@ Support calling static methods and initializers on type parameters.
 
 ### Protocol Method Linking
 
-**Status**: TODO
+**Status**: ✅ DONE
 
 Link struct methods to the protocol methods they implement.
 
-**Tasks**:
+**What was done**:
 
 - [x] Track which protocol a method satisfies when struct conforms
 - [x] Resolve protocol method calls to concrete implementations
 - [x] Error if conforming type is missing required methods
+- [x] `ProtocolImplementationBehavior` for storing method bindings
 
 **Example**:
 
@@ -186,15 +187,63 @@ extend Point: Printable {
 
 ### Tighten Type Parameter Assignability
 
+**Status**: ✅ DONE
+
+Type parameters are now only assignable to themselves (same SymbolId).
+
+**What was done**:
+
+- [x] Updated `is_assignable_to` in `lib/kestrel-semantic-tree/src/ty/mod.rs`
+- [x] Type parameters compared by SymbolId (same symbol = assignable)
+- [x] Type parameter vs any other type = not assignable
+- [x] Fixed substitutions for generic struct field access
+- [x] Fixed substitutions for Call expressions (stored in Expression)
+- [x] Fixed Self substitution for protocol method calls on type parameters
+- [x] Fixed explicit type arguments on method calls
+
+**Rules**:
+
+- `T` assignable to `T` ✓ (same SymbolId)
+- `T` NOT assignable to `U` ✗ (different type parameters)
+- `T` NOT assignable to `Int` ✗ (type param vs concrete)
+- `Int` NOT assignable to `T` ✗ (concrete vs type param)
+
+---
+
+### Where Clause Equality Constraints
+
 **Status**: TODO
 
-Currently `is_assignable_to` allows any type parameter to be assigned to any other. This is intentionally permissive for Phase 5 but should be tightened.
+The parser supports `where T.Item == Int` syntax, but the semantic layer ignores it. This prevents expressing type equality constraints.
+
+**Current State**:
+
+- Parser: ✅ `TypeEqualityData` parsed correctly
+- Syntax tree: ✅ `TypeEquality` nodes emitted
+- `WhereClause::Constraint`: ❌ No `TypeEquality` variant
+- `extract_where_clause()`: ❌ Ignores `TypeEquality` nodes
+- Type checking: ❌ Cannot enforce equality constraints
 
 **Tasks**:
 
-- [ ] Only same type parameter should be assignable to itself
-- [ ] Track type parameter identity through function calls
-- [ ] Handle generic instantiation properly
+- [ ] Add `TypeEquality { left: TypePath, right: Ty }` variant to `Constraint` enum
+- [ ] Update `extract_where_clause()` to parse `TypeEquality` syntax nodes
+- [ ] Make `is_assignable_to` consult where clause for type equality
+- [ ] Handle `where T == U` (type parameter equality)
+- [ ] Handle `where T.Item == Int` (associated type equality)
+- [ ] Handle `where T.Item == U.Item` (associated type to associated type)
+
+**Example** (should work after implementation):
+
+```kestrel
+func intOnly[T](iter: T) where T: Iterator, T.Item == Int {
+    // T.Item is known to be Int
+}
+
+func transfer[T, U](x: T) -> U where T == U {
+    return x  // Valid - T and U are constrained equal
+}
+```
 
 ---
 
@@ -203,4 +252,4 @@ Currently `is_assignable_to` allows any type parameter to be assigned to any oth
 - Type aliases are expanded for comparison
 - No implicit coercions (`Int` ≠ `Float`)
 - `Self` type is compatible with the containing struct/protocol type
-- Type parameter types currently treated as compatible with anything (to be fixed by constraint enforcement)
+- Type parameters only assignable to themselves (same SymbolId) - strict checking now enforced

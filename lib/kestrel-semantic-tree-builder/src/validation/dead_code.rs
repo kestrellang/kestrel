@@ -314,7 +314,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         }
 
         // Expressions that may contain nested code
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call { callee, arguments, .. } => {
             let div = analyze_expression(callee, errors);
             if div.diverges() {
                 return div;

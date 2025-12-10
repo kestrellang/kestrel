@@ -51,7 +51,7 @@ impl TypeCheckValidator {
     /// Get the parameters of a callable from a call expression
     fn get_callable_params(&self, expr: &Expression, ctx: &BodyContext<'_>) -> Option<Vec<Ty>> {
         match &expr.kind {
-            ExprKind::Call { callee, .. } => {
+            ExprKind::Call { callee, substitutions, .. } => {
                 // Get the callable from the callee
                 match &callee.kind {
                     ExprKind::SymbolRef(symbol_id) => {
@@ -62,14 +62,17 @@ impl TypeCheckValidator {
                                 if let Some(callable) =
                                     b.as_ref().downcast_ref::<CallableBehavior>()
                                 {
+                                    // Apply type argument substitutions to parameter types
                                     return Some(
-                                        callable.parameters().iter().map(|p| p.ty.clone()).collect(),
+                                        callable.parameters().iter().map(|p| {
+                                            p.ty.apply_substitutions(substitutions)
+                                        }).collect(),
                                     );
                                 }
                             }
                         }
                     }
-                    ExprKind::MethodRef { candidates, .. } => {
+                    ExprKind::MethodRef { candidates, receiver, .. } => {
                         // Get first matching candidate's parameters
                         for &id in candidates {
                             if let Some(symbol) = ctx.db.symbol_by_id(id) {
@@ -79,11 +82,16 @@ impl TypeCheckValidator {
                                         if let Some(callable) =
                                             b.as_ref().downcast_ref::<CallableBehavior>()
                                         {
+                                            // Apply type argument substitutions to parameter types
+                                            // Also substitute Self with receiver type for method calls
                                             return Some(
                                                 callable
                                                     .parameters()
                                                     .iter()
-                                                    .map(|p| p.ty.clone())
+                                                    .map(|p| {
+                                                        let ty = p.ty.apply_substitutions(substitutions);
+                                                        substitute_self_type(&ty, &receiver.ty)
+                                                    })
                                                     .collect(),
                                             );
                                         }
@@ -97,7 +105,8 @@ impl TypeCheckValidator {
             }
             ExprKind::ImplicitStructInit { .. } => {
                 // For implicit struct init, get field types from the struct type
-                if let Some(struct_sym) = expr.ty.as_struct() {
+                // and apply any substitutions from the instantiated type
+                if let Some((struct_sym, substitutions)) = expr.ty.as_struct_with_subs() {
                     let fields: Vec<Ty> = struct_sym
                         .metadata()
                         .children()
@@ -118,7 +127,9 @@ impl TypeCheckValidator {
                                         .downcast_ref::<kestrel_semantic_tree::behavior::typed::TypedBehavior>(
                                         )
                                     {
-                                        return Some(typed.ty().clone());
+                                        // Apply substitutions to get the concrete field type
+                                        let field_ty = typed.ty().apply_substitutions(substitutions);
+                                        return Some(field_ty);
                                     }
                                 }
                             }
@@ -482,5 +493,34 @@ impl Validator for TypeCheckValidator {
                 );
             }
         }
+    }
+}
+
+/// Substitute SelfType with a concrete type in a type expression.
+/// This is used for method calls where Self should be replaced with the receiver type.
+fn substitute_self_type(ty: &Ty, replacement: &Ty) -> Ty {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    match ty.kind() {
+        TyKind::SelfType => replacement.clone(),
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements.iter()
+                .map(|e| substitute_self_type(e, replacement))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        }
+        TyKind::Array(element) => {
+            let new_element = substitute_self_type(element, replacement);
+            Ty::array(new_element, ty.span().clone())
+        }
+        TyKind::Function { params, return_type } => {
+            let new_params: Vec<Ty> = params.iter()
+                .map(|p| substitute_self_type(p, replacement))
+                .collect();
+            let new_return = substitute_self_type(return_type, replacement);
+            Ty::function(new_params, new_return, ty.span().clone())
+        }
+        // For other types (primitives, structs, etc.), return as-is
+        _ => ty.clone(),
     }
 }

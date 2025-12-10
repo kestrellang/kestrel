@@ -175,7 +175,13 @@ pub fn resolve_member_access(
     for behavior in member.metadata().behaviors() {
         if behavior.kind() == KestrelBehaviorKind::MemberAccess {
             if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
-                return access.access(base, full_span);
+                let mut result = access.access(base.clone(), full_span);
+                // Apply substitutions from the parent's type to the member type
+                // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
+                if let Some((_, substitutions)) = base_ty.as_struct_with_subs() {
+                    result.ty = result.ty.apply_substitutions(substitutions);
+                }
+                return result;
             }
         }
     }

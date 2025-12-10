@@ -414,14 +414,16 @@ impl Ty {
                     && substitutions_equal(a_subs, b_subs)
             }
 
-            // Type parameters - for now, consider any type parameter compatible with another
-            // Full generic constraint checking is deferred to Phase 6
-            // TODO: Proper handling requires tracking type parameter scopes and substitutions
-            (TyKind::TypeParameter(_), TyKind::TypeParameter(_)) => true,
+            // Type parameters - only the same type parameter is assignable to itself
+            // Different type parameters (T vs U) are not compatible even with shared bounds
+            (TyKind::TypeParameter(a), TyKind::TypeParameter(b)) => {
+                Symbol::<KestrelLanguage>::metadata(a.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b.as_ref()).id()
+            }
 
-            // Type parameter can be assigned to anything (and vice versa) for now
-            // This allows generic code to compile before constraint checking
-            (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => true,
+            // Type parameter vs concrete type - not assignable
+            // Future: where clause equality constraints (T == U, T.Item == Int) could allow this
+            (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => false,
 
             // Self type - equal to Self or any Struct/Protocol
             // In a struct/protocol context, Self represents the containing type

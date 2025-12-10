@@ -436,7 +436,7 @@ fn walk_expression(expr: &Expression, validators: &[&dyn Validator], ctx: &BodyC
         ExprKind::MethodRef { receiver, .. } => {
             walk_expression(receiver, validators, ctx);
         }
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call { callee, arguments, .. } => {
             walk_expression(callee, validators, ctx);
             for arg in arguments {
                 walk_expression(&arg.value, validators, ctx);
