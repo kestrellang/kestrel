@@ -5,9 +5,11 @@
 
 use std::sync::Arc;
 
+use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -19,6 +21,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::diagnostics::{TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError};
 use super::context::BodyResolutionContext;
 
 /// Check if a syntax kind is an expression kind
@@ -48,6 +51,34 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
         | SyntaxKind::ExprReturn
         | SyntaxKind::ExprTupleIndex
     )
+}
+
+/// Check if an expression is a standalone type parameter reference and emit an error if so.
+///
+/// Type parameters cannot be used as values directly - they must be called as init (`T()`)
+/// or used for member access (`T.staticMethod()`). This function should be called anywhere
+/// an expression is used as a value (variable initializers, return statements, function arguments).
+///
+/// Returns the expression unchanged if valid, or an error expression if invalid.
+pub fn validate_not_standalone_type_param(
+    expr: Expression,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    if let ExprKind::TypeParameterRef(symbol_id) = &expr.kind {
+        // Get the type parameter name for the error message
+        let type_param_name = ctx.db.symbol_by_id(*symbol_id)
+            .map(|s| s.metadata().name().value.clone())
+            .unwrap_or_else(|| "T".to_string());
+
+        let error = TypeParameterCannotBeUsedAsValueError {
+            span: expr.span.clone(),
+            type_param_name,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+
+        return Expression::error(expr.span);
+    }
+    expr
 }
 
 /// Check if a callable signature matches the given arity and labels
@@ -269,7 +300,7 @@ pub fn get_type_parameter_bounds(
 /// current implementation doesn't update the stored bounds during BIND.
 pub fn get_type_parameter_bounds_from_context(
     type_param: &Arc<TypeParameterSymbol>,
-    ctx: &BodyResolutionContext,
+    ctx: &mut BodyResolutionContext,
 ) -> Vec<Ty> {
     get_type_parameter_bounds_by_id(type_param.metadata().id(), ctx)
 }
@@ -278,9 +309,12 @@ pub fn get_type_parameter_bounds_from_context(
 ///
 /// This variant takes a SymbolId directly, useful when we don't have an
 /// Arc<TypeParameterSymbol> available.
+///
+/// Also validates that bounds don't use generic protocols (like `Container[E]`),
+/// emitting an error for any such bounds found.
 pub fn get_type_parameter_bounds_by_id(
     param_id: SymbolId,
-    ctx: &BodyResolutionContext,
+    ctx: &mut BodyResolutionContext,
 ) -> Vec<Ty> {
     let mut bounds = Vec::new();
 
@@ -298,6 +332,24 @@ pub fn get_type_parameter_bounds_by_id(
             }
         }
     }
+
+    // Validate that no bounds use generic protocols (with type arguments)
+    // Filter them out and emit errors
+    bounds = bounds.into_iter().filter(|bound| {
+        if let TyKind::Protocol { symbol, substitutions } = bound.kind() {
+            if !substitutions.is_empty() {
+                // This is a generic protocol bound like Container[E]
+                let protocol_name = symbol.metadata().name().value.clone();
+                let error = UnsupportedGenericProtocolBoundError {
+                    span: bound.span().clone(),
+                    protocol_name,
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+                return false; // Filter out this bound
+            }
+        }
+        true
+    }).collect();
 
     bounds
 }
@@ -455,7 +507,6 @@ pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use crate::diagnostics::ConstraintNotSatisfiedError;
 use crate::database::Db;
-use kestrel_reporting::IntoDiagnostic;
 
 /// Verify that type arguments satisfy the constraints of a generic callable.
 ///

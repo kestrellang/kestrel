@@ -29,9 +29,10 @@ impl Resolver for InitializerResolver {
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        // Initializers must be inside a struct
+        // Initializers must be inside a struct or protocol
         let parent = parent?;
-        if parent.metadata().kind() != KestrelSymbolKind::Struct {
+        let parent_kind = parent.metadata().kind();
+        if parent_kind != KestrelSymbolKind::Struct && parent_kind != KestrelSymbolKind::Protocol {
             return None;
         }
 
@@ -287,13 +288,13 @@ fn resolve_single_parameter(
         );
         (label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0]))), bind_name)
     } else {
-        // One name: no label, it's the bind_name
-        // (In Kestrel, no label means no external label)
-        let bind_name = Spanned::new(
-            extract_identifier_from_name(&name_nodes[0])?,
-            get_name_span(&name_nodes[0]),
-        );
-        (None, bind_name)
+        // One name: it's both the label AND the bind_name
+        // In Kestrel, `init(value: Int)` means value is the external label too
+        let name = extract_identifier_from_name(&name_nodes[0])?;
+        let span = get_name_span(&name_nodes[0]);
+        let label = Some(Spanned::new(name.clone(), span.clone()));
+        let bind_name = Spanned::new(name, span);
+        (label, bind_name)
     };
 
     // Find and resolve the type from Ty node

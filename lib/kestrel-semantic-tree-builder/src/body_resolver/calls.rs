@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -38,6 +39,7 @@ use super::members::{resolve_member_call, substitute_callable_self};
 use super::utils::{
     create_generic_struct_type, create_struct_type, format_type, get_callable_behavior,
     get_type_parameter_bounds_by_id, is_expression_kind, matches_signature, substitute_type,
+    validate_not_standalone_type_param,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -172,10 +174,12 @@ fn resolve_argument(
     }
 
     // Find the value expression
+    // Also validate that it's not a standalone type parameter reference
     let value_node = node.children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))?;
 
     let value = resolve_expression(&value_node, ctx);
+    let value = validate_not_standalone_type_param(value, ctx);
 
     Some(CallArgument::unlabeled(value, span))
         .map(|mut arg| {
@@ -949,7 +953,7 @@ struct InitCandidate {
     protocol_name: String,
 }
 
-/// Collect initializer methods from a protocol.
+/// Collect initializer methods from a protocol, including inherited protocols.
 fn collect_protocol_initializers(
     protocol: &Arc<ProtocolSymbol>,
     self_replacement: &Ty,
@@ -973,5 +977,12 @@ fn collect_protocol_initializers(
         }
     }
 
-    // TODO: Also collect from inherited protocols
+    // Search inherited protocols
+    if let Some(conformances) = protocol.conformances_behavior() {
+        for parent_proto_ty in conformances.conformances() {
+            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
+                collect_protocol_initializers(parent, self_replacement, candidates);
+            }
+        }
+    }
 }

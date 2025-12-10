@@ -276,7 +276,10 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Init, data.init_span);
     emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
-    emit_function_body(sink, &data.body);
+
+    if let Some(ref block) = data.body {
+        emit_function_body(sink, block);
+    }
 
     sink.finish_node();
 }
@@ -362,6 +365,7 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
         match item {
             ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
             ProtocolBodyItem::AssociatedType(type_data) => emit_type_alias_declaration(sink, type_data),
+            ProtocolBodyItem::Initializer(init_data) => emit_initializer_declaration(sink, init_data),
         }
     }
 

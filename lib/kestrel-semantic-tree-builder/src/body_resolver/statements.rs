@@ -13,7 +13,7 @@ use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
-use super::utils::is_expression_kind;
+use super::utils::{is_expression_kind, validate_not_standalone_type_param};
 
 /// Resolve a statement syntax node
 pub fn resolve_statement(
@@ -83,9 +83,13 @@ pub fn resolve_variable_declaration(
     let ty = extract_var_type(decl_node, ctx);
 
     // Extract initializer (if any)
+    // Also validate that it's not a standalone type parameter reference
     let value = decl_node.children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
-        .map(|expr_node| resolve_expression(&expr_node, ctx));
+        .map(|expr_node| {
+            let expr = resolve_expression(&expr_node, ctx);
+            validate_not_standalone_type_param(expr, ctx)
+        });
 
     // Determine the type from annotation or initializer
     let resolved_ty = ty.unwrap_or_else(|| {

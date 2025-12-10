@@ -379,7 +379,8 @@ pub fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclaratio
 
 /// Parser for an initializer declaration
 ///
-/// Syntax: `(visibility)? init(params) { body }`
+/// Syntax: `(visibility)? init(params) { body }?`
+/// Body is optional for protocol initializer declarations.
 ///
 /// This is the single source of truth for initializer declaration parsing.
 pub fn initializer_declaration_parser_internal() -> impl Parser<Token, InitializerDeclarationData, Error = Simple<Token>> + Clone {
@@ -388,7 +389,7 @@ pub fn initializer_declaration_parser_internal() -> impl Parser<Token, Initializ
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
-        .then(code_block_parser())
+        .then(function_body_parser())
         .map(|(((((visibility, init_span), lparen), parameters), rparen), body)| {
             InitializerDeclarationData {
                 visibility,

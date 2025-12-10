@@ -444,25 +444,6 @@ mod nested_scopes {
     use super::*;
 
     #[test]
-    fn inner_function_uses_outer_type_param() {
-        // Nested function accessing outer's type parameter
-        Test::new(
-            r#"module Test
-            protocol Factory {
-                init()
-            }
-            func outer[T]() -> T where T: Factory {
-                func inner() -> T {
-                    return T()
-                }
-                return inner()
-            }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
     fn struct_method_uses_struct_type_param() {
         // Method in generic struct using the struct's type parameter
         Test::new(

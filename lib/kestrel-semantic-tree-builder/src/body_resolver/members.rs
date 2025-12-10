@@ -857,13 +857,33 @@ struct StaticMethodCandidate {
     definition_span: Span,
 }
 
-/// Collect static methods from a protocol.
+/// Collect static methods from a protocol, including inherited protocols.
 fn collect_protocol_static_methods(
     protocol: &Arc<ProtocolSymbol>,
     method_name: &str,
     _self_replacement: &Ty,
     candidates: &mut Vec<StaticMethodCandidate>,
 ) {
+    // Use flattened behavior if available (normal case after BIND phase)
+    if let Some(flattened) = protocol.flattened_protocol_behavior() {
+        if let Some(methods) = flattened.methods().get(method_name) {
+            for method in methods {
+                if let Some(callable) = get_callable_behavior(&method.symbol) {
+                    // Check if it's a static method (no receiver)
+                    if callable.is_static() {
+                        candidates.push(StaticMethodCandidate {
+                            method_id: method.symbol.metadata().id(),
+                            protocol_name: method.source_protocol_name.clone(),
+                            definition_span: method.definition_span.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // FALLBACK: Recursive traversal (for BUILD phase or if flattening failed)
     let protocol_name = protocol.metadata().name().value.clone();
 
     // Get all static methods with the given name from this protocol
@@ -884,5 +904,12 @@ fn collect_protocol_static_methods(
         }
     }
 
-    // TODO: Also collect from inherited protocols
+    // Search inherited protocols
+    if let Some(conformances) = protocol.conformances_behavior() {
+        for parent_proto_ty in conformances.conformances() {
+            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
+                collect_protocol_static_methods(parent, method_name, _self_replacement, candidates);
+            }
+        }
+    }
 }

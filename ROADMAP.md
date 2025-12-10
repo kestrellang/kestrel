@@ -57,6 +57,7 @@
   - [x] Protocol inheritance (`protocol A: B { }`)
   - [x] Protocol conformance syntax (`struct Point: Drawable { }`)
   - [x] Conformance validation (check all methods implemented)
+  - [x] Protocol initializer declarations (`init()` in protocols)
 
 ### Functions
 
@@ -251,6 +252,12 @@
   - [x] Protocol inheritance chain traversal
   - [x] Call-site constraint verification
   - [x] New diagnostics for constraint errors
+- [x] Static Methods on Type Parameters ✓
+  - [x] Call static methods on type parameters: `T.staticMethod()`
+  - [x] Call initializers on type parameters: `T()`
+  - [x] Lookup methods/inits from protocol bounds (including inherited)
+  - [x] Ambiguity detection across multiple bounds
+  - [x] Type parameter validation (cannot be used as standalone values)
 - [x] GenericsBehavior Refactor ✓
   - [x] Created GenericsBehavior for type_parameters + where_clause
   - [x] Eliminated RwLock<WhereClause> mutation pattern
@@ -275,10 +282,6 @@
   - [ ] ExtensionSymbol and extension registry
   - [ ] Methods in extension satisfy protocol requirements
   - [ ] Retroactive conformance (add conformance to types you don't own)
-
-### Deferred to Later
-
-- [ ] Static Methods on Type Parameters (`T.staticMethod()`)
 - [ ] Tighter Type Parameter Assignability
 
 ## Phase 7: Type Inference
@@ -356,8 +359,8 @@
 
 ## Current Status
 
-**Phase**: Phase 6 (Generics & Protocols) - IN PROGRESS
-**Progress**: Phases 1-5 complete. Phase 6 ~75% complete (3 of 4 major features done).
+**Phase**: Phase 6 (Generics & Protocols) - ~95% complete
+**Progress**: Phases 1-5 complete. Phase 6: 3 of 4 major features done, static methods on type parameters now complete.
 
 **Recently Completed (Phase 6)**:
 
@@ -382,10 +385,18 @@
   - Protocol inheritance with where clause constraints (`where Iterator.Item: Comparable`)
   - Constraint satisfaction validation for bindings
   - New diagnostics: AmbiguousAssociatedTypeError, QualifiedBindingNotConformingError, QualifiedBindingWrongProtocolError, WhereClauseAssociatedTypeNotFoundError, AssociatedTypeConstraintNotSatisfiedError
+- Static Methods on Type Parameters ✓
+  - Protocol initializer declarations (`init()` in protocols)
+  - Calling initializers on type parameters: `T()`
+  - Calling static methods on type parameters: `T.create()`
+  - Inherited protocol method/init lookup (protocol hierarchies)
+  - Type parameter validation (cannot be used as standalone values)
+  - Generic protocol bound detection and validation
+  - New diagnostics: TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError
 
 **Next Tasks**:
 
-1. Protocol method linking (Phase 6)
+1. Protocol method linking (Phase 6) - final remaining feature
 2. Extensions with conformances (Phase 6)
 
 ## Notes

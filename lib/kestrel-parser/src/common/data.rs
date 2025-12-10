@@ -78,7 +78,8 @@ pub struct FieldDeclarationData {
 
 /// Raw parsed data for initializer declaration internals
 ///
-/// Initializer syntax: `(visibility)? init(params) { body }`
+/// Initializer syntax: `(visibility)? init(params) { body }?`
+/// Body is optional for protocol initializer declarations.
 #[derive(Debug, Clone)]
 pub struct InitializerDeclarationData {
     pub visibility: Option<(Token, Span)>,
@@ -86,7 +87,7 @@ pub struct InitializerDeclarationData {
     pub lparen: Span,
     pub parameters: Vec<ParameterData>,
     pub rparen: Span,
-    pub body: CodeBlockData,
+    pub body: Option<CodeBlockData>,
 }
 
 /// Raw parsed data for a conformance list (: Proto1, Proto2)
@@ -181,4 +182,5 @@ pub struct AssociatedTypeBoundsData {
 pub enum ProtocolBodyItem {
     Function(FunctionDeclarationData),
     AssociatedType(TypeAliasDeclarationData),
+    Initializer(InitializerDeclarationData),
 }

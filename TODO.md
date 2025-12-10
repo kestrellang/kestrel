@@ -92,6 +92,36 @@ struct IntRange: Iterator {
 }
 ```
 
+### Static Methods on Type Parameters
+
+**Status**: ✅ DONE
+
+Support calling static methods and initializers on type parameters.
+
+**What was done**:
+
+- [x] Protocol initializer declarations (`init()` in protocol bodies)
+  - Added `Initializer` variant to `ProtocolBodyItem`
+  - Made initializer body optional (`Option<CodeBlockData>`)
+  - Updated `InitializerResolver` to allow initializers in protocols
+  - Fixed parameter label handling for single-name parameters
+- [x] Calling initializers on type parameters (`T()`)
+  - Updated `resolve_type_param_init_call()` to find initializers
+  - Full call resolution with signature matching
+- [x] Inherited protocol method/init lookup
+  - Updated `collect_protocol_static_methods()` to use flattened behavior
+  - Updated `collect_protocol_initializers()` to recursively search inherited protocols
+  - Both now properly traverse protocol hierarchies
+- [x] Type parameter validation
+  - Added `validate_not_standalone_type_param()` to prevent using `T` as a value
+  - Applied in variable initializers, return statements, and function arguments
+- [x] Generic protocol bound validation
+  - Detects `T: Container[E]` syntax (generic protocol bounds)
+  - Emits `UnsupportedGenericProtocolBoundError` during where clause resolution
+  - Prevents invalid generic bounds before semantic analysis
+
+**Test Results**: 840 tests passing, all static type parameter tests complete
+
 ### Protocol Method Linking
 
 **Status**: TODO
@@ -154,35 +184,9 @@ extend Point: Printable {
 
 ---
 
-## Future Work (Deferred)
-
-### Static Methods on Type Parameters
-
-**Status**: DEFERRED (implement after constraint enforcement)
-
-Support calling static methods on type parameters: `T.create()`.
-
-**Tasks**:
-
-- [ ] Recognize when a path refers to a type parameter used as a value
-- [ ] Handle `TypeParameter.method()` syntax in member resolution
-- [ ] Look up static methods from protocol bounds
-
-**Example**:
-
-```kestrel
-protocol Factory {
-    static func create() -> Self
-}
-
-func makeOne[T]() -> T where T: Factory {
-    return T.create()  // Static call on type parameter
-}
-```
-
 ### Tighten Type Parameter Assignability
 
-**Status**: DEFERRED (requires proper generic instantiation tracking)
+**Status**: TODO
 
 Currently `is_assignable_to` allows any type parameter to be assigned to any other. This is intentionally permissive for Phase 5 but should be tightened.
 

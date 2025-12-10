@@ -319,20 +319,44 @@ fn resolve_type_bound(
         .find(|p| p.metadata().name().value == param_name)
         .map(|p| p.metadata().id());
 
-    // Resolve each Path to a protocol type
-    let bounds: Vec<Ty> = syntax
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::Path)
-        .map(|path_node| {
-            let span = get_node_span(&path_node, source);
-            let segments = extract_path_segments(&path_node);
+    // Collect all children and check for type arguments following paths
+    let children: Vec<_> = syntax.children().collect();
+    let mut bounds: Vec<Ty> = Vec::new();
+    let mut i = 0;
+
+    while i < children.len() {
+        let child = &children[i];
+        if child.kind() == SyntaxKind::Path {
+            let path_node = child;
+            let span = get_node_span(path_node, source);
+            let segments = extract_path_segments(path_node);
 
             if segments.is_empty() {
-                return Ty::error(span);
+                bounds.push(Ty::error(span));
+                i += 1;
+                continue;
+            }
+
+            // Check if the next sibling is TypeArgumentList (e.g., Container[E])
+            // Generic protocol bounds are not yet supported
+            let has_type_args = i + 1 < children.len()
+                && children[i + 1].kind() == SyntaxKind::TypeArgumentList;
+
+            if has_type_args {
+                use crate::diagnostics::UnsupportedGenericProtocolBoundError;
+                let protocol_name = segments.join("::");
+                let error = UnsupportedGenericProtocolBoundError {
+                    span: span.clone(),
+                    protocol_name,
+                };
+                ctx.diagnostics.throw(error, file_id);
+                bounds.push(Ty::error(span));
+                i += 2; // Skip both Path and TypeArgumentList
+                continue;
             }
 
             // Resolve the path to a type
-            match ctx.db.resolve_type_path(segments, context_id) {
+            let bound = match ctx.db.resolve_type_path(segments, context_id) {
                 TypePathResolution::Resolved(resolved_ty) => {
                     if let TyKind::Protocol { .. } = resolved_ty.kind() {
                         resolved_ty
@@ -346,9 +370,11 @@ fn resolve_type_bound(
                     Ty::error(span)
                 }
                 _ => Ty::error(span),
-            }
-        })
-        .collect();
+            };
+            bounds.push(bound);
+        }
+        i += 1;
+    }
 
     if bounds.is_empty() {
         None

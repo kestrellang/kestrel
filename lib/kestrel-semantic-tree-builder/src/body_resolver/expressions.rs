@@ -21,7 +21,7 @@ use super::context::BodyResolutionContext;
 use super::operators::{resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression};
 use super::paths::resolve_path_expression;
 use super::statements::resolve_statement;
-use super::utils::{format_type, is_expression_kind};
+use super::utils::{format_type, is_expression_kind, validate_not_standalone_type_param};
 
 /// Resolve an expression syntax node into a semantic Expression
 pub fn resolve_expression(
@@ -556,9 +556,13 @@ fn resolve_return_expression(
 
     // Find the optional value expression
     // The ExprReturn contains: Return keyword, optional Expression child
+    // Also validate that it's not a standalone type parameter reference
     let value = node.children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
-        .map(|expr_node| resolve_expression(&expr_node, ctx));
+        .map(|expr_node| {
+            let expr = resolve_expression(&expr_node, ctx);
+            validate_not_standalone_type_param(expr, ctx)
+        });
 
     Expression::return_expr(value, span)
 }

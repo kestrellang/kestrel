@@ -4,6 +4,7 @@
 //! Protocol bodies can contain:
 //! - Function declarations (methods)
 //! - Associated type declarations
+//! - Initializer declarations
 
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
@@ -14,6 +15,7 @@ use crate::event::{EventSink, TreeBuilder};
 use crate::common::{
     visibility_parser_internal, token, identifier,
     function_declaration_parser_internal,
+    initializer_declaration_parser_internal,
     emit_protocol_declaration,
     ProtocolDeclarationData, ProtocolBodyItem,
 };
@@ -90,7 +92,7 @@ impl ProtocolDeclaration {
     }
 }
 
-/// Parser for protocol body items (functions or associated types)
+/// Parser for protocol body items (functions, associated types, or initializers)
 fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = Simple<Token>> + Clone {
     let function = function_declaration_parser_internal()
         .map(ProtocolBodyItem::Function);
@@ -98,11 +100,16 @@ fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = S
     let associated_type = type_alias_declaration_parser_internal()
         .map(ProtocolBodyItem::AssociatedType);
 
-    // Try function first, then associated type
-    // This works because function starts with visibility? followed by 'func'
-    // while associated type starts with visibility? followed by 'type'
+    let initializer = initializer_declaration_parser_internal()
+        .map(ProtocolBodyItem::Initializer);
+
+    // Try function first, then associated type, then initializer
+    // This works because:
+    // - function starts with visibility? followed by (static)? (mutating/consuming)? 'func'
+    // - associated type starts with visibility? followed by 'type'
+    // - initializer starts with visibility? followed by 'init'
     // Chumsky will backtrack correctly when the keyword doesn't match
-    function.or(associated_type)
+    function.or(associated_type).or(initializer)
 }
 
 /// Internal Chumsky parser for protocol declaration
