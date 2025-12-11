@@ -6,6 +6,33 @@ pub use kind::{FloatBits, IntBits, TyKind};
 pub use substitutions::Substitutions;
 pub use where_clause::{Constraint, WhereClause};
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Globally unique type variable identifier.
+/// Used to identify placeholder types during type inference.
+/// Each `_` in source code becomes a distinct type variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeVarId(u64);
+
+impl TypeVarId {
+    /// Create a new unique type variable ID
+    pub fn new() -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        TypeVarId(COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Get the raw ID value (useful for debugging)
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for TypeVarId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 use crate::language::KestrelLanguage;
 use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
@@ -77,8 +104,16 @@ impl Ty {
         error => TyKind::Error,
         /// Create a Self type reference
         self_type => TyKind::SelfType,
-        /// Create an inferred type placeholder
-        inferred => TyKind::Inferred,
+    }
+
+    /// Create a new type variable with a fresh ID
+    pub fn type_var(span: Span) -> Self {
+        Self::new(TyKind::TypeVar(TypeVarId::new()), span)
+    }
+
+    /// Create a type variable with a specific ID (for testing or explicit use)
+    pub fn type_var_with_id(id: TypeVarId, span: Span) -> Self {
+        Self::new(TyKind::TypeVar(id), span)
     }
 
     // === Parameterized constructors ===
@@ -335,8 +370,8 @@ impl Ty {
             return true;
         }
 
-        // Inferred types are compatible with anything (not yet resolved)
-        if from.is_inferred() || to.is_inferred() {
+        // Type variables are compatible with anything (not yet resolved)
+        if from.is_type_var() || to.is_type_var() {
             return true;
         }
 
@@ -476,8 +511,8 @@ impl Ty {
         is_error => TyKind::Error,
         /// Check if this is a Self type reference
         is_self_type => TyKind::SelfType,
-        /// Check if this is an inferred type
-        is_inferred => TyKind::Inferred,
+        /// Check if this is a type variable (inference placeholder)
+        is_type_var => TyKind::TypeVar(_),
         /// Check if this is a type parameter type
         is_type_parameter => TyKind::TypeParameter(_),
         /// Check if this is a protocol type (resolved)
@@ -528,6 +563,14 @@ impl Ty {
     pub fn as_function(&self) -> Option<(&Vec<Ty>, &Ty)> {
         match &self.kind {
             TyKind::Function { params, return_type } => Some((params, return_type)),
+            _ => None,
+        }
+    }
+
+    /// Get the type variable ID if this is a type variable
+    pub fn as_type_var(&self) -> Option<TypeVarId> {
+        match &self.kind {
+            TyKind::TypeVar(id) => Some(*id),
             _ => None,
         }
     }
@@ -674,10 +717,14 @@ mod tests {
     }
 
     #[test]
-    fn test_inferred_type() {
-        let ty = Ty::inferred(0..1);
-        assert!(ty.is_inferred());
+    fn test_type_var() {
+        let ty = Ty::type_var(0..1);
+        assert!(ty.is_type_var());
         assert!(!ty.is_unit());
+
+        // Each type_var call should produce a unique ID
+        let ty2 = Ty::type_var(0..1);
+        assert_ne!(ty.as_type_var(), ty2.as_type_var());
     }
 
     #[test]

@@ -302,13 +302,13 @@ fn resolve_single_parameter(
         let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
-        // No type annotation - inferred
+        // No type annotation - type variable
         let param_span: kestrel_span::Span = {
             let start = param_node.text_range().start().into();
             let end = param_node.text_range().end().into();
             start..end
         };
-        Ty::inferred(param_span)
+        Ty::type_var(param_span)
     };
 
     Some(Parameter { label, bind_name, ty })

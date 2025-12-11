@@ -138,6 +138,14 @@ impl<'a> TypeResolver<'a> {
             return Ty::error(ty_span);
         }
 
+        // Try TyInferred (_)
+        if ty_node
+            .children()
+            .any(|child| child.kind() == SyntaxKind::TyInferred)
+        {
+            return Ty::type_var(ty_span);
+        }
+
         // Fallback: error type
         Ty::error(ty_span)
     }
@@ -446,6 +454,14 @@ pub fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
             .collect();
 
         return Ty::tuple(element_types, ty_span);
+    }
+
+    // Try TyInferred (_)
+    if ty_node
+        .children()
+        .any(|child| child.kind() == SyntaxKind::TyInferred)
+    {
+        return Ty::type_var(ty_span);
     }
 
     // Fallback: error type

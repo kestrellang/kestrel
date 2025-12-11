@@ -815,8 +815,8 @@ fn resolve_single_parameter(
         let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
-        // No type annotation - inferred
-        Ty::inferred(get_node_span(param_node, source))
+        // No type annotation - type variable
+        Ty::type_var(get_node_span(param_node, source))
     };
 
     Some(Parameter { label, bind_name, ty })

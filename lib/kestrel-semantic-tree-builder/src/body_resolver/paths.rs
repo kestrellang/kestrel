@@ -156,7 +156,7 @@ pub fn resolve_path_expression(
         ValuePathResolution::NotAValue { symbol_id } => {
             // This is a type reference (e.g., struct name) - may be used for initialization
             // The actual type resolution happens during call resolution
-            Expression::type_ref(symbol_id, Ty::inferred(span.clone()), span)
+            Expression::type_ref(symbol_id, Ty::type_var(span.clone()), span)
         }
         ValuePathResolution::TypeParameter { symbol_id } => {
             // This is a type parameter reference (e.g., T in `T()` or `T.create()`)
@@ -168,10 +168,10 @@ pub fn resolve_path_expression(
                 if let Ok(type_param_arc) = symbol.clone().downcast_arc::<TypeParameterSymbol>() {
                     Ty::type_parameter(type_param_arc, first_span.clone())
                 } else {
-                    Ty::inferred(first_span.clone())
+                    Ty::type_var(first_span.clone())
                 }
             } else {
-                Ty::inferred(first_span.clone())
+                Ty::type_var(first_span.clone())
             };
 
             let base = Expression::type_parameter_ref(symbol_id, type_param_ty, first_span.clone());

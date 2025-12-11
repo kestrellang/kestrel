@@ -178,7 +178,7 @@ pub fn create_struct_type_with_type_args(
             for param in type_params {
                 let param_id = param.metadata().id();
                 if !substitutions.contains(param_id) {
-                    substitutions.insert(param_id, Ty::inferred(span.clone()));
+                    substitutions.insert(param_id, Ty::type_var(span.clone()));
                 }
             }
 
@@ -236,7 +236,7 @@ pub fn create_generic_struct_type(
             for param in type_params {
                 let param_id = param.metadata().id();
                 if !substitutions.contains(param_id) {
-                    substitutions.insert(param_id, Ty::inferred(span.clone()));
+                    substitutions.insert(param_id, Ty::type_var(span.clone()));
                 }
             }
 
@@ -518,7 +518,7 @@ pub fn format_type(ty: &Ty) -> String {
             }
         }
         TyKind::SelfType => "Self".to_string(),
-        TyKind::Inferred => "_".to_string(),
+        TyKind::TypeVar(_) => "_".to_string(),
         TyKind::Error => "<error>".to_string(),
     }
 }

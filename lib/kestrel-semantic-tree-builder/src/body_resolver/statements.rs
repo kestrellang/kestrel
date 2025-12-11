@@ -95,7 +95,7 @@ pub fn resolve_variable_declaration(
     let resolved_ty = ty.unwrap_or_else(|| {
         value.as_ref()
             .map(|e| e.ty.clone())
-            .unwrap_or_else(|| Ty::inferred(span.clone()))
+            .unwrap_or_else(|| Ty::type_var(span.clone()))
     });
 
     // Bind the local variable

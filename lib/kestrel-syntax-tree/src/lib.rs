@@ -90,6 +90,7 @@ pub enum SyntaxKind {
     TyPath,
     TyArray,             // [T] - array/list type
     TyList,
+    TyInferred,          // _ - inferred type placeholder
 
     // Path nodes (shared between types and other constructs)
     Path,
@@ -186,6 +187,7 @@ pub enum SyntaxKind {
     Dot,
     Colon,
     Bang,
+    Underscore,
 
     // Operators
     // Multi-character
@@ -285,6 +287,7 @@ impl From<Token> for SyntaxKind {
             Token::Dot => SyntaxKind::Dot,
             Token::Colon => SyntaxKind::Colon,
             Token::Bang => SyntaxKind::Bang,
+            Token::Underscore => SyntaxKind::Underscore,
             // Operators
             Token::DotDotEquals => SyntaxKind::DotDotEquals,
             Token::DotDotLess => SyntaxKind::DotDotLess,
@@ -363,6 +366,7 @@ impl Language for KestrelLanguage {
         const TY_PATH: u16 = SyntaxKind::TyPath as u16;
         const TY_ARRAY: u16 = SyntaxKind::TyArray as u16;
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
+        const TY_INFERRED: u16 = SyntaxKind::TyInferred as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
         const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
         const CODE_BLOCK: u16 = SyntaxKind::CodeBlock as u16;
@@ -443,6 +447,7 @@ impl Language for KestrelLanguage {
         const DOT: u16 = SyntaxKind::Dot as u16;
         const COLON: u16 = SyntaxKind::Colon as u16;
         const BANG: u16 = SyntaxKind::Bang as u16;
+        const UNDERSCORE: u16 = SyntaxKind::Underscore as u16;
         // Operators
         const DOT_DOT_EQUALS: u16 = SyntaxKind::DotDotEquals as u16;
         const DOT_DOT_LESS: u16 = SyntaxKind::DotDotLess as u16;
@@ -514,6 +519,7 @@ impl Language for KestrelLanguage {
             TY_PATH => SyntaxKind::TyPath,
             TY_ARRAY => SyntaxKind::TyArray,
             TY_LIST => SyntaxKind::TyList,
+            TY_INFERRED => SyntaxKind::TyInferred,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,
             CODE_BLOCK => SyntaxKind::CodeBlock,
@@ -594,6 +600,7 @@ impl Language for KestrelLanguage {
             DOT => SyntaxKind::Dot,
             COLON => SyntaxKind::Colon,
             BANG => SyntaxKind::Bang,
+            UNDERSCORE => SyntaxKind::Underscore,
             // Operators
             DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
             DOT_DOT_LESS => SyntaxKind::DotDotLess,

@@ -4,7 +4,7 @@ use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use crate::symbol::type_parameter::TypeParameterSymbol;
 use crate::ty::substitutions::Substitutions;
-use crate::ty::Ty;
+use crate::ty::{Ty, TypeVarId};
 use std::sync::Arc;
 
 /// Integer bit widths
@@ -65,9 +65,10 @@ pub enum TyKind {
     /// Represents the `Self` keyword within a type context
     SelfType,
 
-    /// Inferred type (placeholder for type inference)
-    /// Represents `_` in type annotations, to be resolved by inference
-    Inferred,
+    /// Type variable (placeholder for type inference)
+    /// Each type variable has a unique ID to distinguish between different
+    /// unknown types during inference. The `_` syntax creates a fresh type var.
+    TypeVar(TypeVarId),
 
     /// Type parameter reference (resolved)
     /// This represents a reference to a type parameter within a generic context

@@ -483,8 +483,8 @@ impl Validator for TypeCheckValidator {
             // Get the declared type from the pattern
             let declared_ty = &pattern.ty;
 
-            // Skip if no declared type or if it's inferred
-            if declared_ty.is_inferred() || declared_ty.is_error() {
+            // Skip if no declared type or if it's a type variable
+            if declared_ty.is_type_var() || declared_ty.is_error() {
                 return;
             }
 

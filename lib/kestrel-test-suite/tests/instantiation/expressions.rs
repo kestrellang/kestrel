@@ -109,8 +109,8 @@ mod expression_types {
         let overloaded = Expression::overloaded_ref(candidates, 0..5);
 
         assert!(matches!(overloaded.kind, ExprKind::OverloadedRef(ref c) if c.len() == 3));
-        // Type should be inferred (unknown until call resolution)
-        assert!(overloaded.ty.is_inferred());
+        // Type should be a type variable (unknown until call resolution)
+        assert!(overloaded.ty.is_type_var());
     }
 
     #[test]

@@ -69,6 +69,11 @@ pub enum Token {
     BlockComment,
 
     // ===== Literals =====
+    // Underscore alone is a special token (for inferred types)
+    // Higher priority ensures "_" is matched as Underscore, not Identifier
+    #[token("_", priority = 3)]
+    Underscore,
+
     // Match potential Unicode identifiers and validate with XID rules
     #[regex(r"[\p{L}_][\p{L}\p{N}_]*", is_valid_identifier)]
     Identifier,

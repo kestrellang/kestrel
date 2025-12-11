@@ -679,7 +679,7 @@ impl Expression {
     pub fn overloaded_ref(candidates: Vec<SymbolId>, span: Span) -> Self {
         Expression {
             kind: ExprKind::OverloadedRef(candidates),
-            ty: Ty::inferred(span.clone()),
+            ty: Ty::type_var(span.clone()),
             span,
             mutable: false,
         }
@@ -763,7 +763,7 @@ impl Expression {
                 candidates,
                 method_name,
             },
-            ty: Ty::inferred(span.clone()),
+            ty: Ty::type_var(span.clone()),
             span,
             mutable: false,
         }

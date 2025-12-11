@@ -63,6 +63,11 @@ impl TyExpression {
         self.kind() == SyntaxKind::TyArray
     }
 
+    /// Check if this is an inferred type (_)
+    pub fn is_inferred(&self) -> bool {
+        self.kind() == SyntaxKind::TyInferred
+    }
+
     /// Get the path segments if this is a path type
     /// Structure: Ty -> TyPath -> Path -> PathElement -> Identifier
     pub fn path_segments(&self) -> Option<Vec<String>> {
@@ -154,6 +159,11 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
         // Never type: !
         let never = never_type_parser().map(TyVariant::Never);
 
+        // Inferred type: _
+        let inferred = skip_trivia()
+            .ignore_then(just(Token::Underscore).map_with_span(|_, span| span))
+            .map(TyVariant::Inferred);
+
         // Unit type or tuple/function type
         let paren_types = {
             skip_trivia()
@@ -212,8 +222,8 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
             });
 
-        // Try never first, then paren types, then array, then path
-        never.or(paren_types).or(array).or(path)
+        // Try never first, then inferred, then paren types, then array, then path
+        never.or(inferred).or(paren_types).or(array).or(path)
     })
 }
 
@@ -248,6 +258,9 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Never(bang_span) => {
             emit_never_type(sink, bang_span.clone());
         }
+        TyVariant::Inferred(underscore_span) => {
+            emit_inferred_type(sink, underscore_span.clone());
+        }
         TyVariant::Tuple(lparen, types, rparen) => {
             emit_tuple_type(sink, lparen.clone(), types, rparen.clone());
         }
@@ -268,6 +281,7 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
 pub(crate) enum TyVariant {
     Unit(Span, Span),
     Never(Span),
+    Inferred(Span), // _ type
     Tuple(Span, Vec<TyVariant>, Span),
     Function(Span, Vec<TyVariant>, Span, Span, Box<TyVariant>),
     /// Path with optional type arguments: Foo or Foo[Int, String]
@@ -277,6 +291,15 @@ pub(crate) enum TyVariant {
     },
     /// Array type: [T]
     Array(Span, Box<TyVariant>, Span), // (lbracket, element_type, rbracket)
+}
+
+/// Emit events for an inferred type: _
+pub(crate) fn emit_inferred_type(sink: &mut EventSink, underscore_span: Span) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyInferred);
+    sink.add_token(SyntaxKind::Underscore, underscore_span);
+    sink.finish_node(); // Finish TyInferred
+    sink.finish_node(); // Finish Ty
 }
 
 /// Emit events for a unit type
@@ -449,6 +472,17 @@ mod tests {
         assert!(ty.is_never());
         assert!(!ty.is_tuple());
         assert!(!ty.is_function());
+    }
+
+    #[test]
+    fn test_inferred_type() {
+        let source = "_";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_inferred());
+        assert!(!ty.is_unit());
+        assert!(!ty.is_never());
+        assert!(!ty.is_path());
     }
 
     #[test]

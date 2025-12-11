@@ -206,10 +206,10 @@ fn resolve_array_expression(
         .map(|c| resolve_expression(&c, ctx))
         .collect();
 
-    // Infer element type from first element, or use inferred if empty
+    // Infer element type from first element, or use type_var if empty
     let element_ty = elements.first()
         .map(|e| e.ty.clone())
-        .unwrap_or_else(|| Ty::inferred(span.clone()));
+        .unwrap_or_else(|| Ty::type_var(span.clone()));
 
     Expression::array(elements, element_ty, span)
 }

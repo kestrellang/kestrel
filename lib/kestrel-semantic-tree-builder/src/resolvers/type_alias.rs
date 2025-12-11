@@ -575,7 +575,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::Function { .. } => "function".to_string(),
         TyKind::Error => "error".to_string(),
         TyKind::SelfType => "Self".to_string(),
-        TyKind::Inferred => "_".to_string(),
+        TyKind::TypeVar(_) => "_".to_string(),
         TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
         TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
