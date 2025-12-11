@@ -26,6 +26,7 @@ members = [
     "lib/kestrel-syntax-tree",
     "lib/semantic-tree",
     "lib/kestrel-semantic-tree",
+    "lib/kestrel-semantic-model",
     "lib/kestrel-semantic-tree-builder",
     "lib/kestrel-reporting",
     "lib/kestrel-compiler",

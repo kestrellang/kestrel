@@ -324,6 +324,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-semantic-model"
+version = "0.6.0"
+dependencies = [
+ "kestrel-semantic-tree",
+ "parking_lot",
+ "semantic-tree",
+]
+
+[[package]]
 name = "kestrel-semantic-tree"
 version = "0.6.0"
 dependencies = [
@@ -343,6 +352,7 @@ dependencies = [
  "kestrel-parser",
  "kestrel-prelude",
  "kestrel-reporting",
+ "kestrel-semantic-model",
  "kestrel-semantic-tree",
  "kestrel-span",
  "kestrel-syntax-tree",

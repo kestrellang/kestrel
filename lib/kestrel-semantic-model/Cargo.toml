@@ -1,0 +1,9 @@
+[package]
+name = "kestrel-semantic-model"
+version = "0.6.0"
+edition = "2024"
+
+[dependencies]
+kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+semantic-tree = { path = "../semantic-tree" }
+parking_lot = "0.12"

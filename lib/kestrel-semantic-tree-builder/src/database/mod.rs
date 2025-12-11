@@ -6,17 +6,14 @@
 //! - `SemanticDatabase`: Query interface with caching
 //! - `Db` trait: Query interface for semantic analysis
 
-mod extension_registry;
-mod registry;
 pub mod queries;
 mod semantic_db;
 
-pub use extension_registry::ExtensionRegistry;
-pub use registry::SymbolRegistry;
-pub use queries::{
-    Db, Import, ImportItem, Scope, SymbolResolution, TypePathResolution, ValuePathResolution,
+// Re-export types from kestrel-semantic-model
+pub use kestrel_semantic_model::{
+    ExtensionRegistry, Import, ImportItem, Scope, SymbolRegistry, SymbolResolution,
+    TypePathResolution, ValuePathResolution, get_import_data,
 };
-pub use semantic_db::SemanticDatabase;
 
-// Re-export the helper function
-pub use queries::get_import_data;
+pub use queries::Db;
+pub use semantic_db::SemanticDatabase;

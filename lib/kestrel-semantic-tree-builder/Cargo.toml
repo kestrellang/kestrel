@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-semantic-model = { path = "../kestrel-semantic-model" }
 kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }

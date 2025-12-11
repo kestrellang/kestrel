@@ -23,12 +23,12 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::resolution::VisibilityChecker;
 
-use super::queries::{
-    get_import_data, Db, Import, ImportItem, Scope, SymbolResolution, TypePathResolution,
-    ValuePathResolution,
+use kestrel_semantic_model::{
+    get_import_data, ExtensionRegistry, Import, ImportItem, Scope, SymbolRegistry,
+    SymbolResolution, TypePathResolution, ValuePathResolution,
 };
-use super::extension_registry::ExtensionRegistry;
-use super::registry::SymbolRegistry;
+
+use super::queries::Db;
 
 /// Resolve a primitive type name to its semantic type
 fn resolve_primitive_type(name: &str, span: kestrel_span::Span) -> Option<Ty> {
