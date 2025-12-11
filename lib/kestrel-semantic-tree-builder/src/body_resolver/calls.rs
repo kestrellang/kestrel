@@ -39,7 +39,8 @@ use super::members::{resolve_member_call, substitute_callable_self};
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args, format_type,
     get_callable_behavior, get_type_parameter_bounds_by_id, is_expression_kind, matches_signature,
-    substitute_type, validate_not_standalone_type_param,
+    substitute_type, validate_not_standalone_type_param, verify_type_argument_constraints,
+    infer_type_arguments,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -435,6 +436,7 @@ fn resolve_single_function_call(
     }
 
     // Get return type and substitutions, applying explicit type arguments if provided
+    // or inferring them from argument types
     let (return_ty, call_substitutions) = if let Some(ref type_args) = explicit_type_args {
         // Try to downcast to FunctionSymbol to access type parameters
         if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
@@ -486,6 +488,18 @@ fn resolve_single_function_call(
                 substitutions.insert(param.metadata().id(), arg_ty.clone());
             }
 
+            // Verify constraints are satisfied
+            let where_clause = func_sym.where_clause();
+            verify_type_argument_constraints(
+                &type_params,
+                type_args,
+                &where_clause,
+                span.clone(),
+                ctx.db,
+                ctx.file_id,
+                ctx.diagnostics,
+            );
+
             // Apply substitution to return type
             let return_ty = substitute_type(callable.return_type(), &substitutions);
             (return_ty, substitutions)
@@ -493,7 +507,49 @@ fn resolve_single_function_call(
             (callable.return_type().clone(), Substitutions::new())
         }
     } else {
-        (callable.return_type().clone(), Substitutions::new())
+        // No explicit type arguments - try to infer from argument types
+        if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+            let type_params = func_sym.type_parameters();
+
+            if !type_params.is_empty() {
+                // Collect argument types
+                let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+
+                // Infer type arguments from argument types
+                let substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
+
+                // Build inferred type args in order for constraint verification
+                let inferred_args: Vec<Ty> = type_params
+                    .iter()
+                    .map(|tp| {
+                        substitutions
+                            .get(tp.metadata().id())
+                            .cloned()
+                            .unwrap_or_else(|| Ty::inferred(span.clone()))
+                    })
+                    .collect();
+
+                // Verify constraints are satisfied
+                let where_clause = func_sym.where_clause();
+                verify_type_argument_constraints(
+                    &type_params,
+                    &inferred_args,
+                    &where_clause,
+                    span.clone(),
+                    ctx.db,
+                    ctx.file_id,
+                    ctx.diagnostics,
+                );
+
+                // Apply substitution to return type
+                let return_ty = substitute_type(callable.return_type(), &substitutions);
+                (return_ty, substitutions)
+            } else {
+                (callable.return_type().clone(), Substitutions::new())
+            }
+        } else {
+            (callable.return_type().clone(), Substitutions::new())
+        }
     };
 
     Expression::generic_call(callee, arguments, call_substitutions, return_ty, span)

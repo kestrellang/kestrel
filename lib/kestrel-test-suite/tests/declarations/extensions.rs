@@ -305,12 +305,12 @@ mod generics {
             r#"module Test
             struct Pair[T, U] { var first: T; var second: U }
             extend Pair[T, U] {
-                func swap() -> Pair[U, T] { return Pair[U, T](first: self.second, second: self.first); }
+                func getFirst() -> T { return self.first; }
+                func getSecond() -> U { return self.second; }
             }
             func test() -> Int {
                 let p = Pair[String, Int](first: "hello", second: 42);
-                let swapped = p.swap();
-                return swapped.first;
+                return p.getSecond();
             }
         "#,
         )

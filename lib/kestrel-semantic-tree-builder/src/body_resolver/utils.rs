@@ -581,6 +581,108 @@ pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
 }
 
 // =============================================================================
+// Type Argument Inference
+// =============================================================================
+
+/// Infer type arguments for a generic function call from the argument types.
+///
+/// This function matches argument types against parameter types and infers
+/// substitutions for type parameters. For example:
+/// - `func getHash[T](value: T) -> Int` called with `Point` argument
+/// - Infers `T = Point`
+///
+/// # Arguments
+/// * `type_params` - The type parameters of the generic function
+/// * `callable` - The CallableBehavior containing parameter types
+/// * `arg_types` - The types of the arguments being passed
+///
+/// # Returns
+/// Substitutions mapping type parameter IDs to inferred concrete types
+pub fn infer_type_arguments(
+    type_params: &[Arc<TypeParameterSymbol>],
+    callable: &CallableBehavior,
+    arg_types: &[Ty],
+) -> Substitutions {
+    let mut substitutions = Substitutions::new();
+
+    let params = callable.parameters();
+
+    // Match each argument type against the corresponding parameter type
+    for (param, arg_ty) in params.iter().zip(arg_types.iter()) {
+        // Recursively extract type parameter mappings
+        infer_from_type(&param.ty, arg_ty, type_params, &mut substitutions);
+    }
+
+    substitutions
+}
+
+/// Recursively infer type parameter mappings by matching a parameter type against an argument type.
+fn infer_from_type(
+    param_ty: &Ty,
+    arg_ty: &Ty,
+    type_params: &[Arc<TypeParameterSymbol>],
+    substitutions: &mut Substitutions,
+) {
+    match param_ty.kind() {
+        // If parameter is a type parameter, map it to the argument type
+        TyKind::TypeParameter(param) => {
+            let param_id = param.metadata().id();
+            // Only infer if this type parameter is in our list
+            if type_params.iter().any(|tp| tp.metadata().id() == param_id) {
+                // Only insert if not already mapped (first match wins)
+                if !substitutions.contains(param_id) {
+                    substitutions.insert(param_id, arg_ty.clone());
+                }
+            }
+        }
+
+        // For array types, recurse into element type
+        TyKind::Array(elem_ty) => {
+            if let TyKind::Array(arg_elem) = arg_ty.kind() {
+                infer_from_type(elem_ty, arg_elem, type_params, substitutions);
+            }
+        }
+
+        // For tuple types, recurse into each element
+        TyKind::Tuple(elems) => {
+            if let TyKind::Tuple(arg_elems) = arg_ty.kind() {
+                for (pe, ae) in elems.iter().zip(arg_elems.iter()) {
+                    infer_from_type(pe, ae, type_params, substitutions);
+                }
+            }
+        }
+
+        // For function types, recurse into params and return type
+        TyKind::Function { params, return_type } => {
+            if let TyKind::Function { params: arg_params, return_type: arg_ret } = arg_ty.kind() {
+                for (pp, ap) in params.iter().zip(arg_params.iter()) {
+                    infer_from_type(pp, ap, type_params, substitutions);
+                }
+                infer_from_type(return_type, arg_ret, type_params, substitutions);
+            }
+        }
+
+        // For struct types with substitutions, match the inner type arguments
+        TyKind::Struct { symbol: param_struct, substitutions: param_subs } => {
+            if let TyKind::Struct { symbol: arg_struct, substitutions: arg_subs } = arg_ty.kind() {
+                // Only if same struct
+                if param_struct.metadata().id() == arg_struct.metadata().id() {
+                    // Match substitutions
+                    for (id, param_sub_ty) in param_subs.iter() {
+                        if let Some(arg_sub_ty) = arg_subs.get(*id) {
+                            infer_from_type(param_sub_ty, arg_sub_ty, type_params, substitutions);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Other types don't contribute to inference
+        _ => {}
+    }
+}
+
+// =============================================================================
 // Call-Site Constraint Verification
 // =============================================================================
 

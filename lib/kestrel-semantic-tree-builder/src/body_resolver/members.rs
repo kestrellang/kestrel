@@ -1029,24 +1029,27 @@ fn filter_applicable_extensions(
 
             let target_ty = target_behavior.target_type();
 
-            // Extract type arguments from the extension's target type
-            let extension_type_args = match target_ty.as_struct_with_subs() {
-                Some((_, subs)) => subs.types().cloned().collect::<Vec<_>>(),
-                None => Vec::new(),
+            // Extract substitutions from extension's target type
+            let extension_subs = match target_ty.as_struct_with_subs() {
+                Some((_, subs)) => subs,
+                None => return None,
             };
 
             // Check if this extension's type arguments are applicable to the actual type
-            if !is_extension_applicable(&extension_type_args, actual_subs) {
+            // by comparing types at each type parameter position
+            if !is_extension_applicable(extension_subs, actual_subs) {
                 return None;
             }
 
             // Build substitutions: map extension's type params to actual types
-            // extension_type_args[i] is the type param, actual_subs types()[i] is what it maps to
-            let actual_types: Vec<&Ty> = actual_subs.types().collect();
+            // by iterating over extension_subs and looking up corresponding actual types
             let mut param_to_actual = std::collections::HashMap::new();
-            for (ext_arg, actual_arg) in extension_type_args.iter().zip(actual_types.iter()) {
-                if let TyKind::TypeParameter(param) = ext_arg.kind() {
-                    param_to_actual.insert(param.metadata().id(), *actual_arg);
+            for (param_id, ext_ty) in extension_subs.iter() {
+                if let TyKind::TypeParameter(_) = ext_ty.kind() {
+                    // This position has a type parameter - get the actual type
+                    if let Some(actual_ty) = actual_subs.get(*param_id) {
+                        param_to_actual.insert(*param_id, actual_ty);
+                    }
                 }
             }
 
@@ -1070,9 +1073,9 @@ fn filter_applicable_extensions(
 
             // Count how many concrete (non-type-parameter) arguments the extension has
             // This is the "specificity" - more concrete args = more specific
-            let specificity = extension_type_args
-                .iter()
-                .filter(|arg| !arg.is_type_parameter())
+            let specificity = extension_subs
+                .types()
+                .filter(|ty| !ty.is_type_parameter())
                 .count();
             Some((ext, specificity))
         })
@@ -1087,35 +1090,41 @@ fn filter_applicable_extensions(
 
 /// Check if an extension's type arguments are applicable to an actual type's substitutions.
 ///
-/// This performs a simple unification check:
+/// This performs a simple unification check by comparing types at each type parameter position:
 /// - Type parameters in the extension match any concrete type
 /// - Concrete types in the extension must match exactly
+///
+/// IMPORTANT: We compare by type parameter ID (key) rather than by iteration order,
+/// because HashMap iteration order is undefined.
 fn is_extension_applicable(
-    extension_type_args: &[Ty],
+    extension_subs: &kestrel_semantic_tree::ty::Substitutions,
     actual_subs: &kestrel_semantic_tree::ty::Substitutions,
 ) -> bool {
-    // Collect actual type arguments in order
-    let actual_types: Vec<&Ty> = actual_subs.types().collect();
-
     // Must have same number of type arguments
-    if extension_type_args.len() != actual_types.len() {
+    if extension_subs.len() != actual_subs.len() {
         return false;
     }
 
     // If both have no type arguments (e.g., Point with no generics), they match
-    if extension_type_args.is_empty() && actual_types.is_empty() {
+    if extension_subs.is_empty() && actual_subs.is_empty() {
         return true;
     }
 
-    // Check each type argument
-    for (ext_arg, actual_arg) in extension_type_args.iter().zip(actual_types.iter()) {
-        if ext_arg.is_type_parameter() {
+    // Check each type argument by looking up by parameter ID
+    for (param_id, ext_ty) in extension_subs.iter() {
+        // Get the corresponding actual type for this parameter
+        let actual_ty = match actual_subs.get(*param_id) {
+            Some(ty) => ty,
+            None => return false, // Extension has a param that actual doesn't
+        };
+
+        if ext_ty.is_type_parameter() {
             // Extension has a type parameter here - matches anything
             continue;
         } else {
             // Extension has a concrete type - must match exactly
             // Use types_match to avoid infinite recursion from is_assignable_to
-            if !types_match_simple(ext_arg, actual_arg) {
+            if !types_match_simple(ext_ty, actual_ty) {
                 return false;
             }
         }
