@@ -13,10 +13,14 @@ pub mod queries;
 mod registry;
 mod resolution;
 mod scope;
+mod visibility;
 
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
-pub use queries::{ExtensionsFor, ScopeFor, SymbolFor};
+pub use queries::{
+    ChildByName, ExtensionsFor, ImportsInScope, IsVisibleFrom, ResolveModulePath, ResolveName,
+    ResolveTypePath, ResolveValuePath, ScopeFor, SymbolFor, VisibleChildren,
+};
 pub use query::Query;
 pub use registry::SymbolRegistry;
 pub use resolution::{SymbolResolution, TypePathResolution, ValuePathResolution};

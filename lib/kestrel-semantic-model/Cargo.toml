@@ -4,7 +4,9 @@ version = "0.6.0"
 edition = "2024"
 
 [dependencies]
+kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-span = { path = "../kestrel-span" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 semantic-tree = { path = "../semantic-tree" }
 parking_lot = "0.12"

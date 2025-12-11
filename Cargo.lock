@@ -327,7 +327,9 @@ dependencies = [
 name = "kestrel-semantic-model"
 version = "0.6.0"
 dependencies = [
+ "kestrel-prelude",
  "kestrel-semantic-tree",
+ "kestrel-span",
  "kestrel-syntax-tree",
  "parking_lot",
  "semantic-tree",
