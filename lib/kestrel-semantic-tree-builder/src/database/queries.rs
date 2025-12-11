@@ -11,7 +11,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 // Re-export types from kestrel-semantic-model for backwards compatibility
 pub use kestrel_semantic_model::{
-    get_import_data, Import, ImportItem, Scope, SymbolResolution, TypePathResolution,
+    Import, ImportItem, Scope, SymbolResolution, TypePathResolution,
     ValuePathResolution,
 };
 

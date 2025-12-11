@@ -73,7 +73,7 @@ impl Resolver for ImportResolver {
         ctx: &mut BindingContext,
     ) {
         // Get import data from behavior
-        let import_data = match get_import_data_behavior(symbol) {
+        let import_data = match symbol.metadata().get_behavior::<ImportDataBehavior>() {
             Some(data) => data,
             None => {
                 eprintln!("Warning: ImportSymbol missing ImportDataBehavior");
@@ -172,10 +172,4 @@ fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<I
         .collect()
 }
 
-/// Get ImportDataBehavior from a symbol
-fn get_import_data_behavior(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> Option<Arc<ImportDataBehavior>> {
-    crate::database::get_import_data(symbol)
-}
 

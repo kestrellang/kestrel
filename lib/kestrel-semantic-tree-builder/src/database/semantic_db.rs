@@ -24,9 +24,10 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::resolution::VisibilityChecker;
 
 use kestrel_semantic_model::{
-    get_import_data, ExtensionRegistry, Import, ImportItem, Scope, SymbolRegistry,
+    ExtensionRegistry, Import, ImportItem, Scope, SymbolRegistry,
     SymbolResolution, TypePathResolution, ValuePathResolution,
 };
+use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 
 use super::queries::Db;
 
@@ -515,7 +516,7 @@ impl Db for SemanticDatabase {
             .into_iter()
             .filter(|c| matches!(c.metadata().kind(), KestrelSymbolKind::Import))
             .filter_map(|import_symbol| {
-                get_import_data(&import_symbol).map(|data| {
+                import_symbol.metadata().get_behavior::<ImportDataBehavior>().map(|data| {
                     Arc::new(Import {
                         module_path: data.module_path().to_vec(),
                         alias: data.alias().map(|s| s.to_string()),

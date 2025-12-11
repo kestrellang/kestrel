@@ -14,10 +14,11 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::error::*;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
-use crate::database::{self, Db};
+use crate::database::Db;
 use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
@@ -85,7 +86,7 @@ fn validate_import(
     ctx: &SymbolContext<'_>,
 ) {
     // Get the import data from behavior
-    let import_data = match database::get_import_data(import_symbol) {
+    let import_data = match import_symbol.metadata().get_behavior::<ImportDataBehavior>() {
         Some(data) => data,
         None => {
             // Missing import data - this shouldn't happen, but don't crash
@@ -176,7 +177,7 @@ fn check_import_conflicts(
 
         match child.metadata().kind() {
             KestrelSymbolKind::Import => {
-                if let Some(import_data) = database::get_import_data(&child) {
+                if let Some(import_data) = child.metadata().get_behavior::<ImportDataBehavior>() {
                     // For specific imports, add each item
                     for item in import_data.items() {
                         let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
@@ -228,7 +229,7 @@ fn check_import_conflicts(
 
     // Now check whole-module imports for conflicts
     for import_symbol in import_symbols {
-        let import_data = match database::get_import_data(import_symbol) {
+        let import_data = match import_symbol.metadata().get_behavior::<ImportDataBehavior>() {
             Some(data) => data,
             None => continue,
         };

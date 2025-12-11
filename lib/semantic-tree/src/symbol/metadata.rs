@@ -2,7 +2,11 @@ use std::sync::{Arc, RwLock, Weak};
 
 use kestrel_span::{Name, Span};
 
-use crate::{behavior::Behavior, language::{Language, SymbolKind}, symbol::{Symbol, SymbolId}};
+use crate::{
+    behavior::Behavior,
+    language::{Language, SymbolKind},
+    symbol::{Symbol, SymbolId},
+};
 
 #[derive(Debug)]
 pub struct SymbolMetadata<L: Language> {
@@ -91,6 +95,12 @@ impl<L: Language> SymbolMetadata<L> {
         return behaviors.clone();
     }
 
+    pub fn get_behavior<B: Behavior<L>>(&self) -> Option<Arc<B>> {
+        self.behaviors()
+            .iter()
+            .find_map(|b| b.clone().downcast_arc().ok())
+    }
+
     pub fn add_behavior(&self, behavior: impl Behavior<L> + 'static) {
         let Ok(mut behaviors) = self.behaviors.write() else {
             panic!("internal error: RwLock poison");
@@ -114,7 +124,7 @@ pub struct SymbolMetadataBuilder<L: Language> {
 impl<L: Language> SymbolMetadataBuilder<L> {
     pub fn new(kind: L::SymbolKind) -> Self {
         Self {
-            id: SymbolId::new(),  // Auto-generate unique ID
+            id: SymbolId::new(), // Auto-generate unique ID
             parent: None,
             children: Vec::new(),
             behaviors: Vec::new(),

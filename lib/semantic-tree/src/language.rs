@@ -2,7 +2,7 @@
 ///
 /// Symbol kinds can be "transparent" meaning they don't participate in name resolution
 /// directly - instead their children are surfaced to the parent scope.
-pub trait SymbolKind: Copy + Clone {
+pub trait SymbolKind: Copy + Clone + PartialEq + Eq {
     /// Returns true if this symbol kind is transparent for name resolution.
     fn is_transparent(&self) -> bool;
 }

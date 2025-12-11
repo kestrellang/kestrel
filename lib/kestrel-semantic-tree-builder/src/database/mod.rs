@@ -12,7 +12,7 @@ mod semantic_db;
 // Re-export types from kestrel-semantic-model
 pub use kestrel_semantic_model::{
     ExtensionRegistry, Import, ImportItem, Scope, SymbolRegistry, SymbolResolution,
-    TypePathResolution, ValuePathResolution, get_import_data,
+    TypePathResolution, ValuePathResolution,
 };
 
 pub use queries::Db;
