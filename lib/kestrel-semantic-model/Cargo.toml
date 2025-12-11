@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 semantic-tree = { path = "../semantic-tree" }
 parking_lot = "0.12"

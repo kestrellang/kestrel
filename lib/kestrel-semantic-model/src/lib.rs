@@ -4,13 +4,18 @@
 //! - Scope and import representation
 //! - Resolution result types
 //! - Symbol and extension registries
+//! - SemanticModel for querying semantic information
 
 mod extension_registry;
+mod model;
+mod query;
 mod registry;
 mod resolution;
 mod scope;
 
 pub use extension_registry::ExtensionRegistry;
+pub use model::SemanticModel;
+pub use query::Query;
 pub use registry::SymbolRegistry;
 pub use resolution::{SymbolResolution, TypePathResolution, ValuePathResolution};
 pub use scope::{Import, ImportItem, Scope};
