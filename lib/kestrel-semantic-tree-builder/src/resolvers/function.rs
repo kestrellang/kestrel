@@ -845,8 +845,8 @@ fn resolve_return_type_from_syntax(
 
 /// Get the type of `self` for an instance method
 ///
-/// Returns the type of the containing struct or protocol.
-/// For now, we use `Self` type which will be resolved later.
+/// Returns the type of the containing struct, protocol, or extension target.
+/// For extensions, we use Self type which will resolve to the target type.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
     let parent = symbol.metadata().parent()?;
     let parent_span = parent.metadata().span().clone();
@@ -855,6 +855,11 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
         KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
             // Use Self type which refers to the containing type
             // This will be resolved to the concrete type during type checking
+            Some(Ty::self_type(parent_span))
+        }
+        KestrelSymbolKind::Extension => {
+            // For extension methods, Self refers to the target type
+            // Use Self type which will be resolved during type checking
             Some(Ty::self_type(parent_span))
         }
         _ => None,
@@ -879,11 +884,11 @@ fn determine_receiver_kind(
         return None; // Static functions have no receiver
     }
 
-    // Check if the function is in a struct or protocol (instance method)
+    // Check if the function is in a struct, protocol, or extension (instance method)
     let parent_kind = symbol.metadata().parent().map(|p| p.metadata().kind());
     let is_instance_method = matches!(
         parent_kind,
-        Some(KestrelSymbolKind::Struct) | Some(KestrelSymbolKind::Protocol)
+        Some(KestrelSymbolKind::Struct) | Some(KestrelSymbolKind::Protocol) | Some(KestrelSymbolKind::Extension)
     );
 
     if !is_instance_method {

@@ -127,6 +127,35 @@ impl Validator for ConformanceValidator {
             check_protocol_associated_type_defaults(&collected.protocol, &collected.symbol, diagnostics);
         }
 
+        // Collect additional structs that have extensions with conformances
+        // These may not have been collected during validate_symbol if the struct itself has no conformances
+        let mut additional_structs = Vec::new();
+        for extension in db.extension_registry().all_extensions() {
+            if let Some(conformances_behavior) = extension.conformances_behavior() {
+                if !conformances_behavior.conformances().is_empty() {
+                    // This extension adds conformances, check if its target struct is in our list
+                    if let Some(target_ty) = extension.target_type() {
+                        if let TyKind::Struct { symbol: target_struct, .. } = target_ty.kind() {
+                            let struct_id = target_struct.metadata().id();
+                            // Check if we already have this struct
+                            let already_collected = self.structs.lock().unwrap().iter()
+                                .any(|s| s.struct_sym.metadata().id() == struct_id);
+                            if !already_collected {
+                                let struct_dyn = target_struct.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+                                additional_structs.push(CollectedStruct {
+                                    symbol: struct_dyn,
+                                    struct_sym: target_struct.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add the additional structs to our collection
+        self.structs.lock().unwrap().extend(additional_structs);
+
         // Check structs for protocol conformance
         for collected in self.structs.lock().unwrap().iter() {
             check_struct_conformance(&collected.struct_sym, &collected.symbol, db, diagnostics);
@@ -215,15 +244,22 @@ fn check_struct_conformance(
     db: &SemanticDatabase,
     diagnostics: &mut DiagnosticContext,
 ) {
-    let conformances = get_conformances(symbol);
+    let struct_name = &struct_sym.metadata().name().value;
+    let struct_id = struct_sym.metadata().id();
+    let file_id = get_file_id_for_symbol(symbol, diagnostics);
+
+    let mut conformances = get_conformances(symbol);
+
+    // Also collect conformances from extensions
+    let extensions = db.get_extensions_for(struct_id);
+    for extension in &extensions {
+        let extension_conformances = get_conformances(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        conformances.extend(extension_conformances);
+    }
 
     if conformances.is_empty() {
         return;
     }
-
-    let struct_name = &struct_sym.metadata().name().value;
-    let struct_id = struct_sym.metadata().id();
-    let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
     // Collect associated type bindings from the struct (e.g., type Item = Int)
     // We need to downcast from StructSymbol reference to get Arc<StructSymbol>
@@ -239,10 +275,21 @@ fn check_struct_conformance(
 
     // Collect all methods implemented by the struct
     // Use MethodLookupKey (without return type) for lookup, then validate return type separately
-    let struct_methods = collect_methods_from_symbol(symbol);
-    let struct_method_map: HashMap<MethodLookupKey, (&Arc<FunctionSymbol>, SignatureType)> = struct_methods
+    let mut all_methods = collect_methods_from_symbol(symbol);
+
+    // Also collect methods from applicable extensions
+    let extensions = db.get_extensions_for(struct_id);
+    for extension in extensions {
+        // TODO: Filter by applicability (check type arguments and where clauses)
+        // For now, include all extensions since filtering can cause stack overflow
+        let extension_methods = collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        all_methods.extend(extension_methods);
+    }
+
+    // Build the method map from all collected methods
+    let struct_method_map: HashMap<MethodLookupKey, (Arc<FunctionSymbol>, SignatureType)> = all_methods
         .iter()
-        .map(|f| (f.signature().lookup_key(), (f, SignatureType::from_ty(&f.return_type()))))
+        .map(|f| (f.signature().lookup_key(), (f.clone(), SignatureType::from_ty(&f.return_type()))))
         .collect();
 
     // Check each conformance

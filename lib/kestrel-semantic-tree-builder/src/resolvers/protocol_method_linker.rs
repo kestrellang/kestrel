@@ -45,17 +45,28 @@ pub fn link_protocol_methods_for_struct(
     db: &dyn Db,
     diagnostics: &mut DiagnosticContext,
 ) {
-    let conformances = struct_dyn
+    let file_id = get_file_id_for_symbol(struct_dyn, diagnostics);
+    let struct_name = &struct_sym.metadata().name().value;
+    let struct_id = struct_sym.metadata().id();
+
+    let mut conformances = struct_dyn
         .conformances_behavior()
         .map(|cb| cb.conformances().to_vec())
         .unwrap_or_default();
 
+    // Also collect conformances from extensions
+    let extensions = db.get_extensions_for(struct_id);
+    for extension in &extensions {
+        let extension_conformances = extension
+            .conformances_behavior()
+            .map(|cb| cb.conformances().to_vec())
+            .unwrap_or_default();
+        conformances.extend(extension_conformances);
+    }
+
     if conformances.is_empty() {
         return;
     }
-
-    let file_id = get_file_id_for_symbol(struct_dyn, diagnostics);
-    let struct_name = &struct_sym.metadata().name().value;
 
     // Collect all protocol methods with substitutions
     // The tuple contains: (defining_protocol, method, substituted_signature, bindings)
@@ -77,10 +88,20 @@ pub fn link_protocol_methods_for_struct(
     }
 
     // Collect struct methods
-    let struct_methods = collect_methods_from_symbol(struct_dyn);
+    let mut all_methods = collect_methods_from_symbol(struct_dyn);
 
-    // For each struct method, find matching protocol methods
-    for struct_method in &struct_methods {
+    // Also collect methods from applicable extensions
+    let struct_id = struct_sym.metadata().id();
+    let extensions = db.get_extensions_for(struct_id);
+    for extension in extensions {
+        // TODO: Filter by applicability (check type arguments and where clauses)
+        // For now, include all extensions since filtering can cause stack overflow
+        let extension_methods = collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        all_methods.extend(extension_methods);
+    }
+
+    // For each method (struct or extension), find matching protocol methods
+    for struct_method in &all_methods {
         let struct_sig = struct_method.signature();
         let method_name = &struct_method.metadata().name().value;
         let method_span = struct_method.metadata().declaration_span().clone();

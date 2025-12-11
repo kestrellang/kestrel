@@ -92,6 +92,9 @@ pub enum Token {
     Null,
 
     // ===== Declaration Keywords =====
+    #[token("extend")]
+    Extend,
+
     #[token("fileprivate")]
     Fileprivate,
 

@@ -133,6 +133,61 @@ pub fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span
     }
 }
 
+/// Create a struct type with explicit type arguments.
+///
+/// This function takes explicit type arguments and creates a generic struct type
+/// with those arguments mapped to the struct's type parameters IN ORDER.
+///
+/// For example, if we have `struct Pair[T, U]` and call `Pair[Int, String]`,
+/// this creates substitutions: {T -> Int, U -> String}.
+///
+/// If we call `Pair[U, T]` where U and T are type parameters in the current scope,
+/// this creates substitutions: {Pair's T -> U, Pair's U -> T} (preserving the type parameters).
+///
+/// # Arguments
+/// * `struct_symbol` - The struct symbol
+/// * `type_args` - The explicit type arguments (already resolved in current scope by TypeResolver)
+/// * `span` - The span for the created type
+/// * `_ctx` - The body resolution context (unused but kept for API consistency)
+pub fn create_struct_type_with_type_args(
+    struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    type_args: &[Ty],
+    span: Span,
+    _ctx: &super::context::BodyResolutionContext,
+) -> Ty {
+    let sym_clone = Arc::clone(struct_symbol);
+
+    match sym_clone.downcast_arc::<StructSymbol>() {
+        Ok(struct_arc) => {
+            let type_params = struct_arc.type_parameters();
+
+            // If not generic, just create a simple struct type
+            if type_params.is_empty() {
+                return Ty::r#struct(struct_arc, span);
+            }
+
+            // Build substitutions by mapping struct's type parameters to provided type arguments IN ORDER
+            // This is the key fix: we map by position, not by name
+            // So Pair[U, T] maps Pair's first param (T) to U, and Pair's second param (U) to T
+            let mut substitutions = Substitutions::new();
+            for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
+                substitutions.insert(param.metadata().id(), arg_ty.clone());
+            }
+
+            // Fill in any missing type parameters with inferred type
+            for param in type_params {
+                let param_id = param.metadata().id();
+                if !substitutions.contains(param_id) {
+                    substitutions.insert(param_id, Ty::inferred(span.clone()));
+                }
+            }
+
+            Ty::generic_struct(struct_arc, substitutions, span)
+        }
+        Err(_) => Ty::error(span),
+    }
+}
+
 /// Create a generic struct type with substitutions inferred from argument types.
 ///
 /// This is used for implicit struct initialization where the type arguments
@@ -215,6 +270,21 @@ pub fn get_type_container(ty: &Ty, ctx: &BodyResolutionContext) -> Option<Arc<dy
             let parent = function.metadata().parent()?;
             match parent.metadata().kind() {
                 KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
+                KestrelSymbolKind::Extension => {
+                    // For extension methods, Self refers to the target type
+                    // Get the ExtensionTargetBehavior and return the target struct
+                    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+                    if let Some(target_beh) = parent.extension_target_behavior() {
+                        match target_beh.target_type().kind() {
+                            TyKind::Struct { symbol, .. } => {
+                                Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         }
@@ -487,6 +557,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
 pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
     match kind {
         KestrelSymbolKind::AssociatedType => "associated type".to_string(),
+        KestrelSymbolKind::Extension => "extension".to_string(),
         KestrelSymbolKind::Field => "field".to_string(),
         KestrelSymbolKind::Function => "function".to_string(),
         KestrelSymbolKind::Import => "import".to_string(),
@@ -578,6 +649,7 @@ fn type_satisfies_bound(ty: &Ty, bound: &Ty, db: &dyn Db) -> bool {
     match ty.kind() {
         // Concrete struct - check if it conforms to the protocol
         TyKind::Struct { symbol, .. } => {
+            // Check direct conformances
             if let Some(conformances) = symbol.conformances_behavior() {
                 for conf in conformances.conformances() {
                     if let TyKind::Protocol { symbol: conf_proto, .. } = conf.kind() {
@@ -588,6 +660,23 @@ fn type_satisfies_bound(ty: &Ty, bound: &Ty, db: &dyn Db) -> bool {
                     }
                 }
             }
+
+            // Also check extension conformances
+            let struct_id = symbol.metadata().id();
+            let extensions = db.get_extensions_for(struct_id);
+            for extension in extensions {
+                if let Some(conformances) = extension.conformances_behavior() {
+                    for conf in conformances.conformances() {
+                        if let TyKind::Protocol { symbol: conf_proto, .. } = conf.kind() {
+                            if conf_proto.metadata().id() == required_proto.metadata().id() {
+                                return true;
+                            }
+                            // TODO: Check inherited protocols
+                        }
+                    }
+                }
+            }
+
             false
         }
 

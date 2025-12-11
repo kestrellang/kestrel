@@ -16,6 +16,7 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata};
 
 use crate::behavior::callable::CallableBehavior;
 use crate::behavior::conformances::ConformancesBehavior;
+use crate::behavior::extension_target::ExtensionTargetBehavior;
 use crate::behavior::generics::GenericsBehavior;
 use crate::behavior::implements::ImplementsBehavior;
 use crate::behavior::typed::TypedBehavior;
@@ -50,6 +51,9 @@ pub trait BehaviorExt {
 
     /// Get the ImplementsBehavior if present (cloned)
     fn implements_behavior(&self) -> Option<ImplementsBehavior>;
+
+    /// Get the ExtensionTargetBehavior if present (cloned)
+    fn extension_target_behavior(&self) -> Option<ExtensionTargetBehavior>;
 }
 
 impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
@@ -108,6 +112,13 @@ impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
             .find(|b| matches!(b.kind(), KestrelBehaviorKind::Implements))
             .and_then(|b| b.as_ref().downcast_ref::<ImplementsBehavior>().cloned())
     }
+
+    fn extension_target_behavior(&self) -> Option<ExtensionTargetBehavior> {
+        self.behaviors()
+            .into_iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::ExtensionTarget))
+            .and_then(|b| b.as_ref().downcast_ref::<ExtensionTargetBehavior>().cloned())
+    }
 }
 
 /// Extension trait for accessing typed behaviors directly on symbols
@@ -135,6 +146,9 @@ pub trait SymbolBehaviorExt {
 
     /// Get the ImplementsBehavior if present (cloned)
     fn implements_behavior(&self) -> Option<ImplementsBehavior>;
+
+    /// Get the ExtensionTargetBehavior if present (cloned)
+    fn extension_target_behavior(&self) -> Option<ExtensionTargetBehavior>;
 }
 
 impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
@@ -169,6 +183,10 @@ impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
     fn implements_behavior(&self) -> Option<ImplementsBehavior> {
         self.metadata().implements_behavior()
     }
+
+    fn extension_target_behavior(&self) -> Option<ExtensionTargetBehavior> {
+        self.metadata().extension_target_behavior()
+    }
 }
 
 impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
@@ -202,5 +220,9 @@ impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
 
     fn implements_behavior(&self) -> Option<ImplementsBehavior> {
         self.metadata().implements_behavior()
+    }
+
+    fn extension_target_behavior(&self) -> Option<ExtensionTargetBehavior> {
+        self.metadata().extension_target_behavior()
     }
 }

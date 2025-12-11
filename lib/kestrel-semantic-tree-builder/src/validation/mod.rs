@@ -24,6 +24,7 @@ mod constraint_cycles;
 mod dead_code;
 mod duplicate_symbol;
 mod exhaustive_return;
+mod extension_conflict;
 mod function_body;
 mod generics;
 mod imports;
@@ -60,6 +61,7 @@ pub use constraint_cycles::ConstraintCycleValidator;
 pub use dead_code::DeadCodeValidator;
 pub use duplicate_symbol::DuplicateSymbolValidator;
 pub use exhaustive_return::ExhaustiveReturnValidator;
+pub use extension_conflict::ExtensionConflictValidator;
 pub use function_body::FunctionBodyValidator;
 pub use generics::GenericsValidator;
 pub use imports::ImportValidator;
@@ -145,6 +147,8 @@ pub struct SymbolContext<'a> {
     pub in_protocol: bool,
     /// Whether we're inside a struct
     pub in_struct: bool,
+    /// Whether we're inside an extension
+    pub in_extension: bool,
     /// The database for queries
     pub db: &'a SemanticDatabase,
     /// Diagnostics context for reporting errors
@@ -276,6 +280,7 @@ impl ValidationRunner {
             Box::new(ConstraintCycleValidator::new()),
             Box::new(ImportValidator::new()),
             Box::new(ConformanceValidator::new()),
+            Box::new(ExtensionConflictValidator::new()),
             Box::new(InitializerVerificationValidator::new()),
             Box::new(AssignmentValidator::new()),
             Box::new(DeadCodeValidator::new()),
@@ -308,7 +313,7 @@ impl ValidationRunner {
         }));
 
         // Single tree walk calling all validators
-        walk_symbol(root, &enabled, db, &shared_diagnostics, false, false);
+        walk_symbol(root, &enabled, db, &shared_diagnostics, false, false, false);
 
         // Finalize all validators (diagnostics is still valid here)
         for validator in &enabled {
@@ -331,6 +336,7 @@ fn walk_symbol(
     diagnostics: &SharedDiagnostics,
     in_protocol: bool,
     in_struct: bool,
+    in_extension: bool,
 ) {
     let kind = symbol.metadata().kind();
     let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics.borrow_mut().get());
@@ -338,12 +344,14 @@ fn walk_symbol(
     // Update context flags
     let in_protocol = in_protocol || kind == KestrelSymbolKind::Protocol;
     let in_struct = in_struct || kind == KestrelSymbolKind::Struct;
+    let in_extension = in_extension || kind == KestrelSymbolKind::Extension;
 
     // Create symbol context
     let ctx = SymbolContext {
         symbol,
         in_protocol,
         in_struct,
+        in_extension,
         db,
         diagnostics: Rc::clone(diagnostics),
         file_id,
@@ -381,7 +389,7 @@ fn walk_symbol(
 
     // Recursively walk children
     for child in symbol.metadata().children() {
-        walk_symbol(&child, validators, db, diagnostics, in_protocol, in_struct);
+        walk_symbol(&child, validators, db, diagnostics, in_protocol, in_struct, in_extension);
     }
 }
 

@@ -184,3 +184,29 @@ pub enum ProtocolBodyItem {
     AssociatedType(TypeAliasDeclarationData),
     Initializer(InitializerDeclarationData),
 }
+
+/// Raw parsed data for extension declaration internals
+///
+/// Extension syntax: `extend Type: Protocol { ... }`
+/// Extensions add methods and conformances to existing types.
+#[derive(Debug, Clone)]
+pub struct ExtensionDeclarationData {
+    pub extend_span: Span,
+    /// The type being extended (uses type expression, not type parameter list)
+    /// This allows Box[T, Int] where T references the struct's type parameter
+    pub target_type: TyVariant,
+    /// Optional conformances this extension adds
+    pub conformances: Option<ConformanceListData>,
+    /// Optional where clause for additional constraints
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<ExtensionBodyItem>,
+    pub rbrace_span: Span,
+}
+
+/// Items that can appear in an extension body
+#[derive(Debug, Clone)]
+pub enum ExtensionBodyItem {
+    Function(FunctionDeclarationData),
+    Initializer(InitializerDeclarationData),
+}

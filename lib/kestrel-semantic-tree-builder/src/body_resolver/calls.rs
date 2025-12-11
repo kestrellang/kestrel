@@ -37,9 +37,9 @@ use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::{resolve_member_call, substitute_callable_self};
 use super::utils::{
-    create_generic_struct_type, create_struct_type, format_type, get_callable_behavior,
-    get_type_parameter_bounds_by_id, is_expression_kind, matches_signature, substitute_type,
-    validate_not_standalone_type_param,
+    create_generic_struct_type, create_struct_type, create_struct_type_with_type_args, format_type,
+    get_callable_behavior, get_type_parameter_bounds_by_id, is_expression_kind, matches_signature,
+    substitute_type, validate_not_standalone_type_param,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -82,30 +82,114 @@ pub fn resolve_call_expression(
 
 /// Extract type arguments from a callee expression node.
 /// Handles: foo[T], path.to.func[T, U], obj.method[T]
+///
+/// IMPORTANT: Only extracts type arguments from the FINAL segment of the path.
+/// For `Box[Int].zero()`, the type args `[Int]` belong to `Box` (handled during path
+/// resolution), not to `zero` (the actual function being called). So we should NOT
+/// extract type args here.
 fn extract_type_arguments_from_callee(
     callee_node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Option<Vec<Ty>> {
-    // Look for TypeArgumentList in the callee
+    // Look for TypeArgumentList only in the FINAL segment of the callee
     // The callee is typically an ExprPath that may contain TypeArgumentList
-    fn find_last_type_arg_list(node: &SyntaxNode) -> Option<SyntaxNode> {
-        // First check direct children
-        let mut last_found = None;
-        for child in node.children() {
-            let kind = child.kind();
-            if kind == SyntaxKind::TypeArgumentList {
-                last_found = Some(child);
-            } else if kind == SyntaxKind::Expression || kind == SyntaxKind::ExprPath {
-                // Recurse into Expression wrappers and ExprPath
-                if let Some(inner) = find_last_type_arg_list(&child) {
-                    last_found = Some(inner);
+    //
+    // ExprPath structure for "Box[Int].zero":
+    // ExprPath
+    //   Identifier "Box"
+    //   TypeArgumentList [Int]
+    //   Dot
+    //   Identifier "zero"
+    //
+    // We want to only extract type args that come AFTER the last dot (i.e., on the final segment).
+    fn find_type_args_on_final_segment(node: &SyntaxNode) -> Option<SyntaxNode> {
+        // Find the ExprPath node
+        let expr_path = if node.kind() == SyntaxKind::ExprPath {
+            Some(node.clone())
+        } else {
+            node.children().find(|c| c.kind() == SyntaxKind::ExprPath)
+        };
+
+        if let Some(expr_path) = expr_path {
+            // Collect all children to analyze the structure
+            let children: Vec<_> = expr_path.children_with_tokens().collect();
+
+            // Find the last Dot token position (if any)
+            let mut last_dot_pos = None;
+            for (i, child) in children.iter().enumerate() {
+                if let Some(token) = child.as_token() {
+                    if token.kind() == SyntaxKind::Dot {
+                        last_dot_pos = Some(i);
+                    }
                 }
             }
+
+            // If there's a dot, only look for TypeArgumentList AFTER the last dot
+            if let Some(dot_pos) = last_dot_pos {
+                for child in children.iter().skip(dot_pos + 1) {
+                    if let Some(node) = child.as_node() {
+                        if node.kind() == SyntaxKind::TypeArgumentList {
+                            return Some(node.clone());
+                        }
+                    }
+                }
+                // Multi-segment path but no type args after last dot
+                return None;
+            }
+
+            // No dot - single segment path, check for direct TypeArgumentList
+            for child in children.iter() {
+                if let Some(node) = child.as_node() {
+                    if node.kind() == SyntaxKind::TypeArgumentList {
+                        return Some(node.clone());
+                    }
+                }
+            }
+
+            return None;
         }
-        last_found
+
+        // For Path nodes (used in type paths), check PathElements
+        if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
+            let path_elements: Vec<_> = path_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::PathElement)
+                .collect();
+
+            // For multi-segment paths, only extract type args from the LAST element
+            if path_elements.len() > 1 {
+                if let Some(last_element) = path_elements.last() {
+                    for child in last_element.children() {
+                        if child.kind() == SyntaxKind::TypeArgumentList {
+                            return Some(child);
+                        }
+                    }
+                }
+                return None;
+            }
+
+            // Single element path
+            if let Some(only_element) = path_elements.first() {
+                for child in only_element.children() {
+                    if child.kind() == SyntaxKind::TypeArgumentList {
+                        return Some(child);
+                    }
+                }
+            }
+            return None;
+        }
+
+        // Fallback: direct TypeArgumentList child
+        for child in node.children() {
+            if child.kind() == SyntaxKind::TypeArgumentList {
+                return Some(child);
+            }
+        }
+
+        None
     }
 
-    let type_arg_list = find_last_type_arg_list(callee_node)?;
+    let type_arg_list = find_type_args_on_final_segment(callee_node)?;
 
     // Resolve each type in the TypeArgumentList
     let mut type_args = Vec::new();
@@ -229,7 +313,7 @@ pub fn resolve_call(
 
         // Type reference - struct instantiation
         ExprKind::TypeRef(symbol_id) => {
-            resolve_struct_instantiation(symbol_id, arguments, arg_labels, span, ctx)
+            resolve_struct_instantiation(symbol_id, arguments, arg_labels, explicit_type_args, span, ctx)
         }
 
         // Type parameter reference - init call on type parameter (T())
@@ -491,13 +575,16 @@ fn resolve_overloaded_call(
     Expression::error(span)
 }
 
-/// Resolve struct instantiation: `StructName(x: 1, y: 2)`
+/// Resolve struct instantiation: `StructName(x: 1, y: 2)` or `StructName[T, U](x: 1, y: 2)`
 ///
 /// This handles both explicit initializers and implicit memberwise initialization.
+/// When explicit type arguments are provided, they are resolved in the current scope
+/// before being used as substitutions for the struct's type parameters.
 pub fn resolve_struct_instantiation(
     symbol_id: SymbolId,
     arguments: Vec<CallArgument>,
     arg_labels: &[Option<String>],
+    explicit_type_args: Option<Vec<Ty>>,
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
@@ -528,11 +615,11 @@ pub fn resolve_struct_instantiation(
 
     if !explicit_inits.is_empty() {
         // Has explicit initializers - find matching one
-        return resolve_explicit_init_call(&explicit_inits, arguments, arg_labels, span, symbol.clone(), ctx);
+        return resolve_explicit_init_call(&explicit_inits, arguments, arg_labels, explicit_type_args, span, symbol.clone(), ctx);
     }
 
     // No explicit initializers - try implicit memberwise init
-    resolve_implicit_init(symbol_id, arguments, arg_labels, span, symbol.clone(), ctx)
+    resolve_implicit_init(symbol_id, arguments, arg_labels, explicit_type_args, span, symbol.clone(), ctx)
 }
 
 /// Resolve a call to an explicit initializer
@@ -540,6 +627,7 @@ fn resolve_explicit_init_call(
     initializers: &[Arc<dyn Symbol<KestrelLanguage>>],
     arguments: Vec<CallArgument>,
     arg_labels: &[Option<String>],
+    explicit_type_args: Option<Vec<Ty>>,
     span: Span,
     struct_symbol: Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BodyResolutionContext,
@@ -551,8 +639,12 @@ fn resolve_explicit_init_call(
                 // Found matching initializer
                 // The return type is the actual struct type
                 // Create a struct type from the struct symbol
-                // We use Ty::named which stores the symbol ID for lookup
-                let struct_ty = create_struct_type(&struct_symbol, span.clone());
+                // If explicit type arguments are provided, use them; otherwise infer
+                let struct_ty = if let Some(ref type_args) = explicit_type_args {
+                    create_struct_type_with_type_args(&struct_symbol, type_args, span.clone(), ctx)
+                } else {
+                    create_struct_type(&struct_symbol, span.clone())
+                };
 
                 // For explicit init, create a Call expression
                 // Initializers are not mutable lvalues
@@ -610,6 +702,7 @@ fn resolve_implicit_init(
     _struct_symbol_id: SymbolId,
     arguments: Vec<CallArgument>,
     arg_labels: &[Option<String>],
+    explicit_type_args: Option<Vec<Ty>>,
     span: Span,
     struct_symbol: Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BodyResolutionContext,
@@ -681,9 +774,14 @@ fn resolve_implicit_init(
 
     // All checks passed - create ImplicitStructInit expression
     // Create the actual struct type using the struct symbol
-    // For generic structs, infer type arguments from argument types
-    let arg_types: Vec<_> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-    let struct_ty = create_generic_struct_type(&struct_symbol, &fields, &arg_types, span.clone());
+    // If explicit type arguments are provided, use them; otherwise infer from argument types
+    let struct_ty = if let Some(ref type_args) = explicit_type_args {
+        create_struct_type_with_type_args(&struct_symbol, type_args, span.clone(), ctx)
+    } else {
+        // For generic structs, infer type arguments from argument types
+        let arg_types: Vec<_> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+        create_generic_struct_type(&struct_symbol, &fields, &arg_types, span.clone())
+    };
 
     Expression::implicit_struct_init(struct_ty, arguments, span)
 }
@@ -718,8 +816,20 @@ pub fn resolve_method_call(
                     // Get return type, substituting Self with receiver type if needed
                     let mut return_ty = substitute_self(callable.return_type(), &receiver.ty);
 
-                    // Build substitutions for explicit type arguments and apply to return type
+                    // Build substitutions from the receiver type
+                    // e.g., for Box[Int], we get {T -> Int}
+                    use super::members::resolve_self_type_to_concrete;
+                    let resolved_receiver_ty = resolve_self_type_to_concrete(&receiver.ty, ctx);
                     let mut call_substitutions = Substitutions::new();
+                    if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
+                        // Add receiver's substitutions to call_substitutions
+                        for (param_id, ty) in substitutions.iter() {
+                            call_substitutions.insert(*param_id, ty.clone());
+                        }
+                        return_ty = return_ty.apply_substitutions(substitutions);
+                    }
+
+                    // Add explicit type arguments to substitutions and apply to return type
                     if let Some(ref type_args) = explicit_type_args {
                         if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
                             let type_params = func_sym.type_parameters();

@@ -26,6 +26,7 @@ use super::queries::{
     get_import_data, Db, Import, ImportItem, Scope, SymbolResolution, TypePathResolution,
     ValuePathResolution,
 };
+use super::extension_registry::ExtensionRegistry;
 use super::registry::SymbolRegistry;
 
 /// Resolve a primitive type name to its semantic type
@@ -49,6 +50,7 @@ fn resolve_primitive_type(name: &str, span: kestrel_span::Span) -> Option<Ty> {
 /// Database for semantic queries with caching
 pub struct SemanticDatabase {
     registry: SymbolRegistry,
+    extension_registry: ExtensionRegistry,
     scope_cache: RwLock<HashMap<SymbolId, Arc<Scope>>>,
 }
 
@@ -57,6 +59,7 @@ impl SemanticDatabase {
     pub fn new(registry: SymbolRegistry) -> Self {
         Self {
             registry,
+            extension_registry: ExtensionRegistry::new(),
             scope_cache: RwLock::new(HashMap::new()),
         }
     }
@@ -64,6 +67,11 @@ impl SemanticDatabase {
     /// Get the symbol registry
     pub fn registry(&self) -> &SymbolRegistry {
         &self.registry
+    }
+
+    /// Get the extension registry
+    pub fn extension_registry(&self) -> &ExtensionRegistry {
+        &self.extension_registry
     }
 
     /// Compute scope for a symbol
@@ -228,6 +236,26 @@ impl SemanticDatabase {
                 if let Some(result) = self.find_in_inherited_protocols(&parent_dyn, name) {
                     return Some(result);
                 }
+            }
+        }
+
+        None
+    }
+
+    /// Find a type parameter in an extension's referenced type parameters.
+    ///
+    /// Extensions reference type parameters from their target struct. When resolving
+    /// names in extension methods, we need to check these referenced parameters.
+    fn find_in_extension_type_params(
+        &self,
+        extension: &Arc<dyn Symbol<KestrelLanguage>>,
+        name: &str,
+    ) -> Option<SymbolResolution> {
+        let target_beh = extension.extension_target_behavior()?;
+
+        for type_param in target_beh.referenced_type_parameters() {
+            if type_param.metadata().name().value == name {
+                return Some(SymbolResolution::Found(vec![type_param.metadata().id()]));
             }
         }
 
@@ -453,9 +481,17 @@ impl Db for SemanticDatabase {
                 };
             }
 
-            // Check inherited associated types from parent protocols
-            // (conformances are resolved after scope computation, so we check at lookup time)
+            // Check type parameters for extensions
+            // Extensions reference type parameters from their target type
             if let Some(symbol) = self.symbol_by_id(id) {
+                if symbol.metadata().kind() == KestrelSymbolKind::Extension {
+                    if let Some(result) = self.find_in_extension_type_params(&symbol, &name) {
+                        return result;
+                    }
+                }
+
+                // Check inherited associated types from parent protocols
+                // (conformances are resolved after scope computation, so we check at lookup time)
                 if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
                     if let Some(result) = self.find_in_inherited_protocols(&symbol, &name) {
                         return result;
@@ -807,7 +843,31 @@ impl Db for SemanticDatabase {
         let checker = VisibilityChecker::new(&context_symbol);
 
         for (index, segment) in path.iter().enumerate().skip(1) {
-            let matches = checker.find_visible_children(&current_symbol, segment);
+            let mut matches = checker.find_visible_children(&current_symbol, segment);
+
+            // If no direct children match, search extensions for static methods
+            // This handles cases like Point.origin() where origin is a static method in an extension
+            if matches.is_empty() && current_symbol.metadata().kind() == KestrelSymbolKind::Struct {
+                let current_id = current_symbol.metadata().id();
+                let extensions = self.get_extensions_for(current_id);
+
+                // Search all extensions for static methods with the given name
+                for extension in extensions {
+                    for child in extension.metadata().children() {
+                        if child.metadata().name().value == *segment
+                            && child.metadata().kind() == KestrelSymbolKind::Function
+                            && checker.is_visible(&child)
+                        {
+                            // Check if it's a static method (no receiver)
+                            if let Some(callable) = child.callable_behavior() {
+                                if callable.is_static() {
+                                    matches.push(child);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Last segment: handle overloads
             if index == path.len() - 1 {
@@ -874,5 +934,20 @@ impl Db for SemanticDatabase {
             .visible_children()
             .into_iter()
             .find(|child| child.metadata().name().value == name)
+    }
+
+    fn register_extension(
+        &self,
+        target_id: SymbolId,
+        extension: Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
+    ) {
+        self.extension_registry.register(target_id, extension);
+    }
+
+    fn get_extensions_for(
+        &self,
+        target_id: SymbolId,
+    ) -> Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>> {
+        self.extension_registry.get_extensions_for(target_id)
     }
 }

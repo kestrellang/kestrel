@@ -50,8 +50,8 @@ impl Validator for StaticContextValidator {
         });
 
         if let Some(data) = function_data {
-            // Static is only valid inside structs or protocols
-            let in_valid_context = ctx.in_struct || ctx.in_protocol;
+            // Static is only valid inside structs, protocols, or extensions
+            let in_valid_context = ctx.in_struct || ctx.in_protocol || ctx.in_extension;
 
             if data.is_static() && !in_valid_context {
                 let name = &ctx.symbol.metadata().name().value;

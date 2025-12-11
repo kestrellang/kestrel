@@ -14,8 +14,8 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::database::Db;
 use crate::resolvers::{
-    FieldResolver, FunctionResolver, ImportResolver, InitializerResolver, ModuleResolver,
-    ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver,
+    ExtensionResolver, FieldResolver, FunctionResolver, ImportResolver, InitializerResolver,
+    ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver,
 };
 use crate::tree::SourceMap;
 
@@ -99,6 +99,7 @@ impl ResolverRegistry {
         resolvers.insert(SyntaxKind::TypeAliasDeclaration, Box::new(TypeAliasResolver));
         resolvers.insert(SyntaxKind::ProtocolDeclaration, Box::new(ProtocolResolver));
         resolvers.insert(SyntaxKind::StructDeclaration, Box::new(StructResolver));
+        resolvers.insert(SyntaxKind::ExtensionDeclaration, Box::new(ExtensionResolver));
         resolvers.insert(SyntaxKind::FieldDeclaration, Box::new(FieldResolver));
         resolvers.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionResolver));
         resolvers.insert(SyntaxKind::InitializerDeclaration, Box::new(InitializerResolver));

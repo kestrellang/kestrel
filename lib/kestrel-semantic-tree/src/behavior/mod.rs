@@ -2,6 +2,7 @@ pub mod callable;
 pub mod conformances;
 pub mod conforms_to;
 pub mod executable;
+pub mod extension_target;
 pub mod function_data;
 pub mod generics;
 pub mod implements;
@@ -17,6 +18,7 @@ pub enum KestrelBehaviorKind {
     Conformances,
     ConformsTo,
     Executable,
+    ExtensionTarget,
     FlattenedProtocol,
     FunctionData,
     Generics,

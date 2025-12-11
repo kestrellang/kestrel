@@ -7,6 +7,7 @@
 //! - Type aliases
 //! - Associated types
 //! - Import statements
+//! - Extensions with conformances
 
 mod structs;
 mod functions;
@@ -15,3 +16,4 @@ mod protocol_method_linking;
 mod type_aliases;
 mod associated_types;
 mod imports;
+mod extensions;

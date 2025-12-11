@@ -10,6 +10,7 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData,
+    ExtensionBodyItem, ExtensionDeclarationData,
     FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterData,
     ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructBodyItem, StructDeclarationData,
     TypeAliasDeclarationData,
@@ -446,4 +447,46 @@ pub fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarat
     sink.add_token(SyntaxKind::Semicolon, data.semicolon_span);
 
     sink.finish_node(); // TypeAliasDeclaration
+}
+
+/// Emit events for an extension declaration
+///
+/// This is the single source of truth for extension declaration emission.
+pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarationData) {
+    sink.start_node(SyntaxKind::ExtensionDeclaration);
+
+    sink.add_token(SyntaxKind::Extend, data.extend_span);
+
+    // Emit target type (e.g., Box[T, Int])
+    emit_ty_variant(sink, &data.target_type);
+
+    // Emit conformance list if present
+    if let Some(conf) = data.conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
+    // Emit where clause if present
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::ExtensionBody);
+    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+
+    for item in data.body {
+        emit_extension_body_item(sink, item);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.finish_node(); // ExtensionBody
+
+    sink.finish_node(); // ExtensionDeclaration
+}
+
+/// Emit events for an extension body item
+fn emit_extension_body_item(sink: &mut EventSink, item: ExtensionBodyItem) {
+    match item {
+        ExtensionBodyItem::Function(data) => emit_function_declaration(sink, data),
+        ExtensionBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
+    }
 }

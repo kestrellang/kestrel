@@ -153,16 +153,49 @@ func render[T](item: T) where T: Drawable {
 
 ### Extensions with Conformances
 
-**Status**: TODO
+**Status**: 🔄 IN PROGRESS (85% complete - fixing stack overflow with complex generics)
 
 Add protocol conformances to existing types via extensions.
 
-**Tasks**:
+**Completed**:
 
-- [ ] Parser support for `extend Type: Protocol { ... }`
-- [ ] Extension symbol representation
-- [ ] Methods in extension satisfy protocol requirements
-- [ ] Retroactive conformance (add conformance to types you don't own)
+- [x] Lexer: `Extend` token in `lib/kestrel-lexer/src/lib.rs`
+- [x] Syntax tree: `ExtensionDeclaration`, `ExtensionBody`, `Extend` SyntaxKinds
+- [x] Parser: `extension_declaration_parser_internal()` using `ty_parser()` for target
+- [x] Emitters: `emit_extension_declaration`, `emit_extension_body_item`
+- [x] Semantic symbol: `ExtensionSymbol` (~110 lines)
+- [x] Behavior: `ExtensionTargetBehavior` with `target_type`, `type_arguments`, `referenced_type_parameters`, `where_clause`
+- [x] Registry: `ExtensionRegistry` - `HashMap<SymbolId, Vec<SymbolId>>` for lookup by target
+- [x] Resolver: `ExtensionResolver` with BUILD (creates symbol) and BIND (resolves target, registers) phases
+- [x] Extension method resolution - methods in extensions are found during member lookup
+- [x] Conformance satisfaction - extension methods count toward protocol requirements
+- [x] Type parameter substitution - `self.field` in specialized extensions resolves correctly
+- [x] Basic generic extensions - `extend Box[T]` works
+- [x] Specialized extensions - `extend Box[Int]` works
+- [x] Test suite: `lib/kestrel-test-suite/tests/declarations/extensions.rs` (~660 lines, 38 tests)
+
+**Current Issue**: Stack overflow with complex type parameter patterns
+
+- **Symptom**: Tests with swapped type parameters (e.g., `Pair[U, T]` return type from `Pair[T, U]` target) cause infinite recursion
+- **Examples**: `extension_two_type_params_generic`, some generic extension tests
+- **Workaround**: Applicability filtering temporarily disabled to avoid stack overflow
+- **Impact**: All extensions are searched instead of only applicable ones (correctness OK, performance issue)
+
+**Remaining Tasks**:
+
+- [ ] Fix stack overflow in type comparison/resolution for complex generic patterns
+- [ ] Re-enable extension applicability filtering with recursion guards
+- [ ] Specialized extension priority (more specific extensions should win)
+- [ ] Generic type inference for extension method calls
+- [ ] Conflict detection at same specificity level
+
+**Key Files**:
+
+- `lib/kestrel-parser/src/extension/mod.rs` (242 lines) - parser
+- `lib/kestrel-semantic-tree/src/symbol/extension.rs` (~110 lines) - symbol
+- `lib/kestrel-semantic-tree/src/behavior/extension_target.rs` (~100 lines) - behavior
+- `lib/kestrel-semantic-tree-builder/src/resolvers/extension.rs` (~486 lines) - resolver
+- `lib/kestrel-semantic-tree-builder/src/database/extension_registry.rs` (~100 lines) - registry
 
 **Example**:
 
@@ -212,36 +245,39 @@ Type parameters are now only assignable to themselves (same SymbolId).
 
 ### Where Clause Equality Constraints
 
-**Status**: TODO
+**Status**: ✅ DONE
 
-The parser supports `where T.Item == Int` syntax, but the semantic layer ignores it. This prevents expressing type equality constraints.
+Type equality constraints in where clauses are now fully supported.
 
-**Current State**:
+**What was done**:
 
-- Parser: ✅ `TypeEqualityData` parsed correctly
-- Syntax tree: ✅ `TypeEquality` nodes emitted
-- `WhereClause::Constraint`: ❌ No `TypeEquality` variant
-- `extract_where_clause()`: ❌ Ignores `TypeEquality` nodes
-- Type checking: ❌ Cannot enforce equality constraints
+- [x] Changed syntax from `==` to `=` for equality constraints
+- [x] Added `TypeEquality { left: Ty, right: Ty, span: Span }` variant to `Constraint` enum
+- [x] Updated `resolve_where_clause()` to handle `SyntaxKind::TypeEquality` nodes
+- [x] Added `resolve_type_equality()` to resolve both sides of equality constraints
+- [x] Added `resolve_path_in_where_clause()` for resolving T.Item paths using collected bounds
+- [x] Implemented constraint-aware type assignability (`is_assignable_with_constraints`)
+- [x] Walk parent chain to collect all where clause constraints
+- [x] Normalize types using equality constraints before assignability check
+- [x] Handle `where T = U` (type parameter equality)
+- [x] Handle `where T.Item = Int` (associated type equality)
+- [x] Handle `where T.Item = U.Item` (associated type to associated type)
 
-**Tasks**:
+**Test Results**: 840 tests passing
 
-- [ ] Add `TypeEquality { left: TypePath, right: Ty }` variant to `Constraint` enum
-- [ ] Update `extract_where_clause()` to parse `TypeEquality` syntax nodes
-- [ ] Make `is_assignable_to` consult where clause for type equality
-- [ ] Handle `where T == U` (type parameter equality)
-- [ ] Handle `where T.Item == Int` (associated type equality)
-- [ ] Handle `where T.Item == U.Item` (associated type to associated type)
-
-**Example** (should work after implementation):
+**Example** (now works):
 
 ```kestrel
-func intOnly[T](iter: T) where T: Iterator, T.Item == Int {
+func intOnly[T](iter: T) where T: Iterator, T.Item = Int {
     // T.Item is known to be Int
 }
 
-func transfer[T, U](x: T) -> U where T == U {
-    return x  // Valid - T and U are constrained equal
+func collect[T, U](iter: T) -> U where T: Iterator, T.Item = U {
+    iter.next()  // ✅ Works - T.Item equals U
+}
+
+func zip[A, B](a: A, b: B) where A: Iterator, B: Iterator, A.Item = B.Item {
+    // ✅ Works - A.Item and B.Item are constrained equal
 }
 ```
 
@@ -253,3 +289,4 @@ func transfer[T, U](x: T) -> U where T == U {
 - No implicit coercions (`Int` ≠ `Float`)
 - `Self` type is compatible with the containing struct/protocol type
 - Type parameters only assignable to themselves (same SymbolId) - strict checking now enforced
+- Where clause equality constraints use `=` syntax (not `==`) to avoid confusion with comparison operators

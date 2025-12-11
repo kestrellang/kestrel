@@ -43,6 +43,8 @@ pub enum SyntaxKind {
     ProtocolBody,
     StructDeclaration,
     StructBody,
+    ExtensionDeclaration,
+    ExtensionBody,
     ImportDeclaration,
     ImportItem,
     ModuleDeclaration,
@@ -143,6 +145,7 @@ pub enum SyntaxKind {
     Consuming,
     Continue,
     Else,
+    Extend,
     Fileprivate,
     Func,
     If,
@@ -244,6 +247,7 @@ impl From<Token> for SyntaxKind {
             Token::Consuming => SyntaxKind::Consuming,
             Token::Continue => SyntaxKind::Continue,
             Token::Else => SyntaxKind::Else,
+            Token::Extend => SyntaxKind::Extend,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
@@ -322,6 +326,8 @@ impl Language for KestrelLanguage {
         const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
         const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
         const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
+        const EXTENSION_DECLARATION: u16 = SyntaxKind::ExtensionDeclaration as u16;
+        const EXTENSION_BODY: u16 = SyntaxKind::ExtensionBody as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
         const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
@@ -401,6 +407,7 @@ impl Language for KestrelLanguage {
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const CONTINUE: u16 = SyntaxKind::Continue as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
+        const EXTEND: u16 = SyntaxKind::Extend as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
@@ -470,6 +477,8 @@ impl Language for KestrelLanguage {
             PROTOCOL_BODY => SyntaxKind::ProtocolBody,
             STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
             STRUCT_BODY => SyntaxKind::StructBody,
+            EXTENSION_DECLARATION => SyntaxKind::ExtensionDeclaration,
+            EXTENSION_BODY => SyntaxKind::ExtensionBody,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
             IMPORT_ITEM => SyntaxKind::ImportItem,
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
@@ -549,6 +558,7 @@ impl Language for KestrelLanguage {
             CONSUMING => SyntaxKind::Consuming,
             CONTINUE => SyntaxKind::Continue,
             ELSE => SyntaxKind::Else,
+            EXTEND => SyntaxKind::Extend,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,

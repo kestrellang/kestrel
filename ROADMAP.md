@@ -277,22 +277,30 @@
   - [x] Track which protocol a method satisfies when struct conforms
   - [x] Resolve protocol method calls to concrete implementations
   - [x] ProtocolImplementationBehavior for method bindings
-- [ ] Extensions with Conformances
-  - [ ] `extend Type: Protocol { ... }` syntax
-  - [ ] ExtensionSymbol and extension registry
-  - [ ] Methods in extension satisfy protocol requirements
-  - [ ] Retroactive conformance (add conformance to types you don't own)
+- [ ] Extensions with Conformances (IN PROGRESS - 85% complete)
+  - [x] `extend Type: Protocol { ... }` syntax (lexer + parser)
+  - [x] ExtensionSymbol and ExtensionTargetBehavior
+  - [x] Extension registry (HashMap by target type)
+  - [x] ExtensionResolver (BUILD + BIND phases)
+  - [x] Methods in extension satisfy protocol requirements
+  - [x] Retroactive conformance (add conformance to types you don't own)
+  - [x] Extension method resolution (find methods in extensions)
+  - [x] Type parameter substitution in extension methods (self.field resolves correctly)
+  - [x] Generic extensions (`extend Box[T]` works for basic cases)
+  - [x] Specialized extensions (`extend Box[Int]` works)
+  - [ ] Generic extension applicability checking (stack overflow with complex type parameter patterns)
+  - [ ] Specialized extension priority (Box[Int] should win over Box[T])
 - [x] Tighter Type Parameter Assignability
   - [x] Type parameters only assignable to themselves (same SymbolId)
   - [x] `T` not assignable to `U`, `T` not assignable to `Int`
   - [x] Substitutions stored in Call expression for type checking
   - [x] Self substitution for protocol method calls
   - [x] Generic struct field access applies substitutions
-- [ ] Where Clause Equality Constraints
-  - [ ] `TypeEquality` variant in `WhereClause::Constraint`
-  - [ ] Extract equality constraints from syntax (`where T.Item == Int`)
-  - [ ] Type checking consults where clause for equality
-  - [ ] Support `T == U`, `T.Item == Int`, `T.Item == U.Item`
+- [x] Where Clause Equality Constraints ✓
+  - [x] `TypeEquality` variant in `WhereClause::Constraint`
+  - [x] Extract equality constraints from syntax (`where T.Item = Int`)
+  - [x] Type checking consults where clause for equality
+  - [x] Support `T = U`, `T.Item = Int`, `T.Item = U.Item`
 
 ## Phase 7: Type Inference
 
@@ -369,41 +377,41 @@
 
 ## Current Status
 
-**Phase**: Phase 6 (Generics & Protocols) - ~98% complete
-**Progress**: Phases 1-5 complete. Phase 6: All major features done except extensions and equality constraints.
+**Phase**: Phase 6 (Generics & Protocols) - ~97% complete
+**Progress**: Phases 1-5 complete. Phase 6: Extensions in progress (~85% done).
+
+**Currently In Progress (Phase 6)**:
+
+- Extensions with Conformances (IN PROGRESS - 85% complete)
+  - ✅ Lexer: `extend` token
+  - ✅ Parser: `extension_declaration_parser_internal()` with type expression target
+  - ✅ Syntax tree: `ExtensionDeclaration`, `ExtensionBody`, `Extend` SyntaxKinds
+  - ✅ Semantic symbol: `ExtensionSymbol` (~110 lines)
+  - ✅ Behavior: `ExtensionTargetBehavior` with target_type, type_arguments, where_clause
+  - ✅ Registry: `ExtensionRegistry` - `HashMap<SymbolId, Vec<SymbolId>>` by target
+  - ✅ Resolver: `ExtensionResolver` BUILD + BIND phases
+  - ✅ Extension method resolution - methods in extensions are found during lookup
+  - ✅ Conformance satisfaction - extension methods count toward protocol requirements
+  - ✅ Type parameter substitution - `self.field` in `extend Box[Int]` correctly resolves to `Int`
+  - ✅ Basic generic extensions work - `extend Box[T]`, `extend Box[Int]`
+  - ⚠️  Stack overflow with complex type parameter patterns (e.g., `Pair[U, T]` from `Pair[T, U]`)
+  - 🔄 Applicability filtering disabled to avoid stack overflow (all extensions searched)
 
 **Recently Completed (Phase 6)**:
 
 - Tighter Type Parameter Assignability ✓
-  - Type parameters only assignable to themselves (same SymbolId)
-  - `T` not assignable to `U`, `T` not assignable to `Int`
-  - Substitutions stored in Call expression for type checking
-  - Self substitution for protocol method calls on type parameters
-  - Generic struct field access applies substitutions correctly
 - Protocol Method Linking ✓
-  - Track which protocol a method satisfies when struct conforms
-  - Resolve protocol method calls to concrete implementations
-  - `ProtocolImplementationBehavior` for method bindings
 - Generic Constraint Enforcement ✓
-  - Method calls on type parameters via protocol bounds (`T.method()` where `T: Protocol`)
-  - Self substitution in protocol method return types and parameters
-  - Ambiguous method detection across multiple bounds
-  - Protocol inheritance chain traversal for method lookup
-  - Call-site constraint verification
 - Associated Types ✓
-  - Protocol associated type declarations (`type Item` in protocols)
-  - AssociatedTypeSymbol representation with constraints and defaults
-  - Qualified type path resolution (`T.Item`, `C.Iter.Item`)
-  - Associated type bindings and constraint satisfaction validation
 - Static Methods on Type Parameters ✓
-  - Protocol initializer declarations (`init()` in protocols)
-  - Calling initializers on type parameters: `T()`
-  - Type parameter validation (cannot be used as standalone values)
+- Where Clause Equality Constraints ✓
 
 **Next Tasks**:
 
-1. Extensions with conformances (Phase 6) - `extend Type: Protocol { ... }`
-2. Where clause equality constraints (Phase 6) - `where T.Item == Int`
+1. Fix stack overflow in complex type parameter patterns (e.g., swapped type params in return types)
+2. Re-enable extension applicability filtering with proper recursion guards
+3. Implement specialized extension priority (more specific extensions win)
+4. Generic type inference for extension method calls (T should be inferred from arguments)
 
 ## Notes
 

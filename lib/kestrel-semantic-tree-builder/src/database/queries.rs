@@ -256,6 +256,19 @@ pub trait Db {
         parent: SymbolId,
         name: &str,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;
+
+    /// Register an extension for a target type
+    fn register_extension(
+        &self,
+        target_id: SymbolId,
+        extension: Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
+    );
+
+    /// Get all extensions registered for a target type
+    fn get_extensions_for(
+        &self,
+        target_id: SymbolId,
+    ) -> Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>>;
 }
 
 /// Helper to get ImportDataBehavior from a symbol

@@ -125,3 +125,23 @@ impl IntoDiagnostic for TooManyTypeArgumentsError {
             ])
     }
 }
+
+/// Error when type parameters are used in the wrong position in an extension.
+pub struct TypeParameterWrongPositionError {
+    pub span: Span,
+    pub message: String,
+}
+
+impl IntoDiagnostic for TypeParameterWrongPositionError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(self.message.clone())
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("type parameters must appear in their declared positions")
+            ])
+            .with_notes(vec![
+                "Extensions cannot reorder type parameters. Use the same order as the type declaration.".to_string()
+            ])
+    }
+}

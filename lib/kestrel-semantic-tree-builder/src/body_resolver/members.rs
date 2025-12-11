@@ -124,25 +124,43 @@ pub fn resolve_member_access(
         }
     };
 
-    // 2. Find child with that name
+    // 2. Find child with that name - first in direct children, then in extensions
     let member = container
         .metadata()
         .children()
         .into_iter()
         .find(|c| c.metadata().name().value == member_name);
 
+    // Get applicable extensions once for reuse
+    let container_id = container.metadata().id();
+    let extensions = ctx.db.get_extensions_for(container_id);
+    // Filter to only applicable extensions (now with cycle detection in substitutions)
+    let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);
+
+    // If not found in direct children, search extensions
     let member = match member {
         Some(m) => m,
         None => {
-            let error = NoSuchMemberError {
-                member_span,
-                member_name: member_name.to_string(),
-                base_span,
-                base_type: format_type(base_ty),
-            };
-            ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
-            return Expression::error(full_span);
+            // Try to find in applicable extensions
+            let extension_member = applicable_extensions
+                .iter()
+                .flat_map(|ext| ext.metadata().children())
+                .find(|child| child.metadata().name().value == member_name);
+
+            match extension_member {
+                Some(m) => m,
+                None => {
+                    let error = NoSuchMemberError {
+                        member_span,
+                        member_name: member_name.to_string(),
+                        base_span,
+                        base_type: format_type(base_ty),
+                    };
+                    ctx.diagnostics
+                        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                    return Expression::error(full_span);
+                }
+            }
         }
     };
 
@@ -178,7 +196,11 @@ pub fn resolve_member_access(
                 let mut result = access.access(base.clone(), full_span);
                 // Apply substitutions from the parent's type to the member type
                 // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
-                if let Some((_, substitutions)) = base_ty.as_struct_with_subs() {
+
+                // First, resolve SelfType to the actual type if needed
+                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+
+                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
                     result.ty = result.ty.apply_substitutions(substitutions);
                 }
                 return result;
@@ -188,8 +210,8 @@ pub fn resolve_member_access(
 
     // 5. If it's a function, create a MethodRef (for method calls like obj.method())
     if member.metadata().kind() == KestrelSymbolKind::Function {
-        // Find all methods with this name (for overloads)
-        let candidates: Vec<SymbolId> = container
+        // Find all methods with this name (for overloads) from direct children
+        let mut candidates: Vec<SymbolId> = container
             .metadata()
             .children()
             .into_iter()
@@ -199,6 +221,17 @@ pub fn resolve_member_access(
             })
             .map(|c| c.metadata().id())
             .collect();
+
+        // Also collect methods from applicable extensions
+        for extension in &applicable_extensions {
+            for child in extension.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Function
+                    && child.metadata().name().value == member_name
+                {
+                    candidates.push(child.metadata().id());
+                }
+            }
+        }
 
         return Expression::method_ref(base, candidates, member_name.to_string(), full_span);
     }
@@ -422,8 +455,8 @@ pub fn resolve_member_call(
         }
     };
 
-    // Find method(s) with this name
-    let methods: Vec<Arc<dyn Symbol<KestrelLanguage>>> = container
+    // Find method(s) with this name - first in direct children
+    let mut methods: Vec<Arc<dyn Symbol<KestrelLanguage>>> = container
         .metadata()
         .children()
         .into_iter()
@@ -432,6 +465,25 @@ pub fn resolve_member_call(
                 && c.metadata().name().value == member_name
         })
         .collect();
+
+    // If not found in direct children, search extensions
+    if methods.is_empty() {
+        let container_id = container.metadata().id();
+        let extensions = ctx.db.get_extensions_for(container_id);
+
+        // Filter to applicable extensions, sorted by specificity (now with cycle detection)
+        let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);
+
+        for extension in applicable_extensions {
+            for child in extension.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Function
+                    && child.metadata().name().value == member_name
+                {
+                    methods.push(child);
+                }
+            }
+        }
+    }
 
     if methods.is_empty() {
         // Report error: no such method
@@ -457,8 +509,15 @@ pub fn resolve_member_call(
                     }
                 }
 
-                let return_ty = callable.return_type().clone();
+                let mut return_ty = callable.return_type().clone();
                 let method_id = method.metadata().id();
+
+                // Apply substitutions from the base type to the return type
+                // e.g., for Box[Int].get() where get returns T, substitute T with Int
+                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                    return_ty = return_ty.apply_substitutions(substitutions);
+                }
 
                 // Create method ref and then call
                 let method_ref = Expression::method_ref(
@@ -918,4 +977,222 @@ fn collect_protocol_static_methods(
             }
         }
     }
+}
+
+/// Filter extensions to find those applicable to the given type instance.
+///
+/// Returns extensions sorted by specificity (most specific first).
+/// An extension is applicable if:
+/// 1. Its type arguments can be unified with the actual type's arguments
+/// 2. Any where clause constraints are satisfied (TODO: implement constraint checking)
+///
+/// For example:
+/// - `extend Box[T]` applies to `Box[Int]`, `Box[String]`, etc.
+/// - `extend Box[Int]` only applies to `Box[Int]`
+/// - `extend Pair[T, Int]` applies to `Pair[String, Int]` but not `Pair[String, Bool]`
+fn filter_applicable_extensions(
+    extensions: Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>>,
+    actual_ty: &Ty,
+    ctx: &BodyResolutionContext,
+) -> Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>> {
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+
+    // Get substitutions from actual type
+    let actual_subs = match actual_ty.as_struct_with_subs() {
+        Some((_, subs)) => subs,
+        None => {
+            // Not a struct type - no extensions apply
+            return Vec::new();
+        }
+    };
+
+    // Filter extensions by applicability
+    let mut applicable: Vec<_> = extensions
+        .into_iter()
+        .filter_map(|ext| {
+            // Get the extension's target type
+            let behaviors = ext.metadata().behaviors();
+            let target_behavior = behaviors
+                .iter()
+                .find(|b| b.kind() == KestrelBehaviorKind::ExtensionTarget)?;
+
+            let target_behavior = target_behavior
+                .as_ref()
+                .downcast_ref::<ExtensionTargetBehavior>()?;
+
+            let target_ty = target_behavior.target_type();
+
+            // Extract type arguments from the extension's target type
+            let extension_type_args = match target_ty.as_struct_with_subs() {
+                Some((_, subs)) => subs.types().cloned().collect::<Vec<_>>(),
+                None => Vec::new(),
+            };
+
+            // Check if this extension is applicable to the actual type
+            if is_extension_applicable(&extension_type_args, actual_subs) {
+                // Count how many concrete (non-type-parameter) arguments the extension has
+                // This is the "specificity" - more concrete args = more specific
+                let specificity = extension_type_args
+                    .iter()
+                    .filter(|arg| !arg.is_type_parameter())
+                    .count();
+                Some((ext, specificity))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Sort by specificity (most specific first)
+    applicable.sort_by_key(|(_, specificity)| std::cmp::Reverse(*specificity));
+
+    // Return just the extensions, without specificity scores
+    applicable.into_iter().map(|(ext, _)| ext).collect()
+}
+
+/// Check if an extension's type arguments are applicable to an actual type's substitutions.
+///
+/// This performs a simple unification check:
+/// - Type parameters in the extension match any concrete type
+/// - Concrete types in the extension must match exactly
+fn is_extension_applicable(
+    extension_type_args: &[Ty],
+    actual_subs: &kestrel_semantic_tree::ty::Substitutions,
+) -> bool {
+    // Collect actual type arguments in order
+    let actual_types: Vec<&Ty> = actual_subs.types().collect();
+
+    // Must have same number of type arguments
+    if extension_type_args.len() != actual_types.len() {
+        return false;
+    }
+
+    // If both have no type arguments (e.g., Point with no generics), they match
+    if extension_type_args.is_empty() && actual_types.is_empty() {
+        return true;
+    }
+
+    // Check each type argument
+    for (ext_arg, actual_arg) in extension_type_args.iter().zip(actual_types.iter()) {
+        if ext_arg.is_type_parameter() {
+            // Extension has a type parameter here - matches anything
+            continue;
+        } else {
+            // Extension has a concrete type - must match exactly
+            // Use types_match to avoid infinite recursion from is_assignable_to
+            if !types_match_simple(ext_arg, actual_arg) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// Simple type matching that checks structural equality without recursion.
+/// This is used to avoid infinite loops during extension applicability checking.
+///
+/// IMPORTANT: This function ONLY compares types at the top level - it does NOT
+/// recursively compare substitutions. For example, Box[Int] matches Box[String]
+/// because they're both Box (same struct symbol). The caller must handle
+/// type argument comparison separately.
+fn types_match_simple(a: &Ty, b: &Ty) -> bool {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    match (a.kind(), b.kind()) {
+        // Primitives - direct comparison
+        (TyKind::Unit, TyKind::Unit) => true,
+        (TyKind::Never, TyKind::Never) => true,
+        (TyKind::Bool, TyKind::Bool) => true,
+        (TyKind::String, TyKind::String) => true,
+        (TyKind::Int(a_bits), TyKind::Int(b_bits)) => a_bits == b_bits,
+        (TyKind::Float(a_bits), TyKind::Float(b_bits)) => a_bits == b_bits,
+
+        // Structs - compare by symbol ID only, NOT substitutions
+        // The caller must check substitutions separately to avoid infinite recursion
+        (TyKind::Struct { symbol: a_sym, .. }, TyKind::Struct { symbol: b_sym, .. }) => {
+            a_sym.metadata().id() == b_sym.metadata().id()
+        }
+
+        // Type parameters - compare by symbol ID
+        (TyKind::TypeParameter(a_param), TyKind::TypeParameter(b_param)) => {
+            a_param.metadata().id() == b_param.metadata().id()
+        }
+
+        // Error types match anything (to suppress cascading errors)
+        (TyKind::Error, _) | (_, TyKind::Error) => true,
+
+        // Different kinds don't match
+        _ => false,
+    }
+}
+
+/// Resolve SelfType to the concrete type with substitutions.
+///
+/// When `self` is used in an extension method like `extend Box[Int]`, its type is SelfType,
+/// but we need the actual type `Box[Int]` (with substitutions) for member access.
+pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty {
+    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+
+    match ty.kind() {
+        TyKind::SelfType => {
+            // Get the function symbol, then its parent (struct/protocol/extension)
+            if let Some(function) = ctx.db.symbol_by_id(ctx.function_id) {
+                if let Some(parent) = function.metadata().parent() {
+                    match parent.metadata().kind() {
+                        KestrelSymbolKind::Extension => {
+                            // For extension methods, get the target type from ExtensionTargetBehavior
+                            // This gives us the type with substitutions (e.g., Box[Int] not Box[T])
+                            if let Some(target_beh) = parent.extension_target_behavior() {
+                                let target_ty = target_beh.target_type();
+                                // Make sure target type isn't also SelfType (should never happen, but prevent infinite recursion)
+                                if !matches!(target_ty.kind(), TyKind::SelfType) {
+                                    return target_ty.clone();
+                                }
+                            }
+                        }
+                        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
+                            // For struct/protocol methods, SelfType is correct as-is
+                            // It will be substituted during method calls
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            ty.clone()
+        }
+        _ => ty.clone(),
+    }
+}
+
+/// Find a member in extensions targeting the given container type.
+///
+/// This searches all extensions registered for the container type and looks for
+/// a child with the matching name. Returns the first matching member found.
+fn find_member_in_extensions(
+    container: &Arc<dyn Symbol<KestrelLanguage>>,
+    base_ty: &Ty,
+    member_name: &str,
+    ctx: &BodyResolutionContext,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    // Get the container's ID
+    let container_id = container.metadata().id();
+
+    // Get all extensions for this type from the registry
+    let extensions = ctx.db.get_extensions_for(container_id);
+
+    // Filter to only applicable extensions (now with cycle detection in substitutions)
+    let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);
+
+    // Search through each extension's children
+    for extension in applicable_extensions {
+        for child in extension.metadata().children() {
+            if child.metadata().name().value == member_name {
+                return Some(child);
+            }
+        }
+    }
+
+    None
 }

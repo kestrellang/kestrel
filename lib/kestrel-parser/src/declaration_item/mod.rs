@@ -16,6 +16,7 @@ use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
 use crate::protocol::{ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal};
 use crate::r#struct::{StructDeclaration, parse_struct_declaration, struct_declaration_parser_internal};
+use crate::extension::{ExtensionDeclaration, parse_extension_declaration, extension_declaration_parser_internal};
 use crate::field::{FieldDeclaration, parse_field_declaration};
 use crate::function::{FunctionDeclaration, parse_function_declaration};
 use crate::type_alias::{TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal};
@@ -27,10 +28,12 @@ use crate::common::{
     // Shared emitters
     emit_module_declaration, emit_import_declaration,
     emit_struct_declaration, emit_protocol_declaration,
+    emit_extension_declaration,
     emit_function_declaration, emit_field_declaration,
     emit_type_alias_declaration,
     // Shared data types
     StructDeclarationData, ProtocolDeclarationData,
+    ExtensionDeclarationData,
     FunctionDeclarationData, FieldDeclarationData,
     TypeAliasDeclarationData,
 };
@@ -42,6 +45,7 @@ pub enum DeclarationItem {
     Import(ImportDeclaration),
     Protocol(ProtocolDeclaration),
     Struct(StructDeclaration),
+    Extension(ExtensionDeclaration),
     Field(FieldDeclaration),
     Function(FunctionDeclaration),
     TypeAlias(TypeAliasDeclaration),
@@ -55,6 +59,7 @@ impl DeclarationItem {
             DeclarationItem::Import(decl) => &decl.span,
             DeclarationItem::Protocol(decl) => &decl.span,
             DeclarationItem::Struct(decl) => &decl.span,
+            DeclarationItem::Extension(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
             DeclarationItem::Function(decl) => &decl.span,
             DeclarationItem::TypeAlias(decl) => &decl.span,
@@ -68,6 +73,7 @@ impl DeclarationItem {
             DeclarationItem::Import(decl) => &decl.syntax,
             DeclarationItem::Protocol(decl) => &decl.syntax,
             DeclarationItem::Struct(decl) => &decl.syntax,
+            DeclarationItem::Extension(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
             DeclarationItem::Function(decl) => &decl.syntax,
             DeclarationItem::TypeAlias(decl) => &decl.syntax,
@@ -82,6 +88,7 @@ enum DeclarationItemData {
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
     Protocol(ProtocolDeclarationData),
     Struct(StructDeclarationData),
+    Extension(ExtensionDeclarationData),
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
@@ -135,6 +142,9 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
     let struct_parser = struct_declaration_parser_internal()
         .map(DeclarationItemData::Struct);
 
+    let extension_parser = extension_declaration_parser_internal()
+        .map(DeclarationItemData::Extension);
+
     let function_parser = function_declaration_parser_internal()
         .map(DeclarationItemData::Function);
 
@@ -149,6 +159,7 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
         .or(import_parser)
         .or(protocol_parser)
         .or(struct_parser)
+        .or(extension_parser)
         .or(function_parser)
         .or(field_parser)
         .or(type_alias_parser)
@@ -179,6 +190,9 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         DeclarationItemData::Struct(data) => {
             emit_struct_declaration(sink, data);
         }
+        DeclarationItemData::Extension(data) => {
+            emit_extension_declaration(sink, data);
+        }
         DeclarationItemData::Function(data) => {
             emit_function_declaration(sink, data);
         }
@@ -204,12 +218,13 @@ where
     if try_parse(source, tokens.clone(), sink, parse_import_declaration) { return; }
     if try_parse(source, tokens.clone(), sink, parse_protocol_declaration) { return; }
     if try_parse(source, tokens.clone(), sink, parse_struct_declaration) { return; }
+    if try_parse(source, tokens.clone(), sink, parse_extension_declaration) { return; }
     if try_parse(source, tokens.clone(), sink, parse_function_declaration) { return; }
     if try_parse(source, tokens.clone(), sink, parse_field_declaration) { return; }
     if try_parse(source, tokens, sink, parse_type_alias_declaration) { return; }
 
     // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, protocol, struct, extension, function, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -391,5 +406,82 @@ mod tests {
         assert!(has_struct, "Should have StructDeclaration in syntax tree");
         assert_eq!(field_count, 2, "Should have 2 FieldDeclarations in syntax tree");
         assert!(has_init, "Should have InitializerDeclaration in syntax tree");
+    }
+
+    #[test]
+    fn test_extension_followed_by_function() {
+        let source = r#"module Test
+            struct Point { var x: Int; var y: Int }
+            extend Point { func sum() -> Int { return self.x + self.y; } }
+            func test() -> Int { return 1; }"#;
+
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.events();
+
+        // Count function declarations - should be 2 (one in extension, one at module level)
+        let func_count = events.iter().filter(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::FunctionDeclaration)
+        }).count();
+
+        // Count function bodies - should also be 2
+        let func_body_count = events.iter().filter(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::FunctionBody)
+        }).count();
+
+        let has_extension = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::ExtensionDeclaration)
+        });
+
+        assert!(has_extension, "Should have ExtensionDeclaration");
+        assert_eq!(func_count, 2, "Should have 2 FunctionDeclarations (one in extension, one after)");
+        assert_eq!(func_body_count, 2, "Each function should have a FunctionBody");
+    }
+
+    #[test]
+    fn test_extension_followed_by_function_tree_structure() {
+        use crate::event::TreeBuilder;
+
+        let source = r#"module Test
+            struct Point { var x: Int; var y: Int }
+            extend Point { func sum() -> Int { return self.x + self.y; } }
+            func test() -> Int { let p = 1; return p; }"#;
+
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        // Find all FunctionDeclaration nodes
+        fn find_nodes(node: &kestrel_syntax_tree::SyntaxNode, kind: SyntaxKind) -> Vec<kestrel_syntax_tree::SyntaxNode> {
+            let mut result = Vec::new();
+            if node.kind() == kind {
+                result.push(node.clone());
+            }
+            for child in node.children() {
+                result.extend(find_nodes(&child, kind));
+            }
+            result
+        }
+
+        let func_decls = find_nodes(&tree, SyntaxKind::FunctionDeclaration);
+        assert_eq!(func_decls.len(), 2, "Should have 2 FunctionDeclarations");
+
+        // Each FunctionDeclaration should have a FunctionBody child
+        for (i, func_decl) in func_decls.iter().enumerate() {
+            let has_body = func_decl.children().any(|c| c.kind() == SyntaxKind::FunctionBody);
+            assert!(has_body, "FunctionDeclaration #{} should have FunctionBody as direct child", i);
+        }
     }
 }

@@ -371,46 +371,140 @@ fn has_type_arguments_on_first_segment(node: &SyntaxNode) -> bool {
 ///
 /// Handles paths like `identity[String]` or `module.func[Int, Bool]`.
 /// Returns None if no type arguments are present, or Some(vec) with the resolved types.
+///
+/// IMPORTANT: Only extracts type arguments from the FINAL path segment.
+/// For `Box[Int].zero`, the type args `[Int]` belong to `Box`, not to `zero`.
+/// Type args on intermediate segments are handled during type resolution of those segments.
+///
+/// ExprPath structure for "Box[Int].zero":
+/// ExprPath
+///   Identifier "Box"
+///   TypeArgumentList [Int]
+///   Dot
+///   Identifier "zero"
+///
+/// We want to only extract type args that come AFTER the last dot (i.e., on the final segment).
 fn extract_type_arguments_from_path(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Option<Vec<Ty>> {
-    // Look for TypeArgumentList in the path
-    fn find_last_type_arg_list(node: &SyntaxNode) -> Option<SyntaxNode> {
-        let mut last_found = None;
+    // Look for TypeArgumentList only in the FINAL path segment
+    fn find_type_args_on_final_segment(node: &SyntaxNode) -> Option<SyntaxNode> {
+        // Find the ExprPath node (either this node or a child)
+        let expr_path = if node.kind() == SyntaxKind::ExprPath {
+            Some(node.clone())
+        } else {
+            node.children().find(|c| c.kind() == SyntaxKind::ExprPath)
+        };
 
-        // Check Path child first
-        if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
-            // Look for TypeArgumentList in PathElements
-            for element in path_node.children() {
-                if element.kind() == SyntaxKind::PathElement {
-                    for child in element.children() {
-                        if child.kind() == SyntaxKind::TypeArgumentList {
-                            last_found = Some(child);
+        if let Some(expr_path) = expr_path {
+            // Collect all children to analyze the structure
+            let children: Vec<_> = expr_path.children_with_tokens().collect();
+
+            // Find the last Dot token position (if any)
+            let mut last_dot_pos = None;
+            for (i, child) in children.iter().enumerate() {
+                if let Some(token) = child.as_token() {
+                    if token.kind() == SyntaxKind::Dot {
+                        last_dot_pos = Some(i);
+                    }
+                }
+            }
+
+            // If there's a dot, only look for TypeArgumentList AFTER the last dot
+            if let Some(dot_pos) = last_dot_pos {
+                for child in children.iter().skip(dot_pos + 1) {
+                    if let Some(node) = child.as_node() {
+                        if node.kind() == SyntaxKind::TypeArgumentList {
+                            return Some(node.clone());
                         }
                     }
                 }
+                // Multi-segment path but no type args after last dot
+                return None;
             }
-        }
 
-        // Also check direct children for simpler paths
-        for child in node.children() {
-            if child.kind() == SyntaxKind::PathElement {
-                for inner in child.children() {
-                    if inner.kind() == SyntaxKind::TypeArgumentList {
-                        last_found = Some(inner);
+            // No dot - single segment path, check for direct TypeArgumentList
+            for child in children.iter() {
+                if let Some(node) = child.as_node() {
+                    if node.kind() == SyntaxKind::TypeArgumentList {
+                        return Some(node.clone());
                     }
                 }
             }
-            if child.kind() == SyntaxKind::TypeArgumentList {
-                last_found = Some(child);
+
+            return None;
+        }
+
+        // For Path nodes (used in type paths), check PathElements
+        if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
+            let path_elements: Vec<_> = path_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::PathElement)
+                .collect();
+
+            // For multi-segment paths, only extract type args from the LAST element
+            if path_elements.len() > 1 {
+                if let Some(last_element) = path_elements.last() {
+                    for child in last_element.children() {
+                        if child.kind() == SyntaxKind::TypeArgumentList {
+                            return Some(child);
+                        }
+                    }
+                }
+                return None;
+            }
+
+            // Single element path
+            if let Some(only_element) = path_elements.first() {
+                for child in only_element.children() {
+                    if child.kind() == SyntaxKind::TypeArgumentList {
+                        return Some(child);
+                    }
+                }
+            }
+            return None;
+        }
+
+        // Also check direct PathElements for simpler paths
+        let path_elements: Vec<_> = node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::PathElement)
+            .collect();
+
+        // For multi-segment paths, only extract type args from the LAST element
+        if path_elements.len() > 1 {
+            if let Some(last_element) = path_elements.last() {
+                for inner in last_element.children() {
+                    if inner.kind() == SyntaxKind::TypeArgumentList {
+                        return Some(inner);
+                    }
+                }
+            }
+            return None;
+        }
+
+        if let Some(only_element) = path_elements.first() {
+            for inner in only_element.children() {
+                if inner.kind() == SyntaxKind::TypeArgumentList {
+                    return Some(inner);
+                }
             }
         }
 
-        last_found
+        // Only check direct TypeArgumentList if no path structure found
+        if path_elements.is_empty() {
+            for child in node.children() {
+                if child.kind() == SyntaxKind::TypeArgumentList {
+                    return Some(child);
+                }
+            }
+        }
+
+        None
     }
 
-    let type_arg_list = find_last_type_arg_list(node)?;
+    let type_arg_list = find_type_args_on_final_segment(node)?;
 
     // Resolve each type in the TypeArgumentList
     let mut type_args = Vec::new();
