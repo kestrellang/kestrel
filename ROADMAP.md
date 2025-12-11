@@ -277,7 +277,7 @@
   - [x] Track which protocol a method satisfies when struct conforms
   - [x] Resolve protocol method calls to concrete implementations
   - [x] ProtocolImplementationBehavior for method bindings
-- [ ] Extensions with Conformances (IN PROGRESS - 85% complete)
+- [x] Extensions with Conformances ✓
   - [x] `extend Type: Protocol { ... }` syntax (lexer + parser)
   - [x] ExtensionSymbol and ExtensionTargetBehavior
   - [x] Extension registry (HashMap by target type)
@@ -286,10 +286,15 @@
   - [x] Retroactive conformance (add conformance to types you don't own)
   - [x] Extension method resolution (find methods in extensions)
   - [x] Type parameter substitution in extension methods (self.field resolves correctly)
-  - [x] Generic extensions (`extend Box[T]` works for basic cases)
+  - [x] Generic extensions (`extend Box[T]` works)
   - [x] Specialized extensions (`extend Box[Int]` works)
-  - [ ] Generic extension applicability checking (stack overflow with complex type parameter patterns)
-  - [ ] Specialized extension priority (Box[Int] should win over Box[T])
+  - [x] Extension applicability with where clause constraints
+  - [x] Specialized extension priority (Box[Int] wins over Box[T])
+  - [x] Static methods in extensions
+  - [x] Conflict detection (struct vs extension, extension vs extension)
+  - [x] Private method visibility in extensions
+  - [x] Generic type inference for extension-conforming types
+  - [x] Type parameter position validation (swapped params rejected)
 - [x] Tighter Type Parameter Assignability
   - [x] Type parameters only assignable to themselves (same SymbolId)
   - [x] `T` not assignable to `U`, `T` not assignable to `Int`
@@ -377,41 +382,21 @@
 
 ## Current Status
 
-**Phase**: Phase 6 (Generics & Protocols) - ~97% complete
-**Progress**: Phases 1-5 complete. Phase 6: Extensions in progress (~85% done).
+**Phase**: Phase 6 (Generics & Protocols) - ✅ COMPLETE
+**Progress**: Phases 1-6 complete.
 
-**Currently In Progress (Phase 6)**:
+**Phase 6 Completed Features**:
 
-- Extensions with Conformances (IN PROGRESS - 85% complete)
-  - ✅ Lexer: `extend` token
-  - ✅ Parser: `extension_declaration_parser_internal()` with type expression target
-  - ✅ Syntax tree: `ExtensionDeclaration`, `ExtensionBody`, `Extend` SyntaxKinds
-  - ✅ Semantic symbol: `ExtensionSymbol` (~110 lines)
-  - ✅ Behavior: `ExtensionTargetBehavior` with target_type, type_arguments, where_clause
-  - ✅ Registry: `ExtensionRegistry` - `HashMap<SymbolId, Vec<SymbolId>>` by target
-  - ✅ Resolver: `ExtensionResolver` BUILD + BIND phases
-  - ✅ Extension method resolution - methods in extensions are found during lookup
-  - ✅ Conformance satisfaction - extension methods count toward protocol requirements
-  - ✅ Type parameter substitution - `self.field` in `extend Box[Int]` correctly resolves to `Int`
-  - ✅ Basic generic extensions work - `extend Box[T]`, `extend Box[Int]`
-  - ⚠️  Stack overflow with complex type parameter patterns (e.g., `Pair[U, T]` from `Pair[T, U]`)
-  - 🔄 Applicability filtering disabled to avoid stack overflow (all extensions searched)
+- ✅ Generic Constraint Enforcement
+- ✅ Static Methods on Type Parameters
+- ✅ GenericsBehavior Refactor
+- ✅ Associated Types
+- ✅ Protocol Method Linking
+- ✅ Extensions with Conformances (38/38 tests passing - 100%)
+- ✅ Tighter Type Parameter Assignability
+- ✅ Where Clause Equality Constraints
 
-**Recently Completed (Phase 6)**:
-
-- Tighter Type Parameter Assignability ✓
-- Protocol Method Linking ✓
-- Generic Constraint Enforcement ✓
-- Associated Types ✓
-- Static Methods on Type Parameters ✓
-- Where Clause Equality Constraints ✓
-
-**Next Tasks**:
-
-1. Fix stack overflow in complex type parameter patterns (e.g., swapped type params in return types)
-2. Re-enable extension applicability filtering with proper recursion guards
-3. Implement specialized extension priority (more specific extensions win)
-4. Generic type inference for extension method calls (T should be inferred from arguments)
+**Ready for Phase 7**: Type Inference
 
 ## Notes
 
