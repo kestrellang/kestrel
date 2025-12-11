@@ -31,7 +31,7 @@ impl ModuleDeclaration {
     /// Create a new ModuleDeclaration from spans, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
     pub fn new(source: &str, module_span: Span, path_segments: Vec<Span>) -> Self {
-        let full_span = module_span.start..path_segments.last().unwrap().end;
+        let full_span = Span::from(module_span.start..path_segments.last().unwrap().end);
         let mut sink = EventSink::new();
         emit_module_declaration(&mut sink, module_span, &path_segments);
         Self::from_events(source, sink.into_events(), full_span)
@@ -54,7 +54,9 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    // Convert Span to Range<usize> for chumsky's Stream
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match module_declaration_parser_internal().parse(stream) {
         Ok((module_span, path_segments)) => {
@@ -65,7 +67,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -88,7 +90,7 @@ mod tests {
     #[test]
     fn test_module_path_single_segment() {
         let source = "A";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -111,7 +113,7 @@ mod tests {
     #[test]
     fn test_module_path_multiple_segments() {
         let source = "A.B.C";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -133,7 +135,7 @@ mod tests {
     #[test]
     fn test_module_declaration() {
         let source = "module A.B.C";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -144,7 +146,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ModuleDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
         let path = decl.path();
 
@@ -164,7 +166,7 @@ mod tests {
     #[test]
     fn test_module_declaration_single_segment() {
         let source = "module Main";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -175,7 +177,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ModuleDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
         let path = decl.path();
 

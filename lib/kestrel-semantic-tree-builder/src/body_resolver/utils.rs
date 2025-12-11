@@ -74,7 +74,7 @@ pub fn validate_not_standalone_type_param(
             span: expr.span.clone(),
             type_param_name,
         };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
 
         return Expression::error(expr.span);
     }
@@ -423,7 +423,7 @@ pub fn get_type_parameter_bounds_by_id(
                     span: bound.span().clone(),
                     protocol_name,
                 };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                 return false; // Filter out this bound
             }
         }
@@ -737,7 +737,7 @@ pub fn verify_type_argument_constraints(
                     type_param_name: param_name,
                     constraint_span: Some(bound.span().clone()),
                 };
-                diagnostics.add_diagnostic(error.into_diagnostic(file_id));
+                diagnostics.add_diagnostic(error.into_diagnostic());
                 all_satisfied = false;
             }
         }

@@ -62,9 +62,7 @@ impl Validator for StaticContextValidator {
                         span,
                         name: name.clone(),
                         context: StaticContext::ModuleLevel,
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
     }

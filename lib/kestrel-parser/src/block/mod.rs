@@ -94,11 +94,11 @@ pub struct CodeBlockData {
 /// - Trailing expression blocks: { stmt; expr }
 pub fn code_block_parser() -> impl Parser<Token, CodeBlockData, Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with_span(|_, span| span))
+        .ignore_then(just(Token::LBrace).map_with_span(|_, span| Span::from(span)))
         .then(code_block_items_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with_span(|_, span| span))
+                .ignore_then(just(Token::RBrace).map_with_span(|_, span| Span::from(span)))
         )
         .map(|((lbrace, items), rbrace)| {
             CodeBlockData {
@@ -149,7 +149,7 @@ fn code_block_items_parser() -> impl Parser<Token, Vec<BlockItem>, Error = Simpl
                 .then(
                     // Check if there's a semicolon (making it a regular statement)
                     skip_trivia()
-                        .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+                        .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
                         .map(Some)
                         .or(empty().map(|_| None))
                 )
@@ -218,7 +218,8 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match code_block_parser().parse(stream) {
         Ok(data) => {
@@ -227,7 +228,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -239,7 +240,7 @@ mod tests {
     use kestrel_lexer::lex;
 
     fn parse_block_from_source(source: &str) -> CodeBlock {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -250,7 +251,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         CodeBlock {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         }
     }
 

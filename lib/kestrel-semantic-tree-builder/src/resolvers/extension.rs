@@ -12,6 +12,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
+use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -154,9 +155,7 @@ fn resolve_extension_target(
                     CannotExtendTypeError {
                         span: ty_span.clone(),
                         type_name: format_type_kind(ty.kind()),
-                    },
-                    file_id,
-                );
+                    });
                 return None;
             }
         },
@@ -165,9 +164,7 @@ fn resolve_extension_target(
                 UnresolvedTypeError {
                     span: ty_span.clone(),
                     type_name: segment,
-                },
-                file_id,
-            );
+                });
             return None;
         }
         _ => return None,
@@ -219,9 +216,7 @@ fn resolve_extension_target(
                                 "type parameter '{}' used in wrong position (expected '{}' in position {})",
                                 arg_name, param_name, index
                             ),
-                        },
-                        file_id,
-                    );
+                        });
                     return None;
                 }
             }
@@ -271,9 +266,7 @@ fn resolve_extension_type_arguments(
                 span: arg_list_span,
                 expected: expected_count,
                 actual: arg_count,
-            },
-            file_id,
-        );
+            });
         return None;
     }
 
@@ -366,15 +359,15 @@ pub struct CannotExtendTypeError {
 }
 
 impl kestrel_reporting::IntoDiagnostic for CannotExtendTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> kestrel_reporting::Diagnostic<usize> {
+    fn into_diagnostic(&self) -> kestrel_reporting::Diagnostic<usize> {
         kestrel_reporting::Diagnostic::error()
             .with_message(format!(
                 "cannot extend type '{}' - only structs can be extended",
                 self.type_name
             ))
             .with_labels(vec![kestrel_reporting::Label::primary(
-                file_id,
-                self.span.clone(),
+                self.span.file_id,
+                self.span.range(),
             )
             .with_message("not a struct type")])
             .with_notes(vec![
@@ -392,7 +385,7 @@ pub struct WrongTypeParameterCountError {
 }
 
 impl kestrel_reporting::IntoDiagnostic for WrongTypeParameterCountError {
-    fn into_diagnostic(&self, file_id: usize) -> kestrel_reporting::Diagnostic<usize> {
+    fn into_diagnostic(&self) -> kestrel_reporting::Diagnostic<usize> {
         let message = if self.actual > self.expected {
             format!(
                 "too many type parameters: expected {}, found {}",
@@ -407,8 +400,8 @@ impl kestrel_reporting::IntoDiagnostic for WrongTypeParameterCountError {
         kestrel_reporting::Diagnostic::error()
             .with_message(message)
             .with_labels(vec![kestrel_reporting::Label::primary(
-                file_id,
-                self.span.clone(),
+                self.span.file_id,
+                self.span.range(),
             )
             .with_message(format!("expected {} type parameter(s)", self.expected))])
     }
@@ -468,7 +461,7 @@ fn resolve_extension_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter in the referenced params (not all struct params)
     let param = referenced_params
@@ -501,9 +494,7 @@ fn resolve_extension_type_bound(
                                 span: span.clone(),
                                 name: symbol.metadata().name().value.clone(),
                                 context: NotAProtocolContext::Bound,
-                            },
-                            file_id,
-                        );
+                            });
                         Ty::error(span)
                     }
                     TyKind::TypeAlias { symbol, .. } => {
@@ -512,9 +503,7 @@ fn resolve_extension_type_bound(
                                 span: span.clone(),
                                 name: symbol.metadata().name().value.clone(),
                                 context: NotAProtocolContext::Bound,
-                            },
-                            file_id,
-                        );
+                            });
                         Ty::error(span)
                     }
                     _ => {
@@ -523,9 +512,7 @@ fn resolve_extension_type_bound(
                                 span: span.clone(),
                                 name: bound_name.clone(),
                                 context: NotAProtocolContext::Bound,
-                            },
-                            file_id,
-                        );
+                            });
                         Ty::error(span)
                     }
                 },
@@ -534,9 +521,7 @@ fn resolve_extension_type_bound(
                         UnresolvedTypeError {
                             span: span.clone(),
                             type_name: bound_name.clone(),
-                        },
-                        file_id,
-                    );
+                        });
                     Ty::error(span)
                 }
                 TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
@@ -545,9 +530,7 @@ fn resolve_extension_type_bound(
                             span: span.clone(),
                             name: bound_name.clone(),
                             context: NotAProtocolContext::Bound,
-                        },
-                        file_id,
-                    );
+                        });
                     Ty::error(span)
                 }
             }

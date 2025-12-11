@@ -10,7 +10,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -166,9 +166,7 @@ impl Resolver for TypeAliasResolver {
                             AssociatedTypeBoundsInWrongContextError {
                                 span: span.clone(),
                                 name: name.clone(),
-                            },
-                            file_id,
-                        );
+                            });
                     }
                 }
 
@@ -218,9 +216,7 @@ impl Resolver for TypeAliasResolver {
                                 span,
                                 name,
                                 context: ctx,
-                            },
-                            file_id,
-                        );
+                            });
                     }
                 }
 
@@ -364,7 +360,7 @@ fn resolve_associated_type_bounds(
                             span: get_node_span(node, source),
                             name: type_name,
                             context: NotAProtocolContext::Bound,
-                        }, file_id);
+                        });
                     }
                 }
             }
@@ -455,7 +451,7 @@ fn resolve_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -487,7 +483,7 @@ fn resolve_type_bound(
                                 span: span.clone(),
                                 name: symbol.metadata().name().value.clone(),
                                 context: NotAProtocolContext::Bound,
-                            }, file_id);
+                            });
                             Ty::error(span)
                         }
                         TyKind::TypeAlias { symbol, .. } => {
@@ -495,7 +491,7 @@ fn resolve_type_bound(
                                 span: span.clone(),
                                 name: symbol.metadata().name().value.clone(),
                                 context: NotAProtocolContext::Bound,
-                            }, file_id);
+                            });
                             Ty::error(span)
                         }
                         _ => {
@@ -503,7 +499,7 @@ fn resolve_type_bound(
                                 span: span.clone(),
                                 name: bound_name.clone(),
                                 context: NotAProtocolContext::Bound,
-                            }, file_id);
+                            });
                             Ty::error(span)
                         }
                     }
@@ -512,7 +508,7 @@ fn resolve_type_bound(
                     ctx.diagnostics.throw(UnresolvedTypeError {
                         span: span.clone(),
                         type_name: bound_name.clone(),
-                    }, file_id);
+                    });
                     Ty::error(span)
                 }
                 TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
@@ -520,7 +516,7 @@ fn resolve_type_bound(
                         span: span.clone(),
                         name: bound_name.clone(),
                         context: NotAProtocolContext::Bound,
-                    }, file_id);
+                    });
                     Ty::error(span)
                 }
             }
@@ -635,9 +631,7 @@ fn validate_struct_associated_type_binding(
                             span: binding_span,
                             struct_name,
                             protocol_name: protocol_name.clone(),
-                        },
-                        file_id,
-                    );
+                        });
                     return;
                 }
 
@@ -662,9 +656,7 @@ fn validate_struct_associated_type_binding(
                             span: binding_span,
                             protocol_name,
                             type_name: type_name.to_string(),
-                        },
-                        file_id,
-                    );
+                        });
                 }
             }
         }
@@ -694,9 +686,7 @@ fn validate_struct_associated_type_binding(
                     span: binding_span,
                     type_name: type_name.to_string(),
                     protocols: protocols_with_type,
-                },
-                file_id,
-            );
+                });
         }
     }
 
@@ -905,9 +895,7 @@ fn validate_type_satisfies_bounds(
                         type_name: type_name.to_string(),
                         bound_type: bound_type_name.clone(),
                         required_protocol: required_protocol_name,
-                    },
-                    file_id,
-                );
+                    });
                 return; // Only report the first violation
             }
         }

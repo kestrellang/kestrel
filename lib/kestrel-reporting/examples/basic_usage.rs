@@ -1,17 +1,18 @@
 use kestrel_reporting::{DiagnosticContext, IntoDiagnostic, Diagnostic, Label, Severity};
+use kestrel_span::Span;
 
 /// Example error type that implements IntoDiagnostic
 struct SyntaxError {
     message: String,
-    span: std::ops::Range<usize>,
+    span: Span,
 }
 
 impl IntoDiagnostic for SyntaxError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(&self.message)
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("syntax error here")
             ])
     }
@@ -20,15 +21,15 @@ impl IntoDiagnostic for SyntaxError {
 /// Example warning type
 struct UnusedVariable {
     name: String,
-    span: std::ops::Range<usize>,
+    span: Span,
 }
 
 impl IntoDiagnostic for UnusedVariable {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message(format!("unused variable `{}`", self.name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("not used in this scope")
             ])
             .with_notes(vec![
@@ -48,16 +49,16 @@ fn main() {
     // Example 1: Throw a syntax error using the IntoDiagnostic trait
     let error = SyntaxError {
         message: "expected `;` after expression".to_string(),
-        span: 23..24,
+        span: Span::new(file_id, 23..24),
     };
-    ctx.throw(error, file_id);
+    ctx.throw(error);
 
     // Example 2: Add a warning about unused variable
     let warning = UnusedVariable {
         name: "x".to_string(),
-        span: 20..21,
+        span: Span::new(file_id, 20..21),
     };
-    ctx.throw(warning, file_id);
+    ctx.throw(warning);
 
     // Example 3: Manually create a diagnostic for more complex cases
     let complex_diagnostic = Diagnostic::error()

@@ -93,9 +93,7 @@ fn check_duplicate_types(ctx: &SymbolContext<'_>) {
                         original_span: first.metadata().declaration_span().clone(),
                         original_file_id: first_file_id,
                         duplicate_span: child.metadata().declaration_span().clone(),
-                    },
-                    file_id,
-                );
+                    });
             } else {
                 ctx.diagnostics().get().throw(
                     DuplicateSymbolDifferentKindError {
@@ -105,9 +103,7 @@ fn check_duplicate_types(ctx: &SymbolContext<'_>) {
                         original_span: first.metadata().declaration_span().clone(),
                         original_file_id: first_file_id,
                         duplicate_span: child.metadata().declaration_span().clone(),
-                    },
-                    file_id,
-                );
+                    });
             }
         } else {
             types.insert(name, (child.clone(), kind_desc));
@@ -153,9 +149,7 @@ fn check_duplicate_members(ctx: &SymbolContext<'_>) {
                         original_span: first.metadata().declaration_span().clone(),
                         original_file_id: first_file_id,
                         duplicate_span: child.metadata().declaration_span().clone(),
-                    },
-                    file_id,
-                );
+                    });
             } else {
                 ctx.diagnostics().get().throw(
                     DuplicateSymbolDifferentKindError {
@@ -165,9 +159,7 @@ fn check_duplicate_members(ctx: &SymbolContext<'_>) {
                         original_span: first.metadata().declaration_span().clone(),
                         original_file_id: first_file_id,
                         duplicate_span: child.metadata().declaration_span().clone(),
-                    },
-                    file_id,
-                );
+                    });
             }
         } else {
             members.insert(name, (child.clone(), kind_desc));

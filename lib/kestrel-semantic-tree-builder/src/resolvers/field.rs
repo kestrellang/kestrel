@@ -7,7 +7,7 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -144,5 +144,5 @@ fn resolve_field_type_from_syntax(
     }
 
     // No type found - return error
-    Ty::error(0..0)
+    Ty::error(Span::from(0..0))
 }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder, SymbolTable};
 
@@ -32,7 +32,7 @@ pub struct SemanticTree {
 impl SemanticTree {
     /// Create a new empty semantic tree with a root symbol
     pub fn new() -> Self {
-        let root: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(RootSymbol::new(0..0));
+        let root: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(RootSymbol::new(Span::from(0..0)));
         let symbol_table = SymbolTable::new();
         let syntax_map = SyntaxMap::new();
         let sources = SourceMap::new();
@@ -109,12 +109,12 @@ impl Symbol<KestrelLanguage> for RootSymbol {
 }
 
 impl RootSymbol {
-    fn new(source_span: std::ops::Range<usize>) -> Self {
-        let name = Spanned::new("<root>".to_string(), 0..0);
+    fn new(source_span: Span) -> Self {
+        let name = Spanned::new("<root>".to_string(), Span::from(0..0));
         // RootSymbol uses Module kind as it represents the root of the module hierarchy
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(name)
-            .with_declaration_span(0..0)
+            .with_declaration_span(Span::from(0..0))
             .with_span(source_span)
             .build();
 
@@ -155,9 +155,9 @@ pub(crate) fn build_module_hierarchy(
             existing
         } else {
             // Create new module
-            let name = Spanned::new(segment.clone(), 0..segment.len());
-            let span = 0..segment.len(); // Placeholder span
-            let visibility = VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
+            let name = Spanned::new(segment.clone(), Span::from(0..segment.len()));
+            let span = Span::from(0..segment.len()); // Placeholder span
+            let visibility = VisibilityBehavior::new(Some(Visibility::Public), Span::from(0..6), root.clone());
 
             let module = ModuleSymbol::new(name, span, visibility);
             let module_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(module);

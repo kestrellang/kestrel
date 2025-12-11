@@ -18,16 +18,16 @@ pub struct NoSuchMemberError {
 }
 
 impl IntoDiagnostic for NoSuchMemberError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "no member '{}' on type '{}'",
                 self.member_name, self.base_type
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.member_span.clone())
+                Label::primary(self.member_span.file_id, self.member_span.range())
                     .with_message("unknown member"),
-                Label::secondary(file_id, self.base_span.clone())
+                Label::secondary(self.base_span.file_id, self.base_span.range())
                     .with_message(format!("has type '{}'", self.base_type)),
             ])
     }
@@ -48,16 +48,16 @@ pub struct MemberNotVisibleError {
 }
 
 impl IntoDiagnostic for MemberNotVisibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "member '{}' is {} and not accessible from this scope",
                 self.member_name, self.visibility
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.member_span.clone())
+                Label::primary(self.member_span.file_id, self.member_span.range())
                     .with_message(format!("{} member", self.visibility)),
-                Label::secondary(file_id, self.base_span.clone())
+                Label::secondary(self.base_span.file_id, self.base_span.range())
                     .with_message(format!("has type '{}'", self.base_type)),
             ])
     }
@@ -78,16 +78,16 @@ pub struct MemberNotAccessibleError {
 }
 
 impl IntoDiagnostic for MemberNotAccessibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "'{}' is a {} and cannot be used as a value",
                 self.member_name, self.member_kind
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.member_span.clone())
+                Label::primary(self.member_span.file_id, self.member_span.range())
                     .with_message(format!("is a {}", self.member_kind)),
-                Label::secondary(file_id, self.base_span.clone())
+                Label::secondary(self.base_span.file_id, self.base_span.range())
                     .with_message(format!("has type '{}'", self.base_type)),
             ])
     }
@@ -102,13 +102,13 @@ pub struct CannotAccessMemberOnTypeError {
 }
 
 impl IntoDiagnostic for CannotAccessMemberOnTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "cannot access member on type '{}'",
                 self.base_type
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("member access not supported")])
             .with_notes(vec![format!(
                 "type '{}' does not have accessible members",
@@ -130,13 +130,13 @@ pub struct TupleIndexOutOfBoundsError {
 }
 
 impl IntoDiagnostic for TupleIndexOutOfBoundsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "tuple index {} is out of bounds for tuple of length {}",
                 self.index, self.tuple_length
             ))
-            .with_labels(vec![Label::primary(file_id, self.index_span.clone())
+            .with_labels(vec![Label::primary(self.index_span.file_id, self.index_span.range())
                 .with_message(format!("index {} out of bounds", self.index))])
             .with_notes(vec![format!(
                 "type '{}' has {} element{}",
@@ -158,13 +158,13 @@ pub struct TupleIndexOnNonTupleError {
 }
 
 impl IntoDiagnostic for TupleIndexOnNonTupleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "cannot use tuple index on type '{}'",
                 self.base_type
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("not a tuple type")])
             .with_notes(vec![format!(
                 "tuple indexing (e.g., '.{}') can only be used on tuple types",
@@ -188,13 +188,13 @@ pub struct UnconstrainedTypeParameterMemberError {
 }
 
 impl IntoDiagnostic for UnconstrainedTypeParameterMemberError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "cannot call '{}' on type '{}'",
                 self.member_name, self.type_param_name
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message(format!("cannot call '{}' on type '{}'", self.member_name, self.type_param_name))])
             .with_notes(vec![
                 format!("'{}' is a type parameter with no constraints", self.type_param_name),
@@ -216,7 +216,7 @@ pub struct MethodNotInBoundsError {
 }
 
 impl IntoDiagnostic for MethodNotInBoundsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let bounds_str = if self.bound_names.is_empty() {
             "no protocol bounds".to_string()
         } else {
@@ -228,7 +228,7 @@ impl IntoDiagnostic for MethodNotInBoundsError {
                 "no method '{}' found for type '{}'",
                 self.method_name, self.type_param_name
             ))
-            .with_labels(vec![Label::primary(file_id, self.call_span.clone())
+            .with_labels(vec![Label::primary(self.call_span.file_id, self.call_span.range())
                 .with_message("method not found")])
             .with_notes(vec![
                 format!("'{}' is constrained to: {}", self.type_param_name, bounds_str),
@@ -250,14 +250,14 @@ pub struct AmbiguousConstrainedMethodError {
 }
 
 impl IntoDiagnostic for AmbiguousConstrainedMethodError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
-        let mut labels = vec![Label::primary(file_id, self.call_span.clone())
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        let mut labels = vec![Label::primary(self.call_span.file_id, self.call_span.range())
             .with_message("ambiguous method call")];
 
         // Add secondary labels for each definition
         for (proto_name, span) in &self.definition_spans {
             labels.push(
-                Label::secondary(file_id, span.clone())
+                Label::secondary(span.file_id, span.range())
                     .with_message(format!("candidate from '{}'", proto_name)),
             );
         }
@@ -291,13 +291,13 @@ pub struct ConstraintNotSatisfiedError {
 }
 
 impl IntoDiagnostic for ConstraintNotSatisfiedError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
-        let mut labels = vec![Label::primary(file_id, self.call_span.clone())
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        let mut labels = vec![Label::primary(self.call_span.file_id, self.call_span.range())
             .with_message("constraint not satisfied")];
 
         if let Some(ref span) = self.constraint_span {
             labels.push(
-                Label::secondary(file_id, span.clone())
+                Label::secondary(span.file_id, span.range())
                     .with_message(format!("required by this constraint on '{}'", self.type_param_name)),
             );
         }
@@ -325,13 +325,13 @@ pub struct UnsupportedGenericProtocolBoundError {
 }
 
 impl IntoDiagnostic for UnsupportedGenericProtocolBoundError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "generic protocol bounds are not yet supported: '{}'",
                 self.protocol_name
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("generic protocol bound")])
             .with_notes(vec![
                 "generic protocol bounds require associated types".to_string(),
@@ -355,7 +355,7 @@ pub struct NoInitInTypeParameterBoundsError {
 }
 
 impl IntoDiagnostic for NoInitInTypeParameterBoundsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let bounds_str = if self.bound_names.is_empty() {
             "no protocol bounds".to_string()
         } else {
@@ -367,7 +367,7 @@ impl IntoDiagnostic for NoInitInTypeParameterBoundsError {
                 "no initializer found for type parameter '{}'",
                 self.type_param_name
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("no matching initializer")])
             .with_notes(vec![
                 format!("'{}' is constrained to: {}", self.type_param_name, bounds_str),
@@ -391,10 +391,10 @@ pub struct NoMatchingTypeParameterInitError {
 }
 
 impl IntoDiagnostic for NoMatchingTypeParameterInitError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = super::call::format_argument_labels(&self.provided_labels);
 
-        let mut labels = vec![Label::primary(file_id, self.span.clone()).with_message(format!(
+        let mut labels = vec![Label::primary(self.span.file_id, self.span.range()).with_message(format!(
             "no matching initializer for {} argument(s) with labels {}",
             self.provided_arity, provided
         ))];
@@ -404,7 +404,7 @@ impl IntoDiagnostic for NoMatchingTypeParameterInitError {
             if let (Some(span), Some(def_file_id)) = (&init.definition_span, init.definition_file_id)
             {
                 labels.push(
-                    Label::secondary(def_file_id, span.clone())
+                    Label::secondary(def_file_id, span.range())
                         .with_message(format!("candidate: {}", init.display())),
                 );
             }
@@ -441,15 +441,15 @@ pub struct AmbiguousTypeParameterInitError {
 }
 
 impl IntoDiagnostic for AmbiguousTypeParameterInitError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels = vec![
-            Label::primary(file_id, self.span.clone()).with_message("ambiguous initializer call")
+            Label::primary(self.span.file_id, self.span.range()).with_message("ambiguous initializer call")
         ];
 
         // Add secondary labels for each definition
         for (proto_name, span) in &self.definition_spans {
             labels.push(
-                Label::secondary(file_id, span.clone())
+                Label::secondary(span.file_id, span.range())
                     .with_message(format!("candidate from '{}'", proto_name)),
             );
         }
@@ -476,13 +476,13 @@ pub struct TypeParameterCannotBeUsedAsValueError {
 }
 
 impl IntoDiagnostic for TypeParameterCannotBeUsedAsValueError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type parameter '{}' cannot be used as a value",
                 self.type_param_name
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("not a value")])
             .with_notes(vec![
                 format!("'{}' is a type parameter, not a value", self.type_param_name),

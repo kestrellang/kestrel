@@ -9,7 +9,7 @@ use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -307,9 +307,7 @@ fn resolve_type_bound(
                             type_param: type_param_name.clone(),
                             assoc_type_name: assoc_type_name.clone(),
                             protocol_name,
-                        },
-                        file_id,
-                    );
+                        });
                 }
             }
         }
@@ -328,7 +326,7 @@ fn resolve_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -366,7 +364,7 @@ fn resolve_type_bound(
                     span: span.clone(),
                     protocol_name,
                 };
-                ctx.diagnostics.throw(error, file_id);
+                ctx.diagnostics.throw(error);
                 bounds.push(Ty::error(span));
                 i += 2; // Skip both Path and TypeArgumentList
                 continue;
@@ -598,18 +596,18 @@ fn resolve_function_body(
     // This is needed because LocalScope::new takes Arc<FunctionSymbol>
     // The locals will be added to the actual function through the Arc<dyn Symbol>
     use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
-    use kestrel_span::Spanned;
+    use kestrel_span::{Span, Spanned};
 
-    let temp_name = Spanned::new("__body_temp".to_string(), 0..0);
-    let temp_vis = VisibilityBehavior::new(Some(Visibility::Private), 0..0, func_arc.clone());
+    let temp_name = Spanned::new("__body_temp".to_string(), Span::from(0..0));
+    let temp_vis = VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), func_arc.clone());
     let temp_func = Arc::new(FunctionSymbol::new(
         temp_name,
-        0..0,
+        Span::from(0..0),
         temp_vis,
         true,
         true,
         vec![],
-        kestrel_semantic_tree::ty::Ty::unit(0..0),
+        kestrel_semantic_tree::ty::Ty::unit(Span::from(0..0)),
         None,
     ));
 
@@ -628,7 +626,7 @@ fn resolve_function_body(
     if let Some(receiver) = receiver_kind {
         if let Some(self_type) = get_self_type(symbol) {
             let is_mutable = matches!(receiver, ReceiverKind::Mutating);
-            let self_span = symbol.metadata().span().start..symbol.metadata().span().start;
+            let self_span = Span::from(symbol.metadata().span().start..symbol.metadata().span().start);
 
             // Add self to local scope
             local_scope.bind("self".to_string(), self_type.clone(), is_mutable, self_span.clone());
@@ -749,7 +747,7 @@ fn extract_return_type(syntax: &SyntaxNode, source: &str) -> Ty {
 
     // Default to unit type if no return type specified
     let fn_span = get_node_span(syntax, source);
-    Ty::unit(fn_span.end..fn_span.end)
+    Ty::unit(Span::from(fn_span.end..fn_span.end))
 }
 
 /// Resolve parameters from a FunctionDeclaration syntax node during bind phase
@@ -840,7 +838,7 @@ fn resolve_return_type_from_syntax(
 
     // No explicit return type - defaults to unit
     let fn_span = get_node_span(syntax, source);
-    Ty::unit(fn_span.end..fn_span.end)
+    Ty::unit(Span::from(fn_span.end..fn_span.end))
 }
 
 /// Get the type of `self` for an instance method

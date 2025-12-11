@@ -7,7 +7,7 @@ use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -47,7 +47,7 @@ impl Resolver for InitializerResolver {
             .map(|tok| {
                 let start = tok.text_range().start().into();
                 let end = tok.text_range().end().into();
-                start..end
+                Span::from(start..end)
             })
             .unwrap_or_else(|| full_span.clone());
 
@@ -158,16 +158,16 @@ fn resolve_initializer_body(
     }
 
     // Create a temporary FunctionSymbol for LocalScope (reuse existing infrastructure)
-    let temp_name = Spanned::new("__init_body_temp".to_string(), 0..0);
-    let temp_vis = VisibilityBehavior::new(Some(Visibility::Private), 0..0, init_arc.clone());
+    let temp_name = Spanned::new("__init_body_temp".to_string(), Span::from(0..0));
+    let temp_vis = VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), init_arc.clone());
     let temp_func = Arc::new(FunctionSymbol::new(
         temp_name,
-        0..0,
+        Span::from(0..0),
         temp_vis,
         false,
         true,
         vec![],
-        Ty::unit(0..0),
+        Ty::unit(Span::from(0..0)),
         None,
     ));
 
@@ -176,7 +176,7 @@ fn resolve_initializer_body(
     // Inject `self` as the first local (with initializing semantics)
     // In initializers, self is mutable so we can assign to fields
     if let Some(self_type) = get_self_type(symbol) {
-        let self_span = symbol.metadata().span().start..symbol.metadata().span().start;
+        let self_span = Span::from(symbol.metadata().span().start..symbol.metadata().span().start);
 
         // Add self to local scope (mutable because we're initializing it)
         local_scope.bind("self".to_string(), self_type.clone(), true, self_span.clone());
@@ -275,7 +275,7 @@ fn resolve_single_parameter(
     fn get_name_span(name_node: &SyntaxNode) -> kestrel_span::Span {
         let start = name_node.text_range().start().into();
         let end = name_node.text_range().end().into();
-        start..end
+        Span::from(start..end)
     }
 
     // Determine label and bind_name based on number of Name nodes
@@ -306,7 +306,7 @@ fn resolve_single_parameter(
         let param_span: kestrel_span::Span = {
             let start = param_node.text_range().start().into();
             let end = param_node.text_range().end().into();
-            start..end
+            Span::from(start..end)
         };
         Ty::type_var(param_span)
     };

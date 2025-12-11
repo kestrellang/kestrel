@@ -18,6 +18,7 @@ use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty};
+use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::resolution::VisibilityChecker;
@@ -550,8 +551,8 @@ impl Db for SemanticDatabase {
             return Err(ModuleNotFoundError {
                 path: vec![],
                 failed_segment_index: 0,
-                path_span: 0..0,
-                failed_segment_span: 0..0,
+                path_span: Span::from(0..0),
+                failed_segment_span: Span::from(0..0),
             });
         }
 
@@ -567,8 +568,8 @@ impl Db for SemanticDatabase {
                 return Err(ModuleNotFoundError {
                     path: path.clone(),
                     failed_segment_index: 0,
-                    path_span: 0..0,
-                    failed_segment_span: 0..0,
+                    path_span: Span::from(0..0),
+                    failed_segment_span: Span::from(0..0),
                 });
             }
         };
@@ -587,8 +588,8 @@ impl Db for SemanticDatabase {
                     return Err(ModuleNotFoundError {
                         path: path.clone(),
                         failed_segment_index: index,
-                        path_span: 0..0,
-                        failed_segment_span: 0..0,
+                        path_span: Span::from(0..0),
+                        failed_segment_span: Span::from(0..0),
                     });
                 }
             }
@@ -608,7 +609,7 @@ impl Db for SemanticDatabase {
         // Handle built-in primitive types
         if path.len() == 1 {
             let segment = &path[0];
-            if let Some(ty) = resolve_primitive_type(segment, 0..0) {
+            if let Some(ty) = resolve_primitive_type(segment, Span::from(0..0)) {
                 return TypePathResolution::Resolved(ty);
             }
         }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, WhereClause};
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -89,7 +89,7 @@ fn extract_type_param_name(syntax: &SyntaxNode, _source: &str) -> Option<(String
         if let Some(token) = child.into_token() {
             if token.kind() == SyntaxKind::Identifier {
                 let text_range = token.text_range();
-                let span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+                let span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
                 return Some((token.text().to_string(), span));
             }
         }
@@ -101,7 +101,7 @@ fn extract_type_param_name(syntax: &SyntaxNode, _source: &str) -> Option<(String
             if let Some(token) = child.into_token() {
                 if token.kind() == SyntaxKind::Identifier {
                     let text_range = token.text_range();
-                    let span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+                    let span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
                     return Some((token.text().to_string(), span));
                 }
             }
@@ -225,7 +225,7 @@ fn parse_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params

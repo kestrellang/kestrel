@@ -243,7 +243,8 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match type_alias_declaration_parser_internal().parse(stream) {
         Ok(data) => {
@@ -252,7 +253,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -266,7 +267,7 @@ mod tests {
     #[test]
     fn test_type_alias_declaration_basic() {
         let source = "type Alias = Aliased;";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -277,7 +278,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("Alias".to_string()));
@@ -288,7 +289,7 @@ mod tests {
     #[test]
     fn test_type_alias_declaration_with_visibility() {
         let source = "public type PublicAlias = SomeType;";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -299,7 +300,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("PublicAlias".to_string()));
@@ -309,7 +310,7 @@ mod tests {
     #[test]
     fn test_type_alias_declaration_with_generics() {
         let source = "type Box[T] = T;";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -320,7 +321,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("Box".to_string()));
@@ -331,7 +332,7 @@ mod tests {
     fn test_type_alias_abstract_associated_type() {
         // Associated type in protocol without default: type Item;
         let source = "type Item;";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -342,7 +343,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("Item".to_string()));
@@ -355,7 +356,7 @@ mod tests {
     #[test]
     fn test_type_alias_declaration_tuple() {
         let source = "type TupleAlias = (Int, String);";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -366,7 +367,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = TypeAliasDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("TupleAlias".to_string()));

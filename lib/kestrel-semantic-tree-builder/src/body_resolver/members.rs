@@ -67,7 +67,7 @@ pub fn resolve_member_access(
 ) -> Expression {
     let base_span = base.span.clone();
     let base_ty = &base.ty;
-    let full_span = base_span.start..member_span.end;
+    let full_span = Span::from(base_span.start..member_span.end);
 
     // 0. Check if base is a TypeParameterRef (for static method access like T.create())
     if let ExprKind::TypeParameterRef(symbol_id) = &base.kind {
@@ -91,7 +91,7 @@ pub fn resolve_member_access(
             receiver_type: format_type(base_ty),
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -104,7 +104,7 @@ pub fn resolve_member_access(
             &type_param,
             member_name,
             member_span,
-            full_span,
+            full_span.clone(),
             ctx,
         );
     }
@@ -119,8 +119,8 @@ pub fn resolve_member_access(
                 base_type: format_type(base_ty),
             };
             ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
-            return Expression::error(full_span);
+                .add_diagnostic(error.into_diagnostic());
+            return Expression::error(full_span.clone());
         }
     };
 
@@ -159,8 +159,8 @@ pub fn resolve_member_access(
                         base_type: format_type(base_ty),
                     };
                     ctx.diagnostics
-                        .add_diagnostic(error.into_diagnostic(ctx.file_id));
-                    return Expression::error(full_span);
+                        .add_diagnostic(error.into_diagnostic());
+                    return Expression::error(full_span.clone());
                 }
             }
         }
@@ -186,8 +186,8 @@ pub fn resolve_member_access(
                 visibility: visibility.to_string(),
             };
             ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
-            return Expression::error(full_span);
+                .add_diagnostic(error.into_diagnostic());
+            return Expression::error(full_span.clone());
         }
     }
 
@@ -195,7 +195,7 @@ pub fn resolve_member_access(
     for behavior in member.metadata().behaviors() {
         if behavior.kind() == KestrelBehaviorKind::MemberAccess {
             if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
-                let mut result = access.access(base.clone(), full_span);
+                let mut result = access.access(base.clone(), full_span.clone());
                 // Apply substitutions from the parent's type to the member type
                 // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
 
@@ -235,7 +235,7 @@ pub fn resolve_member_access(
             }
         }
 
-        return Expression::method_ref(base, candidates, member_name.to_string(), full_span);
+        return Expression::method_ref(base, candidates, member_name.to_string(), full_span.clone());
     }
 
     // Member exists but doesn't have MemberAccessBehavior (e.g., type alias, nested type)
@@ -247,8 +247,8 @@ pub fn resolve_member_access(
         member_kind: format_symbol_kind(member.metadata().kind()),
     };
     ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic(ctx.file_id));
-    Expression::error(full_span)
+        .add_diagnostic(error.into_diagnostic());
+    Expression::error(full_span.clone())
 }
 
 /// Tracks a method found in a protocol bound, with its source protocol.
@@ -283,7 +283,7 @@ fn resolve_constrained_member_access(
             type_param_name,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -303,7 +303,7 @@ fn resolve_constrained_member_access(
                     protocol_name: proto_name,
                 };
                 ctx.diagnostics
-                    .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                    .add_diagnostic(error.into_diagnostic());
                 return Expression::error(full_span);
             }
 
@@ -320,7 +320,7 @@ fn resolve_constrained_member_access(
             bound_names,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -345,7 +345,7 @@ fn resolve_constrained_member_access(
             definition_spans,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -452,7 +452,7 @@ pub fn resolve_member_call(
                 receiver_type: format_type(base_ty),
             };
             ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                .add_diagnostic(error.into_diagnostic());
             return Expression::error(span);
         }
     };
@@ -497,7 +497,7 @@ pub fn resolve_member_call(
             receiver_type: format_type(base_ty),
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -550,7 +550,7 @@ pub fn resolve_member_call(
         available_overloads,
     };
     ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        .add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -602,7 +602,7 @@ fn resolve_constrained_member_call(
             type_param_name,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -622,7 +622,7 @@ fn resolve_constrained_member_call(
                     protocol_name: proto_name,
                 };
                 ctx.diagnostics
-                    .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                    .add_diagnostic(error.into_diagnostic());
                 return Expression::error(span);
             }
 
@@ -645,7 +645,7 @@ fn resolve_constrained_member_call(
             bound_names,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -669,7 +669,7 @@ fn resolve_constrained_member_call(
             available_overloads,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -696,7 +696,7 @@ fn resolve_constrained_member_call(
             definition_spans,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -843,7 +843,7 @@ fn resolve_type_parameter_static_member(
             type_param_name,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -873,7 +873,7 @@ fn resolve_type_parameter_static_member(
             bound_names,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -902,7 +902,7 @@ fn resolve_type_parameter_static_member(
             definition_spans,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -912,7 +912,7 @@ fn resolve_type_parameter_static_member(
 
     // Use the type parameter type for the receiver so Self substitution works correctly
     Expression::method_ref(
-        Expression::type_parameter_ref(symbol_id, type_param_ty.clone(), full_span.start..full_span.start),
+        Expression::type_parameter_ref(symbol_id, type_param_ty.clone(), Span::from(full_span.start..full_span.start)),
         method_ids,
         member_name.to_string(),
         full_span,

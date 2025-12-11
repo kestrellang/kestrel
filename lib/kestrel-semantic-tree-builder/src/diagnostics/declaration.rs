@@ -15,13 +15,13 @@ pub struct DuplicateSymbolError {
 }
 
 impl IntoDiagnostic for DuplicateSymbolError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("duplicate definition of {} '{}'", self.kind, self.name))
             .with_labels(vec![
-                Label::primary(file_id, self.duplicate_span.clone())
+                Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
                     .with_message(format!("{} defined here", self.kind)),
-                Label::secondary(self.original_file_id, self.original_span.clone())
+                Label::secondary(self.original_file_id, self.original_span.range())
                     .with_message(format!("first defined as {} here", self.kind)),
             ])
     }
@@ -38,16 +38,16 @@ pub struct DuplicateSymbolDifferentKindError {
 }
 
 impl IntoDiagnostic for DuplicateSymbolDifferentKindError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "'{}' is already defined as a {}",
                 self.name, self.original_kind
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.duplicate_span.clone())
+                Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
                     .with_message(format!("{} defined here", self.new_kind)),
-                Label::secondary(self.original_file_id, self.original_span.clone())
+                Label::secondary(self.original_file_id, self.original_span.range())
                     .with_message(format!("first defined as {} here", self.original_kind)),
             ])
     }
@@ -62,15 +62,15 @@ pub struct DuplicateFunctionSignatureError {
 }
 
 impl IntoDiagnostic for DuplicateFunctionSignatureError {
-    fn into_diagnostic(&self, _file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels = vec![
-            Label::secondary(self.first_file_id, self.first_span.clone())
+            Label::secondary(self.first_file_id, self.first_span.range())
                 .with_message("first defined here"),
         ];
 
         for (span, fid) in &self.duplicate_spans {
             labels.push(
-                Label::primary(*fid, span.clone())
+                Label::primary(*fid, span.range())
                     .with_message("duplicate definition"),
             );
         }
@@ -88,11 +88,11 @@ pub struct FunctionMissingBodyError {
 }
 
 impl IntoDiagnostic for FunctionMissingBodyError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("function '{}' requires a body", self.function_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("function declared without body")
             ])
     }
@@ -112,7 +112,7 @@ pub enum StaticContext {
 }
 
 impl IntoDiagnostic for StaticInWrongContextError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let context_msg = match self.context {
             StaticContext::ModuleLevel => "static is not allowed at module level",
         };
@@ -120,7 +120,7 @@ impl IntoDiagnostic for StaticInWrongContextError {
         Diagnostic::error()
             .with_message(format!("'{}' cannot be static in this context", self.name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(context_msg)
             ])
     }
@@ -142,7 +142,7 @@ pub enum TypeAliasContext {
 }
 
 impl IntoDiagnostic for TypeAliasRequiresTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let (main_msg, context_msg) = match self.context {
             TypeAliasContext::ModuleLevel => (
                 format!("type alias requires a type: '{}'", self.name),
@@ -157,7 +157,7 @@ impl IntoDiagnostic for TypeAliasRequiresTypeError {
         Diagnostic::error()
             .with_message(main_msg)
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(context_msg)
             ])
     }
@@ -170,11 +170,11 @@ pub struct AssociatedTypeBoundsInWrongContextError {
 }
 
 impl IntoDiagnostic for AssociatedTypeBoundsInWrongContextError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type alias cannot have bounds: '{}'", self.name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("bounds are only allowed on associated types in protocols")
             ])
     }

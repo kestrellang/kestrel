@@ -22,18 +22,18 @@ pub struct UnsupportedBinaryOperator {
 }
 
 impl IntoDiagnostic for UnsupportedBinaryOperator {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "binary operator '{}' cannot be applied to types '{}' and '{}'",
                 self.operator, self.lhs_type, self.rhs_type
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.operator_span.clone())
+                Label::primary(self.operator_span.file_id, self.operator_span.range())
                     .with_message("unsupported operator"),
-                Label::secondary(file_id, self.lhs_span.clone())
+                Label::secondary(self.lhs_span.file_id, self.lhs_span.range())
                     .with_message(format!("has type '{}'", self.lhs_type)),
-                Label::secondary(file_id, self.rhs_span.clone())
+                Label::secondary(self.rhs_span.file_id, self.rhs_span.range())
                     .with_message(format!("has type '{}'", self.rhs_type)),
             ])
     }
@@ -52,16 +52,16 @@ pub struct UnsupportedUnaryOperator {
 }
 
 impl IntoDiagnostic for UnsupportedUnaryOperator {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "unary operator '{}' cannot be applied to type '{}'",
                 self.operator, self.operand_type
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.operator_span.clone())
+                Label::primary(self.operator_span.file_id, self.operator_span.range())
                     .with_message("unsupported operator"),
-                Label::secondary(file_id, self.operand_span.clone())
+                Label::secondary(self.operand_span.file_id, self.operand_span.range())
                     .with_message(format!("has type '{}'", self.operand_type)),
             ])
     }

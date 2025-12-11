@@ -14,7 +14,7 @@
 //! use kestrel_lexer::lex;
 //!
 //! let source = "module A.B.C\nimport X.Y.Z";
-//! let tokens: Vec<_> = lex(source)
+//! let tokens: Vec<_> = lex(source, 0)
 //!     .filter_map(|t| t.ok())
 //!     .map(|spanned| (spanned.value, spanned.span))
 //!     .collect();
@@ -87,7 +87,7 @@ impl ParseError {
 
     /// Create a parse error from a Chumsky error
     pub fn from_chumsky_error<T: fmt::Debug + std::hash::Hash + Eq>(error: chumsky::error::Simple<T>) -> Self {
-        let span = Some(error.span());
+        let span = Some(Span::from(error.span()));
 
         // Determine error kind
         let kind = if error.found().is_none() {
@@ -179,7 +179,7 @@ impl Parser {
     /// use kestrel_lexer::lex;
     ///
     /// let source = "module Main";
-    /// let tokens: Vec<_> = lex(source)
+    /// let tokens: Vec<_> = lex(source, 0)
     ///     .filter_map(|t| t.ok())
     ///     .map(|spanned| (spanned.value, spanned.span))
     ///     .collect();
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn test_parser_with_valid_source() {
         let source = "module Test";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn test_parser_with_multiple_declarations() {
         let source = "module A.B.C\nimport X.Y.Z";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -266,7 +266,7 @@ module Test
 public struct A {}
 public struct B {}
 "#;
-        let tokens: Vec<_> = lex(valid_source)
+        let tokens: Vec<_> = lex(valid_source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -277,7 +277,7 @@ public struct B {}
 
         // Test case 2: Parser still creates a tree even with parse errors
         let source_with_errors = r#"module"#; // Incomplete module
-        let tokens: Vec<_> = lex(source_with_errors)
+        let tokens: Vec<_> = lex(source_with_errors, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -296,7 +296,7 @@ public struct B {}
         // Test that parse errors include span information when errors occur
         // Use a syntax that will definitely cause a parse error
         let source = "struct 123"; // struct keyword followed by number instead of identifier
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -321,7 +321,7 @@ public struct B {}
     #[test]
     fn test_module_then_struct() {
         let source = "module Test\nstruct Empty {}";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -335,7 +335,7 @@ public struct B {}
     #[test]
     fn test_module_then_struct_with_indentation() {
         let source = "module Test\n            struct Empty {}";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -353,7 +353,7 @@ public struct B {}
     // struct Point { init() { self.x = 1 } }
     // func test() {}
     //         "#;
-    //     let tokens: Vec<_> = lex(source)
+    //     let tokens: Vec<_> = lex(source, 0)
     //         .filter_map(|t| t.ok())
     //         .map(|spanned| (spanned.value, spanned.span))
     //         .collect();

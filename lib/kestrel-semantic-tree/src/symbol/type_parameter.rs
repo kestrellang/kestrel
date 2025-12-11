@@ -97,13 +97,14 @@ impl TypeParameterSymbol {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
     use kestrel_span::Spanned;
 
     #[test]
     fn test_type_parameter_basic() {
-        let name = Spanned::new("T".to_string(), 0..1);
-        let param = TypeParameterSymbol::new(name, 0..1, None);
+        let name = Spanned::new("T".to_string(), Span::from(0..1));
+        let param = TypeParameterSymbol::new(name, Span::from(0..1), None);
 
         assert_eq!(param.metadata().name().value, "T");
         assert!(!param.has_default());
@@ -113,9 +114,9 @@ mod tests {
     #[test]
     fn test_type_parameter_with_default() {
         use crate::ty::IntBits;
-        let name = Spanned::new("T".to_string(), 0..1);
-        let default_ty = Ty::int(IntBits::I64, 4..7);
-        let param = TypeParameterSymbol::with_default(name, 0..7, default_ty, None);
+        let name = Spanned::new("T".to_string(), Span::from(0..1));
+        let default_ty = Ty::int(IntBits::I64, Span::from(4..7));
+        let param = TypeParameterSymbol::with_default(name, Span::from(0..7), default_ty, None);
 
         assert!(param.has_default());
         assert!(param.default().unwrap().is_int());

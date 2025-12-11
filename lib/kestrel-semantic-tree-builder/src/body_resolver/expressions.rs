@@ -7,6 +7,7 @@
 use kestrel_semantic_tree::expr::{ElseBranch, Expression, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
+use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_reporting::IntoDiagnostic;
 
@@ -483,7 +484,7 @@ fn resolve_break_expression(
     // Check if we're in a loop
     if !ctx.in_loop() {
         let error = BreakOutsideLoopError { span: span.clone() };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -501,7 +502,7 @@ fn resolve_break_expression(
                     span: label.span.clone(),
                     label_name: label.name.clone(),
                 };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             }
             return Expression::error(span);
         }
@@ -520,7 +521,7 @@ fn resolve_continue_expression(
     // Check if we're in a loop
     if !ctx.in_loop() {
         let error = ContinueOutsideLoopError { span: span.clone() };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -538,7 +539,7 @@ fn resolve_continue_expression(
                     span: label.span.clone(),
                     label_name: label.name.clone(),
                 };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             }
             return Expression::error(span);
         }
@@ -625,7 +626,7 @@ fn extract_loop_label(node: &SyntaxNode) -> Option<LabelInfo> {
                     let end = text_range.end().into();
                     LabelInfo {
                         name: token.text().to_string(),
-                        span: start..end,
+                        span: Span::from(start..end),
                     }
                 })
         })
@@ -644,7 +645,7 @@ fn extract_break_continue_label(node: &SyntaxNode) -> Option<LabelInfo> {
             let end = text_range.end().into();
             LabelInfo {
                 name: token.text().to_string(),
-                span: start..end,
+                span: Span::from(start..end),
             }
         })
 }
@@ -677,7 +678,7 @@ fn resolve_tuple_index_expression(
     let (index, index_span) = match index_token {
         Some(token) => {
             let text_range = token.text_range();
-            let idx_span = text_range.start().into()..text_range.end().into();
+            let idx_span = Span::from(text_range.start().into()..text_range.end().into());
             let index_value = token.text().parse::<usize>().unwrap_or(0);
             (index_value, idx_span)
         }
@@ -697,7 +698,7 @@ fn resolve_tuple_index_expression(
                     tuple_type: format_type(base_ty),
                 };
                 ctx.diagnostics
-                    .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                    .add_diagnostic(error.into_diagnostic());
                 return Expression::error(span);
             }
 
@@ -713,7 +714,7 @@ fn resolve_tuple_index_expression(
                 base_type: format_type(base_ty),
             };
             ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                .add_diagnostic(error.into_diagnostic());
             Expression::error(span)
         }
     }
@@ -721,6 +722,7 @@ fn resolve_tuple_index_expression(
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]

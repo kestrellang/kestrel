@@ -265,12 +265,12 @@ fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> Loca
     // Fallback: create a dummy function for the LocalScope
     // The actual local binding will go to this dummy, but that's okay
     // because we're attaching ExecutableBehavior to the real function
-    let name = Spanned::new("__body_resolver_temp".to_string(), 0..0);
-    let visibility = VisibilityBehavior::new(Some(Visibility::Private), 0..0, symbol.clone());
-    let return_type = Ty::unit(0..0);
+    let name = Spanned::new("__body_resolver_temp".to_string(), Span::from(0..0));
+    let visibility = VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
+    let return_type = Ty::unit(Span::from(0..0));
     let dummy_func = Arc::new(FunctionSymbol::new(
         name,
-        0..0,
+        Span::from(0..0),
         visibility,
         true,
         true,

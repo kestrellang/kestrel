@@ -171,9 +171,7 @@ impl TypeCheckValidator {
                             expected: format_type(&expected_ty),
                             found: format_type(&value_expr.ty),
                             context: "return value".to_string(),
-                        },
-                        ctx.file_id,
-                    );
+                        });
                 }
             }
             None => {
@@ -185,9 +183,7 @@ impl TypeCheckValidator {
                             expected: format_type(&expected_ty),
                             found: "()".to_string(),
                             context: "return value".to_string(),
-                        },
-                        ctx.file_id,
-                    );
+                        });
                 }
             }
         }
@@ -207,9 +203,7 @@ impl TypeCheckValidator {
                     expected: format_type(&target.ty),
                     found: format_type(&value.ty),
                     context: "assignment".to_string(),
-                },
-                ctx.file_id,
-            );
+                });
         }
     }
 
@@ -221,9 +215,7 @@ impl TypeCheckValidator {
                     span: condition.span.clone(),
                     found: format_type(&condition.ty),
                     condition_kind: "if",
-                },
-                ctx.file_id,
-            );
+                });
         }
     }
 
@@ -276,9 +268,7 @@ impl TypeCheckValidator {
                     else_span,
                     then_type: format_type(&then_ty),
                     else_type: format_type(&else_ty),
-                },
-                ctx.file_id,
-            );
+                });
         }
     }
 
@@ -290,9 +280,7 @@ impl TypeCheckValidator {
                     span: condition.span.clone(),
                     found: format_type(&condition.ty),
                     condition_kind: "while",
-                },
-                ctx.file_id,
-            );
+                });
         }
     }
 
@@ -322,9 +310,7 @@ impl TypeCheckValidator {
                         expected: format_type(param_ty),
                         found: format_type(&arg.value.ty),
                         context,
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
     }
@@ -358,9 +344,7 @@ impl TypeCheckValidator {
                         element_index: i,
                         expected: format_type(expected_ty),
                         found: format_type(&elem.ty),
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
     }
@@ -431,9 +415,7 @@ impl Validator for TypeCheckValidator {
                         expected: format_type(&expected_ty),
                         found: format_type(&yield_expr.ty),
                         context: "return value".to_string(),
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
     }
@@ -496,9 +478,7 @@ impl Validator for TypeCheckValidator {
                         expected: format_type(declared_ty),
                         found: format_type(&value.ty),
                         context: "variable binding".to_string(),
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
     }

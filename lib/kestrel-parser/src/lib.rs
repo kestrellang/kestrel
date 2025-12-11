@@ -18,7 +18,7 @@
 //! use kestrel_lexer::lex;
 //!
 //! let source = "module A.B.C";
-//! let tokens: Vec<_> = lex(source)
+//! let tokens: Vec<_> = lex(source, 0)
 //!     .filter_map(|t| t.ok())
 //!     .map(|spanned| (spanned.value, spanned.span))
 //!     .collect();
@@ -44,7 +44,7 @@
 //! use kestrel_lexer::lex;
 //!
 //! let source = "module A.B.C";
-//! let tokens: Vec<_> = lex(source)
+//! let tokens: Vec<_> = lex(source, 0)
 //!     .filter_map(|t| t.ok())
 //!     .map(|spanned| (spanned.value, spanned.span))
 //!     .collect();
@@ -54,7 +54,7 @@
 //!
 //! // Build tree from events
 //! let tree = TreeBuilder::new(source, sink.into_events()).build();
-//! let decl = ModuleDeclaration { syntax: tree, span: 0..source.len() };
+//! let decl = ModuleDeclaration { syntax: tree, span: Span::from(0..source.len()) };
 //! ```
 
 pub mod event;
@@ -123,7 +123,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ModuleDeclaration {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }
 
@@ -150,7 +150,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ImportDeclaration {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }
 
@@ -165,7 +165,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     StructDeclaration {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }
 
@@ -180,7 +180,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     TypeAliasDeclaration {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }
 
@@ -195,7 +195,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     FunctionDeclaration {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }
 
@@ -210,7 +210,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ProtocolDeclaration {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }
 
@@ -245,6 +245,6 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     TyExpression {
         syntax: tree,
-        span: 0..source.len(),
+        span: Span::from(0..source.len()),
     }
 }

@@ -83,20 +83,20 @@ fn variable_declaration_parser() -> impl Parser<Token, VariableDeclarationData, 
     skip_trivia()
         .ignore_then(
             just(Token::Let)
-                .map_with_span(|_, span| (span, false))
-                .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+                .map_with_span(|_, span| (Span::from(span), false))
+                .or(just(Token::Var).map_with_span(|_, span| (Span::from(span), true)))
         )
         .then(
             skip_trivia()
                 .ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(span),
+                    Token::Identifier => Ok(Span::from(span)),
                     _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
                 }))
         )
         .then(
             // Optional type annotation: : Type
             skip_trivia()
-                .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+                .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
                 .then(ty_parser())
                 .map(|(colon, ty)| (colon, ty))
                 .or_not()
@@ -104,14 +104,14 @@ fn variable_declaration_parser() -> impl Parser<Token, VariableDeclarationData, 
         .then(
             // Optional initializer: = expr
             skip_trivia()
-                .ignore_then(just(Token::Equals).map_with_span(|_, span| span))
+                .ignore_then(just(Token::Equals).map_with_span(|_, span| Span::from(span)))
                 .then(expr_parser())
                 .map(|(eq, expr)| (eq, expr))
                 .or_not()
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
         )
         .map(|(((((mutability_span, is_mutable), name_span), type_annotation), initializer), semicolon)| {
             VariableDeclarationData {
@@ -132,7 +132,7 @@ fn expression_statement_parser() -> impl Parser<Token, (ExprVariant, Span), Erro
     expr_parser()
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
         )
 }
 
@@ -220,7 +220,8 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match stmt_parser().parse(stream) {
         Ok(variant) => {
@@ -229,7 +230,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -241,7 +242,7 @@ mod tests {
     use kestrel_lexer::lex;
 
     fn parse_stmt_from_source(source: &str) -> Statement {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -252,7 +253,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         Statement {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         }
     }
 

@@ -127,9 +127,7 @@ pub fn link_protocol_methods_for_struct(
                             protocol_name,
                             expected_receiver: receiver_kind_to_string(&protocol_receiver),
                             actual_receiver: receiver_kind_to_string(&struct_receiver),
-                        },
-                        file_id,
-                    );
+                        });
                 }
             }
         }
@@ -146,9 +144,7 @@ pub fn link_protocol_methods_for_struct(
                     span: method_span,
                     method_name: method_name.clone(),
                     protocols: protocol_names,
-                },
-                file_id,
-            );
+                });
         } else if matches.len() == 1 {
             // Exactly one match - add ImplementsBehavior
             let (protocol, protocol_method) = &matches[0];

@@ -155,7 +155,7 @@ impl<'a> TypeResolver<'a> {
         if let Some(ty_node) = node.children().find(|c| c.kind() == SyntaxKind::Ty) {
             return self.resolve(&ty_node);
         }
-        Ty::error(0..0)
+        Ty::error(Span::from(0..0))
     }
 
     /// Apply type arguments to a generic type
@@ -218,9 +218,7 @@ impl<'a> TypeResolver<'a> {
                     NotGenericError {
                         span: span.clone(),
                         type_name,
-                    },
-                    self.file_id,
-                );
+                    });
                 Ty::error(span)
             }
         }
@@ -260,9 +258,7 @@ impl<'a> TypeResolver<'a> {
                     UnresolvedTypeError {
                         span: ty_span.clone(),
                         type_name: segment,
-                    },
-                    self.file_id,
-                );
+                    });
                 Ty::error(ty_span)
             }
             TypePathResolution::Ambiguous {
@@ -273,9 +269,7 @@ impl<'a> TypeResolver<'a> {
                         span: ty_span.clone(),
                         type_name: segment,
                         candidate_count: candidates.len(),
-                    },
-                    self.file_id,
-                );
+                    });
                 Ty::error(ty_span)
             }
             TypePathResolution::NotAType { .. } => {
@@ -283,9 +277,7 @@ impl<'a> TypeResolver<'a> {
                     NotATypeError {
                         span: ty_span.clone(),
                         name: segments.join("."),
-                    },
-                    self.file_id,
-                );
+                    });
                 Ty::error(ty_span)
             }
         }
@@ -329,9 +321,7 @@ impl<'a> TypeResolver<'a> {
                 NotGenericError {
                     span: span.clone(),
                     type_name: type_name.to_string(),
-                },
-                self.file_id,
-            );
+                });
             return Ty::error(span);
         }
 
@@ -343,9 +333,7 @@ impl<'a> TypeResolver<'a> {
                     type_name: type_name.to_string(),
                     min_expected: min_args,
                     got: actual,
-                },
-                self.file_id,
-            );
+                });
             return Ty::error(span);
         }
         if actual > max_args {
@@ -355,9 +343,7 @@ impl<'a> TypeResolver<'a> {
                     type_name: type_name.to_string(),
                     max_expected: max_args,
                     got: actual,
-                },
-                self.file_id,
-            );
+                });
             return Ty::error(span);
         }
 
@@ -473,7 +459,7 @@ pub fn extract_type_from_node(node: &SyntaxNode, source: &str) -> Ty {
     if let Some(ty_node) = node.children().find(|c| c.kind() == SyntaxKind::Ty) {
         return extract_type_from_ty_node(&ty_node, source);
     }
-    Ty::error(0..0)
+    Ty::error(Span::from(0..0))
 }
 
 // =============================================================================

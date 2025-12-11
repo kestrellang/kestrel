@@ -23,7 +23,7 @@ pub struct ImplicitInitArityError {
 }
 
 impl IntoDiagnostic for ImplicitInitArityError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let fields_list = self.field_names.join(", ");
         Diagnostic::error()
             .with_message(format!(
@@ -31,7 +31,7 @@ impl IntoDiagnostic for ImplicitInitArityError {
                 self.struct_name, self.expected, self.provided
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("expected {} argument(s)", self.expected))
             ])
             .with_notes(vec![
@@ -56,7 +56,7 @@ pub struct ImplicitInitLabelError {
 }
 
 impl IntoDiagnostic for ImplicitInitLabelError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided_desc = match &self.provided_label {
             Some(label) => format!("'{}'", label),
             None => "unlabeled".to_string(),
@@ -68,7 +68,7 @@ impl IntoDiagnostic for ImplicitInitLabelError {
                 self.arg_index + 1, provided_desc, self.expected_label
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("expected label '{}'", self.expected_label))
             ])
             .with_notes(vec![
@@ -92,11 +92,11 @@ pub struct NoMatchingInitializerError {
 }
 
 impl IntoDiagnostic for NoMatchingInitializerError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = super::call::format_argument_labels(&self.provided_labels);
 
         let mut labels = vec![
-            Label::primary(file_id, self.span.clone())
+            Label::primary(self.span.file_id, self.span.range())
                 .with_message(format!(
                     "no matching initializer for {} argument(s) with labels {}",
                     self.provided_arity, provided
@@ -107,7 +107,7 @@ impl IntoDiagnostic for NoMatchingInitializerError {
         for init in &self.available_initializers {
             if let (Some(span), Some(def_file_id)) = (&init.definition_span, init.definition_file_id) {
                 labels.push(
-                    Label::secondary(def_file_id, span.clone())
+                    Label::secondary(def_file_id, span.range())
                         .with_message(format!("candidate: {}", init.display()))
                 );
             }
@@ -146,14 +146,14 @@ pub struct FieldNotVisibleForInitError {
 }
 
 impl IntoDiagnostic for FieldNotVisibleForInitError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "cannot use implicit initializer for '{}': field '{}' is {}",
                 self.struct_name, self.field_name, self.field_visibility
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("implicit init not available")
             ])
             .with_notes(vec![
@@ -178,7 +178,7 @@ pub struct ExplicitInitSuppressesImplicitError {
 }
 
 impl IntoDiagnostic for ExplicitInitSuppressesImplicitError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = super::call::format_argument_labels(&self.provided_labels);
 
         let mut notes = vec![
@@ -198,7 +198,7 @@ impl IntoDiagnostic for ExplicitInitSuppressesImplicitError {
                 self.struct_name, self.provided_arity
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("no initializer matches labels {}", provided))
             ])
             .with_notes(notes)

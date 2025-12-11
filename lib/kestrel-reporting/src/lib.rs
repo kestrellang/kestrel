@@ -8,9 +8,11 @@ pub use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 
 /// Trait for types that can be converted into a diagnostic.
 /// Implement this for your error types to integrate with the reporting system.
+///
+/// The file ID is extracted from the span(s) stored in the error type.
 pub trait IntoDiagnostic {
     /// Convert this error into a codespan diagnostic.
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize>;
+    fn into_diagnostic(&self) -> Diagnostic<usize>;
 }
 
 /// Context for managing and reporting diagnostics.
@@ -43,8 +45,8 @@ impl DiagnosticContext {
     }
 
     /// Throw (add) a diagnostic to the context.
-    pub fn throw<D: IntoDiagnostic>(&mut self, diagnostic: D, file_id: usize) {
-        self.diagnostics.push(diagnostic.into_diagnostic(file_id));
+    pub fn throw<D: IntoDiagnostic>(&mut self, diagnostic: D) {
+        self.diagnostics.push(diagnostic.into_diagnostic());
     }
 
     /// Add a raw diagnostic to the context.

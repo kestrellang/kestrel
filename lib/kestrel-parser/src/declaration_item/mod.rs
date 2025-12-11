@@ -235,7 +235,8 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     sink.start_node(SyntaxKind::SourceFile);
 
@@ -248,7 +249,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -265,7 +266,7 @@ mod tests {
     #[test]
     fn test_declaration_item_module() {
         let source = "module A.B.C";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -283,7 +284,7 @@ mod tests {
     #[test]
     fn test_declaration_item_import() {
         let source = "import A.B.C";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -301,7 +302,7 @@ mod tests {
     #[test]
     fn test_generic_struct() {
         let source = "module Test\nstruct Box[T] {}";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -319,7 +320,7 @@ mod tests {
     #[test]
     fn test_generic_protocol() {
         let source = "module Test\nprotocol Collection[T] {}";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -341,7 +342,7 @@ mod tests {
     #[test]
     fn test_generic_function() {
         let source = "module Test\nfunc identity[T](value: T) -> T {}";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -363,7 +364,7 @@ mod tests {
     #[test]
     fn test_struct_with_fields_and_functions() {
         let source = "module Test\nstruct Person { let name: String func greet() {} }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -385,7 +386,7 @@ mod tests {
     #[test]
     fn test_struct_with_two_fields_and_initializer() {
         let source = "module Test\nstruct Point { var x: Int var y: Int init() {} }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -415,7 +416,7 @@ mod tests {
             extend Point { func sum() -> Int { return self.x + self.y; } }
             func test() -> Int { return 1; }"#;
 
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -453,7 +454,7 @@ mod tests {
             extend Point { func sum() -> Int { return self.x + self.y; } }
             func test() -> Int { let p = 1; return p; }"#;
 
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();

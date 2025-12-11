@@ -252,9 +252,7 @@ fn check_function_visibility(ctx: &SymbolContext<'_>) {
                     function_name: name.clone(),
                     function_visibility: "public".to_string(),
                     return_type_visibility: type_level.name().to_string(),
-                },
-                ctx.file_id,
-            );
+                });
         }
 
         // Check parameter types
@@ -262,15 +260,12 @@ fn check_function_visibility(ctx: &SymbolContext<'_>) {
             if let Some((_type_name, type_level)) =
                 find_less_visible_type(&param.ty, VisibilityLevel::Public)
             {
-                ctx.diagnostics().get().throw(
-                    ParameterTypeLessVisibleError {
-                        span: span.clone(),
-                        function_name: name.clone(),
-                        function_visibility: "public".to_string(),
-                        param_type_visibility: type_level.name().to_string(),
-                    },
-                    ctx.file_id,
-                );
+                ctx.diagnostics().get().throw(ParameterTypeLessVisibleError {
+                    span: span.clone(),
+                    function_name: name.clone(),
+                    function_visibility: "public".to_string(),
+                    param_type_visibility: type_level.name().to_string(),
+                });
             }
         }
     }
@@ -295,15 +290,12 @@ fn check_type_alias_visibility(ctx: &SymbolContext<'_>) {
         if let Some((_type_name, type_level)) =
             find_less_visible_type(typed.resolved_ty(), VisibilityLevel::Public)
         {
-            ctx.diagnostics().get().throw(
-                AliasedTypeLessVisibleError {
-                    span,
-                    alias_name: name.clone(),
-                    alias_visibility: "public".to_string(),
-                    aliased_type_visibility: type_level.name().to_string(),
-                },
-                ctx.file_id,
-            );
+            ctx.diagnostics().get().throw(AliasedTypeLessVisibleError {
+                span,
+                alias_name: name.clone(),
+                alias_visibility: "public".to_string(),
+                aliased_type_visibility: type_level.name().to_string(),
+            });
         }
     }
 }
@@ -318,15 +310,12 @@ fn check_field_visibility(ctx: &SymbolContext<'_>) {
         if let Some((_type_name, type_level)) =
             find_less_visible_type(typed.ty(), VisibilityLevel::Public)
         {
-            ctx.diagnostics().get().throw(
-                FieldTypeLessVisibleError {
-                    span,
-                    field_name: name.clone(),
-                    field_visibility: "public".to_string(),
-                    field_type_visibility: type_level.name().to_string(),
-                },
-                ctx.file_id,
-            );
+            ctx.diagnostics().get().throw(FieldTypeLessVisibleError {
+                span,
+                field_name: name.clone(),
+                field_visibility: "public".to_string(),
+                field_type_visibility: type_level.name().to_string(),
+            });
         }
     }
 }

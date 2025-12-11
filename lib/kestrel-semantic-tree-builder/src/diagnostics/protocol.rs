@@ -25,7 +25,7 @@ pub enum NotAProtocolContext {
 }
 
 impl IntoDiagnostic for NotAProtocolError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let (main_msg, label_msg) = match self.context {
             NotAProtocolContext::Bound => (
                 format!("'{}' is not a protocol; bound must be a protocol", self.name),
@@ -44,7 +44,7 @@ impl IntoDiagnostic for NotAProtocolError {
         Diagnostic::error()
             .with_message(main_msg)
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(label_msg)
             ])
     }
@@ -59,13 +59,13 @@ pub struct CircularProtocolInheritanceError {
 }
 
 impl IntoDiagnostic for CircularProtocolInheritanceError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let cycle_str = self.cycle.join(" -> ");
 
         Diagnostic::error()
             .with_message(format!("protocol '{}' has circular inheritance", self.protocol_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("circular inheritance detected")
             ])
             .with_notes(vec![
@@ -83,14 +83,14 @@ pub struct MissingProtocolMethodError {
 }
 
 impl IntoDiagnostic for MissingProtocolMethodError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type '{}' does not implement method '{}' from protocol '{}'",
                 self.struct_name, self.method_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("missing method '{}'", self.method_name))
             ])
     }
@@ -105,14 +105,14 @@ pub struct MissingAssociatedTypeError {
 }
 
 impl IntoDiagnostic for MissingAssociatedTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type '{}' does not provide associated type '{}' from protocol '{}'",
                 self.struct_name, self.type_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("missing associated type '{}'", self.type_name))
             ])
     }
@@ -128,14 +128,14 @@ pub struct WrongMethodReturnTypeError {
 }
 
 impl IntoDiagnostic for WrongMethodReturnTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "method '{}' has wrong return type for protocol '{}'",
                 self.method_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!(
                         "expected '{}', found '{}'",
                         self.expected_type, self.actual_type
@@ -152,14 +152,14 @@ pub struct ProtocolMethodHasBodyError {
 }
 
 impl IntoDiagnostic for ProtocolMethodHasBodyError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "protocol method '{}' in '{}' cannot have a body",
                 self.method_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("body not allowed in protocol method")
             ])
     }
@@ -173,7 +173,7 @@ pub struct AmbiguousAssociatedTypeError {
 }
 
 impl IntoDiagnostic for AmbiguousAssociatedTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let protocols_str = self.protocols.join("', '");
         Diagnostic::error()
             .with_message(format!(
@@ -181,7 +181,7 @@ impl IntoDiagnostic for AmbiguousAssociatedTypeError {
                 self.type_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("ambiguous binding")
             ])
             .with_notes(vec![
@@ -199,14 +199,14 @@ pub struct QualifiedBindingNotConformingError {
 }
 
 impl IntoDiagnostic for QualifiedBindingNotConformingError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "'{}' does not conform to '{}'",
                 self.struct_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("struct does not conform to '{}'", self.protocol_name))
             ])
     }
@@ -220,14 +220,14 @@ pub struct QualifiedBindingWrongProtocolError {
 }
 
 impl IntoDiagnostic for QualifiedBindingWrongProtocolError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "protocol '{}' does not have associated type '{}'",
                 self.protocol_name, self.type_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("'{}' not found in '{}'", self.type_name, self.protocol_name))
             ])
     }
@@ -242,14 +242,14 @@ pub struct WhereClauseAssociatedTypeNotFoundError {
 }
 
 impl IntoDiagnostic for WhereClauseAssociatedTypeNotFoundError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "no associated type '{}' in protocol '{}'",
                 self.assoc_type_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("'{}.{}' does not exist", self.type_param, self.assoc_type_name))
             ])
     }
@@ -264,14 +264,14 @@ pub struct AssociatedTypeConstraintNotSatisfiedError {
 }
 
 impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type '{}' does not satisfy bound",
                 self.bound_type
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!(
                         "type '{}' does not conform to required protocol '{}'",
                         self.bound_type, self.required_protocol
@@ -294,18 +294,18 @@ pub struct InheritedAssociatedTypeConflictError {
 }
 
 impl IntoDiagnostic for InheritedAssociatedTypeConflictError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "conflicting associated type '{}' from inherited protocols",
                 self.type_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("conflicting associated type '{}'", self.type_name)),
-                Label::secondary(file_id, self.definition_span1.clone())
+                Label::secondary(self.definition_span1.file_id, self.definition_span1.range())
                     .with_message(format!("first defined in '{}'", self.protocol1)),
-                Label::secondary(file_id, self.definition_span2.clone())
+                Label::secondary(self.definition_span2.file_id, self.definition_span2.range())
                     .with_message(format!("also defined in '{}'", self.protocol2)),
             ])
             .with_notes(vec![
@@ -324,14 +324,14 @@ pub struct ProtocolMethodReceiverMismatchError {
 }
 
 impl IntoDiagnostic for ProtocolMethodReceiverMismatchError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "method '{}' has incorrect receiver kind for protocol '{}'",
                 self.method_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!(
                         "expected {} method, found {} method",
                         self.expected_receiver, self.actual_receiver
@@ -351,7 +351,7 @@ pub struct AmbiguousProtocolMethodError {
 }
 
 impl IntoDiagnostic for AmbiguousProtocolMethodError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let protocols_str = self.protocols.join("', '");
         Diagnostic::error()
             .with_message(format!(
@@ -359,7 +359,7 @@ impl IntoDiagnostic for AmbiguousProtocolMethodError {
                 self.method_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("ambiguous implementation")
             ])
             .with_notes(vec![

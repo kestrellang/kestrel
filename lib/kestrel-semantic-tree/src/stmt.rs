@@ -94,6 +94,7 @@ impl Statement {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
     use crate::expr::Expression;
     use crate::pattern::{Mutability, Pattern};
@@ -105,11 +106,11 @@ mod tests {
             LocalId(0),
             Mutability::Immutable,
             "x".to_string(),
-            crate::ty::Ty::int(crate::ty::IntBits::I64, 5..8),
-            0..8,
+            crate::ty::Ty::int(crate::ty::IntBits::I64, Span::from(5..8)),
+            Span::from(0..8),
         );
-        let value = Expression::integer(42, 11..13);
-        let stmt = Statement::binding(pattern, Some(value), 0..14);
+        let value = Expression::integer(42, Span::from(11..13));
+        let stmt = Statement::binding(pattern, Some(value), Span::from(0..14));
 
         assert!(stmt.is_binding());
         assert!(!stmt.is_expr());
@@ -119,8 +120,8 @@ mod tests {
 
     #[test]
     fn test_expr_statement() {
-        let expr = Expression::unit(0..2);
-        let stmt = Statement::expr(expr, 0..3);
+        let expr = Expression::unit(Span::from(0..2));
+        let stmt = Statement::expr(expr, Span::from(0..3));
 
         assert!(stmt.is_expr());
         assert!(!stmt.is_binding());

@@ -43,7 +43,7 @@ pub fn resolve_unary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionConte
 
     let op_span: Span = {
         let range = op_token.text_range();
-        (range.start().into())..(range.end().into())
+        Span::from((range.start().into())..(range.end().into()))
     };
 
     // Determine the unary operator
@@ -85,7 +85,7 @@ pub fn resolve_postfix_expression(
 
     let op_span: Span = {
         let range = op_token.text_range();
-        (range.start().into())..(range.end().into())
+        Span::from((range.start().into())..(range.end().into()))
     };
 
     // Find and resolve the operand expression
@@ -157,7 +157,7 @@ fn collect_binary_operands(
 
     let op_info = op_token.map(|t| {
         let range = t.text_range();
-        let span: Span = (range.start().into())..(range.end().into());
+        let span: Span = Span::from((range.start().into())..(range.end().into()));
         (t.kind(), span)
     });
 
@@ -286,7 +286,7 @@ where
                 operators.next(); // consume operator
 
                 let rhs = pratt_parse_bp(operands, operators, prec + 1, full_span.clone(), ctx);
-                let expr_span = lhs.span.start..rhs.span.end;
+                let expr_span = Span::from(lhs.span.start..rhs.span.end);
                 lhs = desugar_binary_op(op, lhs, rhs, op_span, expr_span, ctx);
             }
 
@@ -295,7 +295,7 @@ where
                 operators.next(); // consume operator
 
                 let rhs = pratt_parse_bp(operands, operators, prec, full_span.clone(), ctx);
-                let expr_span = lhs.span.start..rhs.span.end;
+                let expr_span = Span::from(lhs.span.start..rhs.span.end);
                 lhs = desugar_binary_op(op, lhs, rhs, op_span, expr_span, ctx);
             }
 
@@ -303,7 +303,7 @@ where
                 let op_span = op_span.clone();
                 operators.next(); // consume operator
 
-                let expr_span = lhs.span.start..op_span.end;
+                let expr_span = Span::from(lhs.span.start..op_span.end);
                 lhs = desugar_unary_op(op, lhs, op_span, expr_span, ctx);
             }
         }
@@ -339,7 +339,7 @@ fn desugar_binary_op(
         rhs_type: super::utils::format_type(&rhs.ty),
     };
     ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        .add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
 }
 
@@ -404,7 +404,7 @@ fn desugar_unary_op(
         operand_type: super::utils::format_type(&operand.ty),
     };
     ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        .add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
 }
 

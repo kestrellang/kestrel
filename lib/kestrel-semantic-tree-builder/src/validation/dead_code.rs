@@ -67,7 +67,7 @@ impl Validator for DeadCodeValidator {
         for error in errors {
             ctx.diagnostics()
                 .get()
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                .add_diagnostic(error.into_diagnostic());
         }
     }
 }
@@ -100,11 +100,11 @@ impl UnreachableReason {
 }
 
 impl IntoDiagnostic for UnreachableCodeWarning {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message(format!("unreachable code {}", self.reason.description()))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone()).with_message("this code will never execute")
+                Label::primary(self.span.file_id, self.span.range()).with_message("this code will never execute")
             ])
     }
 }
@@ -469,6 +469,7 @@ fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Code
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]

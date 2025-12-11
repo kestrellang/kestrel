@@ -109,7 +109,7 @@ fn validate_import(
             if err.failed_segment_index < segments.len() {
                 err.failed_segment_span = segments[err.failed_segment_index].1.clone();
             }
-            ctx.diagnostics().get().throw(err, file_id);
+            ctx.diagnostics().get().throw(err);
             return;
         }
     };
@@ -135,9 +135,6 @@ fn validate_import(
                         // Get the actual visibility from the target symbol
                         let (visibility_str, _decl_span) = get_visibility_info(&target_symbol);
 
-                        // Get cross-file diagnostic info
-                        let declaration_file_id =
-                            get_file_id_for_symbol(&target_symbol, &mut *ctx.diagnostics().get());
                         // Point to the target's name identifier, not the whole declaration
                         let declaration_span = Some(target_symbol.metadata().name().span.clone());
 
@@ -147,10 +144,7 @@ fn validate_import(
                                 visibility: visibility_str,
                                 import_span: item.span.clone(), // Point to the specific item
                                 declaration_span,
-                                declaration_file_id: Some(declaration_file_id),
-                            },
-                            file_id,
-                        );
+                            });
                     }
                 }
                 None => {
@@ -160,9 +154,7 @@ fn validate_import(
                             module_path: import_data.module_path().to_vec(),
                             symbol_span: item.span.clone(), // Point to the specific item
                             module_span: import_symbol.metadata().span(),
-                        },
-                        file_id,
-                    );
+                        });
                 }
             }
         }
@@ -199,9 +191,7 @@ fn check_import_conflicts(
                                         import_span: item.span.clone(),
                                         existing_span: first.span.clone(),
                                         existing_is_import: first.is_import,
-                                    },
-                                    file_id,
-                                );
+                                    });
                             }
                         }
 
@@ -275,9 +265,7 @@ fn check_import_conflicts(
                             import_span: import_symbol.metadata().span(),
                             existing_span: source.span.clone(),
                             existing_is_import: source.is_import,
-                        },
-                        import_file_id,
-                    );
+                        });
                 }
             }
         }

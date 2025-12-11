@@ -76,9 +76,7 @@ fn validate_assignment_target(
                     CannotAssignToImmutableError {
                         span: target.span.clone(),
                         variable_name: name,
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
         ExprKind::FieldAccess { object, field } => {
@@ -92,9 +90,7 @@ fn validate_assignment_target(
                     CannotAssignToImmutableFieldError {
                         span: target.span.clone(),
                         field_name: field.clone(),
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
         ExprKind::TupleIndex { tuple: _, index } => {
@@ -104,9 +100,7 @@ fn validate_assignment_target(
                     CannotAssignToImmutableFieldError {
                         span: target.span.clone(),
                         field_name: format!("{}", index),
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
         // Invalid assignment targets - not lvalues at all
@@ -133,9 +127,7 @@ fn validate_assignment_target(
             ctx.diagnostics().get().throw(
                 CannotAssignToExpressionError {
                     span: target.span.clone(),
-                },
-                ctx.file_id,
-            );
+                });
         }
     }
 }
@@ -171,6 +163,7 @@ pub fn is_self_expr(expr: &Expression) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
     use kestrel_semantic_tree::ty::Ty;
 
@@ -179,8 +172,8 @@ mod tests {
         // Create a LocalRef to local 0 (self) - self is always mutable in initializers
         let self_expr = Expression::new(
             ExprKind::LocalRef(LocalId::new(0)),
-            Ty::error(0..1),
-            0..4,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..4),
             true, // mutable
         );
         assert!(is_self_expr(&self_expr));
@@ -188,14 +181,14 @@ mod tests {
         // Create a LocalRef to local 1 (not self)
         let other_expr = Expression::new(
             ExprKind::LocalRef(LocalId::new(1)),
-            Ty::error(0..1),
-            0..4,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..4),
             false,
         );
         assert!(!is_self_expr(&other_expr));
 
         // A literal is not self
-        let literal = Expression::integer(42, 0..2);
+        let literal = Expression::integer(42, Span::from(0..2));
         assert!(!is_self_expr(&literal));
     }
 
@@ -204,16 +197,16 @@ mod tests {
         // Create self.field expression
         let self_expr = Expression::new(
             ExprKind::LocalRef(LocalId::new(0)),
-            Ty::error(0..1),
-            0..4,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..4),
             true, // self is mutable
         );
         let field_access = Expression::field_access(
             self_expr,
             "count".to_string(),
             true, // field is mutable (var)
-            Ty::error(0..1),
-            0..10,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..10),
         );
 
         // The object inside the field access should be self
@@ -231,19 +224,19 @@ mod tests {
         // Create self.field = value expression
         let self_expr = Expression::new(
             ExprKind::LocalRef(LocalId::new(0)),
-            Ty::error(0..1),
-            0..4,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..4),
             true, // self is mutable
         );
         let field_access = Expression::field_access(
             self_expr,
             "count".to_string(),
             true, // field is mutable (var)
-            Ty::error(0..1),
-            0..10,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..10),
         );
-        let value = Expression::integer(0, 11..12);
-        let assignment = Expression::assignment(field_access, value, 0..12);
+        let value = Expression::integer(0, Span::from(11..12));
+        let assignment = Expression::assignment(field_access, value, Span::from(0..12));
 
         // Check the structure
         if let ExprKind::Assignment { target, value: _ } = &assignment.kind {
@@ -261,35 +254,35 @@ mod tests {
     #[test]
     fn test_field_mutability_composition() {
         // Mutable parent + mutable field = mutable
-        let mutable_parent = Expression::local_ref(LocalId::new(0), Ty::error(0..1), true, 0..4);
+        let mutable_parent = Expression::local_ref(LocalId::new(0), Ty::error(Span::from(0..1)), true, Span::from(0..4));
         let access1 = Expression::field_access(
             mutable_parent,
             "x".to_string(),
             true, // mutable field
-            Ty::error(0..1),
-            0..6,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..6),
         );
         assert!(access1.is_mutable());
 
         // Mutable parent + immutable field = immutable
-        let mutable_parent2 = Expression::local_ref(LocalId::new(0), Ty::error(0..1), true, 0..4);
+        let mutable_parent2 = Expression::local_ref(LocalId::new(0), Ty::error(Span::from(0..1)), true, Span::from(0..4));
         let access2 = Expression::field_access(
             mutable_parent2,
             "x".to_string(),
             false, // immutable field (let)
-            Ty::error(0..1),
-            0..6,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..6),
         );
         assert!(!access2.is_mutable());
 
         // Immutable parent + mutable field = immutable
-        let immutable_parent = Expression::local_ref(LocalId::new(0), Ty::error(0..1), false, 0..4);
+        let immutable_parent = Expression::local_ref(LocalId::new(0), Ty::error(Span::from(0..1)), false, Span::from(0..4));
         let access3 = Expression::field_access(
             immutable_parent,
             "x".to_string(),
             true, // mutable field
-            Ty::error(0..1),
-            0..6,
+            Ty::error(Span::from(0..1)),
+            Span::from(0..6),
         );
         assert!(!access3.is_mutable());
     }

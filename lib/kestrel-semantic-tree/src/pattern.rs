@@ -127,6 +127,7 @@ impl Pattern {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]
@@ -135,8 +136,8 @@ mod tests {
             LocalId(0),
             Mutability::Immutable,
             "x".to_string(),
-            Ty::int(crate::ty::IntBits::I64, 0..1),
-            0..5,
+            Ty::int(crate::ty::IntBits::I64, Span::from(0..1)),
+            Span::from(0..5),
         );
         assert!(pattern.is_local());
         assert_eq!(pattern.local_id(), Some(LocalId(0)));
@@ -150,15 +151,15 @@ mod tests {
             LocalId(1),
             Mutability::Mutable,
             "y".to_string(),
-            Ty::string(0..1),
-            0..5,
+            Ty::string(Span::from(0..1)),
+            Span::from(0..5),
         );
         assert!(pattern.mutability().unwrap().is_mutable());
     }
 
     #[test]
     fn test_error_pattern() {
-        let pattern = Pattern::error(0..5);
+        let pattern = Pattern::error(Span::from(0..5));
         assert!(pattern.is_error());
         assert!(pattern.ty.is_error());
     }

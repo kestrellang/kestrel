@@ -147,7 +147,7 @@ impl FunctionSymbol {
     pub fn return_type(&self) -> Ty {
         self.get_callable()
             .map(|c| c.return_type().clone())
-            .unwrap_or_else(|| Ty::error(0..0))
+            .unwrap_or_else(|| Ty::error(Span::from(0..0)))
     }
 
     /// Get the function's parameters
@@ -177,7 +177,7 @@ impl FunctionSymbol {
     pub fn function_type(&self) -> Ty {
         self.get_callable()
             .map(|c| c.function_type())
-            .unwrap_or_else(|| Ty::error(0..0))
+            .unwrap_or_else(|| Ty::error(Span::from(0..0)))
     }
 
     /// Get parameter labels for display/debugging

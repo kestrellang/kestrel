@@ -95,7 +95,8 @@ where
     use chumsky::Parser;
 
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match field_declaration_parser_internal().parse(stream) {
         Ok(data) => {
@@ -104,7 +105,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -118,7 +119,7 @@ mod tests {
     #[test]
     fn test_field_declaration_basic() {
         let source = "let x: Int";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -129,7 +130,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("x".to_string()));
@@ -141,7 +142,7 @@ mod tests {
     #[test]
     fn test_field_declaration_var() {
         let source = "var count: Int";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -152,7 +153,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("count".to_string()));
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn test_field_declaration_static() {
         let source = "static let instance: Self";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -173,7 +174,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("instance".to_string()));
@@ -184,7 +185,7 @@ mod tests {
     #[test]
     fn test_field_declaration_with_visibility() {
         let source = "public let name: String";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -195,7 +196,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("name".to_string()));
@@ -205,7 +206,7 @@ mod tests {
     #[test]
     fn test_field_declaration_full() {
         let source = "public static var counter: Int";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -216,7 +217,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FieldDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("counter".to_string()));

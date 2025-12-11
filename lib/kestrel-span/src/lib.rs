@@ -1,6 +1,50 @@
 pub use codespan_reporting::files::SimpleFile;
 
-pub type Span = std::ops::Range<usize>;
+/// A span representing a region of source code.
+///
+/// Contains the file ID and byte range within that file.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Span {
+    pub file_id: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    /// Create a new span from a file ID and byte range.
+    pub fn new(file_id: usize, range: std::ops::Range<usize>) -> Self {
+        Self {
+            file_id,
+            start: range.start,
+            end: range.end,
+        }
+    }
+
+    /// Get the byte range of this span.
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
+
+    /// Create a span with file_id = 0 (for use in parsers where file_id is unknown).
+    pub fn from_range(range: std::ops::Range<usize>) -> Self {
+        Self::new(0, range)
+    }
+
+    /// Create a new span with a different file_id but the same range.
+    pub fn with_file_id(&self, file_id: usize) -> Self {
+        Self {
+            file_id,
+            start: self.start,
+            end: self.end,
+        }
+    }
+}
+
+impl From<std::ops::Range<usize>> for Span {
+    fn from(range: std::ops::Range<usize>) -> Self {
+        Self::from_range(range)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Spanned<T> {
@@ -63,17 +107,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_span() {
+        let span = Span::new(1, 0..10);
+        assert_eq!(span.file_id, 1);
+        assert_eq!(span.start, 0);
+        assert_eq!(span.end, 10);
+        assert_eq!(span.range(), 0..10);
+    }
+
+    #[test]
     fn test_spanned() {
-        let spanned = Spanned::new(42, 0..2);
+        let spanned = Spanned::new(42, Span::new(0, 0..2));
         assert_eq!(spanned.value, 42);
-        assert_eq!(spanned.span, 0..2);
+        assert_eq!(spanned.span.range(), 0..2);
     }
 
     #[test]
     fn test_map() {
-        let spanned = Spanned::new(42, 0..2);
+        let spanned = Spanned::new(42, Span::new(0, 0..2));
         let mapped = spanned.map(|x| x * 2);
         assert_eq!(mapped.value, 84);
-        assert_eq!(mapped.span, 0..2);
+        assert_eq!(mapped.span.range(), 0..2);
     }
 }

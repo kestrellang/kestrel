@@ -115,7 +115,7 @@ fn check_duplicate_type_params(type_params: &[Arc<TypeParameterSymbol>], ctx: &S
                 duplicate_span: span,
                 original_span: original_span.clone(),
             };
-            ctx.diagnostics().get().throw(error, ctx.file_id);
+            ctx.diagnostics().get().throw(error);
         } else {
             seen.insert(name, span);
         }
@@ -140,7 +140,7 @@ fn check_default_ordering(type_params: &[Arc<TypeParameterSymbol>], ctx: &Symbol
                 with_default_span: prev_with_default.metadata().name().span.clone(),
                 without_default_span: param.metadata().name().span.clone(),
             };
-            ctx.diagnostics().get().throw(error, ctx.file_id);
+            ctx.diagnostics().get().throw(error);
             // Only report once per ordering issue
             break;
         }
@@ -187,7 +187,7 @@ fn validate_constraint(
                     span: param_span.clone(),
                     available,
                 };
-                ctx.diagnostics().get().throw(error, ctx.file_id);
+                ctx.diagnostics().get().throw(error);
             }
 
             // Validate each bound type
@@ -228,7 +228,7 @@ fn validate_bound_type(bound: &kestrel_semantic_tree::ty::Ty, ctx: &SymbolContex
                 type_kind: "struct".to_string(),
                 span: bound.span().clone(),
             };
-            ctx.diagnostics().get().throw(error, ctx.file_id);
+            ctx.diagnostics().get().throw(error);
         }
         // Type aliases are not valid as bounds
         TyKind::TypeAlias { symbol, .. } => {
@@ -237,7 +237,7 @@ fn validate_bound_type(bound: &kestrel_semantic_tree::ty::Ty, ctx: &SymbolContex
                 type_kind: "type alias".to_string(),
                 span: bound.span().clone(),
             };
-            ctx.diagnostics().get().throw(error, ctx.file_id);
+            ctx.diagnostics().get().throw(error);
         }
         // Type parameters are not valid as bounds
         TyKind::TypeParameter(param) => {
@@ -246,7 +246,7 @@ fn validate_bound_type(bound: &kestrel_semantic_tree::ty::Ty, ctx: &SymbolContex
                 type_kind: "type parameter".to_string(),
                 span: bound.span().clone(),
             };
-            ctx.diagnostics().get().throw(error, ctx.file_id);
+            ctx.diagnostics().get().throw(error);
         }
         // All other type kinds are not valid as bounds
         _ => {
@@ -255,7 +255,7 @@ fn validate_bound_type(bound: &kestrel_semantic_tree::ty::Ty, ctx: &SymbolContex
                 type_kind: "invalid type".to_string(),
                 span: bound.span().clone(),
             };
-            ctx.diagnostics().get().throw(error, ctx.file_id);
+            ctx.diagnostics().get().throw(error);
         }
     }
 }

@@ -131,15 +131,12 @@ fn check_struct_for_cycles(
                         struct_span: struct_sym.metadata().declaration_span().clone(),
                         field_name,
                         field_span,
-                    },
-                    file_id,
-                );
+                    });
             } else {
                 // Multi-struct cycle
                 let origin = CycleMember {
                     name: struct_name.clone(),
                     span: struct_sym.metadata().declaration_span().clone(),
-                    file_id: Some(file_id),
                 };
 
                 let cycle_members: Vec<CycleMember> = cycle
@@ -150,7 +147,6 @@ fn check_struct_for_cycles(
                         db.symbol_by_id(id).map(|s| CycleMember {
                             name: s.metadata().name().value.clone(),
                             span: s.metadata().declaration_span().clone(),
-                            file_id: Some(get_file_id_for_symbol(&s, diagnostics)),
                         })
                     })
                     .collect();
@@ -161,9 +157,7 @@ fn check_struct_for_cycles(
                         cycle: cycle_members,
                         field_name,
                         field_span,
-                    },
-                    file_id,
-                );
+                    });
             }
         }
 

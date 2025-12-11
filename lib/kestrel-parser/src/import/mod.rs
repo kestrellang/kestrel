@@ -88,7 +88,8 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match import_declaration_parser_internal().parse(stream) {
         Ok((import_span, path_segments, alias, items)) => {
@@ -99,7 +100,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -114,7 +115,7 @@ mod tests {
     #[test]
     fn test_import_all() {
         let source = "import A.B.C";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -125,7 +126,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
@@ -136,7 +137,7 @@ mod tests {
     #[test]
     fn test_import_aliased() {
         let source = "import A.B.C as D";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -147,7 +148,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
@@ -158,7 +159,7 @@ mod tests {
     #[test]
     fn test_import_items() {
         let source = "import A.B.C.(D, E)";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -169,7 +170,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
@@ -196,7 +197,7 @@ mod tests {
     #[test]
     fn test_import_aliased_items() {
         let source = "import A.B.C.(D as E, F as G)";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -207,7 +208,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ImportDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);

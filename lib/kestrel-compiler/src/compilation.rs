@@ -3,6 +3,7 @@ use kestrel_lexer::lex;
 use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
 use kestrel_semantic_tree_builder::{SemanticTree, SemanticTreeBuilder, SemanticBinder};
+use kestrel_span::Span;
 
 /// Represents a compiled Kestrel project.
 ///
@@ -42,7 +43,7 @@ impl Compilation {
             let file_id = diagnostics.add_file(name.clone(), source.clone());
 
             // Phase 1: Lexing
-            let lex_results: Vec<_> = lex(&source).collect();
+            let lex_results: Vec<_> = lex(&source, file_id).collect();
 
             // Collect lex errors
             for result in &lex_results {
@@ -50,7 +51,7 @@ impl Compilation {
                     let error_diag = LexError {
                         span: error.span.clone(),
                     };
-                    diagnostics.throw(error_diag, file_id);
+                    diagnostics.throw(error_diag);
                 }
             }
 
@@ -70,7 +71,7 @@ impl Compilation {
                     message: error.message.clone(),
                     span: error.span.clone(),
                 };
-                diagnostics.throw(error_diag, file_id);
+                diagnostics.throw(error_diag);
             }
 
             // Phase 3: Add file to the semantic tree builder
@@ -131,15 +132,15 @@ impl Compilation {
 
 /// Lex error diagnostic
 struct LexError {
-    span: std::ops::Range<usize>,
+    span: Span,
 }
 
 impl IntoDiagnostic for LexError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("invalid token")
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("unrecognized token")
             ])
     }
@@ -148,18 +149,18 @@ impl IntoDiagnostic for LexError {
 /// Parse error diagnostic
 struct ParseErrorDiagnostic {
     message: String,
-    span: Option<std::ops::Range<usize>>,
+    span: Option<Span>,
 }
 
 impl IntoDiagnostic for ParseErrorDiagnostic {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut diagnostic = Diagnostic::error()
             .with_message(&self.message);
 
         // Add span label if available
         if let Some(span) = &self.span {
             diagnostic = diagnostic.with_labels(vec![
-                Label::primary(file_id, span.clone())
+                Label::primary(span.file_id, span.range())
                     .with_message("error occurred here")
             ]);
         }

@@ -96,11 +96,11 @@ impl<'a> ModuleValidator<'a> {
                 let module_end: usize = module_decl.text_range().end().into();
 
                 let error = ModuleNotFirstError {
-                    module_span: module_start..module_end,
-                    first_item_span: first_start..first_end,
+                    module_span: Span::from(module_start..module_end),
+                    first_item_span: Span::from(first_start..first_end),
                     first_item_kind: format!("{:?}", first.kind()),
                 };
-                self.diagnostics.throw(error, self.file_id);
+                self.diagnostics.throw(error);
             }
         }
     }
@@ -125,13 +125,13 @@ impl<'a> ModuleValidator<'a> {
         let span = if let Some(first_decl) = self.syntax.children().next() {
             let start: usize = first_decl.text_range().start().into();
             let end: usize = first_decl.text_range().end().into();
-            start..end.min(start + 1)
+            Span::from(start..end.min(start + 1))
         } else {
-            0..1
+            Span::from(0..1)
         };
 
         let error = NoModuleDeclarationError { span };
-        self.diagnostics.throw(error, self.file_id);
+        self.diagnostics.throw(error);
     }
 
     /// Emit error for multiple module declarations
@@ -146,15 +146,15 @@ impl<'a> ModuleValidator<'a> {
             .map(|decl| {
                 let start: usize = decl.text_range().start().into();
                 let end: usize = decl.text_range().end().into();
-                start..end
+                Span::from(start..end)
             })
             .collect();
 
         let error = MultipleModuleDeclarationsError {
-            first_span: first_start..first_end,
+            first_span: Span::from(first_start..first_end),
             duplicate_spans,
             count: module_decls.len(),
         };
-        self.diagnostics.throw(error, self.file_id);
+        self.diagnostics.throw(error);
     }
 }

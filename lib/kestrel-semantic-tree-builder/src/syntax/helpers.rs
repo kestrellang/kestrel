@@ -70,7 +70,7 @@ pub fn get_node_span(node: &SyntaxNode, _source: &str) -> Span {
     let start =
         find_first_non_trivia_start(node).unwrap_or_else(|| text_range.start().into());
 
-    start..end
+    Span::from(start..end)
 }
 
 /// Recursively find the start position of the first non-trivia token
@@ -246,9 +246,7 @@ pub fn resolve_conformance_list(
                         span: span.clone(),
                         name: struct_sym.metadata().name().value.clone(),
                         context: error_context,
-                    },
-                    file_id,
-                );
+                    });
                 resolved.push(Ty::error(span));
             }
             TyKind::Error => {
@@ -262,9 +260,7 @@ pub fn resolve_conformance_list(
                         span: span.clone(),
                         name: type_name,
                         context: error_context,
-                    },
-                    file_id,
-                );
+                    });
                 resolved.push(Ty::error(span));
             }
         }

@@ -63,9 +63,7 @@ impl Validator for FunctionBodyValidator {
                     FunctionMissingBodyError {
                         span,
                         function_name: name.clone(),
-                    },
-                    ctx.file_id,
-                );
+                    });
             }
         }
     }

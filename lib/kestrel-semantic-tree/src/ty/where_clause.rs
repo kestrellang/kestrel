@@ -208,6 +208,7 @@ impl Constraint {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]
@@ -221,9 +222,9 @@ mod tests {
     fn test_where_clause_with_constraints() {
         let param_id = SymbolId::new();
         // Use error type as placeholder for protocol bound in test
-        let bound = Ty::error(0..8);
+        let bound = Ty::error(Span::from(0..8));
 
-        let constraint = Constraint::type_bound(param_id, "T".to_string(), 0..1, vec![bound]);
+        let constraint = Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         assert!(!wc.is_empty());
@@ -238,9 +239,9 @@ mod tests {
         let param_id = SymbolId::new();
         let other_id = SymbolId::new();
         // Use error type as placeholder for protocol bound in test
-        let bound = Ty::error(0..8);
+        let bound = Ty::error(Span::from(0..8));
 
-        let constraint = Constraint::type_bound(param_id, "T".to_string(), 0..1, vec![bound]);
+        let constraint = Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         // Looking for bounds on a different param
@@ -251,8 +252,8 @@ mod tests {
     #[test]
     fn test_unresolved_constraint() {
         // Use error type as placeholder for protocol bound in test
-        let bound = Ty::error(0..8);
-        let constraint = Constraint::unresolved_type_bound("U".to_string(), 0..1, vec![bound]);
+        let bound = Ty::error(Span::from(0..8));
+        let constraint = Constraint::unresolved_type_bound("U".to_string(), Span::from(0..1), vec![bound]);
 
         assert!(constraint.is_unresolved());
         assert_eq!(constraint.param_name(), "U");

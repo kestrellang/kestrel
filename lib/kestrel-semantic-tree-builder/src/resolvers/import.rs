@@ -143,7 +143,7 @@ fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<I
                         .filter(|t| t.kind() == SyntaxKind::Identifier)
                         .map(|t| {
                             let range = t.text_range();
-                            let span: Span = range.start().into()..range.end().into();
+                            let span: Span = Span::from(range.start().into()..range.end().into());
                             (t.text().to_string(), span)
                         })
                 })?;

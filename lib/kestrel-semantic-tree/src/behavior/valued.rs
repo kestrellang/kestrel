@@ -51,26 +51,27 @@ impl ValueBehavior {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]
     fn test_value_behavior_simple() {
         use crate::ty::IntBits;
-        let ty = Ty::int(IntBits::I64, 5..8);
-        let behavior = ValueBehavior::new(ty, 0..10);
+        let ty = Ty::int(IntBits::I64, Span::from(5..8));
+        let behavior = ValueBehavior::new(ty, Span::from(0..10));
 
         assert!(behavior.ty().is_int());
-        assert_eq!(behavior.span(), &(0..10));
+        assert_eq!(behavior.span().range(), 0..10);
     }
 
     #[test]
     fn test_value_behavior_function_type() {
         use crate::ty::IntBits;
-        let param = Ty::int(IntBits::I64, 1..4);
-        let return_ty = Ty::int(IntBits::I64, 9..12);
-        let fn_ty = Ty::function(vec![param], return_ty, 0..12);
+        let param = Ty::int(IntBits::I64, Span::from(1..4));
+        let return_ty = Ty::int(IntBits::I64, Span::from(9..12));
+        let fn_ty = Ty::function(vec![param], return_ty, Span::from(0..12));
 
-        let behavior = ValueBehavior::new(fn_ty, 0..20);
+        let behavior = ValueBehavior::new(fn_ty, Span::from(0..20));
 
         assert!(behavior.ty().is_function());
     }

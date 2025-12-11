@@ -292,9 +292,12 @@ pub enum Token {
 
 pub type SpannedToken = Spanned<Token>;
 
-/// Lex source code and return an iterator of tokens with their spans
-pub fn lex(source: &str) -> impl Iterator<Item = Result<SpannedToken, Spanned<()>>> + '_ {
-    Token::lexer(source).spanned().map(|(token, span)| {
+/// Lex source code and return an iterator of tokens with their spans.
+///
+/// The `file_id` is embedded in each token's span for use in diagnostics.
+pub fn lex(source: &str, file_id: usize) -> impl Iterator<Item = Result<SpannedToken, Spanned<()>>> + '_ {
+    Token::lexer(source).spanned().map(move |(token, span)| {
+        let span = Span::new(file_id, span);
         token
             .map(|t| Spanned::new(t, span.clone()))
             .map_err(|_| Spanned::new((), span))
@@ -317,81 +320,81 @@ mod tests {
     #[test]
     fn test_lexer() {
         let source = "func main() { let x = 42; }";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert!(tokens.len() > 0);
 
         // First token should be 'func' at position 0..4
         assert_eq!(tokens[0].value, Token::Func);
-        assert_eq!(tokens[0].span, 0..4);
+        assert_eq!(tokens[0].span.range(), 0..4);
     }
 
     #[test]
     fn test_spans() {
         let source = "let x = 42";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         // Verify spans don't overlap and cover the source
-        assert_eq!(tokens[0].span, 0..3);   // "let"
-        assert_eq!(tokens[1].span, 4..5);   // "x"
-        assert_eq!(tokens[2].span, 6..7);   // "="
-        assert_eq!(tokens[3].span, 8..10);  // "42"
+        assert_eq!(tokens[0].span.range(), 0..3);   // "let"
+        assert_eq!(tokens[1].span.range(), 4..5);   // "x"
+        assert_eq!(tokens[2].span.range(), 6..7);   // "="
+        assert_eq!(tokens[3].span.range(), 8..10);  // "42"
     }
 
     #[test]
     fn test_literals() {
         // Test string literals
         let source = r#""hello world""#;
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::String);
 
         // Test integer literals - decimal
         let source = "42";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Integer);
 
         // Test integer literals - hexadecimal
         let source = "0xFF 0XAB 0x1a2b";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Integer);
         assert_eq!(tokens[1].value, Token::Integer);
         assert_eq!(tokens[2].value, Token::Integer);
 
         // Test integer literals - binary
         let source = "0b1010 0B1111";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Integer);
         assert_eq!(tokens[1].value, Token::Integer);
 
         // Test integer literals - octal
         let source = "0o17 0O755";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Integer);
         assert_eq!(tokens[1].value, Token::Integer);
 
         // Test float literals
         let source = "3.14 2.5e10 1.0E-5";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Float);
         assert_eq!(tokens[1].value, Token::Float);
         assert_eq!(tokens[2].value, Token::Float);
 
         // Test boolean literals
         let source = "true false";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Boolean);
         assert_eq!(tokens[1].value, Token::Boolean);
 
         // Test null literal
         let source = "null";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens[0].value, Token::Null);
     }
 
     #[test]
     fn test_module_declaration() {
         let source = "module A.B.C";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 6);
         assert_eq!(tokens[0].value, Token::Module);
@@ -406,7 +409,7 @@ mod tests {
     fn test_unicode_identifiers() {
         // Test various Unicode identifier patterns
         let source = "let café = 42";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 4);
         assert_eq!(tokens[0].value, Token::Let);
@@ -416,14 +419,14 @@ mod tests {
 
         // Test Greek identifiers
         let source = "func αβγ() { }";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens[0].value, Token::Func);
         assert_eq!(tokens[1].value, Token::Identifier); // αβγ
 
         // Test mixed scripts
         let source = "let _hello世界 = 42";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens[1].value, Token::Identifier); // _hello世界
     }
@@ -434,7 +437,7 @@ mod tests {
             let x = 42; // This is a comment
             let y = 10; // Another comment
         "#;
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         // Comments should be skipped
         // Tokens: let x = 42 ; let y = 10 ;
@@ -460,7 +463,7 @@ mod tests {
                comment */
             let y = 10;
         "#;
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         // Comments should be skipped
         // Tokens: let x = 42 ; let y = 10 ;
@@ -483,7 +486,7 @@ mod tests {
             let x = /* outer /* inner */ still outer */ 42;
             let y = /* /* /* deeply */ nested */ comments */ 10;
         "#;
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         // All nested comments should be properly handled
         // Tokens: let x = 42 ; let y = 10 ;
@@ -503,7 +506,7 @@ mod tests {
     #[test]
     fn test_comments_dont_affect_strings() {
         let source = r#"let s = "// not a comment";"#;
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 5); // let s = "..." ;
         assert_eq!(tokens[0].value, Token::Let);
@@ -516,7 +519,7 @@ mod tests {
     #[test]
     fn test_import_keyword() {
         let source = "import A.B.C";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 6);
         assert_eq!(tokens[0].value, Token::Import);
@@ -530,7 +533,7 @@ mod tests {
     #[test]
     fn test_import_with_as() {
         let source = "import A.B.C as D";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 8);
         assert_eq!(tokens[0].value, Token::Import);
@@ -546,7 +549,7 @@ mod tests {
     #[test]
     fn test_import_with_list() {
         let source = "import A.B.C.(D, E)";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 12);
         assert_eq!(tokens[0].value, Token::Import);
@@ -566,7 +569,7 @@ mod tests {
     #[test]
     fn test_type_alias_declaration() {
         let source = "type Alias = Aliased;";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 5);
         assert_eq!(tokens[0].value, Token::Type);
@@ -579,7 +582,7 @@ mod tests {
     #[test]
     fn test_type_alias_with_visibility() {
         let source = "public type Alias = Aliased;";
-        let tokens = filter_trivia(lex(source).collect());
+        let tokens = filter_trivia(lex(source, 0).collect());
 
         assert_eq!(tokens.len(), 6);
         assert_eq!(tokens[0].value, Token::Public);

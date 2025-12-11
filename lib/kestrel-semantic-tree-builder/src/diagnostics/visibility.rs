@@ -14,14 +14,14 @@ pub struct ReturnTypeLessVisibleError {
 }
 
 impl IntoDiagnostic for ReturnTypeLessVisibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "return type of '{}' is less visible than the function",
                 self.function_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("return type is less visible than function")
             ])
             .with_notes(vec![
@@ -42,14 +42,14 @@ pub struct ParameterTypeLessVisibleError {
 }
 
 impl IntoDiagnostic for ParameterTypeLessVisibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "parameter type in '{}' is less visible than the function",
                 self.function_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("parameter type is less visible than function")
             ])
             .with_notes(vec![
@@ -70,14 +70,14 @@ pub struct AliasedTypeLessVisibleError {
 }
 
 impl IntoDiagnostic for AliasedTypeLessVisibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "aliased type in '{}' is less visible than the type alias",
                 self.alias_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("aliased type is less visible than alias")
             ])
             .with_notes(vec![
@@ -98,14 +98,14 @@ pub struct FieldTypeLessVisibleError {
 }
 
 impl IntoDiagnostic for FieldTypeLessVisibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "field '{}' has type less visible than the field",
                 self.field_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("field type is less visible than field")
             ])
             .with_notes(vec![

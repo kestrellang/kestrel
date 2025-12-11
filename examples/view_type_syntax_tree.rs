@@ -46,7 +46,7 @@ fn parse_type_file(path: &str) {
     println!();
 
     // Lex the code
-    let tokens: Vec<_> = lex(&code)
+    let tokens: Vec<_> = lex(&code, 0)
         .filter_map(|t| t.ok())
         .map(|spanned| (spanned.value, spanned.span))
         .collect();

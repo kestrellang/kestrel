@@ -94,13 +94,14 @@ impl Local {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]
     fn test_local_basic() {
         use crate::ty::IntBits;
-        let ty = Ty::int(IntBits::I64, 0..3);
-        let local = Local::new(LocalId::new(0), "x".to_string(), ty, false, 0..5);
+        let ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let local = Local::new(LocalId::new(0), "x".to_string(), ty, false, Span::from(0..5));
 
         assert_eq!(local.id().index(), 0);
         assert_eq!(local.name(), "x");
@@ -111,8 +112,8 @@ mod tests {
     #[test]
     fn test_local_mutable() {
         use crate::ty::IntBits;
-        let ty = Ty::int(IntBits::I64, 0..3);
-        let local = Local::new(LocalId::new(1), "y".to_string(), ty, true, 0..5);
+        let ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let local = Local::new(LocalId::new(1), "y".to_string(), ty, true, Span::from(0..5));
 
         assert_eq!(local.id().index(), 1);
         assert_eq!(local.name(), "y");
@@ -123,9 +124,9 @@ mod tests {
     #[test]
     fn test_local_shadowing_names() {
         use crate::ty::IntBits;
-        let ty = Ty::int(IntBits::I64, 0..3);
-        let local0 = Local::new(LocalId::new(0), "x".to_string(), ty.clone(), false, 0..5);
-        let local1 = Local::new(LocalId::new(1), "x".to_string(), ty.clone(), false, 10..15);
+        let ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let local0 = Local::new(LocalId::new(0), "x".to_string(), ty.clone(), false, Span::from(0..5));
+        let local1 = Local::new(LocalId::new(1), "x".to_string(), ty.clone(), false, Span::from(10..15));
 
         // Same source name, different codegen names
         assert_eq!(local0.name(), local1.name());

@@ -139,6 +139,7 @@ impl LocalScope {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
     use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
     use kestrel_semantic_tree::language::KestrelLanguage;
@@ -148,11 +149,11 @@ mod tests {
 
     // Helper to create a test root symbol for visibility scope
     fn create_test_root() -> Arc<dyn Symbol<KestrelLanguage>> {
-        let root_name = Name::new("TestRoot".to_string(), 0..8);
+        let root_name = Name::new("TestRoot".to_string(), Span::from(0..8));
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(root_name)
-            .with_declaration_span(0..8)
-            .with_span(0..100)
+            .with_declaration_span(Span::from(0..8))
+            .with_span(Span::from(0..100))
             .build();
 
         #[derive(Debug)]
@@ -171,13 +172,13 @@ mod tests {
 
     fn create_test_function() -> Arc<FunctionSymbol> {
         let root = create_test_root();
-        let name = Name::new("test".to_string(), 0..4);
-        let visibility = VisibilityBehavior::new(Some(Visibility::Internal), 0..0, root);
-        let return_type = Ty::unit(0..2);
+        let name = Name::new("test".to_string(), Span::from(0..4));
+        let visibility = VisibilityBehavior::new(Some(Visibility::Internal), Span::from(0..0), root);
+        let return_type = Ty::unit(Span::from(0..2));
 
         Arc::new(FunctionSymbol::new(
             name,
-            0..50,
+            Span::from(0..50),
             visibility,
             true,  // is_static
             true,  // has_body
@@ -193,8 +194,8 @@ mod tests {
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::int(IntBits::I64, 0..3);
-        let id = scope.bind("x".to_string(), ty, false, 0..5);
+        let ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let id = scope.bind("x".to_string(), ty, false, Span::from(0..5));
 
         assert_eq!(scope.lookup("x"), Some(id));
         assert_eq!(func.local_count(), 1);
@@ -206,15 +207,15 @@ mod tests {
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::int(IntBits::I64, 0..3);
+        let ty = Ty::int(IntBits::I64, Span::from(0..3));
 
         // First binding
-        let id1 = scope.bind("x".to_string(), ty.clone(), false, 0..5);
+        let id1 = scope.bind("x".to_string(), ty.clone(), false, Span::from(0..5));
         assert_eq!(scope.lookup("x"), Some(id1));
 
         // Push new scope and shadow
         scope.push_scope();
-        let id2 = scope.bind("x".to_string(), ty.clone(), false, 10..15);
+        let id2 = scope.bind("x".to_string(), ty.clone(), false, Span::from(10..15));
         assert_eq!(scope.lookup("x"), Some(id2));
         assert_ne!(id1, id2);
 
@@ -232,15 +233,15 @@ mod tests {
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::int(IntBits::I64, 0..3);
+        let ty = Ty::int(IntBits::I64, Span::from(0..3));
 
-        let id_a = scope.bind("a".to_string(), ty.clone(), false, 0..1);
-
-        scope.push_scope();
-        let id_b = scope.bind("b".to_string(), ty.clone(), false, 5..6);
+        let id_a = scope.bind("a".to_string(), ty.clone(), false, Span::from(0..1));
 
         scope.push_scope();
-        let id_c = scope.bind("c".to_string(), ty.clone(), false, 10..11);
+        let id_b = scope.bind("b".to_string(), ty.clone(), false, Span::from(5..6));
+
+        scope.push_scope();
+        let id_c = scope.bind("c".to_string(), ty.clone(), false, Span::from(10..11));
 
         // All visible at innermost scope
         assert_eq!(scope.lookup("a"), Some(id_a));

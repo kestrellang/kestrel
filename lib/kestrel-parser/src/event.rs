@@ -153,12 +153,12 @@ impl<'src> TreeBuilder<'src> {
                     let kind = *kind;
                     let span_start = span.start;
                     let span_end = span.end;
-                    let span_clone = span.clone();
+                    let span_range = span.range();
 
                     // Emit any trivia before this token
                     self.emit_trivia_until(span_start, builder);
 
-                    let text = &self.source[span_clone];
+                    let text = &self.source[span_range];
                     builder.token(kind.into(), text);
                     self.source_pos = span_end;
                     self.pos += 1;
@@ -185,13 +185,13 @@ mod tests {
     fn test_event_sink() {
         let mut sink = EventSink::new();
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, 0..1);
+        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
         sink.finish_node();
 
         let events = sink.events();
         assert_eq!(events.len(), 3);
         assert_eq!(events[0], Event::StartNode(SyntaxKind::ModulePath));
-        assert_eq!(events[1], Event::AddToken(SyntaxKind::Identifier, 0..1));
+        assert_eq!(events[1], Event::AddToken(SyntaxKind::Identifier, Span::from(0..1)));
         assert_eq!(events[2], Event::FinishNode);
     }
 
@@ -201,7 +201,7 @@ mod tests {
         let mut sink = EventSink::new();
 
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, 0..1);
+        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
         sink.finish_node();
 
         let builder = TreeBuilder::new(source, sink.into_events());
@@ -217,9 +217,9 @@ mod tests {
         let mut sink = EventSink::new();
 
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, 0..1);
-        sink.add_token(SyntaxKind::Dot, 1..2);
-        sink.add_token(SyntaxKind::Identifier, 2..3);
+        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
+        sink.add_token(SyntaxKind::Dot, Span::from(1..2));
+        sink.add_token(SyntaxKind::Identifier, Span::from(2..3));
         sink.finish_node();
 
         let builder = TreeBuilder::new(source, sink.into_events());
@@ -236,11 +236,11 @@ mod tests {
 
         // ModuleDeclaration
         sink.start_node(SyntaxKind::ModuleDeclaration);
-        sink.add_token(SyntaxKind::Module, 0..6);
+        sink.add_token(SyntaxKind::Module, Span::from(0..6));
 
         // ModulePath (child node)
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, 7..8);
+        sink.add_token(SyntaxKind::Identifier, Span::from(7..8));
         sink.finish_node();
 
         sink.finish_node();

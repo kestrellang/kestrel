@@ -211,9 +211,7 @@ impl<'a> SemanticBinder<'a> {
                             first_span,
                             first_file_id,
                             duplicate_spans,
-                        },
-                        first_file_id,
-                    );
+                        });
                 }
             }
         }

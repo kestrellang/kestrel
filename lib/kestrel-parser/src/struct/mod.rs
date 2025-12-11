@@ -167,7 +167,8 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match struct_declaration_parser_internal().parse(stream) {
         Ok(data) => {
@@ -176,7 +177,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -189,14 +190,14 @@ mod tests {
 
     /// Helper to parse source code and return a StructDeclaration
     fn parse(source: &str) -> StructDeclaration {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
         let mut sink = EventSink::new();
         parse_struct_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
-        StructDeclaration { syntax: tree, span: 0..source.len() }
+        StructDeclaration { syntax: tree, span: Span::from(0..source.len()) }
     }
 
     /// Helper to check if a syntax node exists as a child

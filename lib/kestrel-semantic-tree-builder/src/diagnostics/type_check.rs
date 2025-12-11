@@ -25,13 +25,13 @@ pub struct TypeMismatchError {
 }
 
 impl IntoDiagnostic for TypeMismatchError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type mismatch: expected `{}`, found `{}`",
                 self.expected, self.found
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message(format!("expected `{}`", self.expected))])
             .with_notes(vec![format!(
                 "{}: expected `{}`, found `{}`",
@@ -53,13 +53,13 @@ pub struct ConditionNotBoolError {
 }
 
 impl IntoDiagnostic for ConditionNotBoolError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "{} condition must be `Bool`, found `{}`",
                 self.condition_kind, self.found
             ))
-            .with_labels(vec![Label::primary(file_id, self.span.clone())
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message(format!("expected `Bool`, found `{}`", self.found))])
     }
 }
@@ -79,16 +79,16 @@ pub struct BranchTypeMismatchError {
 }
 
 impl IntoDiagnostic for BranchTypeMismatchError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "if/else branches have incompatible types: `{}` vs `{}`",
                 self.then_type, self.else_type
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.then_span.clone())
+                Label::primary(self.then_span.file_id, self.then_span.range())
                     .with_message(format!("this has type `{}`", self.then_type)),
-                Label::secondary(file_id, self.else_span.clone())
+                Label::secondary(self.else_span.file_id, self.else_span.range())
                     .with_message(format!("this has type `{}`", self.else_type)),
             ])
             .with_notes(vec![
@@ -114,16 +114,16 @@ pub struct ArrayElementTypeMismatchError {
 }
 
 impl IntoDiagnostic for ArrayElementTypeMismatchError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "array element type mismatch: expected `{}`, found `{}`",
                 self.expected, self.found
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.element_span.clone())
+                Label::primary(self.element_span.file_id, self.element_span.range())
                     .with_message(format!("expected `{}`, found `{}`", self.expected, self.found)),
-                Label::secondary(file_id, self.first_element_span.clone())
+                Label::secondary(self.first_element_span.file_id, self.first_element_span.range())
                     .with_message(format!("first element has type `{}`", self.expected)),
             ])
             .with_notes(vec![format!(

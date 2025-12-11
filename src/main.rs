@@ -68,8 +68,11 @@ fn add_file(
         }
     };
 
+    // Add file to diagnostics first to get file_id for spans
+    let file_id = diagnostics.add_file(path.to_string(), content.clone());
+
     // Lex the entire file
-    let tokens: Vec<_> = lex(&content)
+    let tokens: Vec<_> = lex(&content, file_id)
         .filter_map(|t| t.ok())
         .map(|spanned| (spanned.value, spanned.span))
         .collect();
@@ -79,18 +82,16 @@ fn add_file(
 
     if !result.errors.is_empty() {
         for error in &result.errors {
-            let span = error.span.clone().unwrap_or(0..1);
-            let file_id = diagnostics.add_file(path.to_string(), content.clone());
+            let span = error.span.clone().unwrap_or(kestrel_span::Span::from(0..1));
             let diagnostic = kestrel_reporting::Diagnostic::error()
                 .with_message(&error.message)
-                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)]);
+                .with_labels(vec![kestrel_reporting::Label::primary(span.file_id, span.range())]);
             diagnostics.add_diagnostic(diagnostic);
         }
         return false;
     }
 
     // Add to semantic tree
-    let file_id = diagnostics.add_file(path.to_string(), content.clone());
     builder.add_file(path, &result.tree, &content, diagnostics, file_id);
 
     true
@@ -169,7 +170,7 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
             }
         };
 
-        let tokens: Vec<_> = lex(&content)
+        let tokens: Vec<_> = lex(&content, 0)  // Use file_id=0 for parse-only mode
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();

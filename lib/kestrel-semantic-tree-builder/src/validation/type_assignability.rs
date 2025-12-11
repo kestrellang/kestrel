@@ -160,6 +160,7 @@ fn types_match(a: &Ty, b: &Ty) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     // Unit tests would require setting up a full semantic database,

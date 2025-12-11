@@ -81,7 +81,7 @@ impl Validator for ExhaustiveReturnValidator {
             let span = ctx.symbol.metadata().declaration_span().clone();
 
             ctx.diagnostics().get().add_diagnostic(
-                MissingReturnError { span, func_name }.into_diagnostic(ctx.file_id),
+                MissingReturnError { span, func_name }.into_diagnostic(),
             );
         }
     }
@@ -103,14 +103,14 @@ struct MissingReturnError {
 }
 
 impl IntoDiagnostic for MissingReturnError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "function '{}' does not return a value on all code paths",
                 self.func_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("this function has a non-unit return type")
             ])
             .with_notes(vec![
@@ -432,6 +432,7 @@ fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Code
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]

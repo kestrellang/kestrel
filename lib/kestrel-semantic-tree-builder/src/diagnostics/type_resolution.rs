@@ -12,11 +12,11 @@ pub struct UnresolvedTypeError {
 }
 
 impl IntoDiagnostic for UnresolvedTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("cannot find type '{}' in this scope", self.type_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("not found")
             ])
     }
@@ -30,11 +30,11 @@ pub struct AmbiguousTypeError {
 }
 
 impl IntoDiagnostic for AmbiguousTypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type '{}' is ambiguous", self.type_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("{} types with this name in scope", self.candidate_count))
             ])
             .with_notes(vec![
@@ -50,11 +50,11 @@ pub struct NotATypeError {
 }
 
 impl IntoDiagnostic for NotATypeError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("'{}' is not a type", self.name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("not a type")
             ])
     }
@@ -67,11 +67,11 @@ pub struct NotGenericError {
 }
 
 impl IntoDiagnostic for NotGenericError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type '{}' does not accept type arguments", self.type_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("not a generic type")
             ])
             .with_notes(vec![
@@ -89,11 +89,11 @@ pub struct TooFewTypeArgumentsError {
 }
 
 impl IntoDiagnostic for TooFewTypeArgumentsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("too few type arguments for '{}'", self.type_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!(
                         "expected at least {}, found {}",
                         self.min_expected,
@@ -112,11 +112,11 @@ pub struct TooManyTypeArgumentsError {
 }
 
 impl IntoDiagnostic for TooManyTypeArgumentsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("too many type arguments for '{}'", self.type_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!(
                         "expected at most {}, found {}",
                         self.max_expected,
@@ -133,11 +133,11 @@ pub struct TypeParameterWrongPositionError {
 }
 
 impl IntoDiagnostic for TypeParameterWrongPositionError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(self.message.clone())
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("type parameters must appear in their declared positions")
             ])
             .with_notes(vec![

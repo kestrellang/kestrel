@@ -34,13 +34,13 @@ where
 
 /// Match a specific token, skipping leading trivia
 pub fn token(t: Token) -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
-    trivia(just(t).map_with_span(|_, span| span))
+    trivia(just(t).map_with_span(|_, span| Span::from(span)))
 }
 
 /// Parse an identifier, skipping leading trivia
 pub fn identifier() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
     trivia(filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
+        Token::Identifier => Ok(Span::from(span)),
         _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
     }))
 }
@@ -71,7 +71,7 @@ pub fn visibility_parser_internal(
 ) -> impl Parser<Token, Option<(Token, Span)>, Error = Simple<Token>> + Clone {
     trivia(filter_map(|span, token| match token {
         Token::Public | Token::Private | Token::Internal | Token::Fileprivate => {
-            Ok((token, span))
+            Ok((token, Span::from(span)))
         }
         _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
     }))
@@ -178,7 +178,7 @@ pub fn import_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Spa
 /// - `func foo()` → `None`
 pub fn static_parser() -> impl Parser<Token, Option<Span>, Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Static).map_with_span(|_, span| Some(span)))
+        .ignore_then(just(Token::Static).map_with_span(|_, span| Some(Span::from(span))))
         .or(empty().map(|_| None))
 }
 
@@ -194,8 +194,8 @@ pub fn receiver_modifier_parser() -> impl Parser<Token, Option<(ReceiverModifier
     skip_trivia()
         .ignore_then(
             just(Token::Mutating)
-                .map_with_span(|_, span| Some((ReceiverModifier::Mutating, span)))
-                .or(just(Token::Consuming).map_with_span(|_, span| Some((ReceiverModifier::Consuming, span))))
+                .map_with_span(|_, span| Some((ReceiverModifier::Mutating, Span::from(span))))
+                .or(just(Token::Consuming).map_with_span(|_, span| Some((ReceiverModifier::Consuming, Span::from(span)))))
         )
         .or(empty().map(|_| None))
 }
@@ -211,8 +211,8 @@ pub fn let_var_parser() -> impl Parser<Token, (Span, bool), Error = Simple<Token
     skip_trivia()
         .ignore_then(
             just(Token::Let)
-                .map_with_span(|_, span| (span, false))
-                .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+                .map_with_span(|_, span| (Span::from(span), false))
+                .or(just(Token::Var).map_with_span(|_, span| (Span::from(span), true)))
         )
 }
 
@@ -231,7 +231,7 @@ pub(crate) fn parameter_parser() -> impl Parser<Token, ParameterData, Error = Si
     skip_trivia()
         .ignore_then(
             filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
+                Token::Identifier => Ok(Span::from(span)),
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             })
         )
@@ -240,7 +240,7 @@ pub(crate) fn parameter_parser() -> impl Parser<Token, ParameterData, Error = Si
             skip_trivia()
                 .ignore_then(
                     filter_map(|span, token| match token {
-                        Token::Identifier => Ok(span),
+                        Token::Identifier => Ok(Span::from(span)),
                         _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
                     })
                 )
@@ -248,7 +248,7 @@ pub(crate) fn parameter_parser() -> impl Parser<Token, ParameterData, Error = Si
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+                .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
         )
         .then(ty_parser())
         .map(|(((first_ident, second_ident_opt), colon), ty)| {
@@ -280,7 +280,7 @@ pub(crate) fn parameter_list_parser() -> impl Parser<Token, Vec<ParameterData>, 
     skip_trivia()
         .ignore_then(
             parameter_parser()
-                .separated_by(just(Token::Comma).map_with_span(|_, span| span))
+                .separated_by(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
                 .allow_trailing()
         )
 }
@@ -292,7 +292,7 @@ pub(crate) fn parameter_list_parser() -> impl Parser<Token, Vec<ParameterData>, 
 /// - `None` if no return type
 pub(crate) fn return_type_parser() -> impl Parser<Token, Option<(Span, TyVariant)>, Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Arrow).map_with_span(|_, span| span))
+        .ignore_then(just(Token::Arrow).map_with_span(|_, span| Span::from(span)))
         .then(ty_parser())
         .map(|(arrow, ty)| (arrow, ty))
         .or_not()

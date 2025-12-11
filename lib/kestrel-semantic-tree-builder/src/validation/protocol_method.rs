@@ -67,9 +67,7 @@ impl Validator for ProtocolMethodValidator {
                             span,
                             method_name: name.clone(),
                             protocol_name: protocol_name.clone(),
-                        },
-                        ctx.file_id,
-                    );
+                        });
                 }
             }
         }

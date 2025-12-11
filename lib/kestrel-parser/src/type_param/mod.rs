@@ -81,7 +81,7 @@ fn path_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone
     skip_trivia()
         .ignore_then(
             filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
+                Token::Identifier => Ok(Span::from(span)),
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             })
             .separated_by(just(Token::Dot))
@@ -128,14 +128,14 @@ pub fn type_argument_list_parser() -> impl Parser<Token, Vec<TypeArgumentData>, 
 /// Returns (lbracket, args, rbracket)
 pub fn type_argument_list_with_spans_parser() -> impl Parser<Token, (Span, Vec<TypeArgumentData>, Span), Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBracket).map_with_span(|_, span| span))
+        .ignore_then(just(Token::LBracket).map_with_span(|_, span| Span::from(span)))
         .then(
             type_argument_parser()
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBracket).map_with_span(|_, span| span))
+        .then(just(Token::RBracket).map_with_span(|_, span| Span::from(span)))
         .map(|((lbracket, args), rbracket)| (lbracket, args, rbracket))
 }
 
@@ -154,7 +154,7 @@ fn type_parameter_parser() -> impl Parser<Token, TypeParameterData, Error = Simp
     skip_trivia()
         .ignore_then(
             filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
+                Token::Identifier => Ok(Span::from(span)),
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             })
         )
@@ -171,7 +171,7 @@ fn type_parameter_parser() -> impl Parser<Token, TypeParameterData, Error = Simp
 /// Parser for type parameter list: [T, U, V] or [T, U = String]
 pub fn type_parameter_list_parser() -> impl Parser<Token, (Span, Vec<TypeParameterData>, Span), Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBracket).map_with_span(|_, span| span))
+        .ignore_then(just(Token::LBracket).map_with_span(|_, span| Span::from(span)))
         .then(
             type_parameter_parser()
                 .separated_by(just(Token::Comma))
@@ -179,7 +179,7 @@ pub fn type_parameter_list_parser() -> impl Parser<Token, (Span, Vec<TypeParamet
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBracket).map_with_span(|_, span| span))
+                .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span)))
         )
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
 }
@@ -208,7 +208,7 @@ fn type_equality_parser() -> impl Parser<Token, TypeEqualityData, Error = Simple
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
-        .then(just(Token::Equals).map_with_span(|_, span| span))
+        .then(just(Token::Equals).map_with_span(|_, span| Span::from(span)))
         .then_ignore(skip_trivia())
         .then(crate::ty::ty_parser())
         .map(|((left, equals_span), right)| TypeEqualityData { left, equals_span, right })
@@ -225,7 +225,7 @@ fn where_constraint_parser() -> impl Parser<Token, WhereConstraintData, Error = 
 /// Parser for where clause: where T: Proto, U: Other, T.Item = Int
 pub fn where_clause_parser() -> impl Parser<Token, WhereClauseData, Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Where).map_with_span(|_, span| span))
+        .ignore_then(just(Token::Where).map_with_span(|_, span| Span::from(span)))
         .then(
             where_constraint_parser()
                 .separated_by(just(Token::Comma))
@@ -238,7 +238,7 @@ pub fn where_clause_parser() -> impl Parser<Token, WhereClauseData, Error = Simp
 /// Used after struct/protocol names to declare conformance/inheritance
 pub fn conformance_list_parser() -> impl Parser<Token, (Span, Vec<crate::ty::TyVariant>), Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+        .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
         .then(
             crate::ty::ty_parser()
                 .separated_by(just(Token::Comma))
@@ -398,7 +398,7 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
             // The dot should be a single character somewhere in this gap
             let dot_start = end;
             let dot_end = (end + 1).min(span.start);
-            sink.add_token(SyntaxKind::Dot, dot_start..dot_end);
+            sink.add_token(SyntaxKind::Dot, Span::from(dot_start..dot_end));
         }
         sink.start_node(SyntaxKind::PathElement);
         sink.add_token(SyntaxKind::Identifier, span.clone());
@@ -415,32 +415,35 @@ mod tests {
     use kestrel_lexer::lex;
 
     fn parse_type_params(source: &str) -> Option<(Span, Vec<TypeParameterData>, Span)> {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
         let end_pos = source.len();
-        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens.into_iter());
+        let tokens_with_range = tokens.into_iter().map(|(tok, span)| (tok, span.range()));
+        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
         type_parameter_list_parser().parse(stream).ok()
     }
 
     fn parse_where(source: &str) -> Option<WhereClauseData> {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
         let end_pos = source.len();
-        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens.into_iter());
+        let tokens_with_range = tokens.into_iter().map(|(tok, span)| (tok, span.range()));
+        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
         where_clause_parser().parse(stream).ok()
     }
 
     fn parse_type_args(source: &str) -> Option<Vec<TypeArgumentData>> {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
         let end_pos = source.len();
-        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens.into_iter());
+        let tokens_with_range = tokens.into_iter().map(|(tok, span)| (tok, span.range()));
+        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
         type_argument_list_parser().parse(stream).ok()
     }
 
@@ -551,12 +554,13 @@ mod tests {
     }
 
     fn parse_conformances(source: &str) -> Option<(Span, Vec<crate::ty::TyVariant>)> {
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
         let end_pos = source.len();
-        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens.into_iter());
+        let tokens_with_range = tokens.into_iter().map(|(tok, span)| (tok, span.range()));
+        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
         conformance_list_parser().parse(stream).ok()
     }
 

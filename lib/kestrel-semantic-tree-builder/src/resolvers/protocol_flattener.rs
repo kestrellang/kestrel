@@ -63,7 +63,7 @@ pub fn flatten_protocol(
                 cycle: cycle_path,
             };
 
-            ctx.diagnostics.throw(error, file_id);
+            ctx.diagnostics.throw(error);
             None
         }
     }
@@ -154,7 +154,7 @@ fn flatten_protocol_recursive(
                         definition_span1: existing.definition_span.clone(),
                         definition_span2: child.metadata().name().span.clone(),
                     };
-                    ctx.diagnostics.throw(error, file_id);
+                    ctx.diagnostics.throw(error);
                     continue; // Skip this one, keep existing
                 }
 

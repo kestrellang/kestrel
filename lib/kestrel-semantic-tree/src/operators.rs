@@ -476,6 +476,7 @@ impl OperatorRegistry {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]

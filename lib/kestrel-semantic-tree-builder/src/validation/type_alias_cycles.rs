@@ -107,7 +107,6 @@ fn check_type_alias_for_cycles(
             let origin = CycleParticipant {
                 name: type_alias.metadata().name().value.clone(),
                 name_span: type_alias.metadata().name().span.clone(),
-                file_id: Some(file_id),
             };
 
             let cycle_participants: Vec<CycleParticipant> = cycle
@@ -118,7 +117,6 @@ fn check_type_alias_for_cycles(
                     db.symbol_by_id(id).map(|s| CycleParticipant {
                         name: s.metadata().name().value.clone(),
                         name_span: s.metadata().name().span.clone(),
-                        file_id: Some(get_file_id_for_symbol(&s, diagnostics)),
                     })
                 })
                 .collect();
@@ -127,9 +125,7 @@ fn check_type_alias_for_cycles(
                 CircularTypeAliasError {
                     origin,
                     cycle: cycle_participants,
-                },
-                file_id,
-            );
+                });
         }
 
     visited.exit();

@@ -204,9 +204,7 @@ fn check_circular_inheritance(
                 span,
                 protocol_name: protocol_name.to_string(),
                 cycle: cycle_names,
-            },
-            file_id,
-        );
+            });
     }
 }
 
@@ -316,9 +314,7 @@ fn check_struct_conformance(
                         struct_name: struct_name.clone(),
                         protocol_name: protocol_name.clone(),
                         type_name: type_name.clone(),
-                    },
-                    file_id,
-                );
+                    });
             }
         }
 
@@ -368,9 +364,7 @@ fn check_struct_conformance(
                             struct_name: struct_name.clone(),
                             protocol_name: protocol_name.clone(),
                             method_name: method_name.clone(),
-                        },
-                        file_id,
-                    );
+                        });
                 }
                 Some((_struct_method, struct_return_type)) => {
                     if struct_return_type != &required_return_type {
@@ -383,9 +377,7 @@ fn check_struct_conformance(
                                 protocol_name: protocol_name.clone(),
                                 expected_type: format!("{:?}", required_return_type),
                                 actual_type: format!("{:?}", struct_return_type),
-                            },
-                            file_id,
-                        );
+                            });
                     }
                 }
             }
@@ -676,9 +668,7 @@ fn validate_type_satisfies_protocol_bounds(
                         type_name: type_name.to_string(),
                         bound_type: bound_type_name.clone(),
                         required_protocol: required_protocol_name,
-                    },
-                    file_id,
-                );
+                    });
                 return; // Only report the first violation
             }
         }

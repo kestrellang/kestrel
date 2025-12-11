@@ -8,7 +8,7 @@ use std::sync::Arc;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::source_file::SourceFileSymbol;
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolTable};
 
@@ -74,9 +74,9 @@ impl SemanticTreeBuilder {
         };
 
         // Step 3: Create a SourceFile symbol under the module
-        let file_name_spanned = Spanned::new(file_name.to_string(), 0..file_name.len());
+        let file_name_spanned = Spanned::new(file_name.to_string(), Span::from(0..file_name.len()));
         let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> =
-            Arc::new(SourceFileSymbol::new(file_name_spanned, 0..source.len()));
+            Arc::new(SourceFileSymbol::new(file_name_spanned, Span::from(0..source.len())));
 
         parent_module.metadata().add_child(&source_file_symbol);
         self.tree.symbol_table_mut().insert(source_file_symbol.clone());

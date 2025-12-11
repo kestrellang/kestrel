@@ -32,7 +32,7 @@ pub fn emit_module_path(sink: &mut EventSink, segments: &[Span]) {
     for (i, span) in segments.iter().enumerate() {
         if i > 0 {
             // Emit dot token between segments
-            sink.add_token(SyntaxKind::Dot, span.start - 1..span.start);
+            sink.add_token(SyntaxKind::Dot, Span::from(span.start - 1..span.start));
         }
         sink.add_token(SyntaxKind::Identifier, span.clone());
     }
@@ -62,10 +62,10 @@ pub fn emit_import_declaration(
 
     if let Some(items_list) = &items {
         let last_segment_end = path_segments.last().unwrap().end;
-        sink.add_token(SyntaxKind::Dot, last_segment_end..last_segment_end + 1);
+        sink.add_token(SyntaxKind::Dot, Span::from(last_segment_end..last_segment_end + 1));
         sink.add_token(
             SyntaxKind::LParen,
-            last_segment_end + 1..last_segment_end + 2,
+            Span::from(last_segment_end + 1..last_segment_end + 2),
         );
 
         for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
@@ -77,7 +77,7 @@ pub fn emit_import_declaration(
                 } else {
                     items_list.get(i - 1).unwrap().0.end
                 };
-                sink.add_token(SyntaxKind::Comma, prev_end..prev_end + 1);
+                sink.add_token(SyntaxKind::Comma, Span::from(prev_end..prev_end + 1));
             }
 
             sink.start_node(SyntaxKind::ImportItem);
@@ -85,7 +85,7 @@ pub fn emit_import_declaration(
 
             if let Some(alias_s) = alias_span {
                 let as_start = name_span.end + 1;
-                sink.add_token(SyntaxKind::As, as_start..as_start + 2);
+                sink.add_token(SyntaxKind::As, Span::from(as_start..as_start + 2));
                 sink.add_token(SyntaxKind::Identifier, alias_s.clone());
             }
             sink.finish_node();
@@ -97,10 +97,10 @@ pub fn emit_import_declaration(
         } else {
             last_item.0.end
         };
-        sink.add_token(SyntaxKind::RParen, last_item_end..last_item_end + 1);
+        sink.add_token(SyntaxKind::RParen, Span::from(last_item_end..last_item_end + 1));
     } else if let Some(alias_span) = alias {
         let as_start = path_segments.last().unwrap().end + 1;
-        sink.add_token(SyntaxKind::As, as_start..as_start + 2);
+        sink.add_token(SyntaxKind::As, Span::from(as_start..as_start + 2));
         sink.add_token(SyntaxKind::Identifier, alias_span);
     }
 
@@ -406,7 +406,7 @@ fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoun
             } else {
                 bounds.colon_span.end
             };
-            sink.add_token(SyntaxKind::Comma, prev_end..prev_end + 1);
+            sink.add_token(SyntaxKind::Comma, Span::from(prev_end..prev_end + 1));
         }
         emit_ty_variant(sink, bound);
     }

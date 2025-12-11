@@ -1043,11 +1043,12 @@ impl Expression {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]
     fn test_integer_literal() {
-        let expr = Expression::integer(42, 0..2);
+        let expr = Expression::integer(42, Span::from(0..2));
         assert!(expr.is_literal());
         assert_eq!(expr.as_literal(), Some(&LiteralValue::Integer(42)));
         assert!(expr.ty.is_int());
@@ -1055,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_string_literal() {
-        let expr = Expression::string("hello".to_string(), 0..7);
+        let expr = Expression::string("hello".to_string(), Span::from(0..7));
         assert!(expr.is_literal());
         assert_eq!(
             expr.as_literal(),
@@ -1066,14 +1067,14 @@ mod tests {
 
     #[test]
     fn test_tuple_expression() {
-        let elements = vec![Expression::integer(1, 1..2), Expression::integer(2, 4..5)];
-        let expr = Expression::tuple(elements, 0..6);
+        let elements = vec![Expression::integer(1, Span::from(1..2)), Expression::integer(2, Span::from(4..5))];
+        let expr = Expression::tuple(elements, Span::from(0..6));
         assert!(expr.ty.is_tuple());
     }
 
     #[test]
     fn test_error_expression() {
-        let expr = Expression::error(0..5);
+        let expr = Expression::error(Span::from(0..5));
         assert!(expr.is_error());
         assert!(expr.ty.is_error());
     }

@@ -116,7 +116,8 @@ where
     use chumsky::Parser;
 
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match function_declaration_parser_internal().parse(stream) {
         Ok(data) => {
@@ -125,7 +126,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }
@@ -139,7 +140,7 @@ mod tests {
     #[test]
     fn test_function_declaration_basic() {
         let source = "func test() { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -150,7 +151,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("test".to_string()));
@@ -161,7 +162,7 @@ mod tests {
     #[test]
     fn test_function_declaration_with_visibility() {
         let source = "public func greet() { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -172,7 +173,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("greet".to_string()));
@@ -182,7 +183,7 @@ mod tests {
     #[test]
     fn test_function_declaration_static() {
         let source = "static func create() { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -193,7 +194,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("create".to_string()));
@@ -203,7 +204,7 @@ mod tests {
     #[test]
     fn test_function_declaration_with_params() {
         let source = "func add(a: Int, b: Int) { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -214,7 +215,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("add".to_string()));
@@ -224,7 +225,7 @@ mod tests {
     #[test]
     fn test_function_declaration_with_labeled_param() {
         let source = "func greet(with name: String) { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -235,7 +236,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("greet".to_string()));
@@ -245,7 +246,7 @@ mod tests {
     #[test]
     fn test_function_declaration_with_return_type() {
         let source = "func multiply(x: Int, y: Int) -> Int { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -256,7 +257,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("multiply".to_string()));
@@ -266,7 +267,7 @@ mod tests {
     #[test]
     fn test_function_declaration_with_generics() {
         let source = "func identity[T](value: T) -> T { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -277,7 +278,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("identity".to_string()));
@@ -287,7 +288,7 @@ mod tests {
     #[test]
     fn test_function_declaration_with_where_clause() {
         let source = "func compare[T](a: T, b: T) -> Bool where T: Equatable { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -298,7 +299,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("compare".to_string()));
@@ -309,7 +310,7 @@ mod tests {
     #[test]
     fn test_function_declaration_full() {
         let source = "public static func calculate(value: Float, multiplier: Float) -> Float { }";
-        let tokens: Vec<_> = lex(source)
+        let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
@@ -320,7 +321,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = FunctionDeclaration {
             syntax: tree,
-            span: 0..source.len(),
+            span: Span::from(0..source.len()),
         };
 
         assert_eq!(decl.name(), Some("calculate".to_string()));

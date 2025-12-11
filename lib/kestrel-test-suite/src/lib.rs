@@ -52,6 +52,7 @@
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
+use kestrel_span::Span;
 use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
@@ -123,7 +124,8 @@ impl Test {
 
         // Parse and add all files
         for (file_name, content) in &self.files {
-            let tokens: Vec<_> = lex(content)
+            let file_id = diagnostics.add_file(file_name.clone(), content.clone());
+            let tokens: Vec<_> = lex(content, file_id)
                 .filter_map(|t| t.ok())
                 .map(|spanned| (spanned.value, spanned.span))
                 .collect();
@@ -134,16 +136,14 @@ impl Test {
                 has_parse_errors = true;
                 // Add parse errors to diagnostics
                 for error in &result.errors {
-                    let file_id = diagnostics.add_file(file_name.clone(), content.clone());
-                    let span = error.span.clone().unwrap_or(0..1);
+                    let span = error.span.clone().unwrap_or(Span::from(0..1));
                     let diagnostic = kestrel_reporting::Diagnostic::error()
                         .with_message(&error.message)
-                        .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)]);
+                        .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.range())]);
                     diagnostics.add_diagnostic(diagnostic);
                 }
             }
 
-            let file_id = diagnostics.add_file(file_name.clone(), content.clone());
             builder.add_file(file_name, &result.tree, content, &mut diagnostics, file_id);
         }
 

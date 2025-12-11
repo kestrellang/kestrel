@@ -182,7 +182,6 @@ fn check_constraint_cycles(
             let origin = CycleMember {
                 name: param.metadata().name().value.clone(),
                 span: param.metadata().name().span.clone(),
-                file_id: Some(file_id),
             };
 
             let cycle_members: Vec<CycleMember> = cycle
@@ -193,7 +192,6 @@ fn check_constraint_cycles(
                     param_map.get(id).map(|p| CycleMember {
                         name: p.metadata().name().value.clone(),
                         span: p.metadata().name().span.clone(),
-                        file_id: Some(file_id),
                     })
                 })
                 .collect();
@@ -202,9 +200,7 @@ fn check_constraint_cycles(
                 CircularConstraintError {
                     origin,
                     cycle: cycle_members,
-                },
-                file_id,
-            );
+                });
 
             // Only report one cycle per generic container
             break;

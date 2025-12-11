@@ -158,7 +158,7 @@ impl Validator for ExtensionConflictValidator {
                                 struct_method_span: struct_method_span.clone(),
                                 extension_method_span: ext_method_span.clone(),
                             };
-                            diagnostics.add_diagnostic(error.into_diagnostic(0));
+                            diagnostics.add_diagnostic(error.into_diagnostic());
                         }
                     }
                 }
@@ -191,7 +191,7 @@ impl Validator for ExtensionConflictValidator {
                         method_name,
                         locations: locations.into_iter().map(|(_, span)| span).collect(),
                     };
-                    diagnostics.add_diagnostic(error.into_diagnostic(0));
+                    diagnostics.add_diagnostic(error.into_diagnostic());
                 }
             }
         }
@@ -206,7 +206,7 @@ pub struct DuplicateExtensionMethodError {
 }
 
 impl IntoDiagnostic for DuplicateExtensionMethodError {
-    fn into_diagnostic(&self, _file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels: Vec<Label<usize>> = self
             .locations
             .iter()
@@ -217,7 +217,7 @@ impl IntoDiagnostic for DuplicateExtensionMethodError {
                 } else {
                     "conflicting definition here"
                 };
-                Label::primary(0, span.clone()).with_message(msg)
+                Label::primary(0, span.range()).with_message(msg)
             })
             .collect();
 
@@ -251,16 +251,16 @@ pub struct StructExtensionMethodConflictError {
 }
 
 impl IntoDiagnostic for StructExtensionMethodConflictError {
-    fn into_diagnostic(&self, _file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "duplicate method '{}': extension cannot redefine struct method",
                 self.method_name
             ))
             .with_labels(vec![
-                Label::primary(0, self.struct_method_span.clone())
+                Label::primary(0, self.struct_method_span.range())
                     .with_message("method defined here on struct"),
-                Label::secondary(0, self.extension_method_span.clone())
+                Label::secondary(0, self.extension_method_span.range())
                     .with_message("conflicting extension method here"),
             ])
             .with_notes(vec![

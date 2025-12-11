@@ -332,7 +332,7 @@ pub fn resolve_call(
                             span: span.clone(),
                             callee_description: "a variable".to_string(),
                         }
-                        .into_diagnostic(ctx.file_id),
+                        .into_diagnostic(),
                     );
                     return Expression::error(span);
                 }
@@ -357,7 +357,7 @@ pub fn resolve_call(
                             span: span.clone(),
                             callee_description: "this expression".to_string(),
                         }
-                        .into_diagnostic(ctx.file_id),
+                        .into_diagnostic(),
                     );
                     return Expression::error(span);
                 }
@@ -409,7 +409,7 @@ fn resolve_single_function_call(
             method_name,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -431,7 +431,7 @@ fn resolve_single_function_call(
             available_overloads,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -450,7 +450,7 @@ fn resolve_single_function_call(
                         span: span.clone(),
                         type_name: function_name,
                     }
-                    .into_diagnostic(ctx.file_id),
+                    .into_diagnostic(),
                 );
                 return Expression::error(span);
             }
@@ -464,7 +464,7 @@ fn resolve_single_function_call(
                         min_expected: type_params.len(),
                         got: type_args.len(),
                     }
-                    .into_diagnostic(ctx.file_id),
+                    .into_diagnostic(),
                 );
                 return Expression::error(span);
             }
@@ -477,7 +477,7 @@ fn resolve_single_function_call(
                         max_expected: type_params.len(),
                         got: type_args.len(),
                     }
-                    .into_diagnostic(ctx.file_id),
+                    .into_diagnostic(),
                 );
                 return Expression::error(span);
             }
@@ -626,7 +626,7 @@ fn resolve_overloaded_call(
         available_overloads,
     };
     ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        .add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -746,7 +746,7 @@ fn resolve_explicit_init_call(
         provided_arity: arguments.len(),
         available_initializers,
     };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -790,7 +790,7 @@ fn resolve_implicit_init(
                     field_name: field.metadata().name().value.clone(),
                     field_visibility: "private".to_string(), // TODO: Get actual visibility
                 };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                 return Expression::error(span);
             }
         }
@@ -805,7 +805,7 @@ fn resolve_implicit_init(
             provided: arguments.len(),
             field_names,
         };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -823,7 +823,7 @@ fn resolve_implicit_init(
                 provided_label,
                 expected_label: field_name,
             };
-            ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(span);
         }
     }
@@ -923,7 +923,7 @@ pub fn resolve_method_call(
         available_overloads,
     };
     ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        .add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -1009,7 +1009,7 @@ fn resolve_type_parameter_init_call(
             type_param_name,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1035,7 +1035,7 @@ fn resolve_type_parameter_init_call(
             bound_names,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1080,7 +1080,7 @@ fn resolve_type_parameter_init_call(
             available_inits,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1109,7 +1109,7 @@ fn resolve_type_parameter_init_call(
             definition_spans,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 

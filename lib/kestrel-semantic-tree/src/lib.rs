@@ -11,6 +11,7 @@ pub mod ty;
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);

@@ -17,7 +17,7 @@ pub struct ModuleNotFoundError {
 }
 
 impl IntoDiagnostic for ModuleNotFoundError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let failed_segment = &self.path[self.failed_segment_index];
 
         let partial_path = if self.failed_segment_index == 0 {
@@ -29,9 +29,9 @@ impl IntoDiagnostic for ModuleNotFoundError {
         Diagnostic::error()
             .with_message(format!("module '{}' not found", partial_path))
             .with_labels(vec![
-                Label::primary(file_id, self.failed_segment_span.clone())
+                Label::primary(self.failed_segment_span.file_id, self.failed_segment_span.range())
                     .with_message(format!("no module named '{}'", failed_segment)),
-                Label::secondary(file_id, self.path_span.clone())
+                Label::secondary(self.path_span.file_id, self.path_span.range())
                     .with_message("in this import"),
             ])
             .with_notes(vec![
@@ -57,7 +57,7 @@ pub struct SymbolNotFoundInModuleError {
 }
 
 impl IntoDiagnostic for SymbolNotFoundInModuleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let module_name = self.module_path.join(".");
 
         Diagnostic::error()
@@ -66,9 +66,9 @@ impl IntoDiagnostic for SymbolNotFoundInModuleError {
                 self.symbol_name, module_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.symbol_span.clone())
+                Label::primary(self.symbol_span.file_id, self.symbol_span.range())
                     .with_message(format!("'{}' does not exist", self.symbol_name)),
-                Label::secondary(file_id, self.module_span.clone())
+                Label::secondary(self.module_span.file_id, self.module_span.range())
                     .with_message(format!("in module '{}'", module_name)),
             ])
     }
@@ -86,7 +86,7 @@ pub struct CannotImportFromNonModuleError {
 }
 
 impl IntoDiagnostic for CannotImportFromNonModuleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let path_str = self.path.join(".");
 
         Diagnostic::error()
@@ -95,7 +95,7 @@ impl IntoDiagnostic for CannotImportFromNonModuleError {
                 path_str
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.path_span.clone())
+                Label::primary(self.path_span.file_id, self.path_span.range())
                     .with_message(format!("this is a {}, not a module", self.symbol_kind)),
             ])
             .with_notes(vec![
@@ -118,7 +118,7 @@ pub struct ImportConflictError {
 }
 
 impl IntoDiagnostic for ImportConflictError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let existing_kind = if self.existing_is_import {
             "imported"
         } else {
@@ -128,9 +128,9 @@ impl IntoDiagnostic for ImportConflictError {
         Diagnostic::error()
             .with_message(format!("'{}' is already {}", self.name, existing_kind))
             .with_labels(vec![
-                Label::primary(file_id, self.import_span.clone())
+                Label::primary(self.import_span.file_id, self.import_span.range())
                     .with_message(format!("cannot import '{}'", self.name)),
-                Label::secondary(file_id, self.existing_span.clone())
+                Label::secondary(self.existing_span.file_id, self.existing_span.range())
                     .with_message(format!("'{}' first {} here", self.name, existing_kind)),
             ])
     }
@@ -147,22 +147,18 @@ pub struct SymbolNotVisibleError {
     pub import_span: Span,
     /// Span of the symbol's declaration (where visibility is declared)
     pub declaration_span: Option<Span>,
-    /// File ID of the declaration (for cross-file diagnostics)
-    pub declaration_file_id: Option<usize>,
 }
 
 impl IntoDiagnostic for SymbolNotVisibleError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels = vec![
-            Label::primary(file_id, self.import_span.clone())
+            Label::primary(self.import_span.file_id, self.import_span.range())
                 .with_message(format!("'{}' is {}", self.symbol_name, self.visibility)),
         ];
 
         if let Some(decl_span) = &self.declaration_span {
-            // Use declaration_file_id if available, otherwise fall back to import file
-            let decl_file_id = self.declaration_file_id.unwrap_or(file_id);
             labels.push(
-                Label::secondary(decl_file_id, decl_span.clone())
+                Label::secondary(decl_span.file_id, decl_span.range())
                     .with_message(format!("'{}' declared as {} here", self.symbol_name, self.visibility)),
             );
         }
@@ -180,8 +176,6 @@ pub struct CycleParticipant {
     pub name: String,
     /// Span of the type alias declaration's name
     pub name_span: Span,
-    /// File ID where this type alias is declared
-    pub file_id: Option<usize>,
 }
 
 /// Error when type aliases form a circular dependency
@@ -195,19 +189,18 @@ pub struct CircularTypeAliasError {
 }
 
 impl IntoDiagnostic for CircularTypeAliasError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let cycle_names: Vec<_> = std::iter::once(&self.origin)
             .chain(self.cycle.iter())
             .map(|p| p.name.as_str())
             .collect();
         let cycle_display = cycle_names.join(" -> ");
 
-        let mut labels = vec![Label::primary(file_id, self.origin.name_span.clone())
+        let mut labels = vec![Label::primary(self.origin.name_span.file_id, self.origin.name_span.range())
             .with_message("cycle starts here")];
 
         // Add secondary labels for each participant in the cycle
         for (i, participant) in self.cycle.iter().enumerate() {
-            let participant_file_id = participant.file_id.unwrap_or(file_id);
             let message = if i == self.cycle.len() - 1 {
                 format!("'{}' refers back to '{}'", participant.name, self.origin.name)
             } else {
@@ -218,7 +211,7 @@ impl IntoDiagnostic for CircularTypeAliasError {
                 )
             };
             labels.push(
-                Label::secondary(participant_file_id, participant.name_span.clone())
+                Label::secondary(participant.name_span.file_id, participant.name_span.range())
                     .with_message(message),
             );
         }
@@ -251,7 +244,7 @@ pub struct TypeArityError {
 }
 
 impl IntoDiagnostic for TypeArityError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let expected_msg = if self.expected_min == self.expected_max {
             format!("{}", self.expected_min)
         } else {
@@ -264,7 +257,7 @@ impl IntoDiagnostic for TypeArityError {
                 self.type_name, expected_msg, self.actual
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("expected {} type argument(s)", expected_msg)),
             ])
     }
@@ -280,14 +273,14 @@ pub struct TypeNotGenericError {
 }
 
 impl IntoDiagnostic for TypeNotGenericError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type '{}' does not take type arguments",
                 self.type_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("unexpected type arguments"),
             ])
     }
@@ -305,13 +298,13 @@ pub struct DuplicateTypeParameterError {
 }
 
 impl IntoDiagnostic for DuplicateTypeParameterError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("duplicate type parameter '{}'", self.name))
             .with_labels(vec![
-                Label::primary(file_id, self.duplicate_span.clone())
+                Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
                     .with_message("duplicate definition"),
-                Label::secondary(file_id, self.original_span.clone())
+                Label::secondary(self.original_span.file_id, self.original_span.range())
                     .with_message("first defined here"),
             ])
     }
@@ -331,16 +324,16 @@ pub struct DefaultOrderingError {
 }
 
 impl IntoDiagnostic for DefaultOrderingError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "type parameter '{}' with default must come after parameters without defaults",
                 self.param_with_default
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.with_default_span.clone())
+                Label::primary(self.with_default_span.file_id, self.with_default_span.range())
                     .with_message(format!("'{}' has a default", self.param_with_default)),
-                Label::secondary(file_id, self.without_default_span.clone())
+                Label::secondary(self.without_default_span.file_id, self.without_default_span.range())
                     .with_message(format!(
                         "'{}' has no default and comes later",
                         self.param_without_default
@@ -365,11 +358,11 @@ pub struct NonProtocolBoundError {
 }
 
 impl IntoDiagnostic for NonProtocolBoundError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("'{}' is not a protocol", self.type_name))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("'{}' is a {}", self.type_name, self.type_kind)),
             ])
             .with_notes(vec!["only protocols can be used as type bounds".to_string()])
@@ -388,7 +381,7 @@ pub struct UndeclaredTypeParameterError {
 }
 
 impl IntoDiagnostic for UndeclaredTypeParameterError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut notes = vec![];
         if !self.available.is_empty() {
             notes.push(format!(
@@ -403,7 +396,7 @@ impl IntoDiagnostic for UndeclaredTypeParameterError {
                 self.name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("not declared"),
             ])
             .with_notes(notes)

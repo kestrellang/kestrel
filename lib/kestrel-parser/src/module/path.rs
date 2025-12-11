@@ -51,8 +51,9 @@ impl ModulePath {
         self.identifier_tokens()
             .map(|tok| {
                 let range = tok.text_range();
-                let span: Span = range.start().into()..range.end().into();
-                (tok.text().to_string(), span)
+                let start: usize = range.start().into();
+                let end: usize = range.end().into();
+                (tok.text().to_string(), Span::from(start..end))
             })
             .collect()
     }
@@ -60,7 +61,9 @@ impl ModulePath {
     /// Get the span of the entire module path
     pub fn span(&self) -> Span {
         let range = self.syntax.text_range();
-        range.start().into()..range.end().into()
+        let start: usize = range.start().into();
+        let end: usize = range.end().into();
+        Span::from(start..end)
     }
 
     /// Get the number of segments in the path
@@ -78,7 +81,9 @@ where
     use chumsky::prelude::*;
 
     let end_pos = source.len();
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+    // Convert Span to Range<usize> for chumsky's Stream
+    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
 
     match module_path_parser_internal().parse(stream) {
         Ok(segments) => {
@@ -89,7 +94,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), span);
+                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
             }
         }
     }

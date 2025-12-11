@@ -66,7 +66,7 @@ pub fn resolve_path_expression(
                     span: span.clone(),
                     callee_description: "a variable".to_string(),
                 }
-                .into_diagnostic(ctx.file_id),
+                .into_diagnostic(),
             );
             return Expression::error(span);
         }
@@ -98,7 +98,7 @@ pub fn resolve_path_expression(
             context,
         };
         ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            .add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -145,7 +145,7 @@ pub fn resolve_path_expression(
                 name: segment,
             };
             ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                .add_diagnostic(error.into_diagnostic());
             Expression::error(span)
         }
         ValuePathResolution::Ambiguous { segment, index, candidates } => {
@@ -242,7 +242,7 @@ fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(Str
                         let span = token.text_range();
                         segments.push((
                             token.text().to_string(),
-                            span.start().into()..span.end().into(),
+                            Span::from(span.start().into()..span.end().into()),
                         ));
                     }
                 }
@@ -263,7 +263,7 @@ fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> O
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .map(|t| {
                 let range = t.text_range();
-                (t.text().to_string(), range.start().into()..range.end().into())
+                (t.text().to_string(), Span::from(range.start().into()..range.end().into()))
             });
     }
 
@@ -274,7 +274,7 @@ fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> O
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| {
             let range = t.text_range();
-            (t.text().to_string(), range.start().into()..range.end().into())
+            (t.text().to_string(), Span::from(range.start().into()..range.end().into()))
         })
 }
 
@@ -327,7 +327,7 @@ fn extract_trailing_identifiers(node: &SyntaxNode, _source: &str) -> Vec<(String
                 let range = token.text_range();
                 identifiers.push((
                     token.text().to_string(),
-                    range.start().into()..range.end().into(),
+                    Span::from(range.start().into()..range.end().into()),
                 ));
             }
         }
@@ -556,7 +556,7 @@ fn apply_type_args_to_function(
                 span: span.clone(),
                 type_name: function_name,
             }
-            .into_diagnostic(ctx.file_id),
+            .into_diagnostic(),
         );
         return None;
     }
@@ -570,7 +570,7 @@ fn apply_type_args_to_function(
                 min_expected: type_params.len(),
                 got: type_args.len(),
             }
-            .into_diagnostic(ctx.file_id),
+            .into_diagnostic(),
         );
         return None;
     }
@@ -583,7 +583,7 @@ fn apply_type_args_to_function(
                 max_expected: type_params.len(),
                 got: type_args.len(),
             }
-            .into_diagnostic(ctx.file_id),
+            .into_diagnostic(),
         );
         return None;
     }

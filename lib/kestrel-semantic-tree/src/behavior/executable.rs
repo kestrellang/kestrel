@@ -85,6 +85,7 @@ impl ExecutableBehavior {
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
     use crate::expr::Expression;
     use crate::pattern::{Mutability, Pattern};
@@ -105,11 +106,11 @@ mod tests {
             LocalId(0),
             Mutability::Immutable,
             "x".to_string(),
-            Ty::int(IntBits::I64, 10..12),
-            0..1,
+            Ty::int(IntBits::I64, Span::from(10..12)),
+            Span::from(0..1),
         );
-        let init = Expression::integer(42, 10..12);
-        let stmt = Statement::binding(pattern, Some(init), 0..13);
+        let init = Expression::integer(42, Span::from(10..12));
+        let stmt = Statement::binding(pattern, Some(init), Span::from(0..13));
 
         let block = CodeBlock::new(vec![stmt], None);
         assert!(!block.is_empty());
@@ -118,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_code_block_with_yield() {
-        let yield_expr = Expression::integer(42, 0..2);
+        let yield_expr = Expression::integer(42, Span::from(0..2));
         let block = CodeBlock::new(vec![], Some(yield_expr));
 
         assert!(!block.is_empty());

@@ -136,14 +136,14 @@ fn validate_initializer(
                 span,
                 fields: field_list,
             };
-            diagnostics.add_diagnostic(error.into_diagnostic(file_id));
+            diagnostics.add_diagnostic(error.into_diagnostic());
         }
     }
 
     // Report any errors collected during analysis
     let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics);
     for error in ctx.errors {
-        diagnostics.add_diagnostic(error.into_diagnostic(file_id));
+        diagnostics.add_diagnostic(error.into_diagnostic());
     }
 }
 
@@ -223,7 +223,7 @@ enum InitializerError {
 }
 
 impl IntoDiagnostic for InitializerError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         match self {
             InitializerError::LetFieldAssignedTwice { span, field_name } => Diagnostic::error()
                 .with_message(format!(
@@ -231,7 +231,7 @@ impl IntoDiagnostic for InitializerError {
                     field_name
                 ))
                 .with_labels(vec![
-                    Label::primary(file_id, span.clone()).with_message("second assignment here")
+                    Label::primary(span.file_id, span.range()).with_message("second assignment here")
                 ]),
             InitializerError::FieldReadBeforeAssigned { span, field_name } => Diagnostic::error()
                 .with_message(format!(
@@ -239,14 +239,14 @@ impl IntoDiagnostic for InitializerError {
                     field_name
                 ))
                 .with_labels(vec![
-                    Label::primary(file_id, span.clone()).with_message("field read here")
+                    Label::primary(span.file_id, span.range()).with_message("field read here")
                 ]),
             InitializerError::SelfUsedBeforeFullyInitialized { span, uninitialized } => {
                 let fields = uninitialized.join(", ");
                 Diagnostic::error()
                     .with_message("cannot use 'self' before all fields are initialized")
                     .with_labels(vec![
-                        Label::primary(file_id, span.clone()).with_message("self used here")
+                        Label::primary(span.file_id, span.range()).with_message("self used here")
                     ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
             }
@@ -255,7 +255,7 @@ impl IntoDiagnostic for InitializerError {
                 Diagnostic::error()
                     .with_message("cannot return before all fields are initialized")
                     .with_labels(vec![
-                        Label::primary(file_id, span.clone()).with_message("return here")
+                        Label::primary(span.file_id, span.range()).with_message("return here")
                     ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
             }
@@ -270,14 +270,14 @@ struct UninitializedFieldsError {
 }
 
 impl IntoDiagnostic for UninitializedFieldsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "initializer does not initialize all fields: {}",
                 self.fields
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone()).with_message("in this initializer")
+                Label::primary(self.span.file_id, self.span.range()).with_message("in this initializer")
             ])
     }
 }
@@ -714,6 +714,7 @@ fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Code
 
 #[cfg(test)]
 mod tests {
+    use kestrel_span::Span;
     use super::*;
 
     #[test]

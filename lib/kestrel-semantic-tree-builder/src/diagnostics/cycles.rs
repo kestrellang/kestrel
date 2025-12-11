@@ -12,10 +12,8 @@ use kestrel_span::Span;
 pub struct CycleMember {
     /// Name of the type/symbol
     pub name: String,
-    /// Span of the declaration or reference
+    /// Span of the declaration or reference (contains file_id)
     pub span: Span,
-    /// File ID where this member is declared
-    pub file_id: Option<usize>,
 }
 
 /// Error when structs form a containment cycle (infinite-size type)
@@ -38,7 +36,7 @@ pub struct CircularStructContainmentError {
 }
 
 impl IntoDiagnostic for CircularStructContainmentError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let cycle_names: Vec<_> = std::iter::once(&self.origin)
             .chain(self.cycle.iter())
             .map(|p| p.name.as_str())
@@ -46,20 +44,19 @@ impl IntoDiagnostic for CircularStructContainmentError {
         let cycle_display = cycle_names.join(" -> ");
 
         let mut labels = vec![
-            Label::primary(file_id, self.field_span.clone())
+            Label::primary(self.field_span.file_id, self.field_span.range())
                 .with_message(format!(
                     "field '{}' creates infinite-size type",
                     self.field_name
                 )),
-            Label::secondary(file_id, self.origin.span.clone())
+            Label::secondary(self.origin.span.file_id, self.origin.span.range())
                 .with_message("cycle starts here"),
         ];
 
         // Add secondary labels for each participant in the cycle
         for participant in &self.cycle {
-            let participant_file_id = participant.file_id.unwrap_or(file_id);
             labels.push(
-                Label::secondary(participant_file_id, participant.span.clone())
+                Label::secondary(participant.span.file_id, participant.span.range())
                     .with_message(format!("'{}' is part of the cycle", participant.name)),
             );
         }
@@ -93,21 +90,20 @@ pub struct CircularConstraintError {
 }
 
 impl IntoDiagnostic for CircularConstraintError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let cycle_names: Vec<_> = std::iter::once(&self.origin)
             .chain(self.cycle.iter())
             .map(|p| p.name.as_str())
             .collect();
         let cycle_display = cycle_names.join(" -> ");
 
-        let mut labels = vec![Label::primary(file_id, self.origin.span.clone())
+        let mut labels = vec![Label::primary(self.origin.span.file_id, self.origin.span.range())
             .with_message("cycle starts here")];
 
         // Add secondary labels for each participant in the cycle
         for participant in &self.cycle {
-            let participant_file_id = participant.file_id.unwrap_or(file_id);
             labels.push(
-                Label::secondary(participant_file_id, participant.span.clone())
+                Label::secondary(participant.span.file_id, participant.span.range())
                     .with_message(format!("'{}' is part of the cycle", participant.name)),
             );
         }
@@ -143,18 +139,18 @@ pub struct SelfContainingStructError {
 }
 
 impl IntoDiagnostic for SelfContainingStructError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
                 "struct '{}' cannot contain itself",
                 self.struct_name
             ))
             .with_labels(vec![
-                Label::primary(file_id, self.field_span.clone()).with_message(format!(
+                Label::primary(self.field_span.file_id, self.field_span.range()).with_message(format!(
                     "field '{}' has type '{}', creating infinite-size type",
                     self.field_name, self.struct_name
                 )),
-                Label::secondary(file_id, self.struct_span.clone())
+                Label::secondary(self.struct_span.file_id, self.struct_span.range())
                     .with_message("struct declared here"),
             ])
             .with_notes(vec![

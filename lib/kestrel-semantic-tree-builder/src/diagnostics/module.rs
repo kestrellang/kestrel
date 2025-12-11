@@ -9,11 +9,11 @@ pub struct NoModuleDeclarationError {
 }
 
 impl IntoDiagnostic for NoModuleDeclarationError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("no module declaration found in file")
             .with_labels(vec![
-                Label::primary(file_id, self.span.clone())
+                Label::primary(self.span.file_id, self.span.range())
                     .with_message("module declaration should appear here")
             ])
             .with_notes(vec![
@@ -31,13 +31,13 @@ pub struct ModuleNotFirstError {
 }
 
 impl IntoDiagnostic for ModuleNotFirstError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("module declaration must be the first statement in the file")
             .with_labels(vec![
-                Label::secondary(file_id, self.first_item_span.clone())
+                Label::secondary(self.first_item_span.file_id, self.first_item_span.range())
                     .with_message(format!("{} appears before module declaration", self.first_item_kind)),
-                Label::primary(file_id, self.module_span.clone())
+                Label::primary(self.module_span.file_id, self.module_span.range())
                     .with_message("module declaration should be first"),
             ])
             .with_notes(vec![
@@ -54,15 +54,15 @@ pub struct MultipleModuleDeclarationsError {
 }
 
 impl IntoDiagnostic for MultipleModuleDeclarationsError {
-    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels = vec![
-            Label::primary(file_id, self.first_span.clone())
+            Label::primary(self.first_span.file_id, self.first_span.range())
                 .with_message("first module declaration here"),
         ];
 
         for (i, span) in self.duplicate_spans.iter().enumerate() {
             labels.push(
-                Label::secondary(file_id, span.clone())
+                Label::secondary(span.file_id, span.range())
                     .with_message(format!("duplicate module declaration #{}", i + 2))
             );
         }
