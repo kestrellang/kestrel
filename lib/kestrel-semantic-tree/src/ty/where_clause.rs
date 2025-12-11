@@ -37,6 +37,11 @@ impl WhereClause {
         self.constraints.push(constraint);
     }
 
+    /// Get all constraints in this where clause
+    pub fn constraints(&self) -> &[Constraint] {
+        &self.constraints
+    }
+
     /// Get all bounds for a specific type parameter
     pub fn bounds_for(&self, param_id: SymbolId) -> Vec<&Ty> {
         self.constraints
@@ -181,6 +186,23 @@ impl Constraint {
     /// Check if this is a type equality constraint
     pub fn is_type_equality(&self) -> bool {
         matches!(self, Constraint::TypeEquality { .. })
+    }
+
+    /// Get the type parameter ID this constraint applies to (if resolved)
+    pub fn type_parameter_id(&self) -> Option<SymbolId> {
+        match self {
+            Constraint::TypeBound { param, .. } => *param,
+            _ => None,
+        }
+    }
+
+    /// Get the bounds for this constraint (empty for non-type-bound constraints)
+    pub fn bounds(&self) -> &[Ty] {
+        match self {
+            Constraint::TypeBound { bounds, .. } => bounds,
+            Constraint::InheritedAssociatedTypeBound { bounds, .. } => bounds,
+            Constraint::TypeEquality { .. } => &[],
+        }
     }
 }
 

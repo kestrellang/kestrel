@@ -386,6 +386,8 @@ pub fn get_type_parameter_bounds_by_id(
     param_id: SymbolId,
     ctx: &mut BodyResolutionContext,
 ) -> Vec<Ty> {
+    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+
     let mut bounds = Vec::new();
 
     // Start from the current function
@@ -395,9 +397,16 @@ pub fn get_type_parameter_bounds_by_id(
             bounds.extend(filter_resolved_bounds(&where_clause, param_id));
         }
 
-        // Also check parent (struct/protocol) where clause
+        // Also check parent (struct/protocol/extension) where clause
         if let Some(parent) = function.metadata().parent() {
-            if let Some(where_clause) = get_where_clause(parent.as_ref()) {
+            // For extensions, get the combined where clause from ExtensionTargetBehavior
+            // This includes both inherited struct constraints AND extension's own constraints
+            if parent.metadata().kind() == KestrelSymbolKind::Extension {
+                if let Some(target_beh) = parent.extension_target_behavior() {
+                    let where_clause = target_beh.where_clause();
+                    bounds.extend(filter_resolved_bounds(where_clause, param_id));
+                }
+            } else if let Some(where_clause) = get_where_clause(parent.as_ref()) {
                 bounds.extend(filter_resolved_bounds(&where_clause, param_id));
             }
         }
@@ -639,7 +648,7 @@ pub fn verify_type_argument_constraints(
 ///
 /// This checks if a concrete type conforms to a protocol, either directly
 /// or transitively through other constraints.
-fn type_satisfies_bound(ty: &Ty, bound: &Ty, db: &dyn Db) -> bool {
+pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, db: &dyn Db) -> bool {
     // Get the protocol from the bound
     let TyKind::Protocol { symbol: required_proto, .. } = bound.kind() else {
         // Bound is not a protocol - shouldn't happen with proper validation

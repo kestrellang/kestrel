@@ -988,12 +988,13 @@ fn collect_protocol_static_methods(
 /// Returns extensions sorted by specificity (most specific first).
 /// An extension is applicable if:
 /// 1. Its type arguments can be unified with the actual type's arguments
-/// 2. Any where clause constraints are satisfied (TODO: implement constraint checking)
+/// 2. Any where clause constraints are satisfied
 ///
 /// For example:
 /// - `extend Box[T]` applies to `Box[Int]`, `Box[String]`, etc.
 /// - `extend Box[Int]` only applies to `Box[Int]`
 /// - `extend Pair[T, Int]` applies to `Pair[String, Int]` but not `Pair[String, Bool]`
+/// - `extend Box[T] where T: Equatable` only applies to `Box[String]` if String: Equatable
 fn filter_applicable_extensions(
     extensions: Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>>,
     actual_ty: &Ty,
@@ -1001,6 +1002,7 @@ fn filter_applicable_extensions(
 ) -> Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>> {
     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use super::utils::type_satisfies_bound;
 
     // Get substitutions from actual type
     let actual_subs = match actual_ty.as_struct_with_subs() {
@@ -1033,18 +1035,46 @@ fn filter_applicable_extensions(
                 None => Vec::new(),
             };
 
-            // Check if this extension is applicable to the actual type
-            if is_extension_applicable(&extension_type_args, actual_subs) {
-                // Count how many concrete (non-type-parameter) arguments the extension has
-                // This is the "specificity" - more concrete args = more specific
-                let specificity = extension_type_args
-                    .iter()
-                    .filter(|arg| !arg.is_type_parameter())
-                    .count();
-                Some((ext, specificity))
-            } else {
-                None
+            // Check if this extension's type arguments are applicable to the actual type
+            if !is_extension_applicable(&extension_type_args, actual_subs) {
+                return None;
             }
+
+            // Build substitutions: map extension's type params to actual types
+            // extension_type_args[i] is the type param, actual_subs types()[i] is what it maps to
+            let actual_types: Vec<&Ty> = actual_subs.types().collect();
+            let mut param_to_actual = std::collections::HashMap::new();
+            for (ext_arg, actual_arg) in extension_type_args.iter().zip(actual_types.iter()) {
+                if let TyKind::TypeParameter(param) = ext_arg.kind() {
+                    param_to_actual.insert(param.metadata().id(), *actual_arg);
+                }
+            }
+
+            // Check where clause constraints are satisfied
+            let where_clause = target_behavior.where_clause();
+            for constraint in where_clause.constraints() {
+                if let Some(param_id) = constraint.type_parameter_id() {
+                    // Get the actual type for this parameter
+                    if let Some(actual_type) = param_to_actual.get(&param_id) {
+                        // Check each bound is satisfied
+                        for bound in constraint.bounds() {
+                            if !type_satisfies_bound(actual_type, bound, ctx.db) {
+                                return None; // Constraint not satisfied
+                            }
+                        }
+                    }
+                    // If param_id not in map, it's a constraint on a type param that's not in scope
+                    // This shouldn't happen with valid extensions
+                }
+            }
+
+            // Count how many concrete (non-type-parameter) arguments the extension has
+            // This is the "specificity" - more concrete args = more specific
+            let specificity = extension_type_args
+                .iter()
+                .filter(|arg| !arg.is_type_parameter())
+                .count();
+            Some((ext, specificity))
         })
         .collect();
 
