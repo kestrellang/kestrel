@@ -134,8 +134,10 @@ pub fn resolve_member_access(
     // Get applicable extensions once for reuse
     let container_id = container.metadata().id();
     let extensions = ctx.db.get_extensions_for(container_id);
+    // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
+    let resolved_base_ty_for_extensions = resolve_self_type_to_concrete(base_ty, ctx);
     // Filter to only applicable extensions (now with cycle detection in substitutions)
-    let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);
+    let applicable_extensions = filter_applicable_extensions(extensions, &resolved_base_ty_for_extensions, ctx);
 
     // If not found in direct children, search extensions
     let member = match member {
@@ -471,8 +473,10 @@ pub fn resolve_member_call(
         let container_id = container.metadata().id();
         let extensions = ctx.db.get_extensions_for(container_id);
 
+        // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
+        let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
         // Filter to applicable extensions, sorted by specificity (now with cycle detection)
-        let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);
+        let applicable_extensions = filter_applicable_extensions(extensions, &resolved_base_ty, ctx);
 
         for extension in applicable_extensions {
             for child in extension.metadata().children() {

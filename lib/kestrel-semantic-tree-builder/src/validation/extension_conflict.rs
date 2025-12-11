@@ -4,6 +4,9 @@
 //! specificity level don't have methods with the same signature. Extensions with
 //! different specificity levels (e.g., Box[T] vs Box[Int]) are not considered
 //! conflicting - the more specific one will be preferred at method resolution time.
+//!
+//! This validator also checks that extension methods don't duplicate methods already
+//! defined on the struct itself (struct method vs extension method conflict).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -23,6 +26,8 @@ use crate::validation::{SymbolContext, Validator};
 pub struct ExtensionConflictValidator {
     /// Collected extensions during the walk, grouped by (target_id, specificity)
     extensions_by_target: Mutex<HashMap<(SymbolId, usize), Vec<CollectedExtension>>>,
+    /// Struct methods for each struct, keyed by struct ID: (method_name, method_span)
+    struct_methods: Mutex<HashMap<SymbolId, Vec<(String, Span)>>>,
 }
 
 /// Data collected for an extension
@@ -39,6 +44,7 @@ impl ExtensionConflictValidator {
     pub fn new() -> Self {
         Self {
             extensions_by_target: Mutex::new(HashMap::new()),
+            struct_methods: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -72,12 +78,12 @@ impl Validator for ExtensionConflictValidator {
 
         let target_ty = target_beh.target_type();
 
-        // Get target struct ID and substitutions from the target type
-        let (target_id, substitutions) = match target_ty.kind() {
+        // Get target struct ID, struct symbol, and substitutions from the target type
+        let (target_id, struct_symbol, substitutions) = match target_ty.kind() {
             kestrel_semantic_tree::ty::TyKind::Struct {
                 symbol,
                 substitutions,
-            } => (symbol.metadata().id(), substitutions),
+            } => (symbol.metadata().id(), symbol.clone(), substitutions),
             _ => return,
         };
 
@@ -97,6 +103,21 @@ impl Validator for ExtensionConflictValidator {
             .map(|c| (c.metadata().name().value.clone(), c.metadata().name().span.clone()))
             .collect();
 
+        // Collect struct methods (only once per struct)
+        {
+            let mut struct_methods = self.struct_methods.lock().unwrap();
+            if !struct_methods.contains_key(&target_id) {
+                let methods: Vec<(String, Span)> = struct_symbol
+                    .metadata()
+                    .children()
+                    .into_iter()
+                    .filter(|c| c.metadata().kind() == KestrelSymbolKind::Function)
+                    .map(|c| (c.metadata().name().value.clone(), c.metadata().name().span.clone()))
+                    .collect();
+                struct_methods.insert(target_id, methods);
+            }
+        }
+
         // Add to collection, grouped by (target_id, specificity)
         let collected = CollectedExtension {
             extension_id: extension.metadata().id(),
@@ -114,9 +135,36 @@ impl Validator for ExtensionConflictValidator {
 
     fn finalize(&self, _db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
         let extensions_by_target = self.extensions_by_target.lock().unwrap();
+        let struct_methods = self.struct_methods.lock().unwrap();
 
         // For each (target_id, specificity) group with extensions
-        for (_key, extensions) in extensions_by_target.iter() {
+        for ((target_id, _specificity), extensions) in extensions_by_target.iter() {
+            // Check for struct method vs extension method conflicts
+            // This applies to all extensions, even if there's only one
+            if let Some(struct_method_list) = struct_methods.get(target_id) {
+                // Build a set of struct method names for quick lookup
+                let struct_method_names: HashMap<&str, &Span> = struct_method_list
+                    .iter()
+                    .map(|(name, span)| (name.as_str(), span))
+                    .collect();
+
+                // Check each extension's methods against struct methods
+                for ext in extensions {
+                    for (method_name, ext_method_span) in &ext.methods {
+                        if let Some(&struct_method_span) = struct_method_names.get(method_name.as_str()) {
+                            // Conflict: extension method duplicates struct method
+                            let error = StructExtensionMethodConflictError {
+                                method_name: method_name.clone(),
+                                struct_method_span: struct_method_span.clone(),
+                                extension_method_span: ext_method_span.clone(),
+                            };
+                            diagnostics.add_diagnostic(error.into_diagnostic(0));
+                        }
+                    }
+                }
+            }
+
+            // Check for extension-to-extension conflicts (existing logic)
             // Skip if only one extension at this specificity level
             if extensions.len() <= 1 {
                 continue;
@@ -190,6 +238,34 @@ impl IntoDiagnostic for DuplicateExtensionMethodError {
                     .to_string(),
                 "Extensions with different specificity (e.g., Box[T] vs Box[Int]) can have methods with the same name - the more specific one will be preferred"
                     .to_string(),
+            ])
+    }
+}
+
+/// Error for extension method conflicting with struct method
+#[derive(Debug, Clone)]
+pub struct StructExtensionMethodConflictError {
+    pub method_name: String,
+    pub struct_method_span: Span,
+    pub extension_method_span: Span,
+}
+
+impl IntoDiagnostic for StructExtensionMethodConflictError {
+    fn into_diagnostic(&self, _file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "duplicate method '{}': extension cannot redefine struct method",
+                self.method_name
+            ))
+            .with_labels(vec![
+                Label::primary(0, self.struct_method_span.clone())
+                    .with_message("method defined here on struct"),
+                Label::secondary(0, self.extension_method_span.clone())
+                    .with_message("conflicting extension method here"),
+            ])
+            .with_notes(vec![
+                "Extensions cannot define methods that already exist on the struct".to_string(),
+                "Consider renaming the extension method or removing it".to_string(),
             ])
     }
 }
