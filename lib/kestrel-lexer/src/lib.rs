@@ -31,13 +31,13 @@ fn parse_block_comment(lex: &mut logos::Lexer<Token>) -> bool {
         offset += c.len_utf8();
 
         if c == '/' {
-            if let Some('*') = chars.clone().next() {
+            if matches!(chars.clone().next(), Some('*')) {
                 chars.next();
                 offset += 1;
                 depth += 1;
             }
-        } else if c == '*' {
-            if let Some('/') = chars.clone().next() {
+        } else if c == '*' && matches!(chars.clone().next(), Some('/')) {
+            {
                 chars.next();
                 offset += 1;
                 depth -= 1;
@@ -330,7 +330,7 @@ mod tests {
         let source = "func main() { let x = 42; }";
         let tokens = filter_trivia(lex(source, 0).collect());
 
-        assert!(tokens.len() > 0);
+        assert!(!tokens.is_empty());
 
         // First token should be 'func' at position 0..4
         assert_eq!(tokens[0].value, Token::Func);

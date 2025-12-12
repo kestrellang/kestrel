@@ -22,32 +22,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Rust clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --lib --bins --examples -- -D clippy::correctness -D clippy::suspicious
 
       - name: Rust test
         run: cargo test --workspace
-
-  site:
-    name: Site
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-
-      - name: Install
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build

@@ -30,11 +30,11 @@ impl<L: Language> SymbolMetadata<L> {
     pub fn parent(&self) -> Option<Arc<dyn Symbol<L>>> {
         let symbol = self.parent.as_ref()?;
 
-        return Some(
+        Some(
             symbol
                 .upgrade()
                 .expect("internal error: parent was deleted"),
-        );
+        )
     }
 
     pub fn children(&self) -> Vec<Arc<dyn Symbol<L>>> {
@@ -42,7 +42,7 @@ impl<L: Language> SymbolMetadata<L> {
             panic!("internal error: RwLock poison");
         };
 
-        return children.clone();
+        children.clone()
     }
 
     /// Returns children visible for name resolution, flattening through transparent symbols.
@@ -72,19 +72,19 @@ impl<L: Language> SymbolMetadata<L> {
     }
 
     pub fn kind(&self) -> L::SymbolKind {
-        return self.kind;
+        self.kind
     }
 
     pub fn name(&self) -> Name {
-        return self.name.clone();
+        self.name.clone()
     }
 
     pub fn declaration_span(&self) -> Span {
-        return self.declaration_span.clone();
+        self.declaration_span.clone()
     }
 
     pub fn span(&self) -> Span {
-        return self.span.clone();
+        self.span.clone()
     }
 
     pub fn behaviors(&self) -> Vec<Arc<dyn Behavior<L>>> {
@@ -92,7 +92,7 @@ impl<L: Language> SymbolMetadata<L> {
             panic!("internal error: RwLock poison");
         };
 
-        return behaviors.clone();
+        behaviors.clone()
     }
 
     pub fn get_behavior<B: Behavior<L>>(&self) -> Option<Arc<B>> {

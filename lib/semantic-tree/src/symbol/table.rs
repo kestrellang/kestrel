@@ -34,19 +34,12 @@ impl<L: Language> SymbolTable<L> {
     /// If a symbol with the same name already exists, the new symbol is added to the collection.
     pub fn insert(&mut self, symbol: Arc<dyn Symbol<L>>) {
         let name = symbol.metadata().name().value;
-        self.symbols
-            .entry(name)
-            .or_insert_with(Vec::new)
-            .push(symbol);
+        self.symbols.entry(name).or_default().push(symbol);
     }
 
     /// Retrieves all symbols with the given name, returning an empty collection if none exist.
     pub fn get(&self, name: &str) -> SymbolCollection<L> {
-        let symbols = self
-            .symbols
-            .get(name)
-            .map(|v| v.clone())
-            .unwrap_or_else(Vec::new);
+        let symbols = self.symbols.get(name).cloned().unwrap_or_default();
         SymbolCollection::new(symbols)
     }
 

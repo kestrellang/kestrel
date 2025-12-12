@@ -7,7 +7,6 @@
 //! ```
 //! use kestrel_test_suite::*;
 //!
-//! #[test]
 //! fn test_struct() {
 //!     Test::new("module Test\nstruct Foo {}")
 //!         .expect(Compiles)
@@ -186,7 +185,7 @@ impl Test {
         let ctx = self.context.as_ref().unwrap();
         if let Err(e) = expectation.check(ctx) {
             // Emit diagnostics for context
-            if ctx.diagnostics.len() > 0 {
+            if !ctx.diagnostics.is_empty() {
                 eprintln!("\n--- Compiler Diagnostics ---");
                 ctx.diagnostics.emit().ok();
             }

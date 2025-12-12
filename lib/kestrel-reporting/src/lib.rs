@@ -10,6 +10,7 @@ pub use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
 /// Implement this for your error types to integrate with the reporting system.
 ///
 /// The file ID is extracted from the span(s) stored in the error type.
+#[allow(clippy::wrong_self_convention)]
 pub trait IntoDiagnostic {
     /// Convert this error into a codespan diagnostic.
     fn into_diagnostic(&self) -> Diagnostic<usize>;
