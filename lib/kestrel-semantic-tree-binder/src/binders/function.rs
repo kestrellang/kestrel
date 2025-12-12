@@ -38,18 +38,21 @@ impl DeclarationBinder for FunctionBinder {
         let span = symbol.metadata().span().clone();
 
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that
         // T.Item paths can find the protocol bounds for T
-        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
+        let generics_behavior = resolve_generics(syntax, &source, file_id, symbol_id, context);
         symbol.metadata().add_behavior(generics_behavior);
 
         // Now extract and resolve parameters from syntax (T.Item will work)
-        let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_params =
+            resolve_parameters_from_syntax(syntax, &source, file_id, symbol_id, context);
 
         // Extract and resolve return type from syntax (T.Item will work)
-        let resolved_return = resolve_return_type_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_return =
+            resolve_return_type_from_syntax(syntax, &source, file_id, symbol_id, context);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
@@ -68,7 +71,14 @@ impl DeclarationBinder for FunctionBinder {
 
         // Resolve function body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
-            resolve_function_body(symbol, &body_node, &resolved_params, context, &source);
+            resolve_function_body(
+                symbol,
+                &body_node,
+                &resolved_params,
+                context,
+                &source,
+                file_id,
+            );
         }
     }
 }
@@ -77,6 +87,7 @@ impl DeclarationBinder for FunctionBinder {
 fn resolve_generics(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> GenericsBehavior {
@@ -101,7 +112,8 @@ fn resolve_generics(
         .collect();
 
     // Now resolve the where clause with fully resolved protocol types
-    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters);
+    let where_clause =
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
 
     GenericsBehavior::new(type_parameters, where_clause)
 }
@@ -110,6 +122,7 @@ fn resolve_generics(
 fn resolve_where_clause(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -126,7 +139,7 @@ fn resolve_where_clause(
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
             if let Some(constraint) =
-                resolve_type_bound(&child, source, context_id, ctx, type_params, &constraints)
+                resolve_type_bound(&child, source, file_id, context_id, ctx, type_params, &constraints)
             {
                 constraints.push(constraint);
             }
@@ -143,7 +156,7 @@ fn resolve_where_clause(
 
     for child in equality_nodes {
         if let Some(constraint) =
-            resolve_type_equality(&child, source, context_id, ctx, type_params, &constraints)
+            resolve_type_equality(&child, source, file_id, context_id, ctx, type_params, &constraints)
         {
             constraints.push(constraint);
         }
@@ -158,6 +171,7 @@ fn resolve_where_clause(
 fn resolve_type_bound(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -226,7 +240,7 @@ fn resolve_type_bound(
                 }
 
                 if !found_assoc_type && !bounds.is_empty() {
-                    let target_span = get_node_span(&target_node, source);
+                    let target_span = get_node_span(&target_node, file_id);
                     ctx.diagnostics
                         .throw(WhereClauseAssociatedTypeNotFoundError {
                             span: target_span,
@@ -253,7 +267,7 @@ fn resolve_type_bound(
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
     let param_span: kestrel_span::Span =
-        Span::from((text_range.start().into())..(text_range.end().into()));
+        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -270,7 +284,7 @@ fn resolve_type_bound(
         let child = &children[i];
         if child.kind() == SyntaxKind::Path {
             let path_node = child;
-            let span = get_node_span(path_node, source);
+            let span = get_node_span(path_node, file_id);
             let segments = extract_path_segments(path_node);
 
             if segments.is_empty() {
@@ -341,6 +355,7 @@ fn resolve_type_bound(
 fn resolve_type_equality(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -348,12 +363,12 @@ fn resolve_type_equality(
 ) -> Option<Constraint> {
     use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 
-    let span = get_node_span(syntax, source);
+    let span = get_node_span(syntax, file_id);
 
     // Extract left side from AssociatedTypeTarget
     let left_target = find_child(syntax, SyntaxKind::AssociatedTypeTarget)?;
     let left_path = extract_path_from_node(&left_target);
-    let left_span = get_node_span(&left_target, source);
+    let left_span = get_node_span(&left_target, file_id);
 
     // Resolve the left side to a type
     let left_ty =
@@ -372,7 +387,7 @@ fn resolve_type_equality(
             .find(|child| child.kind() == SyntaxKind::Path)
         {
             let right_path = kestrel_syntax_tree::utils::extract_path_segments(&path_node);
-            let right_span = get_node_span(&ty_node, source);
+            let right_span = get_node_span(&ty_node, file_id);
 
             // Try resolving as type parameter or associated type first
             let resolved = resolve_path_in_where_clause(
@@ -387,17 +402,17 @@ fn resolve_type_equality(
             } else {
                 // Fall back to regular type resolution (for concrete types like Int)
                 let mut type_ctx =
-                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
                 resolve_type_from_ty_node(&ty_node, &mut type_ctx)
             }
         } else {
             let mut type_ctx =
-                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
             resolve_type_from_ty_node(&ty_node, &mut type_ctx)
         }
     } else {
         // Not a path type, resolve normally
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     };
 
@@ -517,6 +532,7 @@ fn resolve_function_body(
     params: &[Parameter],
     context: &mut BindingContext,
     source: &str,
+    file_id: usize,
 ) {
     use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -578,8 +594,8 @@ fn resolve_function_body(
     if let Some(receiver) = receiver_kind {
         if let Some(self_type) = get_self_type(symbol) {
             let is_mutable = matches!(receiver, ReceiverKind::Mutating);
-            let self_span =
-                Span::from(symbol.metadata().span().start..symbol.metadata().span().start);
+            let decl_span = symbol.metadata().span().clone();
+            let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
             // Add self to local scope
             local_scope.bind(
@@ -614,6 +630,7 @@ fn resolve_function_body(
         model: context.model,
         diagnostics: context.diagnostics,
         source,
+        file_id,
         function_id: symbol.metadata().id(),
         local_scope,
         loop_stack: Vec::new(),
@@ -636,6 +653,7 @@ fn resolve_function_body(
 fn resolve_parameters_from_syntax(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Vec<Parameter> {
@@ -649,7 +667,9 @@ fn resolve_parameters_from_syntax(
     param_list
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| resolve_single_parameter(&param_node, source, context_id, ctx))
+        .filter_map(|param_node| {
+            resolve_single_parameter(&param_node, source, file_id, context_id, ctx)
+        })
         .collect()
 }
 
@@ -657,6 +677,7 @@ fn resolve_parameters_from_syntax(
 fn resolve_single_parameter(
     param_node: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Option<Parameter> {
@@ -676,28 +697,29 @@ fn resolve_single_parameter(
         let label_name = extract_identifier_from_name(&name_nodes[0]);
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[1])?,
-            get_node_span(&name_nodes[1], source),
+            get_node_span(&name_nodes[1], file_id),
         );
         (
-            label_name.map(|n| Spanned::new(n, get_node_span(&name_nodes[0], source))),
+            label_name.map(|n| Spanned::new(n, get_node_span(&name_nodes[0], file_id))),
             bind_name,
         )
     } else {
         // One name: no label, it's the bind_name
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[0])?,
-            get_node_span(&name_nodes[0], source),
+            get_node_span(&name_nodes[0], file_id),
         );
         (None, bind_name)
     };
 
     // Find and resolve the type from Ty node using shared utility
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable
-        Ty::type_var(get_node_span(param_node, source))
+        Ty::type_var(get_node_span(param_node, file_id))
     };
 
     Some(Parameter {
@@ -711,6 +733,7 @@ fn resolve_single_parameter(
 fn resolve_return_type_from_syntax(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Ty {
@@ -718,14 +741,14 @@ fn resolve_return_type_from_syntax(
     if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
         if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
             let mut type_ctx =
-                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
             return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
         }
     }
 
     // No explicit return type - defaults to unit
-    let fn_span = get_node_span(syntax, source);
-    Ty::unit(Span::from(fn_span.end..fn_span.end))
+    let fn_span = get_node_span(syntax, file_id);
+    Ty::unit(Span::new(fn_span.file_id, fn_span.end..fn_span.end))
 }
 
 /// Get the type of `self` for an instance method

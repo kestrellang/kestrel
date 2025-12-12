@@ -10,6 +10,7 @@ pub trait Builder {
         &self,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;

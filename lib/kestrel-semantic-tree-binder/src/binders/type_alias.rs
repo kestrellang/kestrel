@@ -51,11 +51,12 @@ impl DeclarationBinder for TypeAliasBinder {
         let symbol_id = symbol.metadata().id();
 
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         match symbol_kind {
             KestrelSymbolKind::AssociatedType => {
                 // Associated type in protocol: resolve bounds and optional default
-                bind_associated_type(symbol, syntax, &source, context);
+                bind_associated_type(symbol, syntax, &source, file_id, context);
             }
             KestrelSymbolKind::TypeAlias => {
                 // Regular type alias or struct binding: resolve aliased type
@@ -88,18 +89,18 @@ impl DeclarationBinder for TypeAliasBinder {
                 if alias_context == TypeAliasContext::Struct {
                     if let Some(parent) = symbol.metadata().parent() {
                         validate_struct_associated_type_binding(
-                            syntax, &source, &name, &parent, context,
+                            syntax, &source, file_id, &name, &parent, context,
                         );
                     }
                 }
 
                 // Extract type parameters and resolve where clause bounds
-                let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
+                let generics_behavior = resolve_generics(syntax, &source, file_id, symbol_id, context);
                 symbol.metadata().add_behavior(generics_behavior);
 
                 // Extract and resolve the aliased type from syntax
                 if let Some(resolved_type) =
-                    resolve_aliased_type_from_syntax(syntax, &source, symbol_id, context)
+                    resolve_aliased_type_from_syntax(syntax, &source, file_id, symbol_id, context)
                 {
                     // Validate constraint satisfaction for struct bindings
                     if alias_context == TypeAliasContext::Struct {
@@ -181,12 +182,13 @@ fn bind_associated_type(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context: &mut BindingContext,
 ) {
     let symbol_id = symbol.metadata().id();
 
     // Resolve bounds if present (: Equatable, Hashable)
-    let bounds = resolve_associated_type_bounds(syntax, source, symbol_id, context);
+    let bounds = resolve_associated_type_bounds(syntax, source, file_id, symbol_id, context);
     if !bounds.is_empty() {
         let bounds_behavior = AssociatedTypeBoundsBehavior::new(bounds);
         symbol.metadata().add_behavior(bounds_behavior);
@@ -195,7 +197,8 @@ fn bind_associated_type(
     // Resolve default type if present (= Int)
     // Note: Validation of defaults against bounds happens in a separate validation pass
     // after all conformances have been resolved (see ConformanceValidator)
-    if let Some(default_type) = resolve_aliased_type_from_syntax(syntax, source, symbol_id, context)
+    if let Some(default_type) =
+        resolve_aliased_type_from_syntax(syntax, source, file_id, symbol_id, context)
     {
         let typed_behavior = TypedBehavior::new(default_type, symbol.metadata().span().clone());
         symbol.metadata().add_behavior(typed_behavior);
@@ -206,6 +209,7 @@ fn bind_associated_type(
 fn resolve_associated_type_bounds(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Vec<Ty> {
@@ -232,7 +236,7 @@ fn resolve_associated_type_bounds(
             {
                 // This is a bound type
                 let mut type_ctx =
-                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
                 let bound_ty = resolve_type_from_ty_node(node, &mut type_ctx);
 
                 // Validate it's a protocol
@@ -244,7 +248,7 @@ fn resolve_associated_type_bounds(
                         // Extract type name without using Debug format (which can cause cyclic reference issues)
                         let type_name = get_type_display_name(&bound_ty);
                         ctx.diagnostics.throw(NotAProtocolError {
-                            span: get_node_span(node, source),
+                            span: get_node_span(node, file_id),
                             name: type_name,
                             context: NotAProtocolContext::Bound,
                         });
@@ -262,6 +266,7 @@ fn resolve_associated_type_bounds(
 fn resolve_generics(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> GenericsBehavior {
@@ -285,7 +290,8 @@ fn resolve_generics(
         .collect();
 
     // Now resolve the where clause with fully resolved protocol types
-    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters);
+    let where_clause =
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
 
     GenericsBehavior::new(type_parameters, where_clause)
 }
@@ -294,6 +300,7 @@ fn resolve_generics(
 fn resolve_where_clause(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -308,7 +315,7 @@ fn resolve_where_clause(
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
             if let Some(constraint) =
-                resolve_type_bound(&child, source, context_id, ctx, type_params)
+                resolve_type_bound(&child, source, file_id, context_id, ctx, type_params)
             {
                 constraints.push(constraint);
             }
@@ -322,6 +329,7 @@ fn resolve_where_clause(
 fn resolve_type_bound(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -336,7 +344,7 @@ fn resolve_type_bound(
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
     let param_span: kestrel_span::Span =
-        Span::from((text_range.start().into())..(text_range.end().into()));
+        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -349,7 +357,7 @@ fn resolve_type_bound(
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
-            let span = get_node_span(&path_node, source);
+            let span = get_node_span(&path_node, file_id);
             let segments = extract_path_segments(&path_node);
 
             if segments.is_empty() {
@@ -428,6 +436,7 @@ fn resolve_type_bound(
 fn resolve_aliased_type_from_syntax(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Option<Ty> {
@@ -439,7 +448,8 @@ fn resolve_aliased_type_from_syntax(
         find_child(&aliased_type_node, SyntaxKind::Ty).unwrap_or_else(|| aliased_type_node.clone());
 
     // Use unified type resolution
-    let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+    let mut type_ctx =
+        TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
     Some(resolve_type_from_ty_node(&ty_node, &mut type_ctx))
 }
 
@@ -476,6 +486,7 @@ fn get_type_display_name(ty: &Ty) -> String {
 fn validate_struct_associated_type_binding(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,
@@ -486,7 +497,7 @@ fn validate_struct_associated_type_binding(
     };
 
     let struct_name = parent.metadata().name().value.clone();
-    let binding_span = get_node_span(syntax, source);
+    let binding_span = get_node_span(syntax, file_id);
 
     // Get the struct's conformances
     let conformances = parent

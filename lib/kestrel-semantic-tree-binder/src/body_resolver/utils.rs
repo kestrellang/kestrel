@@ -529,49 +529,6 @@ pub fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
     })
 }
 
-/// Format a type for error messages
-pub fn format_type(ty: &Ty) -> String {
-    match ty.kind() {
-        TyKind::Unit => "()".to_string(),
-        TyKind::Never => "!".to_string(),
-        TyKind::Bool => "Bool".to_string(),
-        TyKind::String => "String".to_string(),
-        TyKind::Int(bits) => format!("{:?}", bits),
-        TyKind::Float(bits) => format!("{:?}", bits),
-        TyKind::Tuple(elements) => {
-            let items: Vec<_> = elements.iter().map(format_type).collect();
-            format!("({})", items.join(", "))
-        }
-        TyKind::Array(elem) => format!("[{}]", format_type(elem)),
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let params_str: Vec<_> = params.iter().map(format_type).collect();
-            format!(
-                "({}) -> {}",
-                params_str.join(", "),
-                format_type(return_type)
-            )
-        }
-        TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
-        TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::AssociatedType { symbol, container } => match container {
-            Some(container_ty) => format!(
-                "{}.{}",
-                format_type(container_ty),
-                symbol.metadata().name().value
-            ),
-            None => symbol.metadata().name().value.clone(),
-        },
-        TyKind::SelfType => "Self".to_string(),
-        TyKind::TypeVar(_) => "_".to_string(),
-        TyKind::Error => "<error>".to_string(),
-    }
-}
-
 /// Substitute type parameters in a type with their concrete types.
 ///
 /// This recursively traverses a type and replaces any TypeParameter with
@@ -795,8 +752,8 @@ pub fn verify_type_argument_constraints(
             if !type_satisfies_bound(arg, bound, model) {
                 // Report constraint not satisfied
                 let param_name = param.metadata().name().value.clone();
-                let type_name = format_type(arg);
-                let constraint_name = format_type(bound);
+                let type_name = arg.to_string();
+                let constraint_name = bound.to_string();
 
                 let error = ConstraintNotSatisfiedError {
                     call_span: call_span.clone(),

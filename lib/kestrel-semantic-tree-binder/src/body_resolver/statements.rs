@@ -31,7 +31,7 @@ pub fn resolve_statement(
             }
             SyntaxKind::Expression => {
                 let expr = resolve_expression(&child, ctx);
-                let span = get_node_span(&child, ctx.source);
+                let span = get_node_span(&child, ctx.file_id);
                 return Some(Statement::expr(expr, span));
             }
             _ => {}
@@ -51,7 +51,7 @@ pub fn resolve_expression_statement(
         .find(|c| c.kind() == SyntaxKind::Expression)
     {
         let expr = resolve_expression(&expr_node, ctx);
-        let span = get_node_span(stmt_node, ctx.source);
+        let span = get_node_span(stmt_node, ctx.file_id);
         return Some(Statement::expr(expr, span));
     }
 
@@ -59,7 +59,7 @@ pub fn resolve_expression_statement(
     for child in stmt_node.children() {
         if is_expression_kind(child.kind()) {
             let expr = resolve_expression(&child, ctx);
-            let span = get_node_span(stmt_node, ctx.source);
+            let span = get_node_span(stmt_node, ctx.file_id);
             return Some(Statement::expr(expr, span));
         }
     }
@@ -72,7 +72,7 @@ pub fn resolve_variable_declaration(
     decl_node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Option<Statement> {
-    let span = get_node_span(decl_node, ctx.source);
+    let span = get_node_span(decl_node, ctx.file_id);
 
     // Determine if let or var
     let is_mutable = decl_node
@@ -109,7 +109,7 @@ pub fn resolve_variable_declaration(
     });
 
     // Bind the local variable
-    let name_span = get_name_span(decl_node, ctx.source).unwrap_or(span.clone());
+    let name_span = get_name_span(decl_node, ctx.file_id).unwrap_or(span.clone());
     let local_id = ctx.local_scope.bind(
         name.clone(),
         resolved_ty.clone(),
@@ -144,9 +144,9 @@ fn extract_var_name(decl_node: &SyntaxNode) -> Option<String> {
 }
 
 /// Get the span of the name in a variable declaration
-fn get_name_span(decl_node: &SyntaxNode, source: &str) -> Option<Span> {
+fn get_name_span(decl_node: &SyntaxNode, file_id: usize) -> Option<Span> {
     if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
-        return Some(get_node_span(&name_node, source));
+        return Some(get_node_span(&name_node, file_id));
     }
     None
 }
@@ -161,8 +161,13 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
         .find(|c| c.kind() == SyntaxKind::Ty)
         .map(|ty_node| {
             // Resolve the type using the database
-            let mut resolver =
-                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.function_id);
+            let mut resolver = TypeResolver::new(
+                ctx.model,
+                ctx.diagnostics,
+                ctx.source,
+                ctx.file_id,
+                ctx.function_id,
+            );
             resolver.resolve(&ty_node)
         })
 }

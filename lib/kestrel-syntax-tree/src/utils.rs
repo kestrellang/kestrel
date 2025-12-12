@@ -58,19 +58,19 @@ pub fn extract_visibility(syntax: &SyntaxNode) -> Option<String> {
 }
 
 /// Get the span of a syntax node, excluding leading trivia.
-pub fn get_node_span(node: &SyntaxNode, _source: &str) -> Span {
+pub fn get_node_span(node: &SyntaxNode, file_id: usize) -> Span {
     let text_range = node.text_range();
     let end: usize = text_range.end().into();
 
     let start = find_first_non_trivia_start(node).unwrap_or_else(|| text_range.start().into());
 
-    Span::from(start..end)
+    Span::new(file_id, start..end)
 }
 
 /// Get the span of the visibility node.
-pub fn get_visibility_span(syntax: &SyntaxNode, source: &str) -> Option<Span> {
+pub fn get_visibility_span(syntax: &SyntaxNode, file_id: usize) -> Option<Span> {
     let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
-    Some(get_node_span(&visibility_node, source))
+    Some(get_node_span(&visibility_node, file_id))
 }
 
 /// Extract path segments from a `Path` syntax node.

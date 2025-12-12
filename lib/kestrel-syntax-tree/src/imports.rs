@@ -17,7 +17,10 @@ pub struct ImportDeclarationSyntax {
     pub items: Vec<ImportItemSyntax>,
 }
 
-pub fn extract_import_declaration(syntax: &SyntaxNode) -> Option<ImportDeclarationSyntax> {
+pub fn extract_import_declaration(
+    syntax: &SyntaxNode,
+    file_id: usize,
+) -> Option<ImportDeclarationSyntax> {
     if syntax.kind() != SyntaxKind::ImportDeclaration {
         return None;
     }
@@ -33,13 +36,15 @@ pub fn extract_import_declaration(syntax: &SyntaxNode) -> Option<ImportDeclarati
             let range = tok.text_range();
             let start: usize = range.start().into();
             let end: usize = range.end().into();
-            (tok.text().to_string(), Span::from(start..end))
+            (tok.text().to_string(), Span::new(file_id, start..end))
         })
         .collect::<Vec<_>>();
 
     let module_path_range = module_path_node.text_range();
-    let module_path_span: Span =
-        Span::from((module_path_range.start().into())..(module_path_range.end().into()));
+    let module_path_span: Span = Span::new(
+        file_id,
+        (module_path_range.start().into())..(module_path_range.end().into()),
+    );
 
     let has_items = syntax
         .children_with_tokens()
@@ -78,7 +83,7 @@ pub fn extract_import_declaration(syntax: &SyntaxNode) -> Option<ImportDeclarati
                     let range = tok.text_range();
                     let start: usize = range.start().into();
                     let end: usize = range.end().into();
-                    Some((tok.text().to_string(), Span::from(start..end)))
+                    Some((tok.text().to_string(), Span::new(file_id, start..end)))
                 })?;
 
             let mut found_as = false;

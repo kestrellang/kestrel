@@ -23,18 +23,19 @@ impl Builder for FunctionBuilder {
         &self,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let name_str = extract_name(syntax)?;
         let name_node = find_child(syntax, SyntaxKind::Name)?;
-        let name_span = get_node_span(&name_node, source);
+        let name_span = get_node_span(&name_node, file_id);
 
-        let full_span = get_node_span(syntax, source);
+        let full_span = get_node_span(syntax, file_id);
 
         let visibility_str = extract_visibility(syntax);
         let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
-        let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span.clone());
+        let visibility_span = get_visibility_span(syntax, file_id).unwrap_or(name_span.clone());
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), parent, root);
         let visibility_behavior =
             VisibilityBehavior::new(visibility_enum, visibility_span, visibility_scope);
@@ -61,7 +62,7 @@ impl Builder for FunctionBuilder {
         let function_arc_dyn = function_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
         let type_parameters =
-            extract_type_parameters(syntax, source, Some(function_arc_dyn.clone()));
+            extract_type_parameters(syntax, source, file_id, Some(function_arc_dyn.clone()));
         add_type_params_as_children(&type_parameters, &function_arc_dyn);
 
         if let Some(parent) = parent {

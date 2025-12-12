@@ -33,9 +33,11 @@ impl DeclarationBinder for InitializerBinder {
         let span = symbol.metadata().span().clone();
 
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Extract and resolve parameters from syntax
-        let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_params =
+            resolve_parameters_from_syntax(syntax, &source, file_id, symbol_id, context);
 
         // Initializers always return Self (the struct type)
         // Get the parent struct to determine Self type
@@ -59,7 +61,14 @@ impl DeclarationBinder for InitializerBinder {
 
         // Resolve initializer body
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
-            resolve_initializer_body(symbol, &body_node, &resolved_params, context, &source);
+            resolve_initializer_body(
+                symbol,
+                &body_node,
+                &resolved_params,
+                context,
+                &source,
+                file_id,
+            );
         }
     }
 }
@@ -71,6 +80,7 @@ fn resolve_initializer_body(
     params: &[Parameter],
     context: &mut BindingContext,
     source: &str,
+    file_id: usize,
 ) {
     use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
@@ -120,7 +130,8 @@ fn resolve_initializer_body(
     // Inject `self` as the first local (with initializing semantics)
     // In initializers, self is mutable so we can assign to fields
     if let Some(self_type) = get_self_type(symbol) {
-        let self_span = Span::from(symbol.metadata().span().start..symbol.metadata().span().start);
+        let decl_span = symbol.metadata().span().clone();
+        let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
         // Add self to local scope (mutable because we're initializing it)
         local_scope.bind(
@@ -154,6 +165,7 @@ fn resolve_initializer_body(
         model: context.model,
         diagnostics: context.diagnostics,
         source,
+        file_id,
         function_id: symbol.metadata().id(),
         local_scope,
         loop_stack: Vec::new(),
@@ -188,6 +200,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
 fn resolve_parameters_from_syntax(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Vec<Parameter> {
@@ -201,7 +214,9 @@ fn resolve_parameters_from_syntax(
     param_list
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| resolve_single_parameter(&param_node, source, context_id, ctx))
+        .filter_map(|param_node| {
+            resolve_single_parameter(&param_node, source, file_id, context_id, ctx)
+        })
         .collect()
 }
 
@@ -209,6 +224,7 @@ fn resolve_parameters_from_syntax(
 fn resolve_single_parameter(
     param_node: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Option<Parameter> {
@@ -223,8 +239,8 @@ fn resolve_single_parameter(
     }
 
     // Get span helper
-    fn get_name_span(name_node: &SyntaxNode, source: &str) -> kestrel_span::Span {
-        get_node_span(name_node, source)
+    fn get_name_span(name_node: &SyntaxNode, file_id: usize) -> kestrel_span::Span {
+        get_node_span(name_node, file_id)
     }
 
     // Determine label and bind_name based on number of Name nodes
@@ -233,17 +249,17 @@ fn resolve_single_parameter(
         let label_name = extract_identifier_from_name(&name_nodes[0]);
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[1])?,
-            get_name_span(&name_nodes[1], source),
+            get_name_span(&name_nodes[1], file_id),
         );
         (
-            label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0], source))),
+            label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0], file_id))),
             bind_name,
         )
     } else {
         // One name: it's both the label AND the bind_name
         // In Kestrel, `init(value: Int)` means value is the external label too
         let name = extract_identifier_from_name(&name_nodes[0])?;
-        let span = get_name_span(&name_nodes[0], source);
+        let span = get_name_span(&name_nodes[0], file_id);
         let label = Some(Spanned::new(name.clone(), span.clone()));
         let bind_name = Spanned::new(name, span);
         (label, bind_name)
@@ -251,14 +267,15 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable
         let param_span: kestrel_span::Span = {
             let start = param_node.text_range().start().into();
             let end = param_node.text_range().end().into();
-            Span::from(start..end)
+            Span::new(file_id, start..end)
         };
         Ty::type_var(param_span)
     };

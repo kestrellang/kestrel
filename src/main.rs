@@ -89,7 +89,7 @@ fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: boo
     if show_tree {
         println!("--- Semantic Tree ---");
         if let Some(model) = compilation.semantic_model() {
-            kestrel_compiler::print_semantic_model(model);
+            model.print_semantic_model();
             println!();
         }
     }
@@ -97,7 +97,7 @@ fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: boo
     if show_symbols {
         println!("--- Symbol Table ---");
         if let Some(model) = compilation.semantic_model() {
-            kestrel_compiler::print_model_symbols(model);
+            model.print_model_symbols();
             println!();
         }
     }
@@ -223,11 +223,11 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                         if stmt_count > 0 || body.yield_expr().is_some() {
                             println!("{{");
                             for stmt in &body.statements {
-                                let stmt_str = format_statement(stmt);
+                                let stmt_str = stmt.debug_compact();
                                 println!("{}  {}", prefix, stmt_str);
                             }
                             if let Some(yield_expr) = body.yield_expr() {
-                                let value_str = format_expr_value(yield_expr);
+                                let value_str = yield_expr.debug_compact();
                                 println!("{}  -> {}", prefix, value_str);
                             }
                             println!("{}}}", prefix);
@@ -278,218 +278,12 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                         .iter()
                         .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
                         .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>())
-                        .map(|t| format_type_simple(t.ty()))
+                        .map(|t| t.ty().to_string())
                         .unwrap_or_else(|| "<unknown>".to_string());
                     println!("{}{} {}: {}", prefix, mutability, name, ty);
                 }
             }
             _ => {}
-        }
-    }
-
-    fn format_expr_value(expr: &kestrel_semantic_tree::expr::Expression) -> String {
-        match &expr.kind {
-            ExprKind::Literal(lit) => match lit {
-                LiteralValue::Unit => "()".to_string(),
-                LiteralValue::Integer(n) => n.to_string(),
-                LiteralValue::Float(f) => f.to_string(),
-                LiteralValue::String(s) => format!("\"{}\"", s),
-                LiteralValue::Bool(b) => b.to_string(),
-            },
-            ExprKind::Array(elements) => {
-                let items: Vec<_> = elements.iter().map(format_expr_value).collect();
-                format!("[{}]", items.join(", "))
-            }
-            ExprKind::Tuple(elements) => {
-                let items: Vec<_> = elements.iter().map(format_expr_value).collect();
-                format!("({})", items.join(", "))
-            }
-            ExprKind::LocalRef(id) => format!("local_{}", id.0),
-            ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
-            ExprKind::OverloadedRef(_) => "overloaded".to_string(),
-            ExprKind::Grouping(inner) => format!("({})", format_expr_value(inner)),
-            ExprKind::FieldAccess { object, field } => {
-                format!("{}.{}", format_expr_value(object), field)
-            }
-            ExprKind::TupleIndex { tuple, index } => {
-                format!("{}.{}", format_expr_value(tuple), index)
-            }
-            ExprKind::MethodRef {
-                receiver,
-                method_name,
-                ..
-            } => {
-                format!("{}.{}", format_expr_value(receiver), method_name)
-            }
-            ExprKind::Call {
-                callee, arguments, ..
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, format_expr_value(&a.value))
-                        } else {
-                            format_expr_value(&a.value)
-                        }
-                    })
-                    .collect();
-                format!("{}({})", format_expr_value(callee), args.join(", "))
-            }
-            ExprKind::PrimitiveMethodCall {
-                receiver,
-                method,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| format_expr_value(&a.value))
-                    .collect();
-                format!(
-                    "{}.{}({})",
-                    format_expr_value(receiver),
-                    method.name(),
-                    args.join(", ")
-                )
-            }
-            ExprKind::ImplicitStructInit {
-                struct_type,
-                arguments,
-            } => {
-                let args: Vec<String> = arguments
-                    .iter()
-                    .map(|a| {
-                        if let Some(ref label) = a.label {
-                            format!("{}: {}", label, format_expr_value(&a.value))
-                        } else {
-                            format_expr_value(&a.value)
-                        }
-                    })
-                    .collect();
-                format!("{}({})", format_type_simple(struct_type), args.join(", "))
-            }
-            ExprKind::TypeRef(id) => format!("type_{:?}", id),
-            ExprKind::Assignment { target, value } => {
-                format!(
-                    "{} = {}",
-                    format_expr_value(target),
-                    format_expr_value(value)
-                )
-            }
-            ExprKind::If {
-                condition,
-                then_branch: _,
-                then_value,
-                else_branch,
-            } => {
-                let then_str = then_value
-                    .as_ref()
-                    .map(|v| format_expr_value(v))
-                    .unwrap_or_else(|| "()".to_string());
-                let else_str = if else_branch.is_some() {
-                    " else { ... }"
-                } else {
-                    ""
-                };
-                format!(
-                    "if {} {{ {} }}{}",
-                    format_expr_value(condition),
-                    then_str,
-                    else_str
-                )
-            }
-            ExprKind::While { condition, .. } => {
-                format!("while {} {{ ... }}", format_expr_value(condition))
-            }
-            ExprKind::Loop { .. } => "loop { ... }".to_string(),
-            ExprKind::Break { label, .. } => {
-                if let Some(l) = label {
-                    format!("break {}", l.name)
-                } else {
-                    "break".to_string()
-                }
-            }
-            ExprKind::Continue { label, .. } => {
-                if let Some(l) = label {
-                    format!("continue {}", l.name)
-                } else {
-                    "continue".to_string()
-                }
-            }
-            ExprKind::Return { value } => {
-                if let Some(v) = value {
-                    format!("return {}", format_expr_value(v))
-                } else {
-                    "return".to_string()
-                }
-            }
-            ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
-            ExprKind::Error => "<error>".to_string(),
-        }
-    }
-
-    fn format_statement(stmt: &kestrel_semantic_tree::stmt::Statement) -> String {
-        use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
-        use kestrel_semantic_tree::stmt::StatementKind;
-
-        match &stmt.kind {
-            StatementKind::Binding { pattern, value } => {
-                let keyword = match &pattern.kind {
-                    PatternKind::Local { mutability, .. } => {
-                        if *mutability == Mutability::Mutable {
-                            "var"
-                        } else {
-                            "let"
-                        }
-                    }
-                    PatternKind::Error => "let",
-                };
-                let name = pattern.name().unwrap_or("<error>");
-                let value_str = value
-                    .as_ref()
-                    .map(|v| format!(" = {}", format_expr_value(v)))
-                    .unwrap_or_default();
-                format!("{} {}{};", keyword, name, value_str)
-            }
-            StatementKind::Expr(expr) => {
-                format!("{};", format_expr_value(expr))
-            }
-        }
-    }
-
-    fn format_type_simple(ty: &kestrel_semantic_tree::ty::Ty) -> String {
-        use kestrel_semantic_tree::ty::TyKind;
-        match ty.kind() {
-            TyKind::Unit => "()".to_string(),
-            TyKind::Never => "!".to_string(),
-            TyKind::Int(bits) => format!("{:?}", bits),
-            TyKind::Float(bits) => format!("{:?}", bits),
-            TyKind::Bool => "Bool".to_string(),
-            TyKind::String => "String".to_string(),
-            TyKind::Tuple(elements) => {
-                let items: Vec<_> = elements.iter().map(format_type_simple).collect();
-                format!("({})", items.join(", "))
-            }
-            TyKind::Array(elem) => format!("[{}]", format_type_simple(elem)),
-            TyKind::Function {
-                params,
-                return_type,
-            } => {
-                let params_str: Vec<_> = params.iter().map(format_type_simple).collect();
-                format!(
-                    "({}) -> {}",
-                    params_str.join(", "),
-                    format_type_simple(return_type)
-                )
-            }
-            TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
-            TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
-            TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
-            TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-            TyKind::AssociatedType { symbol, .. } => symbol.metadata().name().value.clone(),
-            TyKind::SelfType => "Self".to_string(),
-            TyKind::TypeVar(_) => "_".to_string(),
-            TyKind::Error => "<error>".to_string(),
         }
     }
 

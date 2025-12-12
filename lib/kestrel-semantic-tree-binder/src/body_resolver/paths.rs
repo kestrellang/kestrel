@@ -28,7 +28,7 @@ use super::utils::{get_callable_behavior, is_expression_kind, substitute_type};
 
 /// Resolve a path expression (variable reference, function reference, or member access)
 pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    let span = get_node_span(node, ctx.source);
+    let span = get_node_span(node, ctx.file_id);
 
     // Check for nested expression inside the path (happens with member access on call expressions)
     // e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
@@ -529,7 +529,7 @@ fn extract_type_arguments_from_path(
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
             let mut resolver =
-                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.function_id);
+                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.file_id, ctx.function_id);
             let ty = resolver.resolve(&child);
             type_args.push(ty);
         }

@@ -12,6 +12,7 @@ use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_spa
 pub fn extract_type_parameters(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
 ) -> Vec<Arc<TypeParameterSymbol>> {
     let type_param_list = match find_child(syntax, SyntaxKind::TypeParameterList) {
@@ -23,7 +24,7 @@ pub fn extract_type_parameters(
 
     for child in type_param_list.children() {
         if child.kind() == SyntaxKind::TypeParameter {
-            if let Some(param) = parse_type_parameter(&child, source, parent.clone()) {
+            if let Some(param) = parse_type_parameter(&child, source, file_id, parent.clone()) {
                 type_params.push(Arc::new(param));
             }
         }
@@ -46,13 +47,14 @@ pub fn add_type_params_as_children(
 fn parse_type_parameter(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
 ) -> Option<TypeParameterSymbol> {
-    let (name_text, name_span) = extract_type_param_name(syntax)?;
-    let full_span = get_node_span(syntax, source);
+    let (name_text, name_span) = extract_type_param_name(syntax, file_id)?;
+    let full_span = get_node_span(syntax, file_id);
     let name = Spanned::new(name_text, name_span);
 
-    let default_ty = extract_default_type(syntax, source);
+    let default_ty = extract_default_type(syntax, source, file_id);
 
     Some(if let Some(default) = default_ty {
         TypeParameterSymbol::with_default(name, full_span, default, parent)
@@ -61,13 +63,18 @@ fn parse_type_parameter(
     })
 }
 
-fn extract_type_param_name(syntax: &SyntaxNode) -> Option<(String, kestrel_span::Span)> {
+fn extract_type_param_name(
+    syntax: &SyntaxNode,
+    file_id: usize,
+) -> Option<(String, kestrel_span::Span)> {
     for child in syntax.children_with_tokens() {
         if let Some(token) = child.into_token() {
             if token.kind() == SyntaxKind::Identifier {
                 let text_range = token.text_range();
-                let span: kestrel_span::Span =
-                    Span::from((text_range.start().into())..(text_range.end().into()));
+                let span: kestrel_span::Span = Span::new(
+                    file_id,
+                    (text_range.start().into())..(text_range.end().into()),
+                );
                 return Some((token.text().to_string(), span));
             }
         }
@@ -78,8 +85,10 @@ fn extract_type_param_name(syntax: &SyntaxNode) -> Option<(String, kestrel_span:
             if let Some(token) = child.into_token() {
                 if token.kind() == SyntaxKind::Identifier {
                     let text_range = token.text_range();
-                    let span: kestrel_span::Span =
-                        Span::from((text_range.start().into())..(text_range.end().into()));
+                    let span: kestrel_span::Span = Span::new(
+                        file_id,
+                        (text_range.start().into())..(text_range.end().into()),
+                    );
                     return Some((token.text().to_string(), span));
                 }
             }
@@ -89,14 +98,14 @@ fn extract_type_param_name(syntax: &SyntaxNode) -> Option<(String, kestrel_span:
     None
 }
 
-fn extract_default_type(syntax: &SyntaxNode, source: &str) -> Option<Ty> {
+fn extract_default_type(syntax: &SyntaxNode, source: &str, file_id: usize) -> Option<Ty> {
     let default_node = find_child(syntax, SyntaxKind::DefaultType)?;
     let ty_node = find_child(&default_node, SyntaxKind::Ty)?;
-    extract_ty_from_node(&ty_node, source)
+    extract_ty_from_node(&ty_node, source, file_id)
 }
 
-fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str) -> Option<Ty> {
-    let span = get_node_span(ty_node, source);
+fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> Option<Ty> {
+    let span = get_node_span(ty_node, file_id);
     let variant_node = ty_node.children().next()?;
 
     match variant_node.kind() {
@@ -115,7 +124,7 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str) -> Option<Ty> {
             let elements: Vec<Ty> = variant_node
                 .children()
                 .filter(|c| c.kind() == SyntaxKind::Ty)
-                .filter_map(|c| extract_ty_from_node(&c, source))
+                .filter_map(|c| extract_ty_from_node(&c, source, file_id))
                 .collect();
             Some(Ty::tuple(elements, span))
         }
@@ -126,6 +135,7 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str) -> Option<Ty> {
 pub fn extract_where_clause(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     type_params: &[Arc<TypeParameterSymbol>],
 ) -> WhereClause {
     let where_clause_node = match find_child(syntax, SyntaxKind::WhereClause) {
@@ -138,12 +148,12 @@ pub fn extract_where_clause(
     for child in where_clause_node.children() {
         match child.kind() {
             SyntaxKind::TypeBound => {
-                if let Some(constraint) = parse_type_bound(&child, source, type_params) {
+                if let Some(constraint) = parse_type_bound(&child, source, file_id, type_params) {
                     constraints.push(constraint);
                 }
             }
             SyntaxKind::TypeEquality => {
-                if let Some(constraint) = parse_type_equality(&child, source) {
+                if let Some(constraint) = parse_type_equality(&child, source, file_id) {
                     constraints.push(constraint);
                 }
             }
@@ -157,6 +167,7 @@ pub fn extract_where_clause(
 fn parse_type_bound(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<Constraint> {
     let name_node = find_child(syntax, SyntaxKind::Name)?;
@@ -168,7 +179,7 @@ fn parse_type_bound(
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
     let param_span: kestrel_span::Span =
-        Span::from((text_range.start().into())..(text_range.end().into()));
+        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
 
     let param_id = type_params
         .iter()
@@ -179,7 +190,7 @@ fn parse_type_bound(
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
-            let span = get_node_span(&path_node, source);
+            let span = get_node_span(&path_node, file_id);
             Ty::error(span)
         })
         .collect();
@@ -196,15 +207,15 @@ fn parse_type_bound(
     }
 }
 
-fn parse_type_equality(syntax: &SyntaxNode, source: &str) -> Option<Constraint> {
-    let span = get_node_span(syntax, source);
+fn parse_type_equality(syntax: &SyntaxNode, _source: &str, file_id: usize) -> Option<Constraint> {
+    let span = get_node_span(syntax, file_id);
 
     let left_target = find_child(syntax, SyntaxKind::AssociatedTypeTarget)?;
-    let left_span = get_node_span(&left_target, source);
+    let left_span = get_node_span(&left_target, file_id);
     let left = Ty::error(left_span);
 
     let right_node = find_child(syntax, SyntaxKind::Ty)?;
-    let right_span = get_node_span(&right_node, source);
+    let right_span = get_node_span(&right_node, file_id);
     let right = Ty::error(right_span);
 
     Some(Constraint::type_equality(left, right, span))

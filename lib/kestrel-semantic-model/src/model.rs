@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::SyntaxNode;
+use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::extension_registry::ExtensionRegistry;
@@ -131,5 +132,163 @@ impl SemanticModel {
     /// Register an extension (called during binding).
     pub fn register_extension(&self, target_id: SymbolId, extension: Arc<ExtensionSymbol>) {
         self.extension_registry.register(target_id, extension);
+    }
+
+    /// Debug print the semantic model (symbol hierarchy).
+    pub fn print_semantic_model(&self) {
+        fn format_behavior(b: &dyn Behavior<KestrelLanguage>) -> String {
+            use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+            use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+            use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+            use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
+            use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+            use kestrel_semantic_tree::behavior::valued::ValueBehavior;
+            use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+            use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
+
+            if let Some(vb) = b.downcast_ref::<VisibilityBehavior>() {
+                if let Some(vis) = vb.visibility() {
+                    return format!("Visibility({})", vis);
+                }
+                return "Visibility".to_string();
+            }
+
+            if let Some(tb) = b.downcast_ref::<TypedBehavior>() {
+                return format!("Typed({})", tb.ty());
+            }
+
+            if let Some(import_data) = b.downcast_ref::<ImportDataBehavior>() {
+                let path = import_data.module_path().join(".");
+                let items = import_data.items();
+                if items.is_empty() {
+                    if let Some(alias) = import_data.alias() {
+                        return format!("Import({} as {})", path, alias);
+                    }
+                    return format!("Import({})", path);
+                }
+                let item_strs: Vec<String> = items
+                    .iter()
+                    .map(|i| {
+                        if let Some(alias) = &i.alias {
+                            format!("{} as {}", i.name, alias)
+                        } else {
+                            i.name.clone()
+                        }
+                    })
+                    .collect();
+                return format!("Import({}.({}))", path, item_strs.join(", "));
+            }
+
+            if let Some(callable) = b.downcast_ref::<CallableBehavior>() {
+                let params: Vec<String> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| {
+                        let label = p.external_label().unwrap_or("_");
+                        format!("{}: {}", label, p.ty)
+                    })
+                    .collect();
+                return format!("Callable(({}) -> {})", params.join(", "), callable.return_type());
+            }
+
+            if let Some(fd) = b.downcast_ref::<FunctionDataBehavior>() {
+                return format!(
+                    "FunctionData(has_body={}, is_static={})",
+                    fd.has_body(),
+                    fd.is_static()
+                );
+            }
+
+            if let Some(vb) = b.downcast_ref::<ValueBehavior>() {
+                return format!("Valued({})", vb.ty());
+            }
+
+            if let Some(cb) = b.downcast_ref::<ConformancesBehavior>() {
+                let conformances: Vec<String> = cb.conformances().iter().map(|t| t.to_string()).collect();
+                return format!("Conformances({})", conformances.join(", "));
+            }
+
+            if let Some(eb) = b.downcast_ref::<ExecutableBehavior>() {
+                let stmt_count = eb.body().statements.len();
+                let has_yield = eb.body().yield_expr().is_some();
+                return format!("Executable(stmts={}, has_yield={})", stmt_count, has_yield);
+            }
+
+            if let Some(ma) = b.downcast_ref::<MemberAccessBehavior>() {
+                return format!("MemberAccess({})", ma.member_name());
+            }
+
+            "Unknown".to_string()
+        }
+
+        fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
+            let indent = "  ".repeat(level);
+            let metadata = symbol.metadata();
+
+            let behaviors = metadata.behaviors();
+            let behaviors_str = if !behaviors.is_empty() {
+                let behavior_strings: Vec<String> = behaviors
+                    .iter()
+                    .map(|b| format_behavior(b.as_ref()))
+                    .collect();
+                format!(" [{}]", behavior_strings.join(", "))
+            } else {
+                String::new()
+            };
+
+            println!(
+                "{}{:?} '{}'{}",
+                indent,
+                metadata.kind(),
+                metadata.name().value,
+                behaviors_str
+            );
+
+            for child in metadata.children() {
+                print_symbol(&child, level + 1);
+            }
+        }
+
+        let root = self.root();
+        let children = root.metadata().children();
+
+        println!("{} top-level symbols\n", children.len());
+        for child in children {
+            print_symbol(&child, 0);
+        }
+    }
+
+    /// Debug print a sorted symbol table view of the model.
+    pub fn print_model_symbols(&self) {
+        fn collect_symbols(
+            symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+            symbols: &mut Vec<(String, String)>,
+        ) {
+            let name = symbol.metadata().name().value.clone();
+            let kind = format!("{:?}", symbol.metadata().kind());
+            symbols.push((name, kind));
+
+            for child in symbol.metadata().children() {
+                collect_symbols(&child, symbols);
+            }
+        }
+
+        let mut symbols = Vec::new();
+        for child in self.root().metadata().children() {
+            collect_symbols(&child, &mut symbols);
+        }
+
+        println!("Symbols:");
+        println!("  {} symbols\n", symbols.len());
+
+        symbols.sort_by(|a, b| a.0.cmp(&b.0));
+
+        println!("  {:<30} {:<15}", "Name", "Kind");
+        println!("  {}", "-".repeat(45));
+
+        for (name, kind) in symbols {
+            println!("  {:<30} {:<15}", name, kind);
+        }
     }
 }

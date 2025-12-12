@@ -21,6 +21,7 @@ impl Builder for InitializerBuilder {
         &self,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
@@ -30,7 +31,7 @@ impl Builder for InitializerBuilder {
             return None;
         }
 
-        let full_span = get_node_span(syntax, source);
+        let full_span = get_node_span(syntax, file_id);
 
         let init_token_span = syntax
             .children_with_tokens()
@@ -39,7 +40,7 @@ impl Builder for InitializerBuilder {
             .map(|tok| {
                 let start = tok.text_range().start().into();
                 let end = tok.text_range().end().into();
-                Span::from(start..end)
+                Span::new(file_id, start..end)
             })
             .unwrap_or_else(|| full_span.clone());
 
@@ -47,7 +48,7 @@ impl Builder for InitializerBuilder {
         let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
 
         let visibility_span =
-            get_visibility_span(syntax, source).unwrap_or(init_token_span.clone());
+            get_visibility_span(syntax, file_id).unwrap_or(init_token_span.clone());
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), Some(parent), root);
         let visibility_behavior =
             VisibilityBehavior::new(visibility_enum, visibility_span, visibility_scope);

@@ -24,7 +24,7 @@ static OPERATOR_REGISTRY: LazyLock<OperatorRegistry> = LazyLock::new(OperatorReg
 
 /// Resolve a prefix unary expression: -expr, +expr, !expr, not expr
 pub fn resolve_unary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    let span = get_node_span(node, ctx.source);
+    let span = get_node_span(node, ctx.file_id);
 
     // Find the operator token
     let operator_token = node
@@ -71,7 +71,7 @@ pub fn resolve_postfix_expression(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    let span = get_node_span(node, ctx.source);
+    let span = get_node_span(node, ctx.file_id);
 
     // Find the operator token (!)
     let operator_token = node
@@ -102,7 +102,7 @@ pub fn resolve_postfix_expression(
 /// Resolve a binary expression: a + b
 /// Uses Pratt parsing to handle operator precedence.
 pub fn resolve_binary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    let span = get_node_span(node, ctx.source);
+    let span = get_node_span(node, ctx.file_id);
 
     // Collect all operands and operators from the flat binary tree
     let (operands, operators) = collect_binary_operands(node, ctx);
@@ -334,9 +334,9 @@ fn desugar_binary_op(
         operator_span: op_span.clone(),
         operator: operator_symbol(op),
         lhs_span: lhs.span.clone(),
-        lhs_type: super::utils::format_type(&lhs.ty),
+        lhs_type: lhs.ty.to_string(),
         rhs_span: rhs.span.clone(),
-        rhs_type: super::utils::format_type(&rhs.ty),
+        rhs_type: rhs.ty.to_string(),
     };
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
@@ -400,7 +400,7 @@ fn desugar_unary_op(
         operator_span: op_span.clone(),
         operator: unary_operator_symbol(op),
         operand_span: operand.span.clone(),
-        operand_type: super::utils::format_type(&operand.ty),
+        operand_type: operand.ty.to_string(),
     };
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)

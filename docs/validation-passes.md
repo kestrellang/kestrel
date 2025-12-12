@@ -1,223 +1,102 @@
-# Creating Validation Passes
+# Creating Analyzers (Validation Passes)
 
-This document explains how to create validation passes for the Kestrel compiler. Validation passes run after semantic analysis to check for errors that can't be caught during parsing or binding.
+This document explains how to add validation to the Kestrel compiler.
 
-## Overview
+Historically, validations lived as “passes” in the semantic-tree builder. The compiler now uses:
 
-Validation passes are located in `lib/kestrel-semantic-tree-builder/src/validation/`. Each pass:
+- **Build (lowering)**: `kestrel-semantic-tree-builder` builds a `SemanticModel` from syntax trees.
+- **Bind**: `kestrel-semantic-tree-binder` resolves names/types, attaches relationships, and performs a small number of bind-time checks.
+- **Analyze**: `kestrel-semantic-analyzers` runs validators as analyzers over the bound model.
 
-1. Implements the `ValidationPass` trait
-2. Walks the semantic tree looking for violations
-3. Reports errors via `DiagnosticContext`
+## Where analyzers live
 
-## Process for Creating a New Pass
+Analyzers are in `lib/kestrel-semantic-analyzers/src/analyzers/`.
 
-### Step 1: Check for Overlap
+The “standard set” and ordering is defined in `lib/kestrel-semantic-analyzers/src/lib.rs` via `default_analyzers()`.
 
-Before creating a new pass, check if the validation already exists:
+## When to write an analyzer vs binder check
 
-1. **Existing passes** - Review the passes in `validation/mod.rs`:
-   - `FunctionBodyPass` - Functions must have bodies (except in protocols)
-   - `ProtocolMethodPass` - Protocol methods cannot have bodies
-   - `StaticContextPass` - `static` only allowed in struct/protocol
-   - `DuplicateSymbolPass` - No duplicate types or members
-   - `VisibilityConsistencyPass` - Public APIs can't expose private types
+Prefer an **analyzer** when the rule:
 
-2. **Binding-phase checks** - Some validation happens during binding in `lib.rs`:
-   - `check_type_alias_cycles` - Detects circular type aliases
-   - `check_duplicate_signatures` - Detects duplicate function signatures
+- is purely validation (no mutation required),
+- can run after binding,
+- benefits from queries (e.g. “find all functions”, “resolve call target”, “is symbol visible”).
 
-3. **Parser-level checks** - Some errors are caught during parsing
+Prefer a **binder check** when the rule:
 
-### Step 2: Define the Errors
+- must run while resolving bodies/names (e.g. to avoid creating invalid semantic nodes),
+- requires attaching additional data to symbols/expressions during binding.
 
-Before writing code, define exactly what errors the pass will detect. Create a table:
+## Process for creating a new analyzer
+
+### Step 1: Check for overlap
+
+Search for an existing analyzer first:
+
+- Look under `lib/kestrel-semantic-analyzers/src/analyzers/`
+- Check `default_analyzers()` ordering in `lib/kestrel-semantic-analyzers/src/lib.rs`
+- Grep for an existing diagnostic type/message substring
+
+### Step 2: Define the errors
+
+Before writing code, define exactly what the analyzer detects. Create a table:
 
 | Condition | Error Message |
 |-----------|---------------|
 | When X happens | "error message describing X" |
 | When Y happens | "error message describing Y" |
 
-**Example for `StaticContextPass`:**
+Keep messages stable; tests usually assert on substrings.
 
-| Condition | Error Message |
-|-----------|---------------|
-| Static function at module level | "static modifier is only allowed inside struct or protocol" |
+### Step 3: Implement the analyzer
 
-**Example for `DuplicateSymbolPass`:**
-
-| Condition | Error Message |
-|-----------|---------------|
-| Two types with same name | "duplicate type 'X': already defined as {kind}" |
-| Two members with same name | "duplicate member 'X' in {kind} 'Y': already defined as {member_kind}" |
-
-### Step 3: Implement the Pass
-
-#### 3.1 Create the file
-
-Create a new file in `lib/kestrel-semantic-tree-builder/src/validation/`:
+Create a new module under `lib/kestrel-semantic-analyzers/src/analyzers/<your_rule>/`:
 
 ```rust
-//! Validation pass for [description]
-//!
-//! [Explain what this pass checks]
-
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::analyzer::Analyzer;
+use crate::context::AnalysisContext;
 
-pub struct MyValidationPass;
+pub struct MyAnalyzer;
 
-impl MyValidationPass {
-    const NAME: &'static str = "my_validation";
-}
-
-impl ValidationPass for MyValidationPass {
-    fn name(&self) -> &'static str {
-        Self::NAME
-    }
-
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics, config);
-    }
-}
-
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-) {
-    // Check this symbol
-    // ...
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics, config);
-    }
-}
-```
-
-#### 3.2 Register the pass
-
-Update `validation/mod.rs`:
-
-```rust
-mod my_validation;  // Add module declaration
-
-pub use my_validation::MyValidationPass;  // Export the pass
-
-impl ValidationRunner {
+impl MyAnalyzer {
     pub fn new() -> Self {
-        let passes: Vec<Box<dyn ValidationPass>> = vec![
-            // ... existing passes ...
-            Box::new(MyValidationPass),  // Add to runner
-        ];
-        Self { passes }
+        Self
+    }
+}
+
+impl Analyzer for MyAnalyzer {
+    fn name(&self) -> &'static str {
+        "my_analyzer"
+    }
+
+    fn visit_symbol(&mut self, symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut AnalysisContext) {
+        // Use ctx.model.query(...) to fetch derived information.
+        // Use ctx.report(...) to emit diagnostics.
+        let _ = (symbol, ctx);
     }
 }
 ```
 
-#### 3.3 Report errors
+Define diagnostics in a sibling `diagnostics.rs` file and implement `kestrel_reporting::IntoDiagnostic` on your error type(s).
 
-Use the diagnostic system to report errors:
+### Step 4: Register it
 
-```rust
-fn report_error(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-) {
-    let name = &symbol.metadata().name().value;
-    let span = symbol.metadata().declaration_span().clone();
-    let file_id = get_file_id_for_symbol(symbol, diagnostics);
+Add it to `default_analyzers()` in `lib/kestrel-semantic-analyzers/src/lib.rs` in the appropriate order.
 
-    // Include pass name in debug mode
-    let message = if config.debug_mode {
-        format!("[{}] error message here", MyValidationPass::NAME)
-    } else {
-        "error message here".to_string()
-    };
+### Step 5: Add tests
 
-    let diagnostic = kestrel_reporting::Diagnostic::error()
-        .with_message(message)
-        .with_labels(vec![
-            kestrel_reporting::Label::primary(file_id, span)
-                .with_message("label explaining the error location")
-        ]);
+Add tests under `lib/kestrel-test-suite/tests/` (follow existing patterns in the suite).
 
-    diagnostics.add_diagnostic(diagnostic);
-}
+Run:
 
-// Helper to get file ID
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
-}
-```
-
-### Step 4: Add Tests
-
-Add tests in `lib/kestrel-test-suite/tests/validation.rs`:
-
-```rust
-mod my_validation {
-    use super::*;
-
-    #[test]
-    fn valid_case_compiles() {
-        Test::new(r#"module Test
-            // valid code here
-        "#)
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn invalid_case_errors() {
-        Test::new(r#"module Test
-            // invalid code here
-        "#)
-        .expect(HasError("expected error substring"));
-    }
-}
-```
-
-Run tests with:
 ```bash
-cargo test -p kestrel-test-suite --test validation
+cargo test -p kestrel-test-suite
 ```
-
-## Common Patterns
-
-### Walking the Tree with Context
-
-Pass context down through recursion:
-
-```rust
-fn validate_symbol(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     diagnostics: &mut DiagnosticContext,
     config: &ValidationConfig,

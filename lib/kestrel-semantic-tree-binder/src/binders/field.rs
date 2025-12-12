@@ -32,9 +32,11 @@ impl DeclarationBinder for FieldBinder {
         let span = symbol.metadata().span().clone();
 
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve the type directly from syntax
-        let resolved_type = resolve_field_type_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_type =
+            resolve_field_type_from_syntax(syntax, &source, file_id, symbol_id, context);
 
         // Add a TypedBehavior with the resolved type
         let typed_behavior = TypedBehavior::new(resolved_type.clone(), span);
@@ -61,6 +63,7 @@ impl DeclarationBinder for FieldBinder {
 fn resolve_field_type_from_syntax(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Ty {
@@ -69,10 +72,11 @@ fn resolve_field_type_from_syntax(
         .children()
         .find(|child| child.kind() == SyntaxKind::Ty)
     {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 
     // No type found - return error
-    Ty::error(Span::from(0..0))
+    Ty::error(Span::new(file_id, 0..0))
 }

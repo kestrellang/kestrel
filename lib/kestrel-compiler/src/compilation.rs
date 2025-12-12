@@ -78,7 +78,7 @@ impl Compilation {
             }
 
             // Phase 3: Add file to the semantic tree builder
-            builder.add_file(&name, &parse_result.tree, &source, &mut diagnostics);
+            builder.add_file(&name, &parse_result.tree, &source, file_id, &mut diagnostics);
 
             // Create source file
             let source_file = SourceFile::new(name, source, parse_result.tree);

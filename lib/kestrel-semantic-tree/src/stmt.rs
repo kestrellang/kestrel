@@ -90,6 +90,33 @@ impl Statement {
             _ => None,
         }
     }
+
+    /// Return a compact debug representation of this statement.
+    pub fn debug_compact(&self) -> String {
+        use crate::pattern::{Mutability, PatternKind};
+
+        match &self.kind {
+            StatementKind::Binding { pattern, value } => {
+                let keyword = match &pattern.kind {
+                    PatternKind::Local { mutability, .. } => {
+                        if *mutability == Mutability::Mutable {
+                            "var"
+                        } else {
+                            "let"
+                        }
+                    }
+                    PatternKind::Error => "let",
+                };
+                let name = pattern.name().unwrap_or("<error>");
+                let value_str = value
+                    .as_ref()
+                    .map(|v| format!(" = {}", v.debug_compact()))
+                    .unwrap_or_default();
+                format!("{} {}{};", keyword, name, value_str)
+            }
+            StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
+        }
+    }
 }
 
 #[cfg(test)]

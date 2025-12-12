@@ -24,7 +24,6 @@
 
 // Core modules
 mod binders;
-mod debug;
 mod declaration_binder;
 mod maps;
 pub mod resolution;
@@ -35,7 +34,6 @@ pub mod body_resolver;
 pub mod diagnostics;
 
 // Re-exports for convenient access
-pub use debug::{format_type, print_model_symbols, print_semantic_model};
 pub use declaration_binder::{BindingContext, DeclarationBinder, DeclarationBinderRegistry};
 pub use kestrel_semantic_model::SemanticModel;
 pub use resolution::{LocalScope, SemanticBinder, TypeResolver};

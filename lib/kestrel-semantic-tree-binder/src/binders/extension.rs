@@ -40,9 +40,10 @@ impl DeclarationBinder for ExtensionBinder {
 
         let symbol_id = symbol.metadata().id();
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve the target type from the Ty node
-        let target_result = resolve_extension_target(syntax, &source, symbol_id, context);
+        let target_result = resolve_extension_target(syntax, &source, file_id, symbol_id, context);
 
         if let Some((target_ty, target_struct, type_arguments, referenced_params)) = target_result {
             // Get the target struct's where clause constraints (inherited)
@@ -52,6 +53,7 @@ impl DeclarationBinder for ExtensionBinder {
             let extension_where_clause = resolve_extension_where_clause(
                 syntax,
                 &source,
+                file_id,
                 symbol_id,
                 context,
                 &referenced_params,
@@ -83,6 +85,7 @@ impl DeclarationBinder for ExtensionBinder {
         resolve_conformance_list(
             syntax,
             &source,
+            file_id,
             symbol,
             symbol_id,
             context,
@@ -100,6 +103,7 @@ impl DeclarationBinder for ExtensionBinder {
 fn resolve_extension_target(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Option<(
@@ -110,7 +114,7 @@ fn resolve_extension_target(
 )> {
     // Find the Ty node (target type expression)
     let ty_node = find_child(syntax, SyntaxKind::Ty)?;
-    let ty_span = get_node_span(&ty_node, source);
+    let ty_span = get_node_span(&ty_node, file_id);
 
     // Find TyPath within Ty
     let ty_path_node = ty_node
@@ -160,6 +164,7 @@ fn resolve_extension_target(
     let type_args = resolve_extension_type_arguments(
         &ty_path_node,
         source,
+        file_id,
         &struct_type_params,
         context_id,
         ctx,
@@ -226,6 +231,7 @@ fn resolve_extension_target(
 fn resolve_extension_type_arguments(
     ty_path_node: &SyntaxNode,
     source: &str,
+    file_id: usize,
     struct_type_params: &[Arc<TypeParameterSymbol>],
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
@@ -248,7 +254,7 @@ fn resolve_extension_type_arguments(
 
     // Check for type parameter count mismatch
     if arg_count != expected_count {
-        let arg_list_span = get_node_span(&arg_list, source);
+        let arg_list_span = get_node_span(&arg_list, file_id);
         ctx.diagnostics.throw(WrongTypeParameterCountError {
             span: arg_list_span,
             expected: expected_count,
@@ -260,7 +266,7 @@ fn resolve_extension_type_arguments(
     let mut type_args = Vec::new();
 
     for ty_node in ty_nodes {
-        let ty_span = get_node_span(&ty_node, source);
+        let ty_span = get_node_span(&ty_node, file_id);
 
         // Try to extract a simple identifier from this type argument
         let simple_name = extract_simple_type_name(&ty_node);
@@ -278,7 +284,8 @@ fn resolve_extension_type_arguments(
         }
 
         // Not a type parameter reference - resolve as a normal type
-        let mut type_resolver = TypeResolver::new(ctx.model, ctx.diagnostics, source, context_id);
+        let mut type_resolver =
+            TypeResolver::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         type_args.push(type_resolver.resolve(&ty_node));
     }
 
@@ -406,6 +413,7 @@ impl kestrel_reporting::IntoDiagnostic for WrongTypeParameterCountError {
 fn resolve_extension_where_clause(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     referenced_params: &[Arc<TypeParameterSymbol>],
@@ -420,7 +428,7 @@ fn resolve_extension_where_clause(
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
             if let Some(constraint) =
-                resolve_extension_type_bound(&child, source, context_id, ctx, referenced_params)
+                resolve_extension_type_bound(&child, source, file_id, context_id, ctx, referenced_params)
             {
                 constraints.push(constraint);
             }
@@ -434,6 +442,7 @@ fn resolve_extension_where_clause(
 fn resolve_extension_type_bound(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     referenced_params: &[Arc<TypeParameterSymbol>],
@@ -448,7 +457,7 @@ fn resolve_extension_type_bound(
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
     let param_span: kestrel_span::Span =
-        Span::from((text_range.start().into())..(text_range.end().into()));
+        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter in the referenced params (not all struct params)
     let param = referenced_params
@@ -462,7 +471,7 @@ fn resolve_extension_type_bound(
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
-            let span = get_node_span(&path_node, source);
+            let span = get_node_span(&path_node, file_id);
             let segments = extract_path_segments(&path_node);
 
             if segments.is_empty() {

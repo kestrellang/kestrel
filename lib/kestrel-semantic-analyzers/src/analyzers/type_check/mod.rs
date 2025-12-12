@@ -74,8 +74,8 @@ impl Analyzer for TypeCheckAnalyzer {
             {
                 ctx.report(TypeMismatchError {
                     span: yield_expr.span.clone(),
-                    expected: format_type(&expected_ty),
-                    found: format_type(&yield_expr.ty),
+                    expected: expected_ty.to_string(),
+                    found: yield_expr.ty.to_string(),
                     context: "return value".to_string(),
                 });
             }
@@ -131,8 +131,8 @@ impl Analyzer for TypeCheckAnalyzer {
             if !is_assignable_in_ctx(&value.ty, declared_ty, ctx) {
                 ctx.report(TypeMismatchError {
                     span: value.span.clone(),
-                    expected: format_type(declared_ty),
-                    found: format_type(&value.ty),
+                    expected: declared_ty.to_string(),
+                    found: value.ty.to_string(),
                     context: "variable binding".to_string(),
                 });
             }
@@ -181,8 +181,8 @@ impl TypeCheckAnalyzer {
                 if !self.is_assignable(&value_expr.ty, &expected_ty, ctx) {
                     ctx.report(TypeMismatchError {
                         span: value_expr.span.clone(),
-                        expected: format_type(&expected_ty),
-                        found: format_type(&value_expr.ty),
+                        expected: expected_ty.to_string(),
+                        found: value_expr.ty.to_string(),
                         context: "return value".to_string(),
                     });
                 }
@@ -191,7 +191,7 @@ impl TypeCheckAnalyzer {
                 if !expected_ty.is_unit() && !is_initializer {
                     ctx.report(TypeMismatchError {
                         span: expr.span.clone(),
-                        expected: format_type(&expected_ty),
+                        expected: expected_ty.to_string(),
                         found: "()".to_string(),
                         context: "return value".to_string(),
                     });
@@ -204,8 +204,8 @@ impl TypeCheckAnalyzer {
         if !self.is_assignable(&value.ty, &target.ty, ctx) {
             ctx.report(TypeMismatchError {
                 span: value.span.clone(),
-                expected: format_type(&target.ty),
-                found: format_type(&value.ty),
+                expected: target.ty.to_string(),
+                found: value.ty.to_string(),
                 context: "assignment".to_string(),
             });
         }
@@ -215,7 +215,7 @@ impl TypeCheckAnalyzer {
         if !condition.ty.is_bool() && !condition.ty.is_error() {
             ctx.report(ConditionNotBoolError {
                 span: condition.span.clone(),
-                found: format_type(&condition.ty),
+                found: condition.ty.to_string(),
                 condition_kind: "if",
             });
         }
@@ -253,8 +253,8 @@ impl TypeCheckAnalyzer {
                 if_span: expr.span.clone(),
                 then_span,
                 else_span,
-                then_type: format_type(&then_ty),
-                else_type: format_type(&else_ty),
+                then_type: then_ty.to_string(),
+                else_type: else_ty.to_string(),
             });
         }
     }
@@ -263,7 +263,7 @@ impl TypeCheckAnalyzer {
         if !condition.ty.is_bool() && !condition.ty.is_error() {
             ctx.report(ConditionNotBoolError {
                 span: condition.span.clone(),
-                found: format_type(&condition.ty),
+                found: condition.ty.to_string(),
                 condition_kind: "while",
             });
         }
@@ -287,8 +287,8 @@ impl TypeCheckAnalyzer {
                 };
                 ctx.report(TypeMismatchError {
                     span: arg.value.span.clone(),
-                    expected: format_type(param_ty),
-                    found: format_type(&arg.value.ty),
+                    expected: param_ty.to_string(),
+                    found: arg.value.ty.to_string(),
                     context,
                 });
             }
@@ -319,8 +319,8 @@ impl TypeCheckAnalyzer {
                     first_element_span: first.span.clone(),
                     element_span: elem.span.clone(),
                     element_index: i,
-                    expected: format_type(expected_ty),
-                    found: format_type(&elem.ty),
+                    expected: expected_ty.to_string(),
+                    found: elem.ty.to_string(),
                 });
             }
         }
@@ -333,46 +333,4 @@ fn is_assignable_in_ctx(from: &Ty, to: &Ty, ctx: &AnalysisContext) -> bool {
         .map(|s| s.metadata().id())
         .unwrap_or_else(|| ctx.model.root().metadata().id());
     is_assignable_with_constraints(from, to, ctx.model, context_id)
-}
-
-fn format_type(ty: &Ty) -> String {
-    match ty.kind() {
-        TyKind::Unit => "()".to_string(),
-        TyKind::Never => "!".to_string(),
-        TyKind::Bool => "Bool".to_string(),
-        TyKind::String => "String".to_string(),
-        TyKind::Int(bits) => format!("{:?}", bits),
-        TyKind::Float(bits) => format!("{:?}", bits),
-        TyKind::Tuple(elements) => {
-            let items: Vec<_> = elements.iter().map(format_type).collect();
-            format!("({})", items.join(", "))
-        }
-        TyKind::Array(elem) => format!("[{}]", format_type(elem)),
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let params_str: Vec<_> = params.iter().map(format_type).collect();
-            format!(
-                "({}) -> {}",
-                params_str.join(", "),
-                format_type(return_type)
-            )
-        }
-        TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
-        TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::AssociatedType { symbol, container } => match container {
-            Some(container_ty) => format!(
-                "{}.{}",
-                format_type(container_ty),
-                symbol.metadata().name().value
-            ),
-            None => symbol.metadata().name().value.clone(),
-        },
-        TyKind::SelfType => "Self".to_string(),
-        TyKind::TypeVar(_) => "_".to_string(),
-        TyKind::Error => "<error>".to_string(),
-    }
 }

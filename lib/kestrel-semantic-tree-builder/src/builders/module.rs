@@ -16,6 +16,7 @@ impl Builder for ModuleBuilder {
         &self,
         _syntax: &SyntaxNode,
         _source: &str,
+        _file_id: usize,
         _parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         _root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {

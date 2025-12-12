@@ -10,7 +10,7 @@ pub struct DuplicateExtensionMethodError {
 
 impl IntoDiagnostic for DuplicateExtensionMethodError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let mut labels: Vec<Label<usize>> = self
+        let labels: Vec<Label<usize>> = self
             .locations
             .iter()
             .enumerate()
@@ -20,15 +20,13 @@ impl IntoDiagnostic for DuplicateExtensionMethodError {
                 } else {
                     "conflicting definition here"
                 };
-                // Preserve existing behavior that didn't thread file_id (legacy uses 0)
-                Label::primary(0, span.range()).with_message(msg)
+                if i == 0 {
+                    Label::primary(span.file_id, span.range()).with_message(msg)
+                } else {
+                    Label::secondary(span.file_id, span.range()).with_message(msg)
+                }
             })
             .collect();
-
-        // Make only the first label primary, rest secondary
-        for label in labels.iter_mut().skip(1) {
-            *label = Label::secondary(0, label.range.clone()).with_message(label.message.clone());
-        }
 
         Diagnostic::error()
             .with_message(format!(
@@ -59,10 +57,12 @@ impl IntoDiagnostic for StructExtensionMethodConflictError {
                 self.method_name
             ))
             .with_labels(vec![
-                // Preserve legacy behavior using file_id 0
-                Label::primary(0, self.struct_method_span.range())
+                Label::primary(self.struct_method_span.file_id, self.struct_method_span.range())
                     .with_message("method defined here on struct"),
-                Label::secondary(0, self.extension_method_span.range())
+                Label::secondary(
+                    self.extension_method_span.file_id,
+                    self.extension_method_span.range(),
+                )
                     .with_message("conflicting extension method here"),
             ])
             .with_notes(vec![

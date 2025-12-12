@@ -33,9 +33,10 @@ impl DeclarationBinder for StructBinder {
         let symbol_id = symbol.metadata().id();
 
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Extract type parameters and resolve where clause bounds
-        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
+        let generics_behavior = resolve_generics(syntax, &source, file_id, symbol_id, context);
 
         // Add GenericsBehavior
         symbol.metadata().add_behavior(generics_behavior);
@@ -44,6 +45,7 @@ impl DeclarationBinder for StructBinder {
         resolve_conformance_list(
             syntax,
             &source,
+            file_id,
             symbol,
             symbol_id,
             context,
@@ -59,6 +61,7 @@ impl DeclarationBinder for StructBinder {
 fn resolve_generics(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> GenericsBehavior {
@@ -82,7 +85,8 @@ fn resolve_generics(
         .collect();
 
     // Now resolve the where clause with fully resolved protocol types
-    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters);
+    let where_clause =
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
 
     GenericsBehavior::new(type_parameters, where_clause)
 }
@@ -91,6 +95,7 @@ fn resolve_generics(
 fn resolve_where_clause(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -105,7 +110,7 @@ fn resolve_where_clause(
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
             if let Some(constraint) =
-                resolve_type_bound(&child, source, context_id, ctx, type_params)
+                resolve_type_bound(&child, source, file_id, context_id, ctx, type_params)
             {
                 constraints.push(constraint);
             }
@@ -119,6 +124,7 @@ fn resolve_where_clause(
 fn resolve_type_bound(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -133,7 +139,7 @@ fn resolve_type_bound(
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
     let param_span: kestrel_span::Span =
-        Span::from((text_range.start().into())..(text_range.end().into()));
+        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -146,7 +152,7 @@ fn resolve_type_bound(
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
-            let span = get_node_span(&path_node, source);
+            let span = get_node_span(&path_node, file_id);
             let segments = extract_path_segments(&path_node);
 
             if segments.is_empty() {

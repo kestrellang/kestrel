@@ -37,6 +37,7 @@ impl DeclarationBinder for ProtocolBinder {
         let symbol_id = symbol.metadata().id();
 
         let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve inherited protocols FIRST, before where clause
         // This is needed so that where clause can reference associated types from inherited protocols
@@ -44,6 +45,7 @@ impl DeclarationBinder for ProtocolBinder {
         resolve_conformance_list(
             syntax,
             &source,
+            file_id,
             symbol,
             symbol_id,
             context,
@@ -52,7 +54,8 @@ impl DeclarationBinder for ProtocolBinder {
 
         // Extract type parameters and resolve where clause bounds
         // Now inherited protocols are available for associated type path resolution
-        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context, symbol);
+        let generics_behavior =
+            resolve_generics(syntax, &source, file_id, symbol_id, context, symbol);
 
         // Add GenericsBehavior
         symbol.metadata().add_behavior(generics_behavior);
@@ -70,6 +73,7 @@ impl DeclarationBinder for ProtocolBinder {
 fn resolve_generics(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
@@ -90,7 +94,7 @@ fn resolve_generics(
     // Now resolve the where clause with fully resolved protocol types
     // Inherited protocols are already resolved (ConformancesBehavior is attached)
     let where_clause =
-        resolve_where_clause(syntax, source, context_id, ctx, &type_parameters, symbol);
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters, symbol);
 
     GenericsBehavior::new(type_parameters, where_clause)
 }
@@ -99,6 +103,7 @@ fn resolve_generics(
 fn resolve_where_clause(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -114,7 +119,7 @@ fn resolve_where_clause(
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
             if let Some(constraint) =
-                resolve_type_bound(&child, source, context_id, ctx, type_params, symbol)
+                resolve_type_bound(&child, source, file_id, context_id, ctx, type_params, symbol)
             {
                 constraints.push(constraint);
             }
@@ -132,6 +137,7 @@ fn resolve_where_clause(
 fn resolve_type_bound(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
@@ -162,8 +168,8 @@ fn resolve_type_bound(
 
                 if has_assoc_type {
                     // Resolve the bounds and create an InheritedAssociatedTypeBound constraint
-                    let bounds = resolve_bounds(syntax, source, context_id, ctx);
-                    let span = get_node_span(&target_node, source);
+                    let bounds = resolve_bounds(syntax, source, file_id, context_id, ctx);
+                    let span = get_node_span(&target_node, file_id);
                     let full_name = segments.join(".");
 
                     // Create a constraint that represents the inherited associated type bound
@@ -178,8 +184,8 @@ fn resolve_type_bound(
 
         // If we get here, it's an unresolved associated type path
         let full_name = segments.join(".");
-        let span = get_node_span(&target_node, source);
-        let bounds = resolve_bounds(syntax, source, context_id, ctx);
+        let span = get_node_span(&target_node, file_id);
+        let bounds = resolve_bounds(syntax, source, file_id, context_id, ctx);
 
         if !bounds.is_empty() {
             return Some(Constraint::unresolved_type_bound(full_name, span, bounds));
@@ -197,7 +203,7 @@ fn resolve_type_bound(
     let name = name_token.text().to_string();
     let text_range = name_token.text_range();
     let span: kestrel_span::Span =
-        Span::from((text_range.start().into())..(text_range.end().into()));
+        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -206,7 +212,7 @@ fn resolve_type_bound(
         .map(|p| p.metadata().id());
 
     // Resolve the bounds
-    let bounds = resolve_bounds(syntax, source, context_id, ctx);
+    let bounds = resolve_bounds(syntax, source, file_id, context_id, ctx);
 
     if bounds.is_empty() {
         None
@@ -251,6 +257,7 @@ fn find_inherited_protocol(
 fn resolve_bounds(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
 ) -> Vec<Ty> {
@@ -258,7 +265,7 @@ fn resolve_bounds(
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
-            let span = get_node_span(&path_node, source);
+            let span = get_node_span(&path_node, file_id);
             let segments = extract_path_segments(&path_node);
 
             if segments.is_empty() {

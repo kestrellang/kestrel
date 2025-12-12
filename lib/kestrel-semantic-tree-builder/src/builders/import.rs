@@ -18,12 +18,13 @@ impl Builder for ImportBuilder {
         &self,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         _root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let parent = parent?;
 
-        let import_syntax = extract_import_declaration(syntax)?;
+        let import_syntax = extract_import_declaration(syntax, file_id)?;
 
         let module_path_segments = import_syntax.module_path;
         let module_path_span = import_syntax.module_path_span;
@@ -50,7 +51,7 @@ impl Builder for ImportBuilder {
                 .join(".")
         };
 
-        let span = get_node_span(syntax, source);
+        let span = get_node_span(syntax, file_id);
         let name = Spanned::new(import_name, span.clone());
 
         let import_symbol = ImportSymbol::new(name, parent.clone(), span);

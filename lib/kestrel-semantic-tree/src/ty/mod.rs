@@ -7,6 +7,7 @@ pub use substitutions::Substitutions;
 pub use where_clause::{Constraint, WhereClause};
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{fmt, fmt::Write as _};
 
 /// Globally unique type variable identifier.
 /// Used to identify placeholder types during type inference.
@@ -48,6 +49,115 @@ use std::sync::Arc;
 pub struct Ty {
     kind: TyKind,
     span: Span,
+}
+
+impl fmt::Display for Ty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn fmt_list(f: &mut fmt::Formatter<'_>, mut first: bool, items: impl Iterator<Item = Ty>) -> fmt::Result {
+            for item in items {
+                if !first {
+                    f.write_str(", ")?;
+                }
+                first = false;
+                write!(f, "{}", item)?;
+            }
+            Ok(())
+        }
+
+        match self.kind() {
+            TyKind::Unit => f.write_str("()"),
+            TyKind::Never => f.write_str("!"),
+            TyKind::Int(bits) => write!(f, "{:?}", bits),
+            TyKind::Float(bits) => write!(f, "{:?}", bits),
+            TyKind::Bool => f.write_str("Bool"),
+            TyKind::String => f.write_str("String"),
+            TyKind::Tuple(elements) => {
+                f.write_char('(')?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                f.write_char(')')
+            }
+            TyKind::Array(elem) => write!(f, "[{}]", elem),
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
+                f.write_char('(')?;
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}", p)?;
+                }
+                write!(f, ") -> {}", return_type)
+            }
+            TyKind::TypeParameter(param_symbol) => {
+                f.write_str(&param_symbol.metadata().name().value)
+            }
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => {
+                f.write_str(&symbol.metadata().name().value)?;
+                if substitutions.is_empty() {
+                    return Ok(());
+                }
+                f.write_char('[')?;
+                // Note: Substitutions is a HashMap; ordering is not guaranteed.
+                fmt_list(
+                    f,
+                    true,
+                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                )?;
+                f.write_char(']')
+            }
+            TyKind::Struct {
+                symbol,
+                substitutions,
+            } => {
+                f.write_str(&symbol.metadata().name().value)?;
+                if substitutions.is_empty() {
+                    return Ok(());
+                }
+                f.write_char('[')?;
+                fmt_list(
+                    f,
+                    true,
+                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                )?;
+                f.write_char(']')
+            }
+            TyKind::TypeAlias {
+                symbol,
+                substitutions,
+            } => {
+                f.write_str(&symbol.metadata().name().value)?;
+                if substitutions.is_empty() {
+                    return Ok(());
+                }
+                f.write_char('[')?;
+                fmt_list(
+                    f,
+                    true,
+                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                )?;
+                f.write_char(']')
+            }
+            TyKind::AssociatedType { symbol, container } => {
+                if let Some(container_ty) = container {
+                    write!(f, "{}.", container_ty)?;
+                }
+                f.write_str(&symbol.metadata().name().value)
+            }
+            TyKind::SelfType => f.write_str("Self"),
+            TyKind::TypeVar(_) => f.write_str("_"),
+            TyKind::Error => f.write_str("<error>"),
+        }
+    }
 }
 
 /// Generate simple type constructors that take only a span

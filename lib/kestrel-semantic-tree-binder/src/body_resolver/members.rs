@@ -34,7 +34,7 @@ use crate::diagnostics::{
 use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
 use super::utils::{
-    format_symbol_kind, format_type, get_callable_behavior, get_type_container,
+    format_symbol_kind, get_callable_behavior, get_type_container,
     get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, matches_signature,
     substitute_self,
 };
@@ -91,7 +91,7 @@ pub fn resolve_member_access(
         let error = PrimitiveMethodNotCallableError {
             span: full_span.clone(),
             method_name: primitive_method.name().to_string(),
-            receiver_type: format_type(base_ty),
+            receiver_type: base_ty.to_string(),
         };
         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
@@ -118,7 +118,7 @@ pub fn resolve_member_access(
             // Type doesn't support member access (e.g., Int, Bool, etc.)
             let error = CannotAccessMemberOnTypeError {
                 span: full_span.clone(),
-                base_type: format_type(base_ty),
+                base_type: base_ty.to_string(),
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(full_span.clone());
@@ -160,7 +160,7 @@ pub fn resolve_member_access(
                         member_span,
                         member_name: member_name.to_string(),
                         base_span,
-                        base_type: format_type(base_ty),
+                        base_type: base_ty.to_string(),
                     };
                     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                     return Expression::error(full_span.clone());
@@ -187,7 +187,7 @@ pub fn resolve_member_access(
             member_span,
             member_name: member_name.to_string(),
             base_span,
-            base_type: format_type(base_ty),
+            base_type: base_ty.to_string(),
             visibility: visibility.to_string(),
         };
         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
@@ -251,7 +251,7 @@ pub fn resolve_member_access(
         member_span,
         member_name: member_name.to_string(),
         base_span,
-        base_type: format_type(base_ty),
+        base_type: base_ty.to_string(),
         member_kind: format_symbol_kind(member.metadata().kind()),
     };
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
@@ -456,7 +456,7 @@ pub fn resolve_member_call(
             let error = NoSuchMethodError {
                 call_span: span.clone(),
                 method_name: member_name.to_string(),
-                receiver_type: format_type(base_ty),
+                receiver_type: base_ty.to_string(),
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(span);
@@ -503,7 +503,7 @@ pub fn resolve_member_call(
         let error = NoSuchMethodError {
             call_span: span.clone(),
             method_name: member_name.to_string(),
-            receiver_type: format_type(base_ty),
+            receiver_type: base_ty.to_string(),
         };
         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
@@ -547,7 +547,7 @@ pub fn resolve_member_call(
     }
 
     // No matching method found - collect overload info for error message
-    let receiver_type = format_type(base_ty);
+    let receiver_type = base_ty.to_string();
     let method_ids: Vec<SymbolId> = methods.iter().map(|m| m.metadata().id()).collect();
     let available_overloads = collect_overload_descriptions(&method_ids, ctx.model);
 
@@ -1221,4 +1221,3 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
         _ => ty.clone(),
     }
 }
-

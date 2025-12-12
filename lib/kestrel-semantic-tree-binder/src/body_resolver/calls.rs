@@ -36,7 +36,7 @@ use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::{resolve_member_call, substitute_callable_self};
 use super::utils::{
-    create_generic_struct_type, create_struct_type, create_struct_type_with_type_args, format_type,
+    create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     get_callable_behavior, get_type_parameter_bounds_by_id, infer_type_arguments,
     is_expression_kind, matches_signature, substitute_type, validate_not_standalone_type_param,
     verify_type_argument_constraints,
@@ -44,7 +44,7 @@ use super::utils::{
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
 pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
-    let span = get_node_span(node, ctx.source);
+    let span = get_node_span(node, ctx.file_id);
 
     // Find the callee expression (first child that's an Expression)
     let callee_node = match node
@@ -204,7 +204,7 @@ fn extract_type_arguments_from_callee(
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
             let mut resolver =
-                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.function_id);
+                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.file_id, ctx.function_id);
             let ty = resolver.resolve(&child);
             type_args.push(ty);
         }
@@ -231,7 +231,7 @@ fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
 
 /// Resolve a single argument node
 fn resolve_argument(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Option<CallArgument> {
-    let span = get_node_span(node, ctx.source);
+    let span = get_node_span(node, ctx.file_id);
 
     // Check for label (Identifier followed by Colon)
     let mut label = None;
@@ -583,7 +583,7 @@ fn collect_single_overload_description(
                 .map(|p| p.external_label().map(|s| s.to_string()))
                 .collect();
             let param_types: Vec<String> =
-                cb.parameters().iter().map(|p| format_type(&p.ty)).collect();
+                cb.parameters().iter().map(|p| p.ty.to_string()).collect();
 
             OverloadDescription {
                 name,
@@ -764,7 +764,7 @@ fn resolve_explicit_init_call(
             let param_types: Vec<String> = callable
                 .parameters()
                 .iter()
-                .map(|p| format_type(&p.ty))
+                .map(|p| p.ty.to_string())
                 .collect();
             Some(OverloadDescription {
                 name: struct_name.clone(),
@@ -956,7 +956,7 @@ pub fn resolve_method_call(
     }
 
     // No matching method found - collect overload info for error message
-    let receiver_type = format_type(&receiver.ty);
+    let receiver_type = receiver.ty.to_string();
     let available_overloads = collect_overload_descriptions(candidates, ctx.model);
 
     let error = NoMatchingMethodError {
@@ -1001,7 +1001,7 @@ pub fn collect_overload_descriptions(
                 let param_types: Vec<String> = callable
                     .parameters()
                     .iter()
-                    .map(|p| format_type(&p.ty))
+                    .map(|p| p.ty.to_string())
                     .collect();
 
                 descriptions.push(OverloadDescription {
@@ -1105,7 +1105,7 @@ fn resolve_type_parameter_init_call(
                     .callable
                     .parameters()
                     .iter()
-                    .map(|p| format_type(&p.ty))
+                    .map(|p| p.ty.to_string())
                     .collect();
                 OverloadDescription {
                     name: type_param_name.clone(),

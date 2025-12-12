@@ -36,6 +36,7 @@ pub struct TypeResolver<'a> {
     model: &'a SemanticModel,
     diagnostics: &'a mut DiagnosticContext,
     source: &'a str,
+    file_id: usize,
     context_id: SymbolId,
 }
 
@@ -45,19 +46,21 @@ impl<'a> TypeResolver<'a> {
         model: &'a SemanticModel,
         diagnostics: &'a mut DiagnosticContext,
         source: &'a str,
+        file_id: usize,
         context_id: SymbolId,
     ) -> Self {
         Self {
             model,
             diagnostics,
             source,
+            file_id,
             context_id,
         }
     }
 
     /// Resolve a type from a Ty syntax node
     pub fn resolve(&mut self, ty_node: &SyntaxNode) -> Ty {
-        let ty_span = get_node_span(ty_node, self.source);
+        let ty_span = get_node_span(ty_node, self.file_id);
 
         // Try TyPath (with type arguments support)
         if let Some(ty_path_node) = ty_node
@@ -218,7 +221,7 @@ impl<'a> TypeResolver<'a> {
 
     /// Resolve a TyPath node, handling type arguments if present
     fn resolve_ty_path(&mut self, ty_path_node: &SyntaxNode) -> Ty {
-        let ty_span = get_node_span(ty_path_node, self.source);
+            let ty_span = get_node_span(ty_path_node, self.file_id);
 
         if let Some(path_node) = ty_path_node
             .children()
@@ -360,7 +363,8 @@ impl<'a> TypeResolver<'a> {
 /// This is used during the build phase when we don't have access to the database.
 /// Type paths are returned as error types - they will be resolved during bind phase.
 pub fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
-    let ty_span = get_node_span(ty_node, source);
+    let _ = source;
+    let ty_span = get_node_span(ty_node, 0);
 
     // Try TyPath
     if let Some(ty_path_node) = ty_node
@@ -447,9 +451,7 @@ pub fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
 
 /// Extract type from a node that contains a Ty child (without resolution)
 pub fn extract_type_from_node(node: &SyntaxNode, source: &str) -> Ty {
-    if let Some(ty_node) = node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        return extract_type_from_ty_node(&ty_node, source);
-    }
+    let _ = (node, source);
     Ty::error(Span::from(0..0))
 }
 

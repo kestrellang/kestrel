@@ -34,17 +34,18 @@ impl Builder for TypeAliasBuilder {
         &self,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let context = determine_context(parent);
 
-        let (name_str, name_span) = extract_type_alias_name(syntax, source)?;
-        let full_span = get_node_span(syntax, source);
+        let (name_str, name_span) = extract_type_alias_name(syntax, source, file_id)?;
+        let full_span = get_node_span(syntax, file_id);
 
         let visibility_str = extract_visibility(syntax);
         let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
-        let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span.clone());
+        let visibility_span = get_visibility_span(syntax, file_id).unwrap_or(name_span.clone());
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), parent, root);
         let visibility_behavior =
             VisibilityBehavior::new(visibility_enum, visibility_span, visibility_scope);
@@ -91,8 +92,12 @@ impl Builder for TypeAliasBuilder {
 
                 let type_alias_arc_dyn = type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
-                let type_parameters =
-                    extract_type_parameters(syntax, source, Some(type_alias_arc_dyn.clone()));
+                let type_parameters = extract_type_parameters(
+                    syntax,
+                    source,
+                    file_id,
+                    Some(type_alias_arc_dyn.clone()),
+                );
                 add_type_params_as_children(&type_parameters, &type_alias_arc_dyn);
 
                 if let Some(parent) = parent {
@@ -119,18 +124,19 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
 fn extract_type_alias_name(
     syntax: &SyntaxNode,
     source: &str,
+    file_id: usize,
 ) -> Option<(String, kestrel_span::Span)> {
     if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
         if let Some(name_node) = find_child(&target_node, SyntaxKind::Name) {
             let name_str = extract_name_from_node(&name_node)?;
-            let name_span = get_node_span(&name_node, source);
+            let name_span = get_node_span(&name_node, file_id);
             return Some((name_str, name_span));
         }
     }
 
     if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
         let name_str = extract_name_from_node(&name_node)?;
-        let name_span = get_node_span(&name_node, source);
+        let name_span = get_node_span(&name_node, file_id);
         return Some((name_str, name_span));
     }
 

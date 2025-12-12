@@ -15,11 +15,12 @@ impl Builder for ExtensionBuilder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,
-        source: &str,
+        _source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         _root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        let full_span = get_node_span(syntax, source);
+        let full_span = get_node_span(syntax, file_id);
 
         let extension_symbol = ExtensionSymbol::new(full_span.clone(), parent.cloned());
         let extension_arc = Arc::new(extension_symbol);

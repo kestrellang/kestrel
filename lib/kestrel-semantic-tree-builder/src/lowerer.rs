@@ -17,6 +17,7 @@ pub struct BuildFile<'a> {
     pub file_name: &'a str,
     pub syntax: &'a SyntaxNode,
     pub source: &'a str,
+    pub file_id: usize,
 }
 
 /// Builds a `SemanticModel` from syntax trees (build/lowering phase only).
@@ -40,21 +41,23 @@ impl SemanticModelBuilder {
         file_name: &str,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         _diagnostics: &mut DiagnosticContext,
     ) {
         let root = self.root.clone();
 
         let parent_module = match extract_module_path(syntax) {
             Some(path_segments) if !path_segments.is_empty() => {
-                build_module_hierarchy(&root, &path_segments)
+                build_module_hierarchy(&root, &path_segments, file_id)
             }
             _ => root.clone(),
         };
 
-        let file_name_spanned = Spanned::new(file_name.to_string(), Span::from(0..file_name.len()));
+        let file_name_spanned =
+            Spanned::new(file_name.to_string(), Span::new(file_id, 0..file_name.len()));
         let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(SourceFileSymbol::new(
             file_name_spanned,
-            Span::from(0..source.len()),
+            Span::new(file_id, 0..source.len()),
         ));
 
         parent_module.metadata().add_child(&source_file_symbol);
@@ -63,7 +66,7 @@ impl SemanticModelBuilder {
             if child.kind() == kestrel_syntax_tree::SyntaxKind::ModuleDeclaration {
                 continue;
             }
-            self.walk_node(&child, source, Some(&source_file_symbol), &root);
+            self.walk_node(&child, source, file_id, Some(&source_file_symbol), &root);
         }
 
         self.sources
@@ -78,17 +81,18 @@ impl SemanticModelBuilder {
         &mut self,
         syntax: &SyntaxNode,
         source: &str,
+        file_id: usize,
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         if let Some(builder) = builder_for(syntax.kind()) {
-            if let Some(symbol) = builder.build_declaration(syntax, source, parent, root) {
+            if let Some(symbol) = builder.build_declaration(syntax, source, file_id, parent, root) {
                 self.syntax_map
                     .insert(symbol.metadata().id(), syntax.clone());
 
                 if !builder.is_terminal() {
                     for child in syntax.children() {
-                        self.walk_node(&child, source, Some(&symbol), root);
+                        self.walk_node(&child, source, file_id, Some(&symbol), root);
                     }
                 }
 
@@ -97,7 +101,7 @@ impl SemanticModelBuilder {
         }
 
         for child in syntax.children() {
-            self.walk_node(&child, source, parent, root);
+            self.walk_node(&child, source, file_id, parent, root);
         }
 
         None
@@ -118,7 +122,7 @@ where
     let mut builder = SemanticModelBuilder::new();
 
     for file in files {
-        builder.add_file(file.file_name, file.syntax, file.source, diagnostics);
+        builder.add_file(file.file_name, file.syntax, file.source, file.file_id, diagnostics);
     }
 
     builder.build()
@@ -183,6 +187,7 @@ fn extract_module_path(syntax: &SyntaxNode) -> Option<Vec<String>> {
 fn build_module_hierarchy(
     root: &Arc<dyn Symbol<KestrelLanguage>>,
     path_segments: &[String],
+    file_id: usize,
 ) -> Arc<dyn Symbol<KestrelLanguage>> {
     let mut current_parent = root.clone();
 
@@ -200,10 +205,13 @@ fn build_module_hierarchy(
         let module_symbol = if let Some(existing) = existing_module {
             existing
         } else {
-            let name = Spanned::new(segment.clone(), Span::from(0..segment.len()));
-            let span = Span::from(0..segment.len());
-            let visibility =
-                VisibilityBehavior::new(Some(Visibility::Public), Span::from(0..6), root.clone());
+            let name = Spanned::new(segment.clone(), Span::new(file_id, 0..segment.len()));
+            let span = Span::new(file_id, 0..segment.len());
+            let visibility = VisibilityBehavior::new(
+                Some(Visibility::Public),
+                Span::new(file_id, 0..6),
+                root.clone(),
+            );
 
             let module = ModuleSymbol::new(name, span, visibility);
             let module_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(module);

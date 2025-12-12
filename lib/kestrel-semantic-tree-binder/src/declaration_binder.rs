@@ -72,6 +72,22 @@ impl BindingContext<'_> {
 
         String::new()
     }
+
+    pub fn file_id_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> usize {
+        let mut current = Some(symbol.clone());
+
+        while let Some(sym) = current {
+            if sym.metadata().kind()
+                == kestrel_semantic_tree::symbol::kind::KestrelSymbolKind::SourceFile
+            {
+                let file_name = sym.metadata().name().value.clone();
+                return self.diagnostics.get_file_id(&file_name).unwrap_or(0);
+            }
+            current = sym.metadata().parent();
+        }
+
+        0
+    }
 }
 
 /// Registry mapping SyntaxKind to DeclarationBinder implementations

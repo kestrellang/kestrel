@@ -561,6 +561,142 @@ impl Expression {
         }
     }
 
+    /// Return a compact debug representation of this expression.
+    pub fn debug_compact(&self) -> String {
+        match &self.kind {
+            ExprKind::Literal(lit) => match lit {
+                LiteralValue::Unit => "()".to_string(),
+                LiteralValue::Integer(n) => n.to_string(),
+                LiteralValue::Float(f) => f.to_string(),
+                LiteralValue::String(s) => format!("\"{}\"", s),
+                LiteralValue::Bool(b) => b.to_string(),
+            },
+            ExprKind::Array(elements) => {
+                let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
+                format!("[{}]", items.join(", "))
+            }
+            ExprKind::Tuple(elements) => {
+                let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
+                format!("({})", items.join(", "))
+            }
+            ExprKind::Grouping(inner) => format!("({})", inner.debug_compact()),
+            ExprKind::LocalRef(id) => format!("local_{}", id.0),
+            ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
+            ExprKind::OverloadedRef(_) => "overloaded".to_string(),
+            ExprKind::TypeRef(id) => format!("type_{:?}", id),
+            ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
+            ExprKind::FieldAccess { object, field } => {
+                format!("{}.{}", object.debug_compact(), field)
+            }
+            ExprKind::TupleIndex { tuple, index } => {
+                format!("{}.{}", tuple.debug_compact(), index)
+            }
+            ExprKind::MethodRef {
+                receiver,
+                method_name,
+                ..
+            } => format!("{}.{}", receiver.debug_compact(), method_name),
+            ExprKind::Call { callee, arguments, .. } => {
+                let args: Vec<String> = arguments
+                    .iter()
+                    .map(|a| {
+                        if let Some(ref label) = a.label {
+                            format!("{}: {}", label, a.value.debug_compact())
+                        } else {
+                            a.value.debug_compact()
+                        }
+                    })
+                    .collect();
+                format!("{}({})", callee.debug_compact(), args.join(", "))
+            }
+            ExprKind::PrimitiveMethodCall {
+                receiver,
+                method,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
+                format!("{}.{}({})", receiver.debug_compact(), method.name(), args.join(", "))
+            }
+            ExprKind::ImplicitStructInit {
+                struct_type,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments
+                    .iter()
+                    .map(|a| {
+                        if let Some(ref label) = a.label {
+                            format!("{}: {}", label, a.value.debug_compact())
+                        } else {
+                            a.value.debug_compact()
+                        }
+                    })
+                    .collect();
+                format!("{}({})", struct_type, args.join(", "))
+            }
+            ExprKind::Assignment { target, value } => {
+                format!("{} = {}", target.debug_compact(), value.debug_compact())
+            }
+            ExprKind::If {
+                condition,
+                then_value,
+                else_branch,
+                ..
+            } => {
+                let then_str = if let Some(v) = then_value {
+                    v.debug_compact()
+                } else {
+                    "...".to_string()
+                };
+                let else_str = if let Some(else_b) = else_branch {
+                    match else_b {
+                        ElseBranch::Block { value, .. } => {
+                            if let Some(v) = value {
+                                format!(" else {{ {} }}", v.debug_compact())
+                            } else {
+                                " else { ... }".to_string()
+                            }
+                        }
+                        ElseBranch::ElseIf(_) => " else if ...".to_string(),
+                    }
+                } else {
+                    String::new()
+                };
+                format!(
+                    "if {} {{ {} }}{}",
+                    condition.debug_compact(),
+                    then_str,
+                    else_str
+                )
+            }
+            ExprKind::While { condition, .. } => {
+                format!("while {} {{ ... }}", condition.debug_compact())
+            }
+            ExprKind::Loop { .. } => "loop { ... }".to_string(),
+            ExprKind::Break { label, .. } => {
+                if let Some(l) = label {
+                    format!("break {}", l.name)
+                } else {
+                    "break".to_string()
+                }
+            }
+            ExprKind::Continue { label, .. } => {
+                if let Some(l) = label {
+                    format!("continue {}", l.name)
+                } else {
+                    "continue".to_string()
+                }
+            }
+            ExprKind::Return { value } => {
+                if let Some(v) = value {
+                    format!("return {}", v.debug_compact())
+                } else {
+                    "return".to_string()
+                }
+            }
+            ExprKind::Error => "<error>".to_string(),
+        }
+    }
+
     /// Create a unit literal expression.
     pub fn unit(span: Span) -> Self {
         Expression {

@@ -42,6 +42,8 @@ pub struct BodyResolutionContext<'a> {
     pub diagnostics: &'a mut DiagnosticContext,
     /// Source code for span extraction
     pub source: &'a str,
+    /// File id for span construction
+    pub file_id: usize,
     /// The function symbol ID (for path resolution context)
     pub function_id: SymbolId,
     /// Local scope for variable tracking
@@ -58,6 +60,7 @@ impl<'a> BodyResolutionContext<'a> {
         model: &'a SemanticModel,
         diagnostics: &'a mut DiagnosticContext,
         source: &'a str,
+        file_id: usize,
         function: Arc<FunctionSymbol>,
     ) -> Self {
         let function_id = function.metadata().id();
@@ -66,6 +69,7 @@ impl<'a> BodyResolutionContext<'a> {
             model,
             diagnostics,
             source,
+            file_id,
             function_id,
             local_scope,
             loop_stack: Vec::new(),
@@ -175,7 +179,7 @@ pub fn resolve_code_block(block_node: &SyntaxNode, ctx: &mut BodyResolutionConte
                     yield_expr = Some(resolve_expression(child, ctx));
                 } else {
                     let expr = resolve_expression(child, ctx);
-                    let span = get_node_span(child, ctx.source);
+                    let span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, span));
                 }
             }
@@ -203,6 +207,7 @@ pub fn resolve_and_attach_body(
     model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
     source: &str,
+    file_id: usize,
 ) {
     use kestrel_semantic_model::SymbolFor;
 
@@ -232,6 +237,7 @@ pub fn resolve_and_attach_body(
         model,
         diagnostics,
         source,
+        file_id,
         function_id: function_symbol.metadata().id(),
         local_scope: create_local_scope_from_dyn(func_arc.clone()),
         loop_stack: Vec::new(),
