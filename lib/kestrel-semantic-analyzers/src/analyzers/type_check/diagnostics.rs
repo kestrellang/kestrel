@@ -49,6 +49,7 @@ impl IntoDiagnostic for ConditionNotBoolError {
 }
 
 pub struct BranchTypeMismatchError {
+    #[allow(dead_code)]
     pub if_span: Span,
     pub then_span: Span,
     pub else_span: Span,
@@ -76,6 +77,7 @@ impl IntoDiagnostic for BranchTypeMismatchError {
 }
 
 pub struct ArrayElementTypeMismatchError {
+    #[allow(dead_code)]
     pub array_span: Span,
     pub first_element_span: Span,
     pub element_span: Span,

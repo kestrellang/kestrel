@@ -176,41 +176,6 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
     }
 }
 
-/// Extract the name from a type alias declaration
-/// Handles both simple names (Name node) and qualified paths (AssociatedTypeTarget node)
-fn extract_type_alias_name(
-    syntax: &SyntaxNode,
-    source: &str,
-) -> Option<(String, kestrel_span::Span)> {
-    // First try AssociatedTypeTarget (qualified path)
-    if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
-        // In qualified path, the name is the last Name node
-        if let Some(name_node) = find_child(&target_node, SyntaxKind::Name) {
-            let name_str = extract_name_from_node(&name_node)?;
-            let name_span = get_node_span(&name_node, source);
-            return Some((name_str, name_span));
-        }
-    }
-
-    // Fall back to simple Name node
-    if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
-        let name_str = extract_name_from_node(&name_node)?;
-        let name_span = get_node_span(&name_node, source);
-        return Some((name_str, name_span));
-    }
-
-    None
-}
-
-/// Extract name string from a Name node
-fn extract_name_from_node(name_node: &SyntaxNode) -> Option<String> {
-    name_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-        .map(|tok| tok.text().to_string())
-}
-
 /// Bind an associated type symbol (resolve bounds and default)
 fn bind_associated_type(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,

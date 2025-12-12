@@ -23,6 +23,7 @@ pub struct ExtensionConflictAnalyzer {
 
 struct CollectedExtension {
     extension_id: SymbolId,
+    #[allow(dead_code)]
     extension_span: Span,
     methods: Vec<(String, Span)>,
 }

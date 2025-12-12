@@ -6,11 +6,9 @@ mod initializer;
 mod module;
 mod protocol;
 mod protocol_flattener;
-pub mod protocol_method_linker;
 mod r#struct;
 mod terminal;
 mod type_alias;
-pub mod type_parameter;
 
 pub use extension::ExtensionBinder;
 pub use field::FieldBinder;

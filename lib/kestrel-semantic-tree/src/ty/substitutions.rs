@@ -166,12 +166,6 @@ impl Substitutions {
         }
     }
 
-    /// Apply substitutions to another Substitutions map
-    fn apply_to_substitutions(&self, other: &Substitutions) -> Substitutions {
-        use std::collections::HashSet;
-        self.apply_to_substitutions_with_visited(other, &mut HashSet::new())
-    }
-
     /// Internal helper for apply_to_substitutions that tracks visited type parameters
     fn apply_to_substitutions_with_visited(
         &self,

@@ -30,6 +30,7 @@ pub struct LoopInfo {
     /// Optional label name (without the colon)
     pub label: Option<String>,
     /// Span of the label (for diagnostics)
+    #[allow(dead_code)]
     pub label_span: Option<Span>,
 }
 

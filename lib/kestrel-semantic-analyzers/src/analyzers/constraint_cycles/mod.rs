@@ -21,6 +21,7 @@ pub struct ConstraintCycleAnalyzer {
 }
 
 struct CollectedGeneric {
+    #[allow(dead_code)]
     symbol: Arc<dyn Symbol<KestrelLanguage>>,
     type_params: Vec<Arc<TypeParameterSymbol>>,
     where_clause: WhereClause,

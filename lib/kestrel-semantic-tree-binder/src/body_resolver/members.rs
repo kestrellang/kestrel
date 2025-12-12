@@ -1222,35 +1222,3 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
     }
 }
 
-/// Find a member in extensions targeting the given container type.
-///
-/// This searches all extensions registered for the container type and looks for
-/// a child with the matching name. Returns the first matching member found.
-fn find_member_in_extensions(
-    container: &Arc<dyn Symbol<KestrelLanguage>>,
-    base_ty: &Ty,
-    member_name: &str,
-    ctx: &BodyResolutionContext,
-) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-    // Get the container's ID
-    let container_id = container.metadata().id();
-
-    // Get all extensions for this type from the registry
-    let extensions = ctx.model.query(ExtensionsFor {
-        target_id: container_id,
-    });
-
-    // Filter to only applicable extensions (now with cycle detection in substitutions)
-    let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);
-
-    // Search through each extension's children
-    for extension in applicable_extensions {
-        for child in extension.metadata().children() {
-            if child.metadata().name().value == member_name {
-                return Some(child);
-            }
-        }
-    }
-
-    None
-}
