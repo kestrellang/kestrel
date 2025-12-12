@@ -12,16 +12,16 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
-use crate::resolver::{BindingContext, Resolver};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_name, extract_visibility, find_child, get_node_span, get_visibility_span,
 };
 
-/// Resolver for field declarations
-pub struct FieldResolver;
+/// Binder for field declarations
+pub struct FieldBinder;
 
-impl Resolver for FieldResolver {
+impl DeclarationBinder for FieldBinder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,

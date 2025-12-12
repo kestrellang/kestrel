@@ -12,7 +12,7 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolTable};
 
-use crate::resolver::ResolverRegistry;
+use crate::declaration_binder::DeclarationBinderRegistry;
 use crate::tree::{SemanticTree, build_module_hierarchy};
 
 use super::ModuleValidator;
@@ -32,7 +32,7 @@ use super::ModuleValidator;
 /// ```
 pub struct SemanticTreeBuilder {
     tree: SemanticTree,
-    resolver_registry: ResolverRegistry,
+    binder_registry: DeclarationBinderRegistry,
 }
 
 impl SemanticTreeBuilder {
@@ -40,7 +40,7 @@ impl SemanticTreeBuilder {
     pub fn new() -> Self {
         Self {
             tree: SemanticTree::new(),
-            resolver_registry: ResolverRegistry::new(),
+            binder_registry: DeclarationBinderRegistry::new(),
         }
     }
 
@@ -127,7 +127,7 @@ impl SemanticTreeBuilder {
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         // Look up resolver for this syntax kind
-        if let Some(resolver) = self.resolver_registry.get(syntax.kind()) {
+        if let Some(resolver) = self.binder_registry.get(syntax.kind()) {
             // Resolver creates symbol and adds to parent
             if let Some(symbol) = resolver.build_declaration(syntax, source, parent, root) {
                 // Store the syntax node for the bind phase

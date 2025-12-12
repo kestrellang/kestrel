@@ -4,13 +4,13 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::Resolver;
+use crate::declaration_binder::DeclarationBinder;
 
-/// Terminal resolver for wrapper nodes that don't produce symbols
+/// Terminal binder for wrapper nodes that don't produce symbols
 /// Used for nodes like Visibility and Name that should stop tree traversal
-pub struct TerminalResolver;
+pub struct TerminalBinder;
 
-impl Resolver for TerminalResolver {
+impl DeclarationBinder for TerminalBinder {
     fn build_declaration(
         &self,
         _syntax: &SyntaxNode,

@@ -17,18 +17,18 @@ use semantic_tree::symbol::Symbol;
 use crate::resolution::type_resolver::{
     TypeSyntaxContext, extract_type_from_node, extract_type_from_ty_node, resolve_type_from_ty_node,
 };
-use crate::resolver::{BindingContext, Resolver};
-use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility,
     find_child, get_node_span, get_visibility_span,
 };
 
-/// Resolver for function declarations
-pub struct FunctionResolver;
+/// Binder for function declarations
+pub struct FunctionBinder;
 
-impl Resolver for FunctionResolver {
+impl DeclarationBinder for FunctionBinder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,

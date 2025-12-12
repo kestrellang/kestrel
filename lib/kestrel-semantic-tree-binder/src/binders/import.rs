@@ -8,13 +8,13 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::{BindingContext, Resolver};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use kestrel_syntax_tree::utils::get_node_span;
 
-/// Resolver for import declarations
-pub struct ImportResolver;
+/// Binder for import declarations
+pub struct ImportBinder;
 
-impl Resolver for ImportResolver {
+impl DeclarationBinder for ImportBinder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,

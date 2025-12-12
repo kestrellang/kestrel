@@ -36,8 +36,8 @@
 pub mod builder;
 mod debug;
 pub mod resolution;
-mod resolver;
-mod resolvers;
+mod declaration_binder;
+mod binders;
 pub mod syntax;
 mod tree;
 
@@ -52,5 +52,5 @@ pub use debug::{
 };
 pub use kestrel_semantic_model::SemanticModel;
 pub use resolution::{LocalScope, SemanticBinder, TypeResolver};
-pub use resolver::{BindingContext, Resolver, ResolverRegistry};
+pub use declaration_binder::{BindingContext, DeclarationBinder, DeclarationBinderRegistry};
 pub use tree::SemanticTree;

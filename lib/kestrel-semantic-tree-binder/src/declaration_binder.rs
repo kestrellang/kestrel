@@ -1,7 +1,7 @@
-//! Resolver trait and registry
+//! Declaration binder trait and registry
 //!
-//! This module defines the `Resolver` trait for converting syntax nodes to symbols,
-//! and the `ResolverRegistry` which maps syntax kinds to their resolvers.
+//! This module defines the `DeclarationBinder` trait for converting syntax nodes to symbols,
+//! and the `DeclarationBinderRegistry` which maps syntax kinds to their binders.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -13,14 +13,14 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::resolvers::{
-    ExtensionResolver, FieldResolver, FunctionResolver, ImportResolver, InitializerResolver,
-    ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver,
+use crate::binders::{
+    ExtensionBinder, FieldBinder, FunctionBinder, ImportBinder, InitializerBinder, ModuleBinder,
+    ProtocolBinder, StructBinder, TerminalBinder, TypeAliasBinder,
 };
 use crate::tree::SourceMap;
 
 /// Trait for resolving syntax nodes into semantic symbols
-pub trait Resolver {
+pub trait DeclarationBinder {
     /// Build phase: create symbol from syntax node and add to parent
     /// Returns the created symbol for tree walker recursion
     fn build_declaration(
@@ -80,50 +80,41 @@ impl BindingContext<'_> {
     }
 }
 
-/// Registry mapping SyntaxKind to Resolver implementations
-pub struct ResolverRegistry {
-    resolvers: HashMap<SyntaxKind, Box<dyn Resolver>>,
+/// Registry mapping SyntaxKind to DeclarationBinder implementations
+pub struct DeclarationBinderRegistry {
+    binders: HashMap<SyntaxKind, Box<dyn DeclarationBinder>>,
 }
 
-impl ResolverRegistry {
+impl DeclarationBinderRegistry {
     /// Create a new registry with all resolvers registered
     pub fn new() -> Self {
-        let mut resolvers: HashMap<SyntaxKind, Box<dyn Resolver>> = HashMap::new();
+        let mut binders: HashMap<SyntaxKind, Box<dyn DeclarationBinder>> = HashMap::new();
 
         // Register declaration resolvers
-        resolvers.insert(SyntaxKind::ModuleDeclaration, Box::new(ModuleResolver));
-        resolvers.insert(SyntaxKind::ImportDeclaration, Box::new(ImportResolver));
-        resolvers.insert(
-            SyntaxKind::TypeAliasDeclaration,
-            Box::new(TypeAliasResolver),
-        );
-        resolvers.insert(SyntaxKind::ProtocolDeclaration, Box::new(ProtocolResolver));
-        resolvers.insert(SyntaxKind::StructDeclaration, Box::new(StructResolver));
-        resolvers.insert(
-            SyntaxKind::ExtensionDeclaration,
-            Box::new(ExtensionResolver),
-        );
-        resolvers.insert(SyntaxKind::FieldDeclaration, Box::new(FieldResolver));
-        resolvers.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionResolver));
-        resolvers.insert(
-            SyntaxKind::InitializerDeclaration,
-            Box::new(InitializerResolver),
-        );
+        binders.insert(SyntaxKind::ModuleDeclaration, Box::new(ModuleBinder));
+        binders.insert(SyntaxKind::ImportDeclaration, Box::new(ImportBinder));
+        binders.insert(SyntaxKind::TypeAliasDeclaration, Box::new(TypeAliasBinder));
+        binders.insert(SyntaxKind::ProtocolDeclaration, Box::new(ProtocolBinder));
+        binders.insert(SyntaxKind::StructDeclaration, Box::new(StructBinder));
+        binders.insert(SyntaxKind::ExtensionDeclaration, Box::new(ExtensionBinder));
+        binders.insert(SyntaxKind::FieldDeclaration, Box::new(FieldBinder));
+        binders.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionBinder));
+        binders.insert(SyntaxKind::InitializerDeclaration, Box::new(InitializerBinder));
 
         // Register terminal resolvers
-        resolvers.insert(SyntaxKind::Visibility, Box::new(TerminalResolver));
-        resolvers.insert(SyntaxKind::Name, Box::new(TerminalResolver));
+        binders.insert(SyntaxKind::Visibility, Box::new(TerminalBinder));
+        binders.insert(SyntaxKind::Name, Box::new(TerminalBinder));
 
-        ResolverRegistry { resolvers }
+        DeclarationBinderRegistry { binders }
     }
 
     /// Get a resolver for a given SyntaxKind
-    pub fn get(&self, kind: SyntaxKind) -> Option<&dyn Resolver> {
-        self.resolvers.get(&kind).map(|b| b.as_ref())
+    pub fn get(&self, kind: SyntaxKind) -> Option<&dyn DeclarationBinder> {
+        self.binders.get(&kind).map(|b| b.as_ref())
     }
 }
 
-impl Default for ResolverRegistry {
+impl Default for DeclarationBinderRegistry {
     fn default() -> Self {
         Self::new()
     }

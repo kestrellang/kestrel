@@ -14,7 +14,7 @@ use semantic_tree::cycle::{Cycle, CycleDetector};
 use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
-use crate::resolver::BindingContext;
+use crate::declaration_binder::BindingContext;
 
 /// Flatten a protocol's inheritance hierarchy, collecting all methods and associated types.
 pub fn flatten_protocol(

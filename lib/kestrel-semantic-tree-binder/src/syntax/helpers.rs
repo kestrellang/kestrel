@@ -13,7 +13,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError};
-use crate::resolver::BindingContext;
+use crate::declaration_binder::BindingContext;
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {

@@ -22,8 +22,8 @@ use crate::diagnostics::{
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError, UnresolvedTypeError,
 };
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
-use crate::resolver::{BindingContext, Resolver};
-use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
@@ -41,10 +41,10 @@ enum TypeAliasContext {
     Module,
 }
 
-/// Resolver for type alias declarations
-pub struct TypeAliasResolver;
+/// Binder for type alias declarations
+pub struct TypeAliasBinder;
 
-impl Resolver for TypeAliasResolver {
+impl DeclarationBinder for TypeAliasBinder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,

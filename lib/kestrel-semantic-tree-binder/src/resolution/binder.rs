@@ -19,7 +19,7 @@ use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::DuplicateFunctionSignatureError;
-use crate::resolver::{BindingContext, ResolverRegistry};
+use crate::declaration_binder::{BindingContext, DeclarationBinderRegistry};
 use crate::tree::{SourceMap, SyntaxMap};
 
 /// Binder for resolving references in a semantic tree
@@ -46,7 +46,7 @@ pub struct SemanticBinder {
     extension_registry: ExtensionRegistry,
     /// Semantic model used during binding for resolvers
     model: SemanticModel,
-    resolver_registry: ResolverRegistry,
+    binder_registry: DeclarationBinderRegistry,
     cycle_detector: RefCell<CycleDetector<SymbolId>>,
 }
 
@@ -78,7 +78,7 @@ impl SemanticBinder {
             registry,
             extension_registry,
             model,
-            resolver_registry: ResolverRegistry::new(),
+            binder_registry: DeclarationBinderRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),
         }
     }
@@ -115,7 +115,7 @@ impl SemanticBinder {
         let syntax_kind = Self::symbol_kind_to_syntax_kind(kind);
 
         if let Some(sk) = syntax_kind {
-            if let Some(resolver) = self.resolver_registry.get(sk) {
+            if let Some(resolver) = self.binder_registry.get(sk) {
                 if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
                     let mut ctx = BindingContext {
                         model: &self.model,

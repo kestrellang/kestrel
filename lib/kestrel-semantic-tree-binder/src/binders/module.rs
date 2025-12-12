@@ -4,18 +4,18 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::Resolver;
+use crate::declaration_binder::DeclarationBinder;
 
-/// Resolver for module declarations
+/// Binder for module declarations
 ///
 /// Module declarations are handled specially during semantic tree building.
 /// They define the namespace hierarchy but aren't created as symbols during
 /// the normal tree walk. Instead, the module hierarchy is built before processing
-/// other declarations. This resolver returns None to skip module declarations
+/// other declarations. This binder returns None to skip module declarations
 /// during the normal walk.
-pub struct ModuleResolver;
+pub struct ModuleBinder;
 
-impl Resolver for ModuleResolver {
+impl DeclarationBinder for ModuleBinder {
     fn build_declaration(
         &self,
         _syntax: &SyntaxNode,

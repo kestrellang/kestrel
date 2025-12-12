@@ -19,14 +19,14 @@ use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolution::TypeResolver;
-use crate::resolver::{BindingContext, Resolver};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::syntax::helpers::resolve_conformance_list;
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
-/// Resolver for extension declarations
-pub struct ExtensionResolver;
+/// Binder for extension declarations
+pub struct ExtensionBinder;
 
-impl Resolver for ExtensionResolver {
+impl DeclarationBinder for ExtensionBinder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,
