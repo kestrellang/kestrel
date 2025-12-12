@@ -7,12 +7,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::Db;
 use crate::resolvers::{
     ExtensionResolver, FieldResolver, FunctionResolver, ImportResolver, InitializerResolver,
     ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver,
@@ -53,8 +53,8 @@ pub trait Resolver {
 
 /// Context for the binding phase
 pub struct BindingContext<'a> {
-    /// Database for queries
-    pub db: &'a dyn Db,
+    /// Semantic model for queries
+    pub model: &'a SemanticModel,
     /// Diagnostics collector
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Current file ID for error reporting

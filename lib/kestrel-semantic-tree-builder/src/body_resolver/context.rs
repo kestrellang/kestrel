@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -17,7 +18,6 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::resolution::LocalScope;
-use crate::database::Db;
 use crate::syntax::get_node_span;
 
 use super::expressions::resolve_expression;
@@ -36,8 +36,8 @@ pub struct LoopInfo {
 
 /// Context for body resolution
 pub struct BodyResolutionContext<'a> {
-    /// The database for queries
-    pub db: &'a dyn Db,
+    /// The semantic model for queries
+    pub model: &'a SemanticModel,
     /// Diagnostics collector
     pub diagnostics: &'a mut DiagnosticContext,
     /// File ID for error reporting
@@ -57,7 +57,7 @@ pub struct BodyResolutionContext<'a> {
 impl<'a> BodyResolutionContext<'a> {
     /// Create a new body resolution context
     pub fn new(
-        db: &'a dyn Db,
+        model: &'a SemanticModel,
         diagnostics: &'a mut DiagnosticContext,
         file_id: usize,
         source: &'a str,
@@ -66,7 +66,7 @@ impl<'a> BodyResolutionContext<'a> {
         let function_id = function.metadata().id();
         let local_scope = LocalScope::new(function);
         BodyResolutionContext {
-            db,
+            model,
             diagnostics,
             file_id,
             source,
@@ -202,11 +202,13 @@ fn has_trailing_semicolon(node: &SyntaxNode) -> bool {
 pub fn resolve_and_attach_body(
     function_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     body_syntax: &SyntaxNode,
-    db: &dyn Db,
+    model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
     file_id: usize,
     source: &str,
 ) {
+    use kestrel_semantic_model::SymbolFor;
+
     // Verify it can be downcast to FunctionSymbol
     if function_symbol.as_ref().downcast_ref::<FunctionSymbol>().is_none() {
         return;
@@ -214,8 +216,8 @@ pub fn resolve_and_attach_body(
 
     // Create a new Arc for the function (we need to create LocalScope)
     // Since we already have a FunctionSymbol reference, we need to work around this
-    // by getting it from the db
-    let Some(func_arc) = db.symbol_by_id(function_symbol.metadata().id()) else {
+    // by getting it from the model
+    let Some(func_arc) = model.query(SymbolFor { id: function_symbol.metadata().id() }) else {
         return;
     };
 
@@ -224,7 +226,7 @@ pub fn resolve_and_attach_body(
     };
 
     let mut ctx = BodyResolutionContext {
-        db,
+        model,
         diagnostics,
         file_id,
         source,

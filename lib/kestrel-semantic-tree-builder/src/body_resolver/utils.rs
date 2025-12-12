@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -66,7 +67,7 @@ pub fn validate_not_standalone_type_param(
 ) -> Expression {
     if let ExprKind::TypeParameterRef(symbol_id) = &expr.kind {
         // Get the type parameter name for the error message
-        let type_param_name = ctx.db.symbol_by_id(*symbol_id)
+        let type_param_name = ctx.model.query(SymbolFor { id: *symbol_id })
             .map(|s| s.metadata().name().value.clone())
             .unwrap_or_else(|| "T".to_string());
 
@@ -266,7 +267,7 @@ pub fn get_type_container(ty: &Ty, ctx: &BodyResolutionContext) -> Option<Arc<dy
         TyKind::SelfType => {
             // Resolve Self to the containing struct/protocol
             // Get the function symbol, then its parent (which should be the struct/protocol)
-            let function = ctx.db.symbol_by_id(ctx.function_id)?;
+            let function = ctx.model.query(SymbolFor { id: ctx.function_id })?;
             let parent = function.metadata().parent()?;
             match parent.metadata().kind() {
                 KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
@@ -391,7 +392,7 @@ pub fn get_type_parameter_bounds_by_id(
     let mut bounds = Vec::new();
 
     // Start from the current function
-    if let Some(function) = ctx.db.symbol_by_id(ctx.function_id) {
+    if let Some(function) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
         // Check function's where clause
         if let Some(where_clause) = get_where_clause(function.as_ref()) {
             bounds.extend(filter_resolved_bounds(&where_clause, param_id));
@@ -700,7 +701,7 @@ use crate::database::Db;
 /// * `type_args` - The concrete type arguments being passed
 /// * `where_clause` - The where clause containing constraints
 /// * `call_span` - Span of the call site for error reporting
-/// * `db` - Database for symbol lookup
+/// * `model` - Semantic model for symbol lookup
 /// * `file_id` - File ID for diagnostics
 /// * `diagnostics` - Diagnostic context for reporting errors
 ///
@@ -711,7 +712,7 @@ pub fn verify_type_argument_constraints(
     type_args: &[Ty],
     where_clause: &WhereClause,
     call_span: Span,
-    db: &dyn Db,
+    model: &kestrel_semantic_model::SemanticModel,
     file_id: usize,
     diagnostics: &mut kestrel_reporting::DiagnosticContext,
 ) -> bool {
@@ -724,7 +725,7 @@ pub fn verify_type_argument_constraints(
         let bounds = where_clause.bounds_for(param_id);
 
         for bound in bounds {
-            if !type_satisfies_bound(arg, bound, db) {
+            if !type_satisfies_bound(arg, bound, model) {
                 // Report constraint not satisfied
                 let param_name = param.metadata().name().value.clone();
                 let type_name = format_type(arg);
@@ -750,7 +751,9 @@ pub fn verify_type_argument_constraints(
 ///
 /// This checks if a concrete type conforms to a protocol, either directly
 /// or transitively through other constraints.
-pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, db: &dyn Db) -> bool {
+pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, model: &kestrel_semantic_model::SemanticModel) -> bool {
+    use kestrel_semantic_model::ExtensionsFor;
+
     // Get the protocol from the bound
     let TyKind::Protocol { symbol: required_proto, .. } = bound.kind() else {
         // Bound is not a protocol - shouldn't happen with proper validation
@@ -774,7 +777,7 @@ pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, db: &dyn Db) -> bool {
 
             // Also check extension conformances
             let struct_id = symbol.metadata().id();
-            let extensions = db.get_extensions_for(struct_id);
+            let extensions = model.query(ExtensionsFor { target_id: struct_id });
             for extension in extensions {
                 if let Some(conformances) = extension.conformances_behavior() {
                     for conf in conformances.conformances() {

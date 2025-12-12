@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::{SymbolFor, ResolveModulePath};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::{ImportSymbol, ImportDataBehavior, ImportItem};
 use kestrel_span::{Span, Spanned};
@@ -84,10 +85,10 @@ impl Resolver for ImportResolver {
         let import_id = symbol.metadata().id();
 
         // Resolve module path using query (validation happens in ImportValidationPass)
-        let module_id = match ctx.db.resolve_module_path(
-            import_data.module_path().to_vec(),
-            import_id,
-        ) {
+        let module_id = match ctx.model.query(ResolveModulePath {
+            path: import_data.module_path().to_vec(),
+            context: import_id,
+        }) {
             Ok(id) => id,
             Err(_) => {
                 // Error will be reported by ImportValidationPass
@@ -96,7 +97,7 @@ impl Resolver for ImportResolver {
         };
 
         // Get the module symbol to resolve import items
-        let module_symbol = match ctx.db.symbol_by_id(module_id) {
+        let module_symbol = match ctx.model.query(SymbolFor { id: module_id }) {
             Some(s) => s,
             None => return,
         };

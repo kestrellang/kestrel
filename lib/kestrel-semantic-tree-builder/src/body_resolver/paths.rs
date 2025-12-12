@@ -4,6 +4,7 @@
 //! references, qualified names) including local variable lookup and module path resolution.
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_model::{SymbolFor, ResolveValuePath, ValuePathResolution};
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -17,7 +18,6 @@ use crate::diagnostics::{
     NotGenericError, SelfOutsideInstanceMethodError, TooFewTypeArgumentsError,
     TooManyTypeArgumentsError, TypeArgsOnNonGenericError, UndefinedNameError,
 };
-use crate::database::ValuePathResolution;
 use crate::resolution::type_resolver::TypeResolver;
 use crate::syntax::get_node_span;
 
@@ -106,7 +106,7 @@ pub fn resolve_path_expression(
     let explicit_type_args = extract_type_arguments_from_path(node, ctx);
 
     // Not a local - resolve as a value path (module path)
-    match ctx.db.resolve_value_path(path.clone(), ctx.function_id) {
+    match ctx.model.query(ResolveValuePath { path: path.clone(), context: ctx.function_id }) {
         ValuePathResolution::Symbol { symbol_id, ty } => {
             // Check if type arguments were provided
             let final_ty = if let Some(ref type_args) = explicit_type_args {
@@ -164,7 +164,7 @@ pub fn resolve_path_expression(
             // for just the first segment, and we need to handle the rest as member accesses
 
             // Look up the type parameter symbol to create proper type
-            let type_param_ty = if let Some(symbol) = ctx.db.symbol_by_id(symbol_id) {
+            let type_param_ty = if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
                 if let Ok(type_param_arc) = symbol.clone().downcast_arc::<TypeParameterSymbol>() {
                     Ty::type_parameter(type_param_arc, first_span.clone())
                 } else {
@@ -190,7 +190,7 @@ pub fn resolve_path_expression(
 ///
 /// Returns descriptions like "static method", "free function", etc.
 fn get_function_context(ctx: &BodyResolutionContext) -> String {
-    let Some(function) = ctx.db.symbol_by_id(ctx.function_id) else {
+    let Some(function) = ctx.model.query(SymbolFor { id: ctx.function_id }) else {
         return "this context".to_string();
     };
 
@@ -512,7 +512,7 @@ fn extract_type_arguments_from_path(
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
             let mut resolver = TypeResolver::new(
-                ctx.db,
+                ctx.model,
                 ctx.diagnostics,
                 ctx.file_id,
                 ctx.source,
@@ -542,7 +542,7 @@ fn apply_type_args_to_function(
     ctx: &mut BodyResolutionContext,
 ) -> Option<Ty> {
     // Get the symbol
-    let symbol = ctx.db.symbol_by_id(symbol_id)?;
+    let symbol = ctx.model.query(SymbolFor { id: symbol_id })?;
 
     // Check if it's a function with type parameters
     let func_sym = symbol.as_any().downcast_ref::<FunctionSymbol>()?;

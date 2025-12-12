@@ -97,15 +97,15 @@ impl SemanticModel {
 
     /// Get the symbol registry.
     ///
-    /// Exposed for queries to access.
-    pub(crate) fn registry(&self) -> &SymbolRegistry {
+    /// Exposed for queries and binding phase to access.
+    pub fn registry(&self) -> &SymbolRegistry {
         &self.registry
     }
 
     /// Get the extension registry.
     ///
-    /// Exposed for queries to access.
-    pub(crate) fn extension_registry(&self) -> &ExtensionRegistry {
+    /// Exposed for queries and binding phase to access.
+    pub fn extension_registry(&self) -> &ExtensionRegistry {
         &self.extension_registry
     }
 

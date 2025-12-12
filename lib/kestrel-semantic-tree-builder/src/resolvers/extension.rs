@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use kestrel_semantic_model::{ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
@@ -16,7 +17,6 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::database::TypePathResolution;
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolution::TypeResolver;
 use crate::resolver::{BindingContext, Resolver};
@@ -96,7 +96,7 @@ impl Resolver for ExtensionResolver {
             // Register extension in the ExtensionRegistry
             let target_id = target_struct.metadata().id();
             if let Ok(extension_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
-                context.db.register_extension(target_id, extension_symbol);
+                context.model.register_extension(target_id, extension_symbol);
             }
         }
 
@@ -146,7 +146,7 @@ fn resolve_extension_target(
     }
 
     // First, resolve just the base type (without type arguments) to get the struct
-    let base_resolution = ctx.db.resolve_type_path(segments.clone(), context_id);
+    let base_resolution = ctx.model.query(ResolveTypePath { path: segments.clone(), context: context_id });
     let struct_symbol = match base_resolution {
         TypePathResolution::Resolved(ty) => match ty.kind() {
             TyKind::Struct { symbol, .. } => symbol.clone(),
@@ -288,7 +288,7 @@ fn resolve_extension_type_arguments(
         }
 
         // Not a type parameter reference - resolve as a normal type
-        let mut type_resolver = TypeResolver::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let mut type_resolver = TypeResolver::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         type_args.push(type_resolver.resolve(&ty_node));
     }
 
@@ -485,7 +485,7 @@ fn resolve_extension_type_bound(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.db.resolve_type_path(segments, context_id) {
+            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
                 TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
                     TyKind::Protocol { .. } => resolved_ty,
                     TyKind::Struct { symbol, .. } => {

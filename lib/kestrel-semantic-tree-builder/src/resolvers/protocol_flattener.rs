@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
@@ -51,8 +52,8 @@ pub fn flatten_protocol(
                 .path()
                 .iter()
                 .filter_map(|id| {
-                    ctx.db
-                        .symbol_by_id(*id)
+                    ctx.model
+                        .query(SymbolFor { id: *id })
                         .map(|s| s.metadata().name().value.clone())
                 })
                 .collect();

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -14,7 +15,6 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::database::TypePathResolution;
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::flatten_protocol;
@@ -177,7 +177,7 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx.db.symbol_by_id(context_id)
+    let file_id = ctx.model.query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -338,7 +338,7 @@ fn resolve_bounds(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.db.resolve_type_path(segments, context_id) {
+            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
                 TypePathResolution::Resolved(resolved_ty) => {
                     match resolved_ty.kind() {
                         TyKind::Protocol { .. } => resolved_ty,

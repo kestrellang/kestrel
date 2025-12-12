@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_model::{SymbolFor, ExtensionsFor};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -133,7 +134,7 @@ pub fn resolve_member_access(
 
     // Get applicable extensions once for reuse
     let container_id = container.metadata().id();
-    let extensions = ctx.db.get_extensions_for(container_id);
+    let extensions = ctx.model.query(ExtensionsFor { target_id: container_id });
     // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
     let resolved_base_ty_for_extensions = resolve_self_type_to_concrete(base_ty, ctx);
     // Filter to only applicable extensions (now with cycle detection in substitutions)
@@ -167,7 +168,7 @@ pub fn resolve_member_access(
     };
 
     // 3. Check visibility
-    let context_symbol = ctx.db.symbol_by_id(ctx.function_id);
+    let context_symbol = ctx.model.query(SymbolFor { id: ctx.function_id });
     if let Some(ref context_sym) = context_symbol {
         if !is_visible_from(&member, context_sym) {
             use kestrel_semantic_tree::behavior::visibility::Visibility;
@@ -471,7 +472,7 @@ pub fn resolve_member_call(
     // If not found in direct children, search extensions
     if methods.is_empty() {
         let container_id = container.metadata().id();
-        let extensions = ctx.db.get_extensions_for(container_id);
+        let extensions = ctx.model.query(ExtensionsFor { target_id: container_id });
 
         // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
         let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
@@ -506,7 +507,7 @@ pub fn resolve_member_call(
         if let Some(callable) = get_callable_behavior(method) {
             if matches_signature(&callable, arguments.len(), arg_labels) {
                 // Check visibility
-                if let Some(context_sym) = ctx.db.symbol_by_id(ctx.function_id) {
+                if let Some(context_sym) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
                     if !is_visible_from(method, &context_sym) {
                         // TODO: Report error: method not visible
                         continue;
@@ -539,7 +540,7 @@ pub fn resolve_member_call(
     // No matching method found - collect overload info for error message
     let receiver_type = format_type(base_ty);
     let method_ids: Vec<SymbolId> = methods.iter().map(|m| m.metadata().id()).collect();
-    let available_overloads = collect_overload_descriptions(&method_ids, ctx.db);
+    let available_overloads = collect_overload_descriptions(&method_ids, ctx.model);
 
     let error = NoMatchingMethodError {
         call_span: span.clone(),
@@ -658,7 +659,7 @@ fn resolve_constrained_member_call(
     if matching.is_empty() {
         // No matching signature - report error with available overloads
         let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method.metadata().id()).collect();
-        let available_overloads = collect_overload_descriptions(&method_ids, ctx.db);
+        let available_overloads = collect_overload_descriptions(&method_ids, ctx.model);
 
         let error = NoMatchingMethodError {
             call_span: span.clone(),
@@ -820,7 +821,7 @@ fn resolve_type_parameter_static_member(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // Get the type parameter symbol
-    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+    let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) else {
         return Expression::error(full_span);
     };
 
@@ -1061,7 +1062,7 @@ fn filter_applicable_extensions(
                     if let Some(actual_type) = param_to_actual.get(&param_id) {
                         // Check each bound is satisfied
                         for bound in constraint.bounds() {
-                            if !type_satisfies_bound(actual_type, bound, ctx.db) {
+                            if !type_satisfies_bound(actual_type, bound, ctx.model) {
                                 return None; // Constraint not satisfied
                             }
                         }
@@ -1181,7 +1182,7 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
     match ty.kind() {
         TyKind::SelfType => {
             // Get the function symbol, then its parent (struct/protocol/extension)
-            if let Some(function) = ctx.db.symbol_by_id(ctx.function_id) {
+            if let Some(function) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
                 if let Some(parent) = function.metadata().parent() {
                     match parent.metadata().kind() {
                         KestrelSymbolKind::Extension => {
@@ -1223,7 +1224,7 @@ fn find_member_in_extensions(
     let container_id = container.metadata().id();
 
     // Get all extensions for this type from the registry
-    let extensions = ctx.db.get_extensions_for(container_id);
+    let extensions = ctx.model.query(ExtensionsFor { target_id: container_id });
 
     // Filter to only applicable extensions (now with cycle detection in substitutions)
     let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);

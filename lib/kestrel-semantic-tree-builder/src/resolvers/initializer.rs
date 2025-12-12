@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -148,7 +149,7 @@ fn resolve_initializer_body(
     };
 
     // Get the symbol from db
-    let Some(init_arc) = context.db.symbol_by_id(symbol.metadata().id()) else {
+    let Some(init_arc) = context.model.query(SymbolFor { id: symbol.metadata().id() }) else {
         return;
     };
 
@@ -197,7 +198,7 @@ fn resolve_initializer_body(
 
     // Create body resolution context
     let mut body_ctx = BodyResolutionContext {
-        db: context.db,
+        model: context.model,
         diagnostics: context.diagnostics,
         file_id,
         source,
@@ -299,7 +300,7 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable

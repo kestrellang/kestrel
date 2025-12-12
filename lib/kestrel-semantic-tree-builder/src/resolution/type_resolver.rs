@@ -7,13 +7,13 @@ use std::sync::Arc;
 
 use kestrel_prelude::primitives;
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_model::{SemanticModel, ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{Db, TypePathResolution};
 use crate::diagnostics::{
     AmbiguousTypeError, NotATypeError, NotGenericError, TooFewTypeArgumentsError,
     TooManyTypeArgumentsError, UnresolvedTypeError,
@@ -23,17 +23,17 @@ use crate::syntax::{extract_path_segments, get_node_span};
 /// Resolves types from syntax nodes during the bind phase
 ///
 /// The resolver maintains context about where resolution is happening,
-/// including the database for lookups, diagnostics for errors, and
+/// including the semantic model for lookups, diagnostics for errors, and
 /// the current scope context.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let mut resolver = TypeResolver::new(db, diagnostics, file_id, source, context_id);
+/// let mut resolver = TypeResolver::new(model, diagnostics, file_id, source, context_id);
 /// let ty = resolver.resolve(&ty_node);
 /// ```
 pub struct TypeResolver<'a> {
-    db: &'a dyn Db,
+    model: &'a SemanticModel,
     diagnostics: &'a mut DiagnosticContext,
     file_id: usize,
     source: &'a str,
@@ -43,14 +43,14 @@ pub struct TypeResolver<'a> {
 impl<'a> TypeResolver<'a> {
     /// Create a new type resolver
     pub fn new(
-        db: &'a dyn Db,
+        model: &'a SemanticModel,
         diagnostics: &'a mut DiagnosticContext,
         file_id: usize,
         source: &'a str,
         context_id: SymbolId,
     ) -> Self {
         Self {
-            db,
+            model,
             diagnostics,
             file_id,
             source,
@@ -251,7 +251,10 @@ impl<'a> TypeResolver<'a> {
 
     /// Resolve a type path and emit diagnostics on failure
     fn resolve_path(&mut self, segments: &[String], ty_span: Span) -> Ty {
-        match self.db.resolve_type_path(segments.to_vec(), self.context_id) {
+        match self.model.query(ResolveTypePath {
+            path: segments.to_vec(),
+            context: self.context_id,
+        }) {
             TypePathResolution::Resolved(resolved_ty) => resolved_ty,
             TypePathResolution::NotFound { segment, .. } => {
                 self.diagnostics.throw(

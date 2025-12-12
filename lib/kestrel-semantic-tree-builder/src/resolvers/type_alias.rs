@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
@@ -14,7 +15,6 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::database::TypePathResolution;
 use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError, UnresolvedTypeError,
@@ -345,7 +345,7 @@ fn resolve_associated_type_bounds(
             }
             SyntaxElement::Node(node) if after_colon && (node.kind() == SyntaxKind::Ty || node.kind() == SyntaxKind::TyPath) => {
                 // This is a bound type
-                let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+                let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
                 let bound_ty = resolve_type_from_ty_node(node, &mut type_ctx);
 
                 // Validate it's a protocol
@@ -379,7 +379,7 @@ fn resolve_generics(
     ctx: &mut BindingContext,
 ) -> GenericsBehavior {
     // Get type parameters from the symbol's children (they were added during BUILD)
-    let symbol = match ctx.db.symbol_by_id(context_id) {
+    let symbol = match ctx.model.query(SymbolFor { id: context_id }) {
         Some(s) => s,
         None => return GenericsBehavior::empty(),
     };
@@ -416,7 +416,7 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx.db.symbol_by_id(context_id)
+    let file_id = ctx.model.query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -474,7 +474,7 @@ fn resolve_type_bound(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.db.resolve_type_path(segments, context_id) {
+            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
                 TypePathResolution::Resolved(resolved_ty) => {
                     match resolved_ty.kind() {
                         TyKind::Protocol { .. } => resolved_ty,
@@ -552,7 +552,7 @@ fn resolve_aliased_type_from_syntax(
         .unwrap_or_else(|| aliased_type_node.clone());
 
     // Use unified type resolution
-    let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+    let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
     Some(resolve_type_from_ty_node(&ty_node, &mut type_ctx))
 }
 

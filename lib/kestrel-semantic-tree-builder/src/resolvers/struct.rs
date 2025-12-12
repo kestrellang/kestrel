@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
@@ -13,7 +14,6 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
-use crate::database::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::syntax::{
@@ -133,7 +133,7 @@ fn resolve_generics(
     ctx: &mut BindingContext,
 ) -> GenericsBehavior {
     // Get type parameters from the symbol's children (they were added during BUILD)
-    let symbol = match ctx.db.symbol_by_id(context_id) {
+    let symbol = match ctx.model.query(SymbolFor { id: context_id }) {
         Some(s) => s,
         None => return GenericsBehavior::empty(),
     };
@@ -170,7 +170,7 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx.db.symbol_by_id(context_id)
+    let file_id = ctx.model.query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -228,7 +228,7 @@ fn resolve_type_bound(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.db.resolve_type_path(segments, context_id) {
+            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
                 TypePathResolution::Resolved(resolved_ty) => {
                     match resolved_ty.kind() {
                         TyKind::Protocol { .. } => resolved_ty,

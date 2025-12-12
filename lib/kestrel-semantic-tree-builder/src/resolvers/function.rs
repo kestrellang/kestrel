@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
@@ -13,7 +14,6 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::database::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::resolution::type_resolver::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
@@ -157,7 +157,7 @@ fn resolve_generics(
 ) -> GenericsBehavior {
     // Re-extract type parameters (they were already extracted during BUILD and added as children)
     // We need to get them from the symbol's children
-    let symbol = match ctx.db.symbol_by_id(context_id) {
+    let symbol = match ctx.model.query(SymbolFor { id: context_id }) {
         Some(s) => s,
         None => return GenericsBehavior::empty(),
     };
@@ -197,7 +197,7 @@ fn resolve_where_clause(
     let mut constraints = Vec::new();
 
     // Get file_id for diagnostics
-    let file_id = ctx.db.symbol_by_id(context_id)
+    let file_id = ctx.model.query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -371,7 +371,7 @@ fn resolve_type_bound(
             }
 
             // Resolve the path to a type
-            let bound = match ctx.db.resolve_type_path(segments, context_id) {
+            let bound = match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
                 TypePathResolution::Resolved(resolved_ty) => {
                     if let TyKind::Protocol { .. } = resolved_ty.kind() {
                         resolved_ty
@@ -417,7 +417,7 @@ fn resolve_type_equality(
     use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 
     let span = get_node_span(syntax, source);
-    let file_id = ctx.db.symbol_by_id(context_id)
+    let file_id = ctx.model.query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -450,16 +450,16 @@ fn resolve_type_equality(
                 resolved
             } else {
                 // Fall back to regular type resolution (for concrete types like Int)
-                let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+                let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
                 resolve_type_from_ty_node(&ty_node, &mut type_ctx)
             }
         } else {
-            let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+            let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
             resolve_type_from_ty_node(&ty_node, &mut type_ctx)
         }
     } else {
         // Not a path type, resolve normally
-        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     };
 
@@ -582,8 +582,8 @@ fn resolve_function_body(
 
     // Create LocalScope with the function symbol
     // We need to create an Arc<FunctionSymbol>, but we only have &FunctionSymbol
-    // The workaround is to get the symbol from the db
-    let Some(func_arc) = context.db.symbol_by_id(symbol.metadata().id()) else {
+    // The workaround is to get the symbol from the model
+    let Some(func_arc) = context.model.query(SymbolFor { id: symbol.metadata().id() }) else {
         return;
     };
 
@@ -648,7 +648,7 @@ fn resolve_function_body(
 
     // Create body resolution context
     let mut body_ctx = BodyResolutionContext {
-        db: context.db,
+        model: context.model,
         diagnostics: context.diagnostics,
         file_id,
         source,
@@ -810,7 +810,7 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node using shared utility
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable
@@ -831,7 +831,7 @@ fn resolve_return_type_from_syntax(
     // Find the return type node: FunctionDeclaration -> ReturnType -> Ty
     if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
         if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
-            let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+            let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
             return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
         }
     }

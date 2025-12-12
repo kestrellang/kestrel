@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_model::{SemanticModel, SymbolFor, ExtensionsFor};
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -198,7 +199,7 @@ fn extract_type_arguments_from_callee(
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
             let mut resolver = TypeResolver::new(
-                ctx.db,
+                ctx.model,
                 ctx.diagnostics,
                 ctx.file_id,
                 ctx.source,
@@ -383,7 +384,7 @@ fn resolve_single_function_call(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // Get the function symbol
-    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+    let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) else {
         return Expression::error(span);
     };
 
@@ -495,7 +496,7 @@ fn resolve_single_function_call(
                 type_args,
                 &where_clause,
                 span.clone(),
-                ctx.db,
+                ctx.model,
                 ctx.file_id,
                 ctx.diagnostics,
             );
@@ -536,7 +537,7 @@ fn resolve_single_function_call(
                     &inferred_args,
                     &where_clause,
                     span.clone(),
-                    ctx.db,
+                    ctx.model,
                     ctx.file_id,
                     ctx.diagnostics,
                 );
@@ -602,7 +603,7 @@ fn resolve_overloaded_call(
 ) -> Expression {
     // Find the matching overload
     for &candidate_id in candidates {
-        if let Some(symbol) = ctx.db.symbol_by_id(candidate_id) {
+        if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id }) {
             if let Some(callable) = get_callable_behavior(&symbol) {
                 if matches_signature(&callable, arguments.len(), arg_labels) {
                     let return_ty = callable.return_type().clone();
@@ -615,8 +616,8 @@ fn resolve_overloaded_call(
     }
 
     // No match found - collect overload info for error message
-    let function_name = get_function_name_from_candidates(candidates, ctx.db);
-    let available_overloads = collect_overload_descriptions(candidates, ctx.db);
+    let function_name = get_function_name_from_candidates(candidates, ctx.model);
+    let available_overloads = collect_overload_descriptions(candidates, ctx.model);
 
     let error = NoMatchingOverloadError {
         call_span: span.clone(),
@@ -645,7 +646,7 @@ pub fn resolve_struct_instantiation(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // Get the struct symbol
-    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+    let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) else {
         return Expression::error(span);
     };
 
@@ -779,7 +780,7 @@ fn resolve_implicit_init(
         .collect();
 
     // Check visibility of all fields
-    let context_sym = ctx.db.symbol_by_id(ctx.function_id);
+    let context_sym = ctx.model.query(SymbolFor { id: ctx.function_id });
     for field in &fields {
         if let Some(ref ctx_sym) = context_sym {
             if !is_visible_from(field, ctx_sym) {
@@ -858,11 +859,11 @@ pub fn resolve_method_call(
 
     // Find matching overload
     for &candidate_id in candidates {
-        if let Some(symbol) = ctx.db.symbol_by_id(candidate_id) {
+        if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id }) {
             if let Some(callable) = get_callable_behavior(&symbol) {
                 if matches_signature(&callable, arguments.len(), arg_labels) {
                     // Check visibility
-                    if let Some(context_sym) = ctx.db.symbol_by_id(ctx.function_id) {
+                    if let Some(context_sym) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
                         if !is_visible_from(&symbol, &context_sym) {
                             // TODO: Report error: method not visible
                             continue;
@@ -912,7 +913,7 @@ pub fn resolve_method_call(
 
     // No matching method found - collect overload info for error message
     let receiver_type = format_type(&receiver.ty);
-    let available_overloads = collect_overload_descriptions(candidates, ctx.db);
+    let available_overloads = collect_overload_descriptions(candidates, ctx.model);
 
     let error = NoMatchingMethodError {
         call_span: span.clone(),
@@ -929,9 +930,9 @@ pub fn resolve_method_call(
 }
 
 /// Get the function name from a list of candidate symbol IDs.
-fn get_function_name_from_candidates(candidates: &[SymbolId], db: &dyn Db) -> String {
+fn get_function_name_from_candidates(candidates: &[SymbolId], model: &SemanticModel) -> String {
     for &candidate_id in candidates {
-        if let Some(symbol) = db.symbol_by_id(candidate_id) {
+        if let Some(symbol) = model.query(SymbolFor { id: candidate_id }) {
             return symbol.metadata().name().value.clone();
         }
     }
@@ -939,11 +940,11 @@ fn get_function_name_from_candidates(candidates: &[SymbolId], db: &dyn Db) -> St
 }
 
 /// Collect overload descriptions from a list of candidate symbol IDs.
-pub fn collect_overload_descriptions(candidates: &[SymbolId], db: &dyn Db) -> Vec<OverloadDescription> {
+pub fn collect_overload_descriptions(candidates: &[SymbolId], model: &SemanticModel) -> Vec<OverloadDescription> {
     let mut descriptions = Vec::new();
 
     for &candidate_id in candidates {
-        if let Some(symbol) = db.symbol_by_id(candidate_id) {
+        if let Some(symbol) = model.query(SymbolFor { id: candidate_id }) {
             if let Some(callable) = get_callable_behavior(&symbol) {
                 let name = symbol.metadata().name().value.clone();
                 let labels: Vec<Option<String>> = callable
@@ -983,7 +984,7 @@ fn resolve_type_parameter_init_call(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // Get the type parameter symbol
-    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+    let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) else {
         return Expression::error(span);
     };
 

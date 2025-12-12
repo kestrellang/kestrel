@@ -144,7 +144,7 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
         .map(|ty_node| {
             // Resolve the type using the database
             let mut resolver = TypeResolver::new(
-                ctx.db,
+                ctx.model,
                 ctx.diagnostics,
                 ctx.file_id,
                 ctx.source,

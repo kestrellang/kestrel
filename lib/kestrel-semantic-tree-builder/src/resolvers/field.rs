@@ -139,7 +139,7 @@ fn resolve_field_type_from_syntax(
 ) -> Ty {
     // Find the Ty node and resolve using shared utility
     if let Some(ty_node) = syntax.children().find(|child| child.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 

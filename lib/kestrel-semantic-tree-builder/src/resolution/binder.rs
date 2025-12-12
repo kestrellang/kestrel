@@ -24,6 +24,7 @@ use crate::resolver::{BindingContext, ResolverRegistry};
 use crate::syntax::get_file_id_for_symbol;
 use crate::tree::{SemanticTree, SourceMap, SyntaxMap};
 use crate::validation::{ValidationConfig, ValidationRunner};
+use crate::database::Db;
 
 /// Binder for resolving references in a semantic tree
 ///
@@ -47,8 +48,10 @@ pub struct SemanticBinder {
     registry: SymbolRegistry,
     /// Shared extension registry used by both SemanticDatabase and SemanticModel
     extension_registry: ExtensionRegistry,
-    /// Database used during binding for resolvers
+    /// Database used during binding for validation
     db: SemanticDatabase,
+    /// Semantic model used during binding for resolvers
+    model: SemanticModel,
     resolver_registry: ResolverRegistry,
     cycle_detector: RefCell<CycleDetector<SymbolId>>,
 }
@@ -82,8 +85,17 @@ impl SemanticBinder {
         registry.register_tree(&root);
         let extension_registry = ExtensionRegistry::new();
 
-        // Create database with cloned (Arc-shared) registries
+        // Create database with cloned (Arc-shared) registries (for validation)
         let db = SemanticDatabase::with_registries(registry.clone(), extension_registry.clone());
+
+        // Create semantic model with shared registries (for resolvers)
+        let model = SemanticModel::with_registries(
+            root.clone(),
+            syntax_map.clone(),
+            sources.clone(),
+            registry.clone(),
+            extension_registry.clone(),
+        );
 
         Self {
             root,
@@ -92,6 +104,7 @@ impl SemanticBinder {
             registry,
             extension_registry,
             db,
+            model,
             resolver_registry: ResolverRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),
         }
@@ -148,7 +161,7 @@ impl SemanticBinder {
             if let Some(resolver) = self.resolver_registry.get(sk) {
                 if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
                     let mut ctx = BindingContext {
-                        db: &self.db,
+                        model: &self.model,
                         diagnostics,
                         file_id,
                         type_alias_cycle_detector: &self.cycle_detector,

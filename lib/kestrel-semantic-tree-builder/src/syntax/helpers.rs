@@ -232,7 +232,7 @@ pub fn resolve_conformance_list(
         let span = get_node_span(&ty_node, source);
 
         // Use full type resolution (handles type arguments like Add[MyInt])
-        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
         // Validate that it's a protocol
