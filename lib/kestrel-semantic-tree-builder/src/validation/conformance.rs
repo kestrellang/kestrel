@@ -21,7 +21,8 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{Db, SemanticDatabase};
+use kestrel_semantic_model::{ExtensionsFor, SemanticModel, SymbolFor};
+
 use crate::diagnostics::{
     AssociatedTypeConstraintNotSatisfiedError, CircularProtocolInheritanceError,
     MissingAssociatedTypeError, MissingProtocolMethodError, WrongMethodReturnTypeError,
@@ -116,10 +117,10 @@ impl Validator for ConformanceValidator {
         }
     }
 
-    fn finalize(&self, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+    fn finalize(&self, model: &SemanticModel, diagnostics: &mut DiagnosticContext) {
         // Check protocols for circular inheritance
         for collected in self.protocols.lock().unwrap().iter() {
-            check_circular_inheritance(&collected.protocol, &collected.symbol, db, diagnostics);
+            check_circular_inheritance(&collected.protocol, &collected.symbol, model, diagnostics);
         }
 
         // Check protocols for associated type default satisfaction
@@ -130,7 +131,7 @@ impl Validator for ConformanceValidator {
         // Collect additional structs that have extensions with conformances
         // These may not have been collected during validate_symbol if the struct itself has no conformances
         let mut additional_structs = Vec::new();
-        for extension in db.extension_registry().all_extensions() {
+        for extension in model.extension_registry().all_extensions() {
             if let Some(conformances_behavior) = extension.conformances_behavior() {
                 if !conformances_behavior.conformances().is_empty() {
                     // This extension adds conformances, check if its target struct is in our list
@@ -158,7 +159,7 @@ impl Validator for ConformanceValidator {
 
         // Check structs for protocol conformance
         for collected in self.structs.lock().unwrap().iter() {
-            check_struct_conformance(&collected.struct_sym, &collected.symbol, db, diagnostics);
+            check_struct_conformance(&collected.struct_sym, &collected.symbol, model, diagnostics);
         }
 
         // Link protocol methods for all structs
@@ -167,7 +168,7 @@ impl Validator for ConformanceValidator {
             crate::resolvers::link_protocol_methods_for_struct(
                 &collected.struct_sym,
                 &collected.symbol,
-                db,
+                model,
                 diagnostics,
             );
         }
@@ -178,7 +179,7 @@ impl Validator for ConformanceValidator {
 fn check_circular_inheritance(
     protocol: &Arc<ProtocolSymbol>,
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
     let protocol_name = &protocol.metadata().name().value;
@@ -195,7 +196,7 @@ fn check_circular_inheritance(
             .cycle()
             .iter()
             .filter_map(|&id| {
-                db.symbol_by_id(id).map(|s| s.metadata().name().value.clone())
+                model.query(SymbolFor { id }).map(|s| s.metadata().name().value.clone())
             })
             .collect();
 
@@ -239,7 +240,7 @@ fn check_inheritance_cycle(
 fn check_struct_conformance(
     struct_sym: &StructSymbol,
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
     let struct_name = &struct_sym.metadata().name().value;
@@ -249,7 +250,7 @@ fn check_struct_conformance(
     let mut conformances = get_conformances(symbol);
 
     // Also collect conformances from extensions
-    let extensions = db.get_extensions_for(struct_id);
+    let extensions = model.query(ExtensionsFor { target_id: struct_id });
     for extension in &extensions {
         let extension_conformances = get_conformances(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
         conformances.extend(extension_conformances);
@@ -276,7 +277,7 @@ fn check_struct_conformance(
     let mut all_methods = collect_methods_from_symbol(symbol);
 
     // Also collect methods from applicable extensions
-    let extensions = db.get_extensions_for(struct_id);
+    let extensions = model.query(ExtensionsFor { target_id: struct_id });
     for extension in extensions {
         // TODO: Filter by applicability (check type arguments and where clauses)
         // For now, include all extensions since filtering can cause stack overflow
@@ -293,7 +294,7 @@ fn check_struct_conformance(
     // Check each conformance
     for conformance_ty in &conformances {
         let (protocol_symbol, type_param_bindings) =
-            match resolve_protocol_type(conformance_ty, struct_id, db) {
+            match resolve_protocol_type(conformance_ty, struct_id, model) {
                 Some(result) => result,
                 None => continue,
             };
@@ -341,7 +342,7 @@ fn check_struct_conformance(
         effective_bindings.insert("Self".to_string(), self_type);
 
         // Collect all required methods from the protocol (including inherited)
-        let required_methods = collect_all_protocol_methods(&protocol_symbol, db);
+        let required_methods = collect_all_protocol_methods(&protocol_symbol, model);
 
         // Check each required method
         for (protocol_sig, method) in &required_methods {
@@ -389,7 +390,7 @@ fn check_struct_conformance(
 fn resolve_protocol_type(
     ty: &Ty,
     _context: SymbolId,
-    _db: &SemanticDatabase,
+    _model: &SemanticModel,
 ) -> Option<(Arc<ProtocolSymbol>, HashMap<String, SignatureType>)> {
     match ty.kind() {
         TyKind::Protocol {
@@ -538,12 +539,12 @@ fn substitute_signature(
 /// Collect all required methods from a protocol, including inherited protocols
 fn collect_all_protocol_methods(
     protocol: &Arc<ProtocolSymbol>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
 ) -> HashMap<CallableSignature, Arc<FunctionSymbol>> {
     let mut methods = HashMap::new();
     let mut visited = HashSet::new();
 
-    collect_protocol_methods_recursive(protocol, db, &mut methods, &mut visited);
+    collect_protocol_methods_recursive(protocol, model, &mut methods, &mut visited);
 
     methods
 }
@@ -551,7 +552,7 @@ fn collect_all_protocol_methods(
 /// Recursively collect methods from a protocol and its inherited protocols
 fn collect_protocol_methods_recursive(
     protocol: &Arc<ProtocolSymbol>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
     methods: &mut HashMap<CallableSignature, Arc<FunctionSymbol>>,
     visited: &mut HashSet<SymbolId>,
 ) {
@@ -565,8 +566,8 @@ fn collect_protocol_methods_recursive(
     // First, collect methods from inherited protocols
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
     for inherited_ty in get_conformances(&protocol_dyn) {
-        if let Some((inherited_protocol, _)) = resolve_protocol_type(&inherited_ty, id, db) {
-            collect_protocol_methods_recursive(&inherited_protocol, db, methods, visited);
+        if let Some((inherited_protocol, _)) = resolve_protocol_type(&inherited_ty, id, model) {
+            collect_protocol_methods_recursive(&inherited_protocol, model, methods, visited);
         }
     }
 

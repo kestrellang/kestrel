@@ -53,7 +53,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
-use crate::database::SemanticDatabase;
+use kestrel_semantic_model::SemanticModel;
 
 pub use assignment_validation::AssignmentValidator;
 pub use conformance::ConformanceValidator;
@@ -149,8 +149,8 @@ pub struct SymbolContext<'a> {
     pub in_struct: bool,
     /// Whether we're inside an extension
     pub in_extension: bool,
-    /// The database for queries
-    pub db: &'a SemanticDatabase,
+    /// The semantic model for queries
+    pub model: &'a SemanticModel,
     /// Diagnostics context for reporting errors
     diagnostics: SharedDiagnostics,
     /// The file ID for the current symbol
@@ -168,8 +168,8 @@ impl<'a> SymbolContext<'a> {
 pub struct BodyContext<'a> {
     /// The containing symbol (function or initializer)
     pub container: &'a Arc<dyn Symbol<KestrelLanguage>>,
-    /// The database for queries
-    pub db: &'a SemanticDatabase,
+    /// The semantic model for queries
+    pub model: &'a SemanticModel,
     /// Diagnostics context for reporting errors
     diagnostics: SharedDiagnostics,
     /// The file ID for the current symbol
@@ -187,8 +187,8 @@ impl<'a> BodyContext<'a> {
 pub struct TypeContext<'a> {
     /// The containing symbol where this type appears
     pub container: &'a Arc<dyn Symbol<KestrelLanguage>>,
-    /// The database for queries
-    pub db: &'a SemanticDatabase,
+    /// The semantic model for queries
+    pub model: &'a SemanticModel,
     /// Diagnostics context for reporting errors
     diagnostics: SharedDiagnostics,
     /// The file ID for the current symbol
@@ -240,7 +240,7 @@ pub trait Validator: Send + Sync {
     ///
     /// Validators that collect data during traversal and analyze it at the end
     /// implement this method (e.g., cycle detection).
-    fn finalize(&self, _db: &SemanticDatabase, _diagnostics: &mut DiagnosticContext) {}
+    fn finalize(&self, _model: &SemanticModel, _diagnostics: &mut DiagnosticContext) {}
 }
 
 /// Legacy trait for backwards compatibility
@@ -254,7 +254,7 @@ pub trait ValidationPass: Send + Sync {
     fn validate(
         &self,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
+        model: &SemanticModel,
         diagnostics: &mut DiagnosticContext,
         config: &ValidationConfig,
     );
@@ -295,7 +295,7 @@ impl ValidationRunner {
     pub fn run(
         &self,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
+        model: &SemanticModel,
         diagnostics: &mut DiagnosticContext,
         config: &ValidationConfig,
     ) {
@@ -313,11 +313,11 @@ impl ValidationRunner {
         }));
 
         // Single tree walk calling all validators
-        walk_symbol(root, &enabled, db, &shared_diagnostics, false, false, false);
+        walk_symbol(root, &enabled, model, &shared_diagnostics, false, false, false);
 
         // Finalize all validators (diagnostics is still valid here)
         for validator in &enabled {
-            validator.finalize(db, diagnostics);
+            validator.finalize(model, diagnostics);
         }
     }
 }
@@ -332,7 +332,7 @@ impl Default for ValidationRunner {
 fn walk_symbol(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     validators: &[&dyn Validator],
-    db: &SemanticDatabase,
+    model: &SemanticModel,
     diagnostics: &SharedDiagnostics,
     in_protocol: bool,
     in_struct: bool,
@@ -352,7 +352,7 @@ fn walk_symbol(
         in_protocol,
         in_struct,
         in_extension,
-        db,
+        model,
         diagnostics: Rc::clone(diagnostics),
         file_id,
     };
@@ -370,7 +370,7 @@ fn walk_symbol(
         if let Some(body) = get_executable_body(symbol) {
             let body_ctx = BodyContext {
                 container: symbol,
-                db,
+                model,
                 diagnostics: Rc::clone(diagnostics),
                 file_id,
             };
@@ -389,7 +389,7 @@ fn walk_symbol(
 
     // Recursively walk children
     for child in symbol.metadata().children() {
-        walk_symbol(&child, validators, db, diagnostics, in_protocol, in_struct, in_extension);
+        walk_symbol(&child, validators, model, diagnostics, in_protocol, in_struct, in_extension);
     }
 }
 

@@ -20,7 +20,8 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{Db, SemanticDatabase};
+use kestrel_semantic_model::{SemanticModel, SymbolFor};
+
 use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
@@ -60,10 +61,10 @@ impl Validator for TypeAliasCycleValidator {
         }
     }
 
-    fn finalize(&self, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+    fn finalize(&self, model: &SemanticModel, diagnostics: &mut DiagnosticContext) {
         // Check each collected type alias for cycles
         for type_alias in self.type_aliases.lock().unwrap().iter() {
-            check_type_alias_for_cycles(type_alias, db, diagnostics);
+            check_type_alias_for_cycles(type_alias, model, diagnostics);
         }
     }
 }
@@ -71,7 +72,7 @@ impl Validator for TypeAliasCycleValidator {
 /// Check if a specific type alias participates in a cycle
 fn check_type_alias_for_cycles(
     type_alias: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
     // Get the file_id for error reporting
@@ -114,7 +115,7 @@ fn check_type_alias_for_cycles(
                 .iter()
                 .skip(1) // Skip the origin (which is the first element)
                 .filter_map(|&id| {
-                    db.symbol_by_id(id).map(|s| CycleParticipant {
+                    model.query(SymbolFor { id }).map(|s| CycleParticipant {
                         name: s.metadata().name().value.clone(),
                         name_span: s.metadata().name().span.clone(),
                     })

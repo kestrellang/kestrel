@@ -27,7 +27,8 @@ use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::Db;
+use kestrel_semantic_model::{ExtensionsFor, SemanticModel};
+
 use crate::diagnostics::{
     AmbiguousProtocolMethodError, ProtocolMethodReceiverMismatchError,
 };
@@ -42,7 +43,7 @@ use crate::syntax::get_file_id_for_symbol;
 pub fn link_protocol_methods_for_struct(
     struct_sym: &Arc<StructSymbol>,
     struct_dyn: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &dyn Db,
+    model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
     let file_id = get_file_id_for_symbol(struct_dyn, diagnostics);
@@ -55,7 +56,7 @@ pub fn link_protocol_methods_for_struct(
         .unwrap_or_default();
 
     // Also collect conformances from extensions
-    let extensions = db.get_extensions_for(struct_id);
+    let extensions = model.query(ExtensionsFor { target_id: struct_id });
     for extension in &extensions {
         let extension_conformances = extension
             .conformances_behavior()
@@ -75,7 +76,7 @@ pub fn link_protocol_methods_for_struct(
     for conformance_ty in &conformances {
         if let Some((_conforming_protocol, bindings)) = resolve_protocol_type(conformance_ty, struct_dyn, struct_name) {
             // Get all protocol methods (including inherited), each paired with its defining protocol
-            let methods = collect_all_protocol_methods(&_conforming_protocol, db);
+            let methods = collect_all_protocol_methods(&_conforming_protocol, model);
 
             for (defining_protocol, method) in methods {
                 let sig = method.signature();
@@ -92,7 +93,7 @@ pub fn link_protocol_methods_for_struct(
 
     // Also collect methods from applicable extensions
     let struct_id = struct_sym.metadata().id();
-    let extensions = db.get_extensions_for(struct_id);
+    let extensions = model.query(ExtensionsFor { target_id: struct_id });
     for extension in extensions {
         // TODO: Filter by applicability (check type arguments and where clauses)
         // For now, include all extensions since filtering can cause stack overflow
@@ -251,14 +252,14 @@ fn collect_methods_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec
 /// Returns (defining_protocol, method) pairs to track which protocol defined each method
 fn collect_all_protocol_methods(
     protocol: &Arc<ProtocolSymbol>,
-    db: &dyn Db,
+    model: &SemanticModel,
 ) -> Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>)> {
     use std::collections::HashSet;
 
     let mut methods = Vec::new();
     let mut visited = HashSet::new();
 
-    collect_protocol_methods_recursive(protocol, db, &mut methods, &mut visited);
+    collect_protocol_methods_recursive(protocol, model, &mut methods, &mut visited);
 
     methods
 }
@@ -267,7 +268,7 @@ fn collect_all_protocol_methods(
 /// Each method is paired with the protocol that defines it
 fn collect_protocol_methods_recursive(
     protocol: &Arc<ProtocolSymbol>,
-    db: &dyn Db,
+    model: &SemanticModel,
     methods: &mut Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>)>,
     visited: &mut std::collections::HashSet<SymbolId>,
 ) {
@@ -283,7 +284,7 @@ fn collect_protocol_methods_recursive(
     if let Some(conformances_behavior) = protocol_dyn.conformances_behavior() {
         for inherited_ty in conformances_behavior.conformances() {
             if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
-                collect_protocol_methods_recursive(symbol, db, methods, visited);
+                collect_protocol_methods_recursive(symbol, model, methods, visited);
             }
         }
     }

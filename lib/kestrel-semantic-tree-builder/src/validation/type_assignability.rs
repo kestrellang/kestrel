@@ -8,6 +8,8 @@ use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use kestrel_semantic_model::{SemanticModel, SymbolFor};
+
 use crate::database::Db;
 
 /// Collect all where clauses from the context by walking up the parent chain.
@@ -156,6 +158,70 @@ fn types_match(a: &Ty, b: &Ty) -> bool {
         // (which handles Never, Error, etc. correctly)
         _ => a.is_assignable_to(b) && b.is_assignable_to(a),
     }
+}
+
+/// Collect all where clauses from the context using SemanticModel.
+///
+/// This finds all type parameters in scope and their associated constraints,
+/// including nested scopes.
+pub fn collect_where_clauses_with_model(model: &SemanticModel, context_id: SymbolId) -> Vec<WhereClause> {
+    let mut clauses = Vec::new();
+    let mut current_id = Some(context_id);
+
+    while let Some(id) = current_id {
+        let Some(symbol) = model.query(SymbolFor { id }) else {
+            break;
+        };
+
+        // Check if this symbol has generics behavior (where clause)
+        if let Some(generics_beh) = symbol.generics_behavior() {
+            let wc = generics_beh.where_clause();
+            if !wc.is_empty() {
+                clauses.push(wc.clone());
+            }
+        }
+
+        // Walk up to parent
+        current_id = symbol.metadata().parent().map(|p| p.metadata().id());
+    }
+
+    clauses
+}
+
+/// Check if `from` type is assignable to `to` type using SemanticModel.
+///
+/// This extends the basic `is_assignable_to` check by consulting equality constraints
+/// like `T = U` or `T.Item = Int` that are in scope.
+pub fn is_assignable_with_model(
+    from: &Ty,
+    to: &Ty,
+    model: &SemanticModel,
+    context_id: SymbolId,
+) -> bool {
+    // First, try the basic assignability check
+    if from.is_assignable_to(to) {
+        return true;
+    }
+
+    // Collect all where clauses in scope
+    let where_clauses = collect_where_clauses_with_model(model, context_id);
+
+    // Collect all equality constraints
+    let equalities: Vec<(&Ty, &Ty)> = where_clauses
+        .iter()
+        .flat_map(|wc| wc.equality_constraints())
+        .collect();
+
+    // If no equality constraints, fall back to basic check
+    if equalities.is_empty() {
+        return false;
+    }
+
+    // Normalize both types using equality constraints and check again
+    let from_normalized = normalize_type(from, &equalities);
+    let to_normalized = normalize_type(to, &equalities);
+
+    from_normalized.is_assignable_to(&to_normalized)
 }
 
 #[cfg(test)]

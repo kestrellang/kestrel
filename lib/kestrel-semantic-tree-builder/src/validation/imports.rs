@@ -18,7 +18,10 @@ use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
-use crate::database::Db;
+use kestrel_semantic_model::{
+    ChildByName, IsVisibleFrom, ResolveModulePath, SemanticModel, SymbolFor, VisibleChildren,
+};
+
 use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
@@ -98,10 +101,10 @@ fn validate_import(
     let file_id = get_file_id_for_symbol(import_symbol, &mut *ctx.diagnostics().get());
 
     // 1. Validate module path resolution
-    let module_id = match ctx.db.resolve_module_path(
-        import_data.module_path().to_vec(),
-        import_id,
-    ) {
+    let module_id = match ctx.model.query(ResolveModulePath {
+        path: import_data.module_path().to_vec(),
+        context: import_id,
+    }) {
         Ok(id) => id,
         Err(mut err) => {
             // Fix up the spans in the error using the import data
@@ -116,7 +119,7 @@ fn validate_import(
     };
 
     // Verify the module exists
-    if ctx.db.symbol_by_id(module_id).is_none() {
+    if ctx.model.query(SymbolFor { id: module_id }).is_none() {
         return;
     }
 
@@ -125,14 +128,20 @@ fn validate_import(
         // import A.B.C.(D, E)
         for item in import_data.items() {
             // Find the symbol in the module's visible children using query
-            let target = ctx.db.find_child_by_name(module_id, &item.name);
+            let target = ctx.model.query(ChildByName {
+                parent: module_id,
+                name: item.name.clone(),
+            });
 
             match target {
                 Some(target_symbol) => {
                     let target_id = target_symbol.metadata().id();
 
                     // Check visibility using query
-                    if !ctx.db.is_visible_from(target_id, import_id) {
+                    if !ctx.model.query(IsVisibleFrom {
+                        target: target_id,
+                        context: import_id,
+                    }) {
                         // Get the actual visibility from the target symbol
                         let (visibility_str, _decl_span) = get_visibility_info(&target_symbol);
 
@@ -244,16 +253,19 @@ fn check_import_conflicts(
             get_file_id_for_symbol(import_symbol, &mut *ctx.diagnostics().get());
 
         // Resolve the module
-        let module_id = match ctx.db.resolve_module_path(
-            import_data.module_path().to_vec(),
-            import_id,
-        ) {
+        let module_id = match ctx.model.query(ResolveModulePath {
+            path: import_data.module_path().to_vec(),
+            context: import_id,
+        }) {
             Ok(id) => id,
             Err(_) => continue, // Already reported in validate_import
         };
 
         // Check each visible symbol from the module using query
-        for child in ctx.db.visible_children_from(module_id, import_id) {
+        for child in ctx.model.query(VisibleChildren {
+            parent: module_id,
+            context: import_id,
+        }) {
             let name = child.metadata().name().value.clone();
 
             // Check if this name conflicts with existing names

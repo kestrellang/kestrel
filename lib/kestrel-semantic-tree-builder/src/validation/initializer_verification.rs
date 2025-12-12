@@ -26,7 +26,8 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
-use crate::database::SemanticDatabase;
+use kestrel_semantic_model::SemanticModel;
+
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator for initializer field initialization
@@ -59,14 +60,14 @@ impl Validator for InitializerVerificationValidator {
             return;
         }
 
-        validate_initializer(ctx.symbol, ctx.db, &mut *ctx.diagnostics().get());
+        validate_initializer(ctx.symbol, ctx.model, &mut *ctx.diagnostics().get());
     }
 }
 
 /// Validate a single initializer
 fn validate_initializer(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    _db: &SemanticDatabase,
+    _model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
     // Get the parent struct to know what fields need to be initialized

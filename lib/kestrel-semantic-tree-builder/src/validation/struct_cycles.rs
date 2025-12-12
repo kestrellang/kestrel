@@ -20,7 +20,8 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{Db, SemanticDatabase};
+use kestrel_semantic_model::{SemanticModel, SymbolFor};
+
 use crate::diagnostics::{CircularStructContainmentError, CycleMember, SelfContainingStructError};
 use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
@@ -72,10 +73,10 @@ impl Validator for StructCycleValidator {
         }
     }
 
-    fn finalize(&self, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+    fn finalize(&self, model: &SemanticModel, diagnostics: &mut DiagnosticContext) {
         // Check each collected struct for cycles
         for collected in self.structs.lock().unwrap().iter() {
-            check_struct_for_cycles(&collected.struct_sym, &collected.symbol, db, diagnostics);
+            check_struct_for_cycles(&collected.struct_sym, &collected.symbol, model, diagnostics);
         }
     }
 }
@@ -84,7 +85,7 @@ impl Validator for StructCycleValidator {
 fn check_struct_for_cycles(
     struct_sym: &StructSymbol,
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
     let file_id = get_file_id_for_symbol(symbol, diagnostics);
@@ -122,7 +123,7 @@ fn check_struct_for_cycles(
             continue;
         }
 
-        if let Some(cycle) = check_type_for_struct_cycle(&field_ty, &mut detector, db) {
+        if let Some(cycle) = check_type_for_struct_cycle(&field_ty, &mut detector, model) {
             // Check if it's a self-cycle (direct self-reference)
             if cycle.is_self_cycle() {
                 diagnostics.throw(
@@ -144,7 +145,7 @@ fn check_struct_for_cycles(
                     .iter()
                     .skip(1) // Skip the origin
                     .filter_map(|&id| {
-                        db.symbol_by_id(id).map(|s| CycleMember {
+                        model.query(SymbolFor { id }).map(|s| CycleMember {
                             name: s.metadata().name().value.clone(),
                             span: s.metadata().declaration_span().clone(),
                         })
@@ -171,7 +172,7 @@ fn check_struct_for_cycles(
 fn check_type_for_struct_cycle(
     ty: &Ty,
     detector: &mut CycleDetector<SymbolId>,
-    db: &SemanticDatabase,
+    model: &SemanticModel,
 ) -> Option<semantic_tree::cycle::Cycle<SymbolId>> {
     match ty.kind() {
         TyKind::Struct { symbol, .. } => {
@@ -199,7 +200,7 @@ fn check_type_for_struct_cycle(
                 });
 
                 if let Some(field_ty) = field_ty {
-                    if let Some(cycle) = check_type_for_struct_cycle(&field_ty, detector, db) {
+                    if let Some(cycle) = check_type_for_struct_cycle(&field_ty, detector, model) {
                         detector.exit();
                         return Some(cycle);
                     }
@@ -212,7 +213,7 @@ fn check_type_for_struct_cycle(
         TyKind::Tuple(elements) => {
             // Check each element of the tuple
             for elem in elements {
-                if let Some(cycle) = check_type_for_struct_cycle(elem, detector, db) {
+                if let Some(cycle) = check_type_for_struct_cycle(elem, detector, model) {
                     return Some(cycle);
                 }
             }

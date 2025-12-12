@@ -125,7 +125,7 @@ impl SemanticBinder {
         // Run validation passes
         let validation_config = config.cloned().unwrap_or_default();
         let runner = ValidationRunner::new();
-        runner.run(&self.root, &self.db, diagnostics, &validation_config);
+        runner.run(&self.root, &self.model, diagnostics, &validation_config);
 
         // Create SemanticModel with the shared registries
         SemanticModel::with_registries(

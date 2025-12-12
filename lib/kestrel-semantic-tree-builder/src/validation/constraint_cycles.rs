@@ -27,7 +27,7 @@ use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::SemanticDatabase;
+use kestrel_semantic_model::SemanticModel;
 use crate::diagnostics::{CircularConstraintError, CycleMember};
 use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
@@ -118,7 +118,7 @@ impl Validator for ConstraintCycleValidator {
         }
     }
 
-    fn finalize(&self, _db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+    fn finalize(&self, _model: &SemanticModel, diagnostics: &mut DiagnosticContext) {
         // Check each collected symbol for constraint cycles
         for collected in self.generic_symbols.lock().unwrap().iter() {
             check_constraint_cycles(

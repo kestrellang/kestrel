@@ -16,14 +16,15 @@ use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
+use kestrel_semantic_model::{SemanticModel, SymbolFor};
+
 use crate::body_resolver::format_type;
-use crate::database::Db;
 use crate::diagnostics::{
     ArrayElementTypeMismatchError, BranchTypeMismatchError, ConditionNotBoolError,
     TypeMismatchError,
 };
 use crate::validation::{BodyContext, Validator};
-use super::type_assignability::is_assignable_with_constraints;
+use super::type_assignability::is_assignable_with_model;
 
 /// Validator for type checking
 pub struct TypeCheckValidator;
@@ -38,7 +39,7 @@ impl TypeCheckValidator {
     /// Check if a type is assignable to another, considering where clause constraints
     fn is_assignable(&self, from: &Ty, to: &Ty, ctx: &BodyContext<'_>) -> bool {
         let context_id = ctx.container.metadata().id();
-        is_assignable_with_constraints(from, to, ctx.db, context_id)
+        is_assignable_with_model(from, to, ctx.model, context_id)
     }
 
     /// Get the return type of the containing function/initializer
@@ -62,7 +63,7 @@ impl TypeCheckValidator {
                 // Get the callable from the callee
                 match &callee.kind {
                     ExprKind::SymbolRef(symbol_id) => {
-                        let symbol = ctx.db.symbol_by_id(*symbol_id)?;
+                        let symbol = ctx.model.query(SymbolFor { id: *symbol_id })?;
                         let behaviors = symbol.metadata().behaviors();
                         for b in behaviors.iter() {
                             if matches!(b.kind(), KestrelBehaviorKind::Callable) {
@@ -82,7 +83,7 @@ impl TypeCheckValidator {
                     ExprKind::MethodRef { candidates, receiver, .. } => {
                         // Get first matching candidate's parameters
                         for &id in candidates {
-                            if let Some(symbol) = ctx.db.symbol_by_id(id) {
+                            if let Some(symbol) = ctx.model.query(SymbolFor { id }) {
                                 let behaviors = symbol.metadata().behaviors();
                                 for b in behaviors.iter() {
                                     if matches!(b.kind(), KestrelBehaviorKind::Callable) {
@@ -408,7 +409,7 @@ impl Validator for TypeCheckValidator {
             // Unit functions can have any expression (result discarded)
             // Non-unit functions must return the correct type
             let context_id = ctx.symbol.metadata().id();
-            if !expected_ty.is_unit() && !is_assignable_with_constraints(&yield_expr.ty, &expected_ty, ctx.db, context_id) {
+            if !expected_ty.is_unit() && !is_assignable_with_model(&yield_expr.ty, &expected_ty, ctx.model, context_id) {
                 ctx.diagnostics().get().throw(
                     TypeMismatchError {
                         span: yield_expr.span.clone(),

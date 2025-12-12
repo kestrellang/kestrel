@@ -19,7 +19,8 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::SemanticDatabase;
+use kestrel_semantic_model::SemanticModel;
+
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator that checks for conflicting methods across extensions
@@ -133,7 +134,7 @@ impl Validator for ExtensionConflictValidator {
             .push(collected);
     }
 
-    fn finalize(&self, _db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+    fn finalize(&self, _model: &SemanticModel, diagnostics: &mut DiagnosticContext) {
         let extensions_by_target = self.extensions_by_target.lock().unwrap();
         let struct_methods = self.struct_methods.lock().unwrap();
 
