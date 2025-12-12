@@ -20,7 +20,6 @@ pub use initializer::InitializerBinder;
 pub use module::ModuleBinder;
 pub use protocol::ProtocolBinder;
 pub use protocol_flattener::flatten_protocol;
-pub use protocol_method_linker::link_protocol_methods_for_struct;
 pub use r#struct::StructBinder;
 pub use terminal::TerminalBinder;
 pub use type_alias::TypeAliasBinder;

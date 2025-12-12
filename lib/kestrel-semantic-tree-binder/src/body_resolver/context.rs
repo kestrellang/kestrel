@@ -12,7 +12,6 @@ use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -273,7 +272,6 @@ fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> Loca
     let name = Spanned::new("__body_resolver_temp".to_string(), Span::from(0..0));
     let visibility =
         VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
-    let return_type = Ty::unit(Span::from(0..0));
     let dummy_func = Arc::new(FunctionSymbol::new(
         name,
         Span::from(0..0),

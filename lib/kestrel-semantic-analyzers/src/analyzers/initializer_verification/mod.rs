@@ -390,6 +390,12 @@ fn analyze_expression(
             let mut break_states: Vec<InitState> = Vec::new();
             let mut body_state = state.clone();
             for stmt in body {
+                if body_state.diverged {
+                    break;
+                }
+
+                body_state = analyze_statement(stmt, body_state, ctx);
+
                 if body_state.diverged && contains_break_at_top_level(&stmt.kind) {
                     let mut break_state = body_state.clone();
                     break_state.diverged = false;

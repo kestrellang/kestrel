@@ -78,7 +78,7 @@ impl DiagnosticContext {
         let config = codespan_reporting::term::Config::default();
 
         for diagnostic in &self.diagnostics {
-            term::emit(&mut writer.lock(), &config, &self.files, diagnostic)?;
+            term::emit_to_io_write(&mut writer.lock(), &config, &self.files, diagnostic)?;
         }
 
         Ok(())
@@ -92,7 +92,7 @@ impl DiagnosticContext {
         let config = codespan_reporting::term::Config::default();
 
         for diagnostic in &self.diagnostics {
-            term::emit(writer, &config, &self.files, diagnostic)?;
+            term::emit_to_io_write(writer, &config, &self.files, diagnostic)?;
         }
 
         Ok(())

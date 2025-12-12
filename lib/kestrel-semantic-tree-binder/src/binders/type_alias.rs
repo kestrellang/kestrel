@@ -4,30 +4,26 @@ use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::{
-    AssociatedTypeBoundsBehavior, AssociatedTypeSymbol,
+    AssociatedTypeBoundsBehavior
 };
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
+use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
-use kestrel_span::{Span, Spanned};
+use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError, UnresolvedTypeError,
 };
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
-    extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
-    get_visibility_span,
+    extract_path_segments, find_child, get_node_span,
 };
 
 /// Determines the context in which a type alias declaration appears

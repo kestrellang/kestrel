@@ -2,26 +2,18 @@ use std::sync::Arc;
 
 use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
-use kestrel_span::{Span, Spanned};
+use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::syntax::helpers::resolve_conformance_list;
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
-use kestrel_syntax_tree::utils::{
-    extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
-    get_visibility_span,
-};
+use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
 /// Binder for struct declarations
 pub struct StructBinder;

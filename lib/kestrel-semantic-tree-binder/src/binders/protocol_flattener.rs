@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::{

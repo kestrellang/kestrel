@@ -276,7 +276,7 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
 
 /// Internal enum to distinguish between type variants during parsing
 #[derive(Debug, Clone)]
-pub(crate) enum TyVariant {
+pub enum TyVariant {
     Unit(Span, Span),
     Never(Span),
     Inferred(Span), // _ type

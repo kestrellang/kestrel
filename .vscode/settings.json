@@ -4,12 +4,9 @@
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
-  "rust-analyzer.rustfmt.extraArgs": ["--edition", "2024"],
   "rust-analyzer.checkOnSave": true,
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.check.extraArgs": [
-    "--workspace",
-    "--all-targets",
     "--",
     "-D",
     "clippy::correctness",

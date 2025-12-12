@@ -826,20 +826,6 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 )
         };
 
-        // Inline expression statement parser (uses expr)
-        let inline_expr_stmt =
-            {
-                let expr_for_stmt = expr.clone();
-                expr_for_stmt
-                    .then(skip_trivia().ignore_then(
-                        just(Token::Semicolon).map_with_span(|_, span| Span::from(span)),
-                    ))
-                    .map(|(e, semi)| StmtVariant::Expression(e, semi))
-            };
-
-        // Inline statement parser (for statements with semicolons)
-        let inline_stmt = inline_var_decl.clone().or(inline_expr_stmt.clone());
-
         // Code block parser that uses the local expr reference (to avoid mutual recursion)
         // Syntax: { statement* expression? }
         //

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SemanticModel, SymbolFor};
+use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;

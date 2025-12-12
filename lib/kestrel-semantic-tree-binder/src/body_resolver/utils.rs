@@ -785,8 +785,6 @@ pub fn verify_type_argument_constraints(
     model: &kestrel_semantic_model::SemanticModel,
     diagnostics: &mut kestrel_reporting::DiagnosticContext,
 ) -> bool {
-    use semantic_tree::symbol::SymbolId;
-
     let mut all_satisfied = true;
 
     for (param, arg) in type_params.iter().zip(type_args.iter()) {
