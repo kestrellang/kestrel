@@ -7,4 +7,4 @@ pub mod builder;
 pub mod builders;
 mod lowerer;
 
-pub use lowerer::{BuildFile, build};
+pub use lowerer::{BuildFile, SemanticModelBuilder, build};

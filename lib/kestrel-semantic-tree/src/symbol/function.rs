@@ -66,34 +66,6 @@ impl FunctionSymbol {
         visibility: VisibilityBehavior,
         is_static: bool,
         has_body: bool,
-        parameters: Vec<Parameter>,
-        return_type: Ty,
-        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
-    ) -> Self {
-        Self::with_generics(
-            name,
-            span,
-            visibility,
-            is_static,
-            has_body,
-            parameters,
-            return_type,
-            parent,
-        )
-    }
-
-    /// Create a new generic FunctionSymbol with type parameters and where clause
-    ///
-    /// NOTE: CallableBehavior and GenericsBehavior are NOT added here. They will be
-    /// added during the bind phase when types are resolved.
-    pub fn with_generics(
-        name: Name,
-        span: Span,
-        visibility: VisibilityBehavior,
-        is_static: bool,
-        has_body: bool,
-        _parameters: Vec<Parameter>,
-        _return_type: Ty,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
         // Create the function data behavior

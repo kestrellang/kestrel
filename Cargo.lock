@@ -384,7 +384,6 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
- "kestrel-semantic-tree-builder",
  "kestrel-span",
  "kestrel-syntax-tree",
  "semantic-tree",

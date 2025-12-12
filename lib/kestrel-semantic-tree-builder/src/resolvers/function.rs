@@ -22,8 +22,8 @@ use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type
 use crate::syntax::helpers::get_file_id_for_symbol;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
-    extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility, find_child,
-    get_node_span, get_visibility_span,
+    extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility,
+    find_child, get_node_span, get_visibility_span,
 };
 
 /// Resolver for function declarations
@@ -68,24 +68,16 @@ impl Resolver for FunctionResolver {
             .children()
             .any(|child| child.kind() == SyntaxKind::FunctionBody);
 
-        // Extract parameters
-        let parameters = extract_parameters(syntax, source);
-
-        // Extract return type
-        let return_type = extract_return_type(syntax, source);
-
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
         // Create the function symbol (GenericsBehavior is added during BIND)
-        let function_symbol = FunctionSymbol::with_generics(
+        let function_symbol = FunctionSymbol::new(
             name,
             full_span,
             visibility_behavior,
             is_static,
             has_body,
-            parameters,
-            return_type,
             parent.cloned(),
         );
         let function_arc = Arc::new(function_symbol);
@@ -675,8 +667,6 @@ fn resolve_function_body(
         temp_vis,
         true,
         true,
-        vec![],
-        kestrel_semantic_tree::ty::Ty::unit(Span::from(0..0)),
         None,
     ));
 
@@ -748,86 +738,6 @@ fn resolve_function_body(
     // Create and attach ExecutableBehavior
     let executable = ExecutableBehavior::new(code_block);
     symbol.metadata().add_behavior(executable);
-}
-
-/// Extract parameters from a FunctionDeclaration syntax node
-fn extract_parameters(syntax: &SyntaxNode, source: &str) -> Vec<Parameter> {
-    // Find the ParameterList node
-    let param_list = match find_child(syntax, SyntaxKind::ParameterList) {
-        Some(node) => node,
-        None => return Vec::new(),
-    };
-
-    // Extract each Parameter node
-    param_list
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| extract_single_parameter(&param_node, source))
-        .collect()
-}
-
-/// Extract a single parameter from a Parameter syntax node
-///
-/// Parameter structure:
-/// - Parameter
-///   - Name (label, optional - if there are 2 Name nodes, first is label)
-///   - Name (bind_name)
-///   - Colon
-///   - Ty
-fn extract_single_parameter(param_node: &SyntaxNode, source: &str) -> Option<Parameter> {
-    // Collect all Name nodes
-    let name_nodes: Vec<SyntaxNode> = param_node
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::Name)
-        .collect();
-
-    if name_nodes.is_empty() {
-        return None;
-    }
-
-    // Extract name strings and spans
-    let (label, bind_name) = if name_nodes.len() >= 2 {
-        // Two names: first is label, second is bind_name
-        let label_str = extract_identifier_from_name(&name_nodes[0])?;
-        let label_span = get_node_span(&name_nodes[0], source);
-        let label = Spanned::new(label_str, label_span);
-
-        let bind_str = extract_identifier_from_name(&name_nodes[1])?;
-        let bind_span = get_node_span(&name_nodes[1], source);
-        let bind_name = Spanned::new(bind_str, bind_span);
-
-        (Some(label), bind_name)
-    } else {
-        // One name: it's the bind_name
-        let bind_str = extract_identifier_from_name(&name_nodes[0])?;
-        let bind_span = get_node_span(&name_nodes[0], source);
-        let bind_name = Spanned::new(bind_str, bind_span);
-
-        (None, bind_name)
-    };
-
-    // Extract the type
-    let ty = extract_type_from_node(param_node, source);
-
-    Some(match label {
-        Some(l) => Parameter::with_label(l, bind_name, ty),
-        None => Parameter::new(bind_name, ty),
-    })
-}
-
-/// Extract return type from a FunctionDeclaration syntax node
-fn extract_return_type(syntax: &SyntaxNode, source: &str) -> Ty {
-    // Find the ReturnType node
-    if let Some(ret_node) = find_child(syntax, SyntaxKind::ReturnType) {
-        // Get the Ty child
-        if let Some(ty_node) = find_child(&ret_node, SyntaxKind::Ty) {
-            return extract_type_from_ty_node(&ty_node, source);
-        }
-    }
-
-    // Default to unit type if no return type specified
-    let fn_span = get_node_span(syntax, source);
-    Ty::unit(Span::from(fn_span.end..fn_span.end))
 }
 
 /// Resolve parameters from a FunctionDeclaration syntax node during bind phase

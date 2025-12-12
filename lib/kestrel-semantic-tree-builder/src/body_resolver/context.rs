@@ -286,8 +286,6 @@ fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> Loca
         visibility,
         true,
         true,
-        vec![],
-        return_type,
         None,
     ));
 

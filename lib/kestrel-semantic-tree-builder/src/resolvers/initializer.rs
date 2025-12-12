@@ -186,8 +186,6 @@ fn resolve_initializer_body(
         temp_vis,
         false,
         true,
-        vec![],
-        Ty::unit(Span::from(0..0)),
         None,
     ));
 
