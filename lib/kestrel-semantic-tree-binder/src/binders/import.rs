@@ -1,15 +1,12 @@
 use std::sync::Arc;
 
-use kestrel_parser::import::ImportDeclaration;
 use kestrel_semantic_model::{ResolveModulePath, SymbolFor};
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::import::{ImportDataBehavior, ImportItem, ImportSymbol};
-use kestrel_span::{Span, Spanned};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
+use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use kestrel_syntax_tree::utils::get_node_span;
 
 /// Binder for import declarations
 pub struct ImportBinder;
@@ -76,45 +73,4 @@ impl DeclarationBinder for ImportBinder {
     fn is_terminal(&self) -> bool {
         true // Don't walk children of import declarations
     }
-}
-
-/// Extract import items from import declaration
-fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<ImportItem> {
-    import_decl
-        .items()
-        .into_iter()
-        .filter_map(|item_node| {
-            // Get the name (first identifier) and its span
-            let (name, span) = item_node.children_with_tokens().find_map(|elem| {
-                elem.as_token()
-                    .filter(|t| t.kind() == SyntaxKind::Identifier)
-                    .map(|t| {
-                        let range = t.text_range();
-                        let span: Span = Span::from(range.start().into()..range.end().into());
-                        (t.text().to_string(), span)
-                    })
-            })?;
-
-            // Check for alias (identifier after "as" keyword)
-            let mut found_as = false;
-            let alias = item_node.children_with_tokens().find_map(|elem| {
-                if let Some(token) = elem.as_token() {
-                    if found_as && token.kind() == SyntaxKind::Identifier {
-                        return Some(token.text().to_string());
-                    }
-                    if token.kind() == SyntaxKind::As {
-                        found_as = true;
-                    }
-                }
-                None
-            });
-
-            Some(ImportItem {
-                name,
-                alias,
-                span,
-                target_id: None, // Filled during bind phase
-            })
-        })
-        .collect()
 }

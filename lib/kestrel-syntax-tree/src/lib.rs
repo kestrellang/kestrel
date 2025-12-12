@@ -639,6 +639,7 @@ pub type SyntaxNode = rowan::SyntaxNode<KestrelLanguage>;
 pub type SyntaxToken = rowan::SyntaxToken<KestrelLanguage>;
 pub type SyntaxElement = rowan::SyntaxElement<KestrelLanguage>;
 
+pub mod imports;
 pub mod utils;
 
 #[cfg(test)]

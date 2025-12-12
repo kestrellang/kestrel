@@ -1,0 +1,695 @@
+warning: use of deprecated function `codespan_reporting::term::emit`: Use `emit_to_write_style` instead or depending on the writer use `emit_to_io_write` or `emit_to_string`
+  --> lib/kestrel-reporting/src/lib.rs:81:19
+   |
+81 |             term::emit(&mut writer.lock(), &config, &self.files, diagnostic)?;
+   |                   ^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `codespan_reporting::term::emit`: Use `emit_to_write_style` instead or depending on the writer use `emit_to_io_write` or `emit_to_string`
+  --> lib/kestrel-reporting/src/lib.rs:95:19
+   |
+95 |             term::emit(writer, &config, &self.files, diagnostic)?;
+   |                   ^^^^
+
+warning: `kestrel-reporting` (lib) generated 2 warnings
+warning: method `apply_to_substitutions` is never used
+   --> lib/kestrel-semantic-tree/src/ty/substitutions.rs:170:8
+    |
+ 17 | impl Substitutions {
+    | ------------------ method in this implementation
+...
+170 |     fn apply_to_substitutions(&self, other: &Substitutions) -> Substitutions {
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `inline_stmt`
+   --> lib/kestrel-parser/src/expr/mod.rs:841:13
+    |
+841 |         let inline_stmt = inline_var_decl.clone().or(inline_expr_stmt.clone());
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_inline_stmt`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: type `TyVariant` is more private than the item `ParameterData::ty`
+   --> lib/kestrel-parser/src/common/data.rs:33:5
+    |
+ 33 |     pub ty: TyVariant,
+    |     ^^^^^^^^^^^^^^^^^ field `ParameterData::ty` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `TyVariant` is more private than the item `data::FunctionDeclarationData::return_type`
+   --> lib/kestrel-parser/src/common/data.rs:60:5
+    |
+ 60 |     pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `data::FunctionDeclarationData::return_type` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `data::FieldDeclarationData::ty`
+   --> lib/kestrel-parser/src/common/data.rs:74:5
+    |
+ 74 |     pub ty: TyVariant,
+    |     ^^^^^^^^^^^^^^^^^ field `data::FieldDeclarationData::ty` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `data::ConformanceListData::conformances`
+   --> lib/kestrel-parser/src/common/data.rs:97:5
+    |
+ 97 |     pub conformances: Vec<TyVariant>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `data::ConformanceListData::conformances` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `data::TypeAliasDeclarationData::aliased`
+   --> lib/kestrel-parser/src/common/data.rs:157:5
+    |
+157 |     pub aliased: Option<(Span, TyVariant)>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `data::TypeAliasDeclarationData::aliased` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `data::AssociatedTypeTargetData::Qualified::protocol_path`
+   --> lib/kestrel-parser/src/common/data.rs:169:9
+    |
+169 |         protocol_path: TyVariant,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^ field `data::AssociatedTypeTargetData::Qualified::protocol_path` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `data::AssociatedTypeBoundsData::bounds`
+   --> lib/kestrel-parser/src/common/data.rs:182:5
+    |
+182 |     pub bounds: Vec<TyVariant>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ field `data::AssociatedTypeBoundsData::bounds` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `data::ExtensionDeclarationData::target_type`
+   --> lib/kestrel-parser/src/common/data.rs:202:5
+    |
+202 |     pub target_type: TyVariant,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ field `data::ExtensionDeclarationData::target_type` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `emit_return_type`
+   --> lib/kestrel-parser/src/common/emitters.rs:189:1
+    |
+189 | pub fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: crate::ty::TyVariant) {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ function `emit_return_type` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `TypeArgsData::args`
+   --> lib/kestrel-parser/src/expr/mod.rs:174:5
+    |
+174 |     pub args: Vec<TyVariant>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^ field `TypeArgsData::args` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `VariableDeclarationData::type_annotation`
+   --> lib/kestrel-parser/src/stmt/mod.rs:63:5
+    |
+ 63 |     pub type_annotation: Option<(Span, TyVariant)>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `VariableDeclarationData::type_annotation` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `TypeEqualityData::right`
+   --> lib/kestrel-parser/src/type_param/mod.rs:57:5
+    |
+ 57 |     pub right: crate::ty::TyVariant,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `TypeEqualityData::right` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `conformance_list_parser`
+   --> lib/kestrel-parser/src/type_param/mod.rs:248:1
+    |
+248 | / pub fn conformance_list_parser()
+249 | | -> impl Parser<Token, (Span, Vec<crate::ty::TyVariant>), Error = Simple<Token>> + Clone {
+    | |_______________________________________________________________________________________^ function `conformance_list_parser` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `TyVariant` is more private than the item `emit_conformance_list`
+   --> lib/kestrel-parser/src/type_param/mod.rs:336:1
+    |
+336 | / pub fn emit_conformance_list(
+337 | |     sink: &mut EventSink,
+338 | |     colon_span: Span,
+339 | |     conformances: &[crate::ty::TyVariant],
+340 | | ) {
+    | |_^ function `emit_conformance_list` is reachable at visibility `pub`
+    |
+note: but type `TyVariant` is only usable at visibility `pub(crate)`
+   --> lib/kestrel-parser/src/ty/mod.rs:279:1
+    |
+279 | pub(crate) enum TyVariant {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `kestrel-semantic-tree` (lib) generated 1 warning
+warning: `kestrel-parser` (lib) generated 15 warnings (run `cargo fix --lib -p kestrel-parser` to apply 1 suggestion)
+warning: unused import: `HashSet`
+ --> lib/kestrel-semantic-analyzers/src/analyzers/conformance/mod.rs:1:33
+  |
+1 | use std::collections::{HashMap, HashSet};
+  |                                 ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> lib/kestrel-semantic-analyzers/src/analyzers/initializer_verification/mod.rs:391:17
+    |
+391 |             let mut body_state = state.clone();
+    |                 ----^^^^^^^^^^
+    |                 |
+    |                 help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `symbol` is never read
+  --> lib/kestrel-semantic-analyzers/src/analyzers/constraint_cycles/mod.rs:24:5
+   |
+23 | struct CollectedGeneric {
+   |        ---------------- field in this struct
+24 |     symbol: Arc<dyn Symbol<KestrelLanguage>>,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `extension_span` is never read
+  --> lib/kestrel-semantic-analyzers/src/analyzers/extension_conflict/mod.rs:26:5
+   |
+24 | struct CollectedExtension {
+   |        ------------------ field in this struct
+25 |     extension_id: SymbolId,
+26 |     extension_span: Span,
+   |     ^^^^^^^^^^^^^^
+
+warning: field `if_span` is never read
+  --> lib/kestrel-semantic-analyzers/src/analyzers/type_check/diagnostics.rs:52:9
+   |
+51 | pub struct BranchTypeMismatchError {
+   |            ----------------------- field in this struct
+52 |     pub if_span: Span,
+   |         ^^^^^^^
+
+warning: field `array_span` is never read
+  --> lib/kestrel-semantic-analyzers/src/analyzers/type_check/diagnostics.rs:79:9
+   |
+78 | pub struct ArrayElementTypeMismatchError {
+   |            ----------------------------- field in this struct
+79 |     pub array_span: Span,
+   |         ^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::visibility::VisibilityBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/field.rs:5:5
+  |
+5 | use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Spanned`
+  --> lib/kestrel-semantic-tree-binder/src/binders/field.rs:10:26
+   |
+10 | use kestrel_span::{Span, Spanned};
+   |                          ^^^^^^^
+
+warning: unused imports: `Visibility` and `find_visibility_scope`
+  --> lib/kestrel-semantic-tree-binder/src/binders/field.rs:16:51
+   |
+16 | use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+   |                                                   ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_name`, `extract_visibility`, `find_child`, `get_node_span`, and `get_visibility_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/field.rs:18:5
+   |
+18 |     extract_name, extract_visibility, find_child, get_node_span, get_visibility_span,
+   |     ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::visibility::VisibilityBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:6:5
+  |
+6 | use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `FunctionSymbol`
+ --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:8:47
+  |
+8 | use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
+  |                                               ^^^^^^^^^^^^^^
+
+warning: unused imports: `add_type_params_as_children` and `extract_type_parameters`
+  --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:17:38
+   |
+17 | use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_type_from_node` and `extract_type_from_ty_node`
+  --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:20:24
+   |
+20 |     TypeSyntaxContext, extract_type_from_node, extract_type_from_ty_node, resolve_type_from_ty_node,
+   |                        ^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Visibility` and `find_visibility_scope`
+  --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:22:51
+   |
+22 | use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+   |                                                   ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_name`, `extract_visibility`, and `get_visibility_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:24:35
+   |
+24 |     extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility,
+   |                                   ^^^^^^^^^^^^                         ^^^^^^^^^^^^^^^^^^
+25 |     find_child, get_node_span, get_visibility_span,
+   |                                ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ImportSymbol`
+ --> lib/kestrel-semantic-tree-binder/src/binders/import.rs:6:77
+  |
+6 | use kestrel_semantic_tree::symbol::import::{ImportDataBehavior, ImportItem, ImportSymbol};
+  |                                                                             ^^^^^^^^^^^^
+
+warning: unused import: `Spanned`
+ --> lib/kestrel-semantic-tree-binder/src/binders/import.rs:7:26
+  |
+7 | use kestrel_span::{Span, Spanned};
+  |                          ^^^^^^^
+
+warning: unused import: `kestrel_syntax_tree::utils::get_node_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/import.rs:12:5
+   |
+12 | use kestrel_syntax_tree::utils::get_node_span;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::visibility::VisibilityBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/initializer.rs:5:5
+  |
+5 | use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::symbol::initializer::InitializerSymbol`
+ --> lib/kestrel-semantic-tree-binder/src/binders/initializer.rs:8:5
+  |
+8 | use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Visibility` and `find_visibility_scope`
+  --> lib/kestrel-semantic-tree-binder/src/binders/initializer.rs:17:51
+   |
+17 | use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+   |                                                   ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_visibility` and `get_visibility_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/initializer.rs:19:35
+   |
+19 |     extract_identifier_from_name, extract_visibility, find_child, get_node_span,
+   |                                   ^^^^^^^^^^^^^^^^^^
+20 |     get_visibility_span,
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `SymbolFor`
+ --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:3:47
+  |
+3 | use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
+  |                                               ^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::typed::TypedBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:7:5
+  |
+7 | use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::visibility::VisibilityBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:8:5
+  |
+8 | use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Spanned`
+  --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:14:26
+   |
+14 | use kestrel_span::{Span, Spanned};
+   |                          ^^^^^^^
+
+warning: unused imports: `add_type_params_as_children` and `extract_type_parameters`
+  --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:19:38
+   |
+19 | use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Visibility` and `find_visibility_scope`
+  --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:23:51
+   |
+23 | use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+   |                                                   ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_name`, `extract_visibility`, and `get_visibility_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/protocol.rs:25:5
+   |
+25 |     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
+   |     ^^^^^^^^^^^^                         ^^^^^^^^^^^^^^^^^^
+26 |     get_visibility_span,
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::language::KestrelLanguage`
+ --> lib/kestrel-semantic-tree-binder/src/binders/protocol_flattener.rs:6:5
+  |
+6 | use kestrel_semantic_tree::language::KestrelLanguage;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::typed::TypedBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:5:5
+  |
+5 | use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::visibility::VisibilityBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:6:5
+  |
+6 | use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::symbol::r#struct::StructSymbol`
+ --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:9:5
+  |
+9 | use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Spanned`
+  --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:12:26
+   |
+12 | use kestrel_span::{Span, Spanned};
+   |                          ^^^^^^^
+
+warning: unused imports: `add_type_params_as_children` and `extract_type_parameters`
+  --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:16:38
+   |
+16 | use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Visibility` and `find_visibility_scope`
+  --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:20:51
+   |
+20 | use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+   |                                                   ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_name`, `extract_visibility`, and `get_visibility_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/struct.rs:22:5
+   |
+22 |     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
+   |     ^^^^^^^^^^^^                         ^^^^^^^^^^^^^^^^^^
+23 |     get_visibility_span,
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::behavior::visibility::VisibilityBehavior`
+ --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:7:5
+  |
+7 | use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AssociatedTypeSymbol`
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:10:35
+   |
+10 |     AssociatedTypeBoundsBehavior, AssociatedTypeSymbol,
+   |                                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `TypeAliasSymbol`
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:13:49
+   |
+13 | use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
+   |                                                 ^^^^^^^^^^^^^^^
+
+warning: unused import: `Spanned`
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:16:26
+   |
+16 | use kestrel_span::{Span, Spanned};
+   |                          ^^^^^^^
+
+warning: unused imports: `add_type_params_as_children` and `extract_type_parameters`
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:20:38
+   |
+20 | use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Visibility` and `find_visibility_scope`
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:27:51
+   |
+27 | use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+   |                                                   ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `extract_name`, `extract_visibility`, and `get_visibility_span`
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:29:5
+   |
+29 |     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
+   |     ^^^^^^^^^^^^                         ^^^^^^^^^^^^^^^^^^
+30 |     get_visibility_span,
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `protocol_method_linker::link_protocol_methods_for_struct`
+  --> lib/kestrel-semantic-tree-binder/src/binders/mod.rs:23:9
+   |
+23 | pub use protocol_method_linker::link_protocol_methods_for_struct;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ExtensionsFor`
+ --> lib/kestrel-semantic-tree-binder/src/body_resolver/calls.rs:9:30
+  |
+9 | use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SemanticModel, SymbolFor};
+  |                              ^^^^^^^^^^^^^
+
+warning: unused import: `semantic_tree::symbol::SymbolId`
+   --> lib/kestrel-semantic-tree-binder/src/body_resolver/utils.rs:788:9
+    |
+788 |     use semantic_tree::symbol::SymbolId;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `return_type`
+   --> lib/kestrel-semantic-tree-binder/src/body_resolver/context.rs:276:9
+    |
+276 |     let return_type = Ty::unit(Span::from(0..0));
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_return_type`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `extract_import_items` is never used
+  --> lib/kestrel-semantic-tree-binder/src/binders/import.rs:82:4
+   |
+82 | fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<ImportItem> {
+   |    ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `link_protocol_methods_for_struct` is never used
+  --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:42:8
+   |
+42 | pub fn link_protocol_methods_for_struct(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `resolve_protocol_type` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:183:4
+    |
+183 | fn resolve_protocol_type(
+    |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_associated_type_bindings` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:227:4
+    |
+227 | fn collect_associated_type_bindings(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_methods_from_symbol` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:261:4
+    |
+261 | fn collect_methods_from_symbol(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_all_protocol_methods` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:275:4
+    |
+275 | fn collect_all_protocol_methods(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `collect_protocol_methods_recursive` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:291:4
+    |
+291 | fn collect_protocol_methods_recursive(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `signatures_match` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:324:4
+    |
+324 | fn signatures_match(sig1: &CallableSignature, sig2: &CallableSignature) -> bool {
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `receivers_match` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:329:4
+    |
+329 | fn receivers_match(receiver1: &Option<ReceiverKind>, receiver2: &Option<ReceiverKind>) -> bool {
+    |    ^^^^^^^^^^^^^^^
+
+warning: function `receiver_kind_to_string` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:334:4
+    |
+334 | fn receiver_kind_to_string(receiver: &Option<ReceiverKind>) -> String {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `substitute_signature` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:345:4
+    |
+345 | fn substitute_signature(
+    |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `substitute_associated_types` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/protocol_method_linker.rs:362:4
+    |
+362 | fn substitute_associated_types(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_type_alias_name` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:185:4
+    |
+185 | fn extract_type_alias_name(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_name_from_node` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs:210:4
+    |
+210 | fn extract_name_from_node(name_node: &SyntaxNode) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_type_parameters` is never used
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:20:8
+   |
+20 | pub fn extract_type_parameters(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `add_type_params_as_children` is never used
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:49:8
+   |
+49 | pub fn add_type_params_as_children(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_type_parameter` is never used
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:65:4
+   |
+65 | fn parse_type_parameter(
+   |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_type_param_name` is never used
+  --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:88:4
+   |
+88 | fn extract_type_param_name(
+   |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_default_type` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:122:4
+    |
+122 | fn extract_default_type(syntax: &SyntaxNode, source: &str) -> Option<Ty> {
+    |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_ty_from_node` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:135:4
+    |
+135 | fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str) -> Option<Ty> {
+    |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_where_clause` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:170:8
+    |
+170 | pub fn extract_where_clause(
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_type_bound` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:221:4
+    |
+221 | fn parse_type_bound(
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `parse_type_equality` is never used
+   --> lib/kestrel-semantic-tree-binder/src/binders/type_parameter.rs:284:4
+    |
+284 | fn parse_type_equality(syntax: &SyntaxNode, source: &str) -> Option<Constraint> {
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: field `label_span` is never read
+  --> lib/kestrel-semantic-tree-binder/src/body_resolver/context.rs:34:9
+   |
+28 | pub struct LoopInfo {
+   |            -------- field in this struct
+...
+34 |     pub label_span: Option<Span>,
+   |         ^^^^^^^^^^
+   |
+   = note: `LoopInfo` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `find_member_in_extensions` is never used
+    --> lib/kestrel-semantic-tree-binder/src/body_resolver/members.rs:1229:4
+     |
+1229 | fn find_member_in_extensions(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `kestrel-semantic-analyzers` (lib) generated 6 warnings (run `cargo fix --lib -p kestrel-semantic-analyzers` to apply 2 suggestions)
+warning: `kestrel-semantic-tree-binder` (lib) generated 68 warnings (run `cargo fix --lib -p kestrel-semantic-tree-binder` to apply 43 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s

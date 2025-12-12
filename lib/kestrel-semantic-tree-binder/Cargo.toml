@@ -10,7 +10,6 @@ kestrel-semantic-model = { path = "../kestrel-semantic-model" }
 kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }
-kestrel-parser = { path = "../kestrel-parser" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = { workspace = true }
 parking_lot = { workspace = true }

@@ -333,7 +333,6 @@ version = "0.6.0"
 dependencies = [
  "downcast-rs",
  "kestrel-lexer",
- "kestrel-parser",
  "kestrel-prelude",
  "kestrel-reporting",
  "kestrel-semantic-model",
@@ -348,7 +347,6 @@ dependencies = [
 name = "kestrel-semantic-tree-builder"
 version = "0.6.0"
 dependencies = [
- "kestrel-parser",
  "kestrel-reporting",
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
