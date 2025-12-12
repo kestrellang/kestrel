@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{SemanticModel, SymbolFor, ExtensionsFor};
+use kestrel_semantic_model::{SemanticModel, SymbolFor, ExtensionsFor, IsVisibleFrom};
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -30,7 +30,6 @@ use crate::diagnostics::{
     TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
     UnconstrainedTypeParameterMemberError,
 };
-use crate::resolution::visibility::is_visible_from;
 use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
@@ -779,20 +778,21 @@ fn resolve_implicit_init(
         .collect();
 
     // Check visibility of all fields
-    let context_sym = ctx.model.query(SymbolFor { id: ctx.function_id });
     for field in &fields {
-        if let Some(ref ctx_sym) = context_sym {
-            if !is_visible_from(field, ctx_sym) {
-                // Field is not visible - cannot use implicit init
-                let error = FieldNotVisibleForInitError {
-                    span: span.clone(),
-                    struct_name: struct_name.clone(),
-                    field_name: field.metadata().name().value.clone(),
-                    field_visibility: "private".to_string(), // TODO: Get actual visibility
-                };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                return Expression::error(span);
-            }
+        let field_id = field.metadata().id();
+        if !ctx.model.query(IsVisibleFrom {
+            target: field_id,
+            context: ctx.function_id,
+        }) {
+            // Field is not visible - cannot use implicit init
+            let error = FieldNotVisibleForInitError {
+                span: span.clone(),
+                struct_name: struct_name.clone(),
+                field_name: field.metadata().name().value.clone(),
+                field_visibility: "private".to_string(), // TODO: Get actual visibility
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Expression::error(span);
         }
     }
 
@@ -862,11 +862,12 @@ pub fn resolve_method_call(
             if let Some(callable) = get_callable_behavior(&symbol) {
                 if matches_signature(&callable, arguments.len(), arg_labels) {
                     // Check visibility
-                    if let Some(context_sym) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
-                        if !is_visible_from(&symbol, &context_sym) {
-                            // TODO: Report error: method not visible
-                            continue;
-                        }
+                    if !ctx.model.query(IsVisibleFrom {
+                        target: candidate_id,
+                        context: ctx.function_id,
+                    }) {
+                        // TODO: Report error: method not visible
+                        continue;
                     }
 
                     // Get return type, substituting Self with receiver type if needed

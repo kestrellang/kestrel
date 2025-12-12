@@ -35,10 +35,10 @@ public class Vector3D {
             println!("  Source length: {} bytes", file.source().len());
         }
 
-        // Access the unified semantic tree
-        if let Some(semantic_tree) = compilation.semantic_tree() {
-            println!("\n  Semantic tree: {} top-level symbols",
-                     semantic_tree.root().metadata().children().len());
+        // Access the unified semantic model
+        if let Some(semantic_model) = compilation.semantic_model() {
+            println!("\n  Semantic model: {} top-level symbols",
+                     semantic_model.root().metadata().children().len());
         }
     }
 

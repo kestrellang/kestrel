@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use kestrel_prelude::primitives;
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_model::{SemanticModel, ResolveTypePath, TypePathResolution};
+use kestrel_semantic_model::{ResolveTypePath, SemanticModel, TypePathResolution};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
@@ -130,7 +130,8 @@ impl<'a> TypeResolver<'a> {
             .children()
             .find(|child| child.kind() == SyntaxKind::TyArray)
         {
-            if let Some(element_ty_node) = array_node.children().find(|c| c.kind() == SyntaxKind::Ty)
+            if let Some(element_ty_node) =
+                array_node.children().find(|c| c.kind() == SyntaxKind::Ty)
             {
                 let element_ty = self.resolve(&element_ty_node);
                 return Ty::array(element_ty, ty_span);
@@ -159,12 +160,7 @@ impl<'a> TypeResolver<'a> {
     }
 
     /// Apply type arguments to a generic type
-    pub fn apply_type_arguments(
-        &mut self,
-        resolved_ty: &Ty,
-        type_args: Vec<Ty>,
-        span: Span,
-    ) -> Ty {
+    pub fn apply_type_arguments(&mut self, resolved_ty: &Ty, type_args: Vec<Ty>, span: Span) -> Ty {
         match resolved_ty.kind() {
             TyKind::Struct { symbol, .. } => {
                 let type_params = symbol.type_parameters();
@@ -214,11 +210,10 @@ impl<'a> TypeResolver<'a> {
                     TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
                     _ => "type".to_string(),
                 };
-                self.diagnostics.throw(
-                    NotGenericError {
-                        span: span.clone(),
-                        type_name,
-                    });
+                self.diagnostics.throw(NotGenericError {
+                    span: span.clone(),
+                    type_name,
+                });
                 Ty::error(span)
             }
         }
@@ -257,30 +252,29 @@ impl<'a> TypeResolver<'a> {
         }) {
             TypePathResolution::Resolved(resolved_ty) => resolved_ty,
             TypePathResolution::NotFound { segment, .. } => {
-                self.diagnostics.throw(
-                    UnresolvedTypeError {
-                        span: ty_span.clone(),
-                        type_name: segment,
-                    });
+                self.diagnostics.throw(UnresolvedTypeError {
+                    span: ty_span.clone(),
+                    type_name: segment,
+                });
                 Ty::error(ty_span)
             }
             TypePathResolution::Ambiguous {
-                segment, candidates, ..
+                segment,
+                candidates,
+                ..
             } => {
-                self.diagnostics.throw(
-                    AmbiguousTypeError {
-                        span: ty_span.clone(),
-                        type_name: segment,
-                        candidate_count: candidates.len(),
-                    });
+                self.diagnostics.throw(AmbiguousTypeError {
+                    span: ty_span.clone(),
+                    type_name: segment,
+                    candidate_count: candidates.len(),
+                });
                 Ty::error(ty_span)
             }
             TypePathResolution::NotAType { .. } => {
-                self.diagnostics.throw(
-                    NotATypeError {
-                        span: ty_span.clone(),
-                        name: segments.join("."),
-                    });
+                self.diagnostics.throw(NotATypeError {
+                    span: ty_span.clone(),
+                    name: segments.join("."),
+                });
                 Ty::error(ty_span)
             }
         }
@@ -320,33 +314,30 @@ impl<'a> TypeResolver<'a> {
 
         // Non-generic type with type args
         if max_args == 0 {
-            self.diagnostics.throw(
-                NotGenericError {
-                    span: span.clone(),
-                    type_name: type_name.to_string(),
-                });
+            self.diagnostics.throw(NotGenericError {
+                span: span.clone(),
+                type_name: type_name.to_string(),
+            });
             return Ty::error(span);
         }
 
         // Check arity with defaults
         if actual < min_args {
-            self.diagnostics.throw(
-                TooFewTypeArgumentsError {
-                    span: span.clone(),
-                    type_name: type_name.to_string(),
-                    min_expected: min_args,
-                    got: actual,
-                });
+            self.diagnostics.throw(TooFewTypeArgumentsError {
+                span: span.clone(),
+                type_name: type_name.to_string(),
+                min_expected: min_args,
+                got: actual,
+            });
             return Ty::error(span);
         }
         if actual > max_args {
-            self.diagnostics.throw(
-                TooManyTypeArgumentsError {
-                    span: span.clone(),
-                    type_name: type_name.to_string(),
-                    max_expected: max_args,
-                    got: actual,
-                });
+            self.diagnostics.throw(TooManyTypeArgumentsError {
+                span: span.clone(),
+                type_name: type_name.to_string(),
+                max_expected: max_args,
+                got: actual,
+            });
             return Ty::error(span);
         }
 
@@ -479,19 +470,4 @@ pub type TypeSyntaxContext<'a> = TypeResolver<'a>;
 /// This is provided for backwards compatibility. New code should use `TypeResolver::resolve()` directly.
 pub fn resolve_type_from_ty_node(ty_node: &SyntaxNode, ctx: &mut TypeSyntaxContext) -> Ty {
     ctx.resolve(ty_node)
-}
-
-/// Resolve type from a node that contains a Ty child (legacy function)
-pub fn resolve_type_from_node(node: &SyntaxNode, ctx: &mut TypeSyntaxContext) -> Ty {
-    ctx.resolve_from_parent(node)
-}
-
-/// Apply type arguments to a resolved type (legacy function)
-pub fn apply_type_arguments(
-    resolved_ty: &Ty,
-    type_args: Vec<Ty>,
-    span: Span,
-    ctx: &mut TypeSyntaxContext,
-) -> Ty {
-    ctx.apply_type_arguments(resolved_ty, type_args, span)
 }

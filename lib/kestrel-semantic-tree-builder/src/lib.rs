@@ -12,7 +12,7 @@
 //!
 //! - `builder`: Tree construction from syntax (`SemanticTreeBuilder`)
 //! - `database`: Re-exports from `kestrel-semantic-model` for convenience
-//! - `resolution`: Binding and type resolution (`SemanticBinder`, `TypeResolver`, `VisibilityChecker`)
+//! - `resolution`: Binding and type resolution (`SemanticBinder`, `TypeResolver`)
 //! - `syntax`: Syntax tree utilities
 //! - `diagnostics`: Error types for semantic analysis
 //! - `validation`: Validation passes
@@ -53,6 +53,6 @@ pub use builder::SemanticTreeBuilder;
 pub use database::SymbolRegistry;
 pub use debug::{format_type, print_semantic_tree, print_symbol_table, print_semantic_model, print_model_symbols};
 pub use kestrel_semantic_model::SemanticModel;
-pub use resolution::{LocalScope, SemanticBinder, TypeResolver, VisibilityChecker};
+pub use resolution::{LocalScope, SemanticBinder, TypeResolver};
 pub use resolver::{BindingContext, Resolver, ResolverRegistry};
 pub use tree::SemanticTree;

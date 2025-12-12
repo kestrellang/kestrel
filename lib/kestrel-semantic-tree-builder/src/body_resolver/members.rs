@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{SymbolFor, ExtensionsFor};
+use kestrel_semantic_model::{SymbolFor, ExtensionsFor, IsVisibleFrom};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -27,7 +27,6 @@ use crate::diagnostics::{
     NoSuchMethodError, PrimitiveMethodNotCallableError, UnconstrainedTypeParameterMemberError,
     UnsupportedGenericProtocolBoundError,
 };
-use crate::resolution::visibility::is_visible_from;
 
 use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
@@ -168,28 +167,29 @@ pub fn resolve_member_access(
     };
 
     // 3. Check visibility
-    let context_symbol = ctx.model.query(SymbolFor { id: ctx.function_id });
-    if let Some(ref context_sym) = context_symbol {
-        if !is_visible_from(&member, context_sym) {
-            use kestrel_semantic_tree::behavior::visibility::Visibility;
-            use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+    let member_id = member.metadata().id();
+    if !ctx.model.query(IsVisibleFrom {
+        target: member_id,
+        context: ctx.function_id,
+    }) {
+        use kestrel_semantic_tree::behavior::visibility::Visibility;
+        use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 
-            let visibility = member
-                .visibility_behavior()
-                .and_then(|v| v.visibility().cloned())
-                .unwrap_or(Visibility::Internal);
+        let visibility = member
+            .visibility_behavior()
+            .and_then(|v| v.visibility().cloned())
+            .unwrap_or(Visibility::Internal);
 
-            let error = MemberNotVisibleError {
-                member_span,
-                member_name: member_name.to_string(),
-                base_span,
-                base_type: format_type(base_ty),
-                visibility: visibility.to_string(),
-            };
-            ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic());
-            return Expression::error(full_span.clone());
-        }
+        let error = MemberNotVisibleError {
+            member_span,
+            member_name: member_name.to_string(),
+            base_span,
+            base_type: format_type(base_ty),
+            visibility: visibility.to_string(),
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span.clone());
     }
 
     // 4. Get MemberAccessBehavior and produce expression
@@ -507,11 +507,13 @@ pub fn resolve_member_call(
         if let Some(callable) = get_callable_behavior(method) {
             if matches_signature(&callable, arguments.len(), arg_labels) {
                 // Check visibility
-                if let Some(context_sym) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
-                    if !is_visible_from(method, &context_sym) {
-                        // TODO: Report error: method not visible
-                        continue;
-                    }
+                let method_id = method.metadata().id();
+                if !ctx.model.query(IsVisibleFrom {
+                    target: method_id,
+                    context: ctx.function_id,
+                }) {
+                    // TODO: Report error: method not visible
+                    continue;
                 }
 
                 let mut return_ty = callable.return_type().clone();
