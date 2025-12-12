@@ -12,11 +12,12 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
-    extract_identifier_from_name, extract_visibility, find_child, get_node_span, get_visibility_span,
+    extract_identifier_from_name, extract_visibility, find_child, get_node_span,
+    get_visibility_span,
 };
 
 /// Binder for initializer declarations
@@ -40,8 +41,7 @@ impl DeclarationBinder for InitializerBinder {
         let source = context.source_for_symbol(symbol);
 
         // Extract and resolve parameters from syntax
-        let resolved_params =
-            resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
 
         // Initializers always return Self (the struct type)
         // Get the parent struct to determine Self type
@@ -65,13 +65,7 @@ impl DeclarationBinder for InitializerBinder {
 
         // Resolve initializer body
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
-            resolve_initializer_body(
-                symbol,
-                &body_node,
-                &resolved_params,
-                context,
-                &source,
-            );
+            resolve_initializer_body(symbol, &body_node, &resolved_params, context, &source);
         }
     }
 }
@@ -213,9 +207,7 @@ fn resolve_parameters_from_syntax(
     param_list
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| {
-            resolve_single_parameter(&param_node, source, context_id, ctx)
-        })
+        .filter_map(|param_node| resolve_single_parameter(&param_node, source, context_id, ctx))
         .collect()
 }
 

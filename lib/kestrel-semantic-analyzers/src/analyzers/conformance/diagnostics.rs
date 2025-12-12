@@ -17,8 +17,10 @@ impl IntoDiagnostic for CircularProtocolInheritanceError {
                 "protocol '{}' has circular inheritance",
                 self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("circular inheritance detected")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("circular inheritance detected"),
+            ])
             .with_notes(vec![format!("inheritance cycle: {}", cycle_str)])
     }
 }
@@ -37,8 +39,10 @@ impl IntoDiagnostic for MissingProtocolMethodError {
                 "type '{}' does not implement method '{}' from protocol '{}'",
                 self.struct_name, self.method_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("missing method '{}'", self.method_name))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("missing method '{}'", self.method_name)),
+            ])
     }
 }
 
@@ -56,11 +60,10 @@ impl IntoDiagnostic for MissingAssociatedTypeError {
                 "type '{}' does not provide associated type '{}' from protocol '{}'",
                 self.struct_name, self.type_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
-                    "missing associated type '{}'",
-                    self.type_name
-                ))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("missing associated type '{}'", self.type_name)),
+            ])
     }
 }
 
@@ -79,11 +82,12 @@ impl IntoDiagnostic for WrongMethodReturnTypeError {
                 "method '{}' has wrong return type for protocol '{}'",
                 self.method_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "expected '{}', found '{}'",
                     self.expected_type, self.actual_type
-                ))])
+                )),
+            ])
     }
 }
 
@@ -98,11 +102,12 @@ impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type '{}' does not satisfy bound", self.bound_type))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "type '{}' does not conform to required protocol '{}'",
                     self.bound_type, self.required_protocol
-                ))])
+                )),
+            ])
             .with_notes(vec![format!(
                 "associated type '{}' requires conformance to '{}'",
                 self.type_name, self.required_protocol
@@ -125,11 +130,12 @@ impl IntoDiagnostic for ProtocolMethodReceiverMismatchError {
                 "method '{}' has incorrect receiver kind for protocol '{}'",
                 self.method_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "expected {} method, found {} method",
                     self.expected_receiver, self.actual_receiver
-                ))])
+                )),
+            ])
     }
 }
 
@@ -147,8 +153,10 @@ impl IntoDiagnostic for AmbiguousProtocolMethodError {
                 "method '{}' ambiguously implements protocol requirements",
                 self.method_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("ambiguous implementation")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("ambiguous implementation"),
+            ])
             .with_notes(vec![
                 format!(
                     "this method would satisfy requirements from protocols: '{}'",

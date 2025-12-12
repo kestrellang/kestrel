@@ -24,4 +24,3 @@ impl Builder for TerminalBuilder {
         true
     }
 }
-

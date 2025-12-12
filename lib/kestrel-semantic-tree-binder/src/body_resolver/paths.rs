@@ -528,12 +528,8 @@ fn extract_type_arguments_from_path(
 
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
-            let mut resolver = TypeResolver::new(
-                ctx.model,
-                ctx.diagnostics,
-                ctx.source,
-                ctx.function_id,
-            );
+            let mut resolver =
+                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.function_id);
             let ty = resolver.resolve(&child);
             type_args.push(ty);
         }

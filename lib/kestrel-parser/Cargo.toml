@@ -1,10 +1,10 @@
 [package]
 name = "kestrel-parser"
-version = "0.6.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-chumsky = "0.9"
+chumsky = { workspace = true }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

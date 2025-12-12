@@ -383,11 +383,14 @@ If exactly one function matches, select it. If zero or multiple match, error.
 
 ## Source Location
 
-- **Resolver:** `lib/kestrel-semantic-tree-builder/src/resolvers/function.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/builders/function.rs`
+- **Bind:** `lib/kestrel-semantic-tree-binder/src/binders/function.rs`
+- **Body resolution:** `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs`
 - **Symbol:** `lib/kestrel-semantic-tree/src/symbol/function.rs`
 - **Callable behavior:** `lib/kestrel-semantic-tree/src/behavior/callable.rs`
 - **Function data:** `lib/kestrel-semantic-tree/src/behavior/function_data.rs`
 - **Signature:** `lib/kestrel-semantic-tree/src/behavior/callable.rs` (`CallableSignature`)
-- **Validation:** `lib/kestrel-semantic-tree-builder/src/validation/function_body.rs`
-- **Protocol validation:** `lib/kestrel-semantic-tree-builder/src/validation/protocol_method.rs`
-- **Static validation:** `lib/kestrel-semantic-tree-builder/src/validation/static_context.rs`
+- **Duplicate signature diagnostic:** `lib/kestrel-semantic-tree-binder/src/diagnostics/declaration.rs`
+- **Validate:** `lib/kestrel-semantic-analyzers/src/analyzers/function_body/mod.rs`
+- **Protocol validation:** `lib/kestrel-semantic-analyzers/src/analyzers/protocol_method/mod.rs`
+- **Static validation:** `lib/kestrel-semantic-analyzers/src/analyzers/static_context/mod.rs`

@@ -11,8 +11,8 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_name, extract_visibility, find_child, get_node_span, get_visibility_span,

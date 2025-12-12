@@ -38,18 +38,25 @@ impl ExtensionDeclaration {
 
     /// Get the target type name from this declaration (simplified - just first identifier)
     pub fn target_type_name(&self) -> Option<String> {
-        self.syntax
-            .children()
-            .find(|child| child.kind() == SyntaxKind::TyPath || child.kind() == SyntaxKind::Ty)?
-            .descendants()
-            .filter_map(|elem| {
-                if elem.kind() == SyntaxKind::Identifier {
-                    Some(elem.text().to_string())
-                } else {
-                    None
-                }
-            })
-            .next()
+        let ty = self.syntax.children().find(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::Ty
+                    | SyntaxKind::TyUnit
+                    | SyntaxKind::TyNever
+                    | SyntaxKind::TyTuple
+                    | SyntaxKind::TyFunction
+                    | SyntaxKind::TyPath
+                    | SyntaxKind::TyArray
+                    | SyntaxKind::TyList
+                    | SyntaxKind::TyInferred
+            )
+        })?;
+
+        ty.descendants_with_tokens()
+            .filter_map(|elem| elem.into_token())
+            .find(|tok| tok.kind() == SyntaxKind::Identifier)
+            .map(|tok| tok.text().to_string())
     }
 
     /// Get child declaration items (functions, initializers)

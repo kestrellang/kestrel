@@ -12,6 +12,9 @@ Kestrel is a statically-typed language with:
 - Protocols for interface definitions
 - Structs for data types
 - Type aliases
+- Extensions for retroactive modeling
+- Generics (type parameters, where clauses)
+- Initializers
 
 ## Compilation Phases
 
@@ -22,25 +25,20 @@ Converts source text into tokens. See individual construct documentation for tok
 Converts tokens into a syntax tree. The parser uses error recovery to continue after syntax errors.
 
 ### Phase 3: Semantic Analysis (Build)
-Creates semantic symbols from syntax nodes:
-- Extracts declarations (structs, functions, etc.)
-- Creates symbol table entries
-- Stores unresolved type paths
+Lowering from syntax trees to an initial `SemanticModel`:
+- Creates symbol hierarchy (modules, structs, functions, etc.)
+- Stores syntax nodes and sources for later binding
 
 ### Phase 4: Semantic Analysis (Bind)
-Resolves references and validates constraints:
+Resolves references and establishes relationships on a `SemanticModel`:
 - Resolves type paths to concrete types
-- Validates imports
-- Detects circular type aliases
-- Checks duplicate signatures
+- Resolves conformances, extension targets, callable signatures, bodies
+- Emits bind-time diagnostics (e.g. type resolution failures, duplicate signatures)
 
 ### Phase 5: Validation
-Runs validation passes:
-1. `FunctionBodyPass` - Functions outside protocols need bodies
-2. `ProtocolMethodPass` - Protocol methods cannot have bodies
-3. `StaticContextPass` - Static modifier context validation
-4. `DuplicateSymbolPass` - Duplicate type/member detection
-5. `VisibilityConsistencyPass` - Public API consistency
+Runs analyzers over the bound model (post-bind):
+- Examples include: type alias cycle detection, duplicate symbols, visibility consistency,
+  protocol method rules, type checking, imports validation.
 
 ## Documentation Index
 
@@ -55,6 +53,9 @@ Runs validation passes:
 - [Structs](structs.md) - Struct declarations
 - [Protocols](protocols.md) - Protocol declarations
 - [Fields](fields.md) - Field declarations
+- [Extensions](extensions.md) - Extension declarations
+- [Initializers](initializers.md) - Initializer declarations
+- [Generics](generics.md) - Type parameters and where clauses
 
 ### Resolution & Visibility
 - [Visibility](visibility.md) - Access control system

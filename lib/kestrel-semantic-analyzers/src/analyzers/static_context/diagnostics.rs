@@ -23,7 +23,7 @@ impl IntoDiagnostic for StaticInWrongContextError {
         Diagnostic::error()
             .with_message(format!("'{}' cannot be static in this context", self.name))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message(context_msg)
+                Label::primary(self.span.file_id, self.span.range()).with_message(context_msg),
             ])
     }
 }

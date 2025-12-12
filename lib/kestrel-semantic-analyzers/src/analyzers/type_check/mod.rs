@@ -7,7 +7,7 @@ use kestrel_semantic_model::CallableParamTypesForCall;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::expr::{
-    compute_block_type, CallArgument, ElseBranch, ExprKind, Expression,
+    CallArgument, ElseBranch, ExprKind, Expression, compute_block_type,
 };
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::ty::{Ty, TyKind};

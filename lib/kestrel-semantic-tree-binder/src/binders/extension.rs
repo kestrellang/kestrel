@@ -17,9 +17,9 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolution::TypeResolver;
-use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::syntax::helpers::resolve_conformance_list;
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
@@ -419,13 +419,9 @@ fn resolve_extension_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_extension_type_bound(
-                &child,
-                source,
-                context_id,
-                ctx,
-                referenced_params,
-            ) {
+            if let Some(constraint) =
+                resolve_extension_type_bound(&child, source, context_id, ctx, referenced_params)
+            {
                 constraints.push(constraint);
             }
         }

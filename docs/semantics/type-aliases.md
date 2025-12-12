@@ -294,8 +294,10 @@ For all type aliases A:
 
 ## Source Location
 
-- **Resolver:** `lib/kestrel-semantic-tree-builder/src/resolvers/type_alias.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/builders/type_alias.rs`
+- **Bind:** `lib/kestrel-semantic-tree-binder/src/binders/type_alias.rs`
 - **Symbol:** `lib/kestrel-semantic-tree/src/symbol/type_alias.rs`
 - **Cycle detector:** `lib/semantic-tree/src/cycle.rs`
 - **Errors:** `lib/kestrel-semantic-tree/src/error.rs`
-- **Post-binding check:** `lib/kestrel-semantic-tree-builder/src/lib.rs` (`check_type_alias_cycles`)
+- **Resolve aliased type:** `lib/kestrel-semantic-model/src/queries/resolved_aliased_type.rs`
+- **Validate (cycles):** `lib/kestrel-semantic-analyzers/src/analyzers/type_alias_cycles/mod.rs`

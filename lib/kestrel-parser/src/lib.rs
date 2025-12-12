@@ -42,6 +42,7 @@
 //! use kestrel_parser::{module::parse_module_declaration, event::{EventSink, TreeBuilder}};
 //! use kestrel_parser::module::ModuleDeclaration;
 //! use kestrel_lexer::lex;
+//! use kestrel_span::Span;
 //!
 //! let source = "module A.B.C";
 //! let tokens: Vec<_> = lex(source, 0)

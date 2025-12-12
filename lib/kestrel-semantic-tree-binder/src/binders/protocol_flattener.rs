@@ -13,8 +13,8 @@ use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::cycle::{Cycle, CycleDetector};
 use semantic_tree::symbol::Symbol;
 
-use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
 use crate::declaration_binder::BindingContext;
+use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
 
 /// Flatten a protocol's inheritance hierarchy, collecting all methods and associated types.
 pub fn flatten_protocol(

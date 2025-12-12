@@ -28,11 +28,10 @@ impl IntoDiagnostic for CircularTypeAliasError {
             .collect();
         let cycle_display = cycle_names.join(" -> ");
 
-        let mut labels =
-            vec![
-                Label::primary(self.origin.name_span.file_id, self.origin.name_span.range())
-                    .with_message("cycle starts here"),
-            ];
+        let mut labels = vec![
+            Label::primary(self.origin.name_span.file_id, self.origin.name_span.range())
+                .with_message("cycle starts here"),
+        ];
 
         // Add secondary labels for each participant in the cycle
         for (i, participant) in self.cycle.iter().enumerate() {

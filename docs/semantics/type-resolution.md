@@ -441,7 +441,6 @@ well_typed(declaration) iff:
 
 ## Source Location
 
-- **Type resolver:** `lib/kestrel-semantic-tree-builder/src/type_resolver.rs`
-- **Path resolution:** `lib/kestrel-semantic-tree-builder/src/db.rs` (`resolve_type_path`)
-- **Type builder:** `lib/kestrel-semantic-tree-builder/src/type_builder.rs`
+- **Type resolver:** `lib/kestrel-semantic-tree-binder/src/resolution/type_resolver.rs`
+- **Path resolution:** `lib/kestrel-semantic-model/src/queries/resolve_type_path.rs`
 - **Type kinds:** `lib/kestrel-semantic-tree/src/ty/kind.rs`

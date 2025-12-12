@@ -414,7 +414,8 @@ path_resolves(p₁.p₂...pₙ, context) iff:
 
 ## Source Location
 
-- **Name resolution:** `lib/kestrel-semantic-tree-builder/src/db.rs` (`resolve_name`)
-- **Scope computation:** `lib/kestrel-semantic-tree-builder/src/db.rs` (`scope_for`)
-- **Path resolution:** `lib/kestrel-semantic-tree-builder/src/db.rs` (`resolve_type_path`)
-- **Visibility checking:** `lib/kestrel-semantic-tree-builder/src/path_resolver.rs`
+- **Name resolution:** `lib/kestrel-semantic-model/src/queries/resolve_name.rs`
+- **Scope computation:** `lib/kestrel-semantic-model/src/queries/scope_for.rs`
+- **Imports in scope:** `lib/kestrel-semantic-model/src/queries/imports_in_scope.rs`
+- **Value path resolution:** `lib/kestrel-semantic-model/src/queries/resolve_value_path.rs`
+- **Visibility checking:** `lib/kestrel-semantic-model/src/queries/is_visible_from.rs`

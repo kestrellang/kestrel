@@ -181,9 +181,7 @@ impl SemanticBinder {
 
                     let duplicate_spans: Vec<Span> = funcs[1..]
                         .iter()
-                        .map(|f| {
-                            f.metadata().declaration_span().clone()
-                        })
+                        .map(|f| f.metadata().declaration_span().clone())
                         .collect();
 
                     diagnostics.throw(DuplicateFunctionSignatureError {

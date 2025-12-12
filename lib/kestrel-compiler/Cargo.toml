@@ -1,7 +1,7 @@
 [package]
 name = "kestrel-compiler"
-version = "0.6.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 kestrel-lexer = { path = "../kestrel-lexer" }

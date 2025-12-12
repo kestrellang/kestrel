@@ -13,9 +13,9 @@ use kestrel_syntax_tree::utils::{
     extract_name, extract_visibility, find_child, get_node_span, get_visibility_span,
 };
 
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use crate::builder::Builder;
 use crate::builders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 
 /// Builder for protocol declarations.
 pub struct ProtocolBuilder;
@@ -57,7 +57,8 @@ impl Builder for ProtocolBuilder {
 
         let protocol_arc_dyn = protocol_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
-        let type_parameters = extract_type_parameters(syntax, source, Some(protocol_arc_dyn.clone()));
+        let type_parameters =
+            extract_type_parameters(syntax, source, Some(protocol_arc_dyn.clone()));
         add_type_params_as_children(&type_parameters, &protocol_arc_dyn);
 
         if let Some(parent) = parent {

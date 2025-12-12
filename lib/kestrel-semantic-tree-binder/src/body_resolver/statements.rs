@@ -161,12 +161,8 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
         .find(|c| c.kind() == SyntaxKind::Ty)
         .map(|ty_node| {
             // Resolve the type using the database
-            let mut resolver = TypeResolver::new(
-                ctx.model,
-                ctx.diagnostics,
-                ctx.source,
-                ctx.function_id,
-            );
+            let mut resolver =
+                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.function_id);
             resolver.resolve(&ty_node)
         })
 }

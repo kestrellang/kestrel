@@ -166,11 +166,11 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
 }
 
 fn run_program(file: &str, verbose: bool) -> ExitCode {
+    use kestrel_compiler::Compilation;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use kestrel_compiler::Compilation;
     use semantic_tree::symbol::Symbol;
 
     if verbose {

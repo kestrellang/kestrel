@@ -341,7 +341,9 @@ For specific import `import M.(x₁, x₂, ..., xₙ)`:
 
 ## Source Location
 
-- **Resolver:** `lib/kestrel-semantic-tree-builder/src/resolvers/import.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/builders/import.rs`
+- **Bind:** `lib/kestrel-semantic-tree-binder/src/binders/import.rs`
+- **Validate:** `lib/kestrel-semantic-analyzers/src/analyzers/imports/mod.rs`
 - **Errors:** `lib/kestrel-semantic-tree/src/error.rs`
 - **Symbol type:** `ImportSymbol` in `lib/kestrel-semantic-tree/src/symbol/import.rs`
 - **Behavior:** `ImportDataBehavior` in `lib/kestrel-semantic-tree/src/behavior/import_data.rs`

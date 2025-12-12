@@ -12,8 +12,8 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::diagnostics::{NotAProtocolContext, NotAProtocolError};
 use crate::declaration_binder::BindingContext;
+use crate::diagnostics::{NotAProtocolContext, NotAProtocolError};
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
@@ -58,9 +58,7 @@ pub fn find_ancestor_of_kind(
 }
 
 /// Get the source file name for a symbol by walking up to its SourceFile parent.
-pub fn get_source_file_name(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> Option<String> {
+pub fn get_source_file_name(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<String> {
     let mut current = symbol.clone();
     loop {
         if current.metadata().kind() == KestrelSymbolKind::SourceFile {

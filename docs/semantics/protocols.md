@@ -347,6 +347,8 @@ protocol Observer {
 
 ## Source Location
 
-- **Resolver:** `lib/kestrel-semantic-tree-builder/src/resolvers/protocol.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/builders/protocol.rs`
+- **Bind:** `lib/kestrel-semantic-tree-binder/src/binders/protocol.rs`
 - **Symbol:** `lib/kestrel-semantic-tree/src/symbol/protocol.rs`
-- **Validation:** `lib/kestrel-semantic-tree-builder/src/validation/protocol_method.rs`
+- **Validate (protocol method rules):** `lib/kestrel-semantic-analyzers/src/analyzers/protocol_method/mod.rs`
+- **Validate (conformances):** `lib/kestrel-semantic-analyzers/src/analyzers/conformance/mod.rs`

@@ -1,8 +1,8 @@
 [package]
 name = "semantic-tree"
-version = "0.6.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 kestrel-span = { path = "../kestrel-span" }
-downcast-rs = "2.0.2"
+downcast-rs = { workspace = true }

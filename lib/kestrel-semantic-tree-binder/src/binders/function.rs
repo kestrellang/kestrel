@@ -14,11 +14,11 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::resolution::type_resolver::{
     TypeSyntaxContext, extract_type_from_node, extract_type_from_ty_node, resolve_type_from_ty_node,
 };
-use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility,
@@ -52,12 +52,10 @@ impl DeclarationBinder for FunctionBinder {
         symbol.metadata().add_behavior(generics_behavior);
 
         // Now extract and resolve parameters from syntax (T.Item will work)
-        let resolved_params =
-            resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
 
         // Extract and resolve return type from syntax (T.Item will work)
-        let resolved_return =
-            resolve_return_type_from_syntax(syntax, &source, symbol_id, context);
+        let resolved_return = resolve_return_type_from_syntax(syntax, &source, symbol_id, context);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
@@ -76,13 +74,7 @@ impl DeclarationBinder for FunctionBinder {
 
         // Resolve function body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
-            resolve_function_body(
-                symbol,
-                &body_node,
-                &resolved_params,
-                context,
-                &source,
-            );
+            resolve_function_body(symbol, &body_node, &resolved_params, context, &source);
         }
     }
 }
@@ -139,14 +131,9 @@ fn resolve_where_clause(
     // These need to be processed first so that associated type resolution works
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(
-                &child,
-                source,
-                context_id,
-                ctx,
-                type_params,
-                &constraints,
-            ) {
+            if let Some(constraint) =
+                resolve_type_bound(&child, source, context_id, ctx, type_params, &constraints)
+            {
                 constraints.push(constraint);
             }
         }
@@ -405,11 +392,13 @@ fn resolve_type_equality(
                 resolved
             } else {
                 // Fall back to regular type resolution (for concrete types like Int)
-                let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+                let mut type_ctx =
+                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
                 resolve_type_from_ty_node(&ty_node, &mut type_ctx)
             }
         } else {
-            let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+            let mut type_ctx =
+                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
             resolve_type_from_ty_node(&ty_node, &mut type_ctx)
         }
     } else {
@@ -666,9 +655,7 @@ fn resolve_parameters_from_syntax(
     param_list
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| {
-            resolve_single_parameter(&param_node, source, context_id, ctx)
-        })
+        .filter_map(|param_node| resolve_single_parameter(&param_node, source, context_id, ctx))
         .collect()
 }
 

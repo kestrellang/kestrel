@@ -17,13 +17,13 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError, UnresolvedTypeError,
 };
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
-use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
@@ -234,8 +234,7 @@ fn bind_associated_type(
     // Resolve default type if present (= Int)
     // Note: Validation of defaults against bounds happens in a separate validation pass
     // after all conformances have been resolved (see ConformanceValidator)
-    if let Some(default_type) =
-        resolve_aliased_type_from_syntax(syntax, source, symbol_id, context)
+    if let Some(default_type) = resolve_aliased_type_from_syntax(syntax, source, symbol_id, context)
     {
         let typed_behavior = TypedBehavior::new(default_type, symbol.metadata().span().clone());
         symbol.metadata().add_behavior(typed_behavior);
@@ -347,7 +346,8 @@ fn resolve_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params)
+            if let Some(constraint) =
+                resolve_type_bound(&child, source, context_id, ctx, type_params)
             {
                 constraints.push(constraint);
             }
@@ -478,8 +478,7 @@ fn resolve_aliased_type_from_syntax(
         find_child(&aliased_type_node, SyntaxKind::Ty).unwrap_or_else(|| aliased_type_node.clone());
 
     // Use unified type resolution
-    let mut type_ctx =
-        TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
+    let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
     Some(resolve_type_from_ty_node(&ty_node, &mut type_ctx))
 }
 

@@ -17,60 +17,6 @@ Source:   File where the error is defined/emitted
 
 ---
 
-## Module Errors
-
-### NoModuleDeclarationError
-
-```
-When:     A source file contains zero module declarations
-Why:      Every file must belong to a module for proper organization
-Message:  "no module declaration found in file"
-Source:   lib/kestrel-semantic-tree-builder/src/diagnostics.rs
-```
-
-**Example:**
-```kestrel
-// file.kes - missing module declaration
-struct MyStruct { }    // ERROR
-```
-
----
-
-### ModuleNotFirstError
-
-```
-When:     Import or declaration appears before module declaration
-Why:      Module context must be established first
-Message:  "module declaration must be the first statement in the file"
-Source:   lib/kestrel-semantic-tree-builder/src/diagnostics.rs
-```
-
-**Example:**
-```kestrel
-import Other.Module    // ERROR: before module
-
-module MyApp
-```
-
----
-
-### MultipleModuleDeclarationsError
-
-```
-When:     File contains two or more module declarations
-Why:      A file can only belong to one module
-Message:  "multiple module declarations found ({count} total)"
-Source:   lib/kestrel-semantic-tree-builder/src/diagnostics.rs
-```
-
-**Example:**
-```kestrel
-module First
-module Second    // ERROR: multiple declarations
-```
-
----
-
 ## Import Errors
 
 ### ModuleNotFoundError
@@ -200,7 +146,7 @@ import Utils    // Utils has Logger -> ERROR: 'Logger' already declared
 When:     Type alias forms a circular reference chain
 Why:      Would create infinite type with no base
 Message:  "circular type alias: {origin} -> {chain} -> {origin}"
-Source:   lib/kestrel-semantic-tree/src/error.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/type_alias_cycles/diagnostics.rs
 ```
 
 **Fields:**
@@ -224,7 +170,7 @@ type C = A;    // ERROR: circular type alias: A -> B -> C -> A
 When:     Function outside protocol has no body
 Why:      Non-protocol functions need implementations
 Message:  "function '{name}' requires a body"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/function_body.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/function_body/diagnostics.rs
 ```
 
 **Example:**
@@ -244,7 +190,7 @@ struct Service {
 When:     Method inside protocol has a body
 Why:      Protocols define interfaces, not implementations
 Message:  "protocol method '{name}' cannot have a body"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/protocol_method.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/protocol_method/diagnostics.rs
 ```
 
 **Example:**
@@ -262,7 +208,7 @@ protocol Runnable {
 When:     Two functions have identical signatures in same scope
 Why:      Would create ambiguity during overload resolution
 Message:  "duplicate function signature: {signature}"
-Source:   lib/kestrel-semantic-tree-builder/src/lib.rs
+Source:   lib/kestrel-semantic-tree-binder/src/diagnostics/declaration.rs
 ```
 
 **Example:**
@@ -279,7 +225,7 @@ func process(x: Int) { }    // ERROR: duplicate signature
 When:     static used outside struct/protocol
 Why:      static only meaningful inside types
 Message:  "static modifier is only allowed inside struct or protocol"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/static_context.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/static_context/diagnostics.rs
 ```
 
 **Example:**
@@ -299,7 +245,7 @@ static func utility() { }    // ERROR: invalid context
 When:     Two types have same name in same scope
 Why:      Ambiguous type reference
 Message:  "duplicate type '{name}': already defined as {kind}"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/duplicate_symbol.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/duplicate_symbol/diagnostics.rs
 ```
 
 **Example:**
@@ -316,7 +262,7 @@ struct Item { }    // ERROR: duplicate type 'Item'
 When:     Two members have same name in a type
 Why:      Ambiguous member reference
 Message:  "duplicate member '{name}' in {kind} '{type}': already defined as {member_kind}"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/duplicate_symbol.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/duplicate_symbol/diagnostics.rs
 ```
 
 **Example:**
@@ -342,7 +288,7 @@ struct AlsoBad {
 When:     Public function returns less-visible type
 Why:      Callers couldn't use the return type
 Message:  "public function '{name}' exposes {visibility} type '{type}'"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/diagnostics.rs
 ```
 
 **Example:**
@@ -359,7 +305,7 @@ public func getSecret() -> Secret { }    // ERROR
 When:     Public function has less-visible parameter type
 Why:      Callers couldn't provide required arguments
 Message:  "public function '{name}' exposes {visibility} type '{type}' in parameter"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/diagnostics.rs
 ```
 
 **Example:**
@@ -376,7 +322,7 @@ public func configure(c: Config) { }    // ERROR
 When:     Public type alias targets less-visible type
 Why:      Users couldn't access the underlying type
 Message:  "public type alias '{name}' exposes {visibility} type '{type}'"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/diagnostics.rs
 ```
 
 **Example:**
@@ -393,7 +339,7 @@ public type API = Impl;    // ERROR
 When:     Public field has less-visible type
 Why:      Users couldn't work with the field value
 Message:  "public field '{name}' exposes {visibility} type '{type}'"
-Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs
+Source:   lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/diagnostics.rs
 ```
 
 **Example:**
@@ -408,16 +354,14 @@ public struct Container {
 
 ## Type Resolution Errors
 
-### Type Not Found
+### UnresolvedTypeError
 
 ```
-When:     Type path segment doesn't exist
-Why:      Cannot use undefined type
-Message:  (context-dependent, from type resolution)
-Source:   lib/kestrel-semantic-tree-builder/src/db.rs
+When:     Type cannot be resolved from a path
+Why:      Cannot use an undefined or out-of-scope type
+Message:  "unresolved type: {path}"
+Source:   lib/kestrel-semantic-tree-binder/src/diagnostics/type_resolution.rs
 ```
-
-**Result:** `TypePathResolution::NotFound { segment, index }`
 
 **Example:**
 ```kestrel
@@ -427,29 +371,25 @@ let y: A.B.Missing    // ERROR: 'Missing' not found at index 2
 
 ---
 
-### Ambiguous Type
+### AmbiguousTypeError
 
 ```
 When:     Multiple symbols match type path segment
 Why:      Cannot determine which type is intended
-Message:  (context-dependent, from type resolution)
-Source:   lib/kestrel-semantic-tree-builder/src/db.rs
+Message:  "ambiguous type: {name}"
+Source:   lib/kestrel-semantic-tree-binder/src/diagnostics/type_resolution.rs
 ```
-
-**Result:** `TypePathResolution::Ambiguous { segment, index, candidates }`
 
 ---
 
-### Not a Type
+### NotATypeError
 
 ```
 When:     Path resolves to non-type symbol
 Why:      Expected type, got function/import/etc.
-Message:  (context-dependent, from type resolution)
-Source:   lib/kestrel-semantic-tree-builder/src/db.rs
+Message:  "not a type: {name}"
+Source:   lib/kestrel-semantic-tree-binder/src/diagnostics/type_resolution.rs
 ```
-
-**Result:** `TypePathResolution::NotAType { symbol_id }`
 
 **Example:**
 ```kestrel
@@ -463,9 +403,6 @@ let x: helper    // ERROR: 'helper' is not a type
 
 | Category | Error | Severity |
 |----------|-------|----------|
-| **Module** | NoModuleDeclarationError | Fatal |
-| **Module** | ModuleNotFirstError | Fatal |
-| **Module** | MultipleModuleDeclarationsError | Fatal |
 | **Import** | ModuleNotFoundError | Error |
 | **Import** | SymbolNotFoundInModuleError | Error |
 | **Import** | CannotImportFromNonModuleError | Error |
@@ -482,9 +419,9 @@ let x: helper    // ERROR: 'helper' is not a type
 | **Visibility** | Public exposes private (param) | Error |
 | **Visibility** | Public exposes private (alias) | Error |
 | **Visibility** | Public exposes private (field) | Error |
-| **Type** | Type not found | Error |
-| **Type** | Ambiguous type | Error |
-| **Type** | Not a type | Error |
+| **Type** | UnresolvedTypeError | Error |
+| **Type** | AmbiguousTypeError | Error |
+| **Type** | NotATypeError | Error |
 
 ---
 
@@ -532,13 +469,12 @@ The error shows:
 
 | Category | Source File |
 |----------|-------------|
-| Module errors | `lib/kestrel-semantic-tree-builder/src/diagnostics.rs` |
 | Import errors | `lib/kestrel-semantic-tree/src/error.rs` |
-| Type alias errors | `lib/kestrel-semantic-tree/src/error.rs` |
-| Function body | `lib/kestrel-semantic-tree-builder/src/validation/function_body.rs` |
-| Protocol method | `lib/kestrel-semantic-tree-builder/src/validation/protocol_method.rs` |
-| Static context | `lib/kestrel-semantic-tree-builder/src/validation/static_context.rs` |
-| Duplicate symbols | `lib/kestrel-semantic-tree-builder/src/validation/duplicate_symbol.rs` |
-| Visibility | `lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs` |
-| Type resolution | `lib/kestrel-semantic-tree-builder/src/db.rs` |
+| Type alias cycles | `lib/kestrel-semantic-analyzers/src/analyzers/type_alias_cycles/diagnostics.rs` |
+| Function body | `lib/kestrel-semantic-analyzers/src/analyzers/function_body/diagnostics.rs` |
+| Protocol method | `lib/kestrel-semantic-analyzers/src/analyzers/protocol_method/diagnostics.rs` |
+| Static context | `lib/kestrel-semantic-analyzers/src/analyzers/static_context/diagnostics.rs` |
+| Duplicate symbols | `lib/kestrel-semantic-analyzers/src/analyzers/duplicate_symbol/diagnostics.rs` |
+| Visibility | `lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/diagnostics.rs` |
+| Type resolution | `lib/kestrel-semantic-tree-binder/src/diagnostics/type_resolution.rs` |
 | Diagnostics base | `lib/kestrel-reporting/src/` |

@@ -312,5 +312,5 @@ struct Ty {
 ## Source Location
 
 - **Type definitions:** `lib/kestrel-semantic-tree/src/ty/kind.rs`
-- **Type builder:** `lib/kestrel-semantic-tree-builder/src/type_builder.rs`
-- **Type resolver:** `lib/kestrel-semantic-tree-builder/src/type_resolver.rs`
+- **Type resolver:** `lib/kestrel-semantic-tree-binder/src/resolution/type_resolver.rs`
+- **Nominal type lookup:** `lib/kestrel-semantic-model/src/queries/resolve_type_path.rs`

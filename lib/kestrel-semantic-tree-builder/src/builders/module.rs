@@ -26,4 +26,3 @@ impl Builder for ModuleBuilder {
         true
     }
 }
-

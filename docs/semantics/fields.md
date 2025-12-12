@@ -377,7 +377,8 @@ struct Entity {
 
 ## Source Location
 
-- **Resolver:** `lib/kestrel-semantic-tree-builder/src/resolvers/field.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/builders/field.rs`
+- **Bind:** `lib/kestrel-semantic-tree-binder/src/binders/field.rs`
 - **Symbol:** `lib/kestrel-semantic-tree/src/symbol/field.rs`
-- **Validation:** `lib/kestrel-semantic-tree-builder/src/validation/duplicate_symbol.rs`
-- **Visibility validation:** `lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs`
+- **Validate (duplicates):** `lib/kestrel-semantic-analyzers/src/analyzers/duplicate_symbol/mod.rs`
+- **Validate (visibility):** `lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/mod.rs`

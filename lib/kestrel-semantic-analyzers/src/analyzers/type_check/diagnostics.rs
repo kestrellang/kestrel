@@ -17,8 +17,10 @@ impl IntoDiagnostic for TypeMismatchError {
                 "type mismatch: expected `{}`, found `{}`",
                 self.expected, self.found
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("expected `{}`", self.expected))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected `{}`", self.expected)),
+            ])
             .with_notes(vec![format!(
                 "{}: expected `{}`, found `{}`",
                 self.context, self.expected, self.found
@@ -39,8 +41,10 @@ impl IntoDiagnostic for ConditionNotBoolError {
                 "{} condition must be `Bool`, found `{}`",
                 self.condition_kind, self.found
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("expected `Bool`, found `{}`", self.found))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected `Bool`, found `{}`", self.found)),
+            ])
     }
 }
 

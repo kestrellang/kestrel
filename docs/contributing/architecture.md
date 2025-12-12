@@ -94,6 +94,31 @@ Source Code ("module Main\nstruct Point { ... }")
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Semantic Model Mutation Points
+
+Kestrel keeps semantic analysis split into **BUILD**, **BIND**, and **VALIDATE** phases.
+To preserve clean boundaries (and keep the query system free to become incremental later),
+each phase has a clear “what it may mutate” rule:
+
+- **BUILD (`kestrel-semantic-tree-builder`)**: creates symbols and the initial `SemanticModel`.
+  - Allowed mutations: symbol creation, parent/child relationships, initial symbol metadata,
+    `syntax_map` entries, and `sources` registration.
+  - Not allowed: type/value resolution, cross-file binding, or any analysis that depends on
+    already-resolved types/paths.
+
+- **BIND (`kestrel-semantic-tree-binder`)**: resolves references and enriches the model.
+  - Allowed mutations: attach/compute derived semantic information (e.g. types, callable
+    signatures, executable bodies), populate resolution/registry structures, and link symbols
+    across files/modules.
+  - Not allowed: emitting new symbols that change the program surface area (those belong in BUILD).
+
+- **VALIDATE (`kestrel-semantic-analyzers`)**: read-only checks over the bound model.
+  - Allowed mutations: diagnostics accumulation only.
+  - Not allowed: mutating the model or changing resolution results.
+
+Guideline: if a component needs semantic information, prefer going through the `kestrel-semantic-model`
+query layer rather than ad-hoc traversals, even if the query currently computes eagerly.
+
 ## Crate Dependencies
 
 ```

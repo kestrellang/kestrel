@@ -20,4 +20,3 @@ pub use protocol::ProtocolBuilder;
 pub use r#struct::StructBuilder;
 pub use terminal::TerminalBuilder;
 pub use type_alias::TypeAliasBuilder;
-

@@ -7,8 +7,8 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use kestrel_syntax_tree::utils::get_node_span;
 use crate::builder::Builder;
+use kestrel_syntax_tree::utils::get_node_span;
 
 /// Builder for import declarations.
 pub struct ImportBuilder;

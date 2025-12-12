@@ -1,7 +1,7 @@
 [package]
 name = "kestrel-test-suite"
-version = "0.6.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 kestrel-span = { path = "../kestrel-span" }
@@ -14,4 +14,4 @@ kestrel-semantic-tree-binder = { path = "../kestrel-semantic-tree-binder" }
 kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 semantic-tree = { path = "../semantic-tree" }
-downcast-rs = "2.0.2"
+downcast-rs = { workspace = true }

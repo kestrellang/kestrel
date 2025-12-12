@@ -1,6 +1,7 @@
 # Modules
 
-Modules are the primary organizational unit in Kestrel. Every source file must declare which module it belongs to.
+Modules are the primary organizational unit in Kestrel.
+If a source file contains a `module` declaration, it contributes its declarations into that module path.
 
 ## Syntax
 
@@ -30,60 +31,25 @@ module café.αβγ
 
 ## Semantic Rules
 
-### Rule 1: Module Declaration Required
+### Rule 1: Module Declaration Optional
 
-Every Kestrel source file MUST contain exactly one module declaration.
+If a file has no module declaration, it is treated as belonging to the implicit root module.
 
-```
-ERROR: NoModuleDeclarationError
-WHEN: A source file contains zero module declarations
-WHY: Files must be organized into modules for proper scoping and imports
-```
-
-**Example (invalid):**
 ```kestrel
-// ERROR: no module declaration found in file
+// No module declaration: declarations attach to the root module
 struct MyStruct { }
 ```
 
-### Rule 2: Module Declaration Must Be First
+### Rule 2: Module Declaration Placement
 
-The module declaration MUST appear before any imports or other declarations.
+If a file contains a module declaration, the first module declaration encountered in the syntax tree is used.
+Additional module declarations (if any) are currently ignored during lowering.
 
-```
-ERROR: ModuleNotFirstError
-WHEN: Any import or declaration appears before the module declaration
-WHY: The module context must be established before processing other declarations
-```
-
-**Example (invalid):**
 ```kestrel
-import Other.Module    // ERROR: module declaration must be first
+import Lib
 
-module MyApp
-```
-
-**Example (valid):**
-```kestrel
-module MyApp
-
-import Other.Module    // OK: after module declaration
-```
-
-### Rule 3: Single Module Declaration
-
-Only ONE module declaration is allowed per source file.
-
-```
-ERROR: MultipleModuleDeclarationsError
-WHEN: A source file contains two or more module declarations
-WHY: A file can only belong to one module
-```
-
-**Example (invalid):**
-```kestrel
-module MyApp
-module OtherApp    // ERROR: multiple module declarations found (2 total)
+module App       // This module path is used
+module Ignored   // Ignored during lowering
 ```
 
 ## Module Hierarchy
@@ -147,6 +113,5 @@ scope(M) = {
 
 ## Source Location
 
-- **Defined in:** `lib/kestrel-semantic-tree-builder/src/resolvers/module.rs`
-- **Errors defined in:** `lib/kestrel-semantic-tree-builder/src/diagnostics.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/lowerer.rs` (module path extraction + hierarchy)
 - **Symbol type:** `ModuleSymbol` in `lib/kestrel-semantic-tree/src/symbol/module.rs`

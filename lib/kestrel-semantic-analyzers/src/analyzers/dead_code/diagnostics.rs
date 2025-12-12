@@ -32,7 +32,9 @@ impl IntoDiagnostic for UnreachableCodeWarning {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message(format!("unreachable code {}", self.reason.description()))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("this code will never execute")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("this code will never execute"),
+            ])
     }
 }

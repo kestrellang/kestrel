@@ -11,11 +11,13 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use kestrel_syntax_tree::utils::{extract_visibility, find_child, get_node_span, get_visibility_span};
+use kestrel_syntax_tree::utils::{
+    extract_visibility, find_child, get_node_span, get_visibility_span,
+};
 
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use crate::builder::Builder;
 use crate::builders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeAliasContext {
@@ -80,14 +82,14 @@ impl Builder for TypeAliasBuilder {
                 );
                 let type_alias_arc = Arc::new(type_alias_symbol);
 
-                let type_alias_type =
-                    Ty::type_alias(type_alias_arc.clone(), full_span.clone());
+                let type_alias_type = Ty::type_alias(type_alias_arc.clone(), full_span.clone());
                 let semantic_typed_behavior =
                     TypedBehavior::new(type_alias_type, full_span.clone());
-                type_alias_arc.metadata().add_behavior(semantic_typed_behavior);
+                type_alias_arc
+                    .metadata()
+                    .add_behavior(semantic_typed_behavior);
 
-                let type_alias_arc_dyn =
-                    type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+                let type_alias_arc_dyn = type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
                 let type_parameters =
                     extract_type_parameters(syntax, source, Some(type_alias_arc_dyn.clone()));

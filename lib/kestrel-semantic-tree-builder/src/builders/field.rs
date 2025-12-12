@@ -8,10 +8,12 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use kestrel_syntax_tree::utils::{extract_name, extract_visibility, find_child, get_node_span, get_visibility_span};
+use kestrel_syntax_tree::utils::{
+    extract_name, extract_visibility, find_child, get_node_span, get_visibility_span,
+};
 
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use crate::builder::Builder;
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 
 /// Builder for field declarations.
 pub struct FieldBuilder;

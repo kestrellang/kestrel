@@ -5,8 +5,8 @@ use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
-use kestrel_syntax_tree::utils::get_node_span;
 use crate::builder::Builder;
+use kestrel_syntax_tree::utils::get_node_span;
 
 /// Builder for extension declarations.
 pub struct ExtensionBuilder;

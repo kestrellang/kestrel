@@ -13,9 +13,9 @@ use kestrel_syntax_tree::utils::{
     extract_name, extract_visibility, find_child, get_node_span, get_visibility_span,
 };
 
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use crate::builder::Builder;
 use crate::builders::type_parameter::{add_type_params_as_children, extract_type_parameters};
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 
 /// Builder for struct declarations.
 pub struct StructBuilder;

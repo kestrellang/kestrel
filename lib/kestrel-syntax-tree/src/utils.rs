@@ -105,4 +105,3 @@ fn find_first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
     }
     None
 }
-

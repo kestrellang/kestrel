@@ -61,7 +61,8 @@ impl BindingContext<'_> {
         let mut current = Some(symbol.clone());
 
         while let Some(sym) = current {
-            if sym.metadata().kind() == kestrel_semantic_tree::symbol::kind::KestrelSymbolKind::SourceFile
+            if sym.metadata().kind()
+                == kestrel_semantic_tree::symbol::kind::KestrelSymbolKind::SourceFile
             {
                 let file_name = sym.metadata().name().value.clone();
                 return self.sources.get(&file_name).cloned().unwrap_or_default();
@@ -92,7 +93,10 @@ impl DeclarationBinderRegistry {
         binders.insert(SyntaxKind::ExtensionDeclaration, Box::new(ExtensionBinder));
         binders.insert(SyntaxKind::FieldDeclaration, Box::new(FieldBinder));
         binders.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionBinder));
-        binders.insert(SyntaxKind::InitializerDeclaration, Box::new(InitializerBinder));
+        binders.insert(
+            SyntaxKind::InitializerDeclaration,
+            Box::new(InitializerBinder),
+        );
 
         // Register terminal resolvers
         binders.insert(SyntaxKind::Visibility, Box::new(TerminalBinder));

@@ -15,13 +15,11 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
-use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::binders::flatten_protocol;
 use crate::binders::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::syntax::helpers::{
-    resolve_conformance_list,
-};
+use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
+use crate::syntax::helpers::resolve_conformance_list;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
@@ -122,14 +120,9 @@ fn resolve_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(
-                &child,
-                source,
-                context_id,
-                ctx,
-                type_params,
-                symbol,
-            ) {
+            if let Some(constraint) =
+                resolve_type_bound(&child, source, context_id, ctx, type_params, symbol)
+            {
                 constraints.push(constraint);
             }
         }

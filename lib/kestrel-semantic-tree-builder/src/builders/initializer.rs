@@ -10,8 +10,8 @@ use semantic_tree::symbol::Symbol;
 
 use kestrel_syntax_tree::utils::{extract_visibility, get_node_span, get_visibility_span};
 
-use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use crate::builder::Builder;
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 
 /// Builder for initializer declarations.
 pub struct InitializerBuilder;
@@ -46,7 +46,8 @@ impl Builder for InitializerBuilder {
         let visibility_str = extract_visibility(syntax);
         let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
 
-        let visibility_span = get_visibility_span(syntax, source).unwrap_or(init_token_span.clone());
+        let visibility_span =
+            get_visibility_span(syntax, source).unwrap_or(init_token_span.clone());
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), Some(parent), root);
         let visibility_behavior =
             VisibilityBehavior::new(visibility_enum, visibility_span, visibility_scope);

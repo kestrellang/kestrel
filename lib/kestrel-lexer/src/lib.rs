@@ -62,7 +62,7 @@ pub enum Token {
     #[regex(r"[ \t\n\f]+")]
     Whitespace,
 
-    #[regex(r"//[^\n]*")]
+    #[regex(r"//[^\n]*", allow_greedy = true)]
     LineComment,
 
     #[regex(r"/\*", parse_block_comment)]

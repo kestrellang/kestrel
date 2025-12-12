@@ -83,7 +83,8 @@ impl SemanticModelBuilder {
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         if let Some(builder) = builder_for(syntax.kind()) {
             if let Some(symbol) = builder.build_declaration(syntax, source, parent, root) {
-                self.syntax_map.insert(symbol.metadata().id(), syntax.clone());
+                self.syntax_map
+                    .insert(symbol.metadata().id(), syntax.clone());
 
                 if !builder.is_terminal() {
                     for child in syntax.children() {
@@ -123,8 +124,9 @@ where
     builder.build()
 }
 
-fn builder_for(kind: kestrel_syntax_tree::SyntaxKind) -> Option<&'static dyn crate::builder::Builder>
-{
+fn builder_for(
+    kind: kestrel_syntax_tree::SyntaxKind,
+) -> Option<&'static dyn crate::builder::Builder> {
     use crate::builders::{
         ExtensionBuilder, FieldBuilder, FunctionBuilder, ImportBuilder, InitializerBuilder,
         ModuleBuilder, ProtocolBuilder, StructBuilder, TerminalBuilder, TypeAliasBuilder,

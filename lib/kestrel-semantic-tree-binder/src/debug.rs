@@ -15,6 +15,7 @@ use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::Symbol;
 
 /// Print the semantic model (shows symbol hierarchy)
@@ -179,7 +180,7 @@ pub fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
 }
 
 /// Format a behavior for display
-fn format_behavior(b: &dyn std::any::Any) -> String {
+fn format_behavior(b: &dyn Behavior<KestrelLanguage>) -> String {
     // Try each behavior type
     if let Some(vb) = b.downcast_ref::<VisibilityBehavior>() {
         if let Some(vis) = vb.visibility() {

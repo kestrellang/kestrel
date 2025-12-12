@@ -383,5 +383,5 @@ let myField: Int           // internal (inside a type)
 ## Source Location
 
 - **Behavior:** `lib/kestrel-semantic-tree/src/behavior/visibility.rs`
-- **Validation:** `lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs`
-- **Access checking:** `lib/kestrel-semantic-tree-builder/src/path_resolver.rs`
+- **Access checking:** `lib/kestrel-semantic-model/src/queries/is_visible_from.rs`
+- **Validate (consistency):** `lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/mod.rs`

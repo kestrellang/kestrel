@@ -362,6 +362,8 @@ struct Complex {
 
 ## Source Location
 
-- **Resolver:** `lib/kestrel-semantic-tree-builder/src/resolvers/struct.rs`
+- **Build/lowering:** `lib/kestrel-semantic-tree-builder/src/builders/struct.rs`
+- **Bind:** `lib/kestrel-semantic-tree-binder/src/binders/struct.rs`
 - **Symbol:** `lib/kestrel-semantic-tree/src/symbol/struct.rs`
-- **Validation:** `lib/kestrel-semantic-tree-builder/src/validation/duplicate_symbol.rs`
+- **Validate (duplicates):** `lib/kestrel-semantic-analyzers/src/analyzers/duplicate_symbol/mod.rs`
+- **Validate (cycles):** `lib/kestrel-semantic-analyzers/src/analyzers/struct_cycles/mod.rs`
