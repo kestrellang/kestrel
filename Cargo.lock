@@ -377,6 +377,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-semantic-tree-lowerer"
+version = "0.6.0"
+dependencies = [
+ "kestrel-parser",
+ "kestrel-reporting",
+ "kestrel-semantic-model",
+ "kestrel-semantic-tree",
+ "kestrel-semantic-tree-builder",
+ "kestrel-span",
+ "kestrel-syntax-tree",
+ "semantic-tree",
+]
+
+[[package]]
 name = "kestrel-span"
 version = "0.6.0"
 dependencies = [

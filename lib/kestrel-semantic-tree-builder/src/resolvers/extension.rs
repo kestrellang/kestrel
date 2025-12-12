@@ -20,7 +20,8 @@ use semantic_tree::symbol::Symbol;
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolution::TypeResolver;
 use crate::resolver::{BindingContext, Resolver};
-use crate::syntax::{extract_path_segments, find_child, get_node_span, resolve_conformance_list};
+use crate::syntax::helpers::resolve_conformance_list;
+use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
 /// Resolver for extension declarations
 pub struct ExtensionResolver;

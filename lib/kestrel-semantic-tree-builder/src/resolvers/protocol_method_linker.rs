@@ -32,7 +32,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use kestrel_semantic_model::{ExtensionsFor, SemanticModel};
 
 use crate::diagnostics::{AmbiguousProtocolMethodError, ProtocolMethodReceiverMismatchError};
-use crate::syntax::get_file_id_for_symbol;
+use crate::syntax::helpers::get_file_id_for_symbol;
 
 /// Link struct methods to protocol methods based on signature matching
 ///

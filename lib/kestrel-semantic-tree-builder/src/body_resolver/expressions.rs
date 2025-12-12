@@ -15,7 +15,7 @@ use crate::diagnostics::{
     BreakOutsideLoopError, ContinueOutsideLoopError, TupleIndexOnNonTupleError,
     TupleIndexOutOfBoundsError, UndeclaredLabelError,
 };
-use crate::syntax::get_node_span;
+use kestrel_syntax_tree::utils::get_node_span;
 
 use super::calls::resolve_call_expression;
 use super::context::BodyResolutionContext;

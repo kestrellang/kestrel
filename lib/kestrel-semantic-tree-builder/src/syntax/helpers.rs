@@ -11,7 +11,7 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
-use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError};
@@ -19,92 +19,27 @@ use crate::resolver::BindingContext;
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-    syntax.children().find(|n| n.kind() == kind)
+    kestrel_syntax_tree::utils::find_child(syntax, kind)
 }
 
 /// Extract name from a Name node
 pub fn extract_name(syntax: &SyntaxNode) -> Option<String> {
-    let name_node = find_child(syntax, SyntaxKind::Name)?;
-
-    name_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-        .map(|tok| tok.text().to_string())
-}
-
-/// Check if a SyntaxKind is trivia (whitespace or comment)
-fn is_trivia(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
-    )
+    kestrel_syntax_tree::utils::extract_name(syntax)
 }
 
 /// Extract visibility modifier from a node with a Visibility child
 pub fn extract_visibility(syntax: &SyntaxNode) -> Option<String> {
-    let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
-
-    let visibility_token = visibility_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| !is_trivia(tok.kind()))?;
-
-    let vis_text = match visibility_token.kind() {
-        SyntaxKind::Public => "public",
-        SyntaxKind::Private => "private",
-        SyntaxKind::Internal => "internal",
-        SyntaxKind::Fileprivate => "fileprivate",
-        _ => return None,
-    };
-
-    Some(vis_text.to_string())
+    kestrel_syntax_tree::utils::extract_visibility(syntax)
 }
 
 /// Get the span of a syntax node, excluding leading trivia
 pub fn get_node_span(node: &SyntaxNode, _source: &str) -> Span {
-    let text_range = node.text_range();
-    let end: usize = text_range.end().into();
-
-    let start = find_first_non_trivia_start(node).unwrap_or_else(|| text_range.start().into());
-
-    Span::from(start..end)
-}
-
-/// Recursively find the start position of the first non-trivia token
-fn find_first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
-    for child in node.children_with_tokens() {
-        match child {
-            SyntaxElement::Token(t) => {
-                if !is_trivia(t.kind()) {
-                    return Some(t.text_range().start().into());
-                }
-            }
-            SyntaxElement::Node(n) => {
-                if let Some(start) = find_first_non_trivia_start(&n) {
-                    return Some(start);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Parse visibility string to Visibility enum
-pub fn parse_visibility(vis_str: &str) -> Option<Visibility> {
-    match vis_str {
-        "public" => Some(Visibility::Public),
-        "private" => Some(Visibility::Private),
-        "internal" => Some(Visibility::Internal),
-        "fileprivate" => Some(Visibility::Fileprivate),
-        _ => None,
-    }
+    kestrel_syntax_tree::utils::get_node_span(node, _source)
 }
 
 /// Get the span of the visibility node
 pub fn get_visibility_span(syntax: &SyntaxNode, source: &str) -> Option<Span> {
-    let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
-    Some(get_node_span(&visibility_node, source))
+    kestrel_syntax_tree::utils::get_visibility_span(syntax, source)
 }
 
 /// Find an ancestor symbol of the specified kind
@@ -122,21 +57,6 @@ pub fn find_ancestor_of_kind(
     }
 
     None
-}
-
-/// Find the scope symbol where this visibility level is accessible
-pub fn find_visibility_scope(
-    visibility: Option<&Visibility>,
-    parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-    root: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> Arc<dyn Symbol<KestrelLanguage>> {
-    match visibility {
-        Some(Visibility::Private) => parent.cloned().unwrap_or_else(|| root.clone()),
-        Some(Visibility::Fileprivate) => parent
-            .and_then(|p| find_ancestor_of_kind(p, KestrelSymbolKind::SourceFile))
-            .unwrap_or_else(|| root.clone()),
-        Some(Visibility::Internal) | Some(Visibility::Public) | None => root.clone(),
-    }
 }
 
 /// Information about a symbol's source file
@@ -176,26 +96,12 @@ pub fn get_file_id_for_symbol(
 
 /// Extract path segments from a Path syntax node
 pub fn extract_path_segments(path_node: &SyntaxNode) -> Vec<String> {
-    path_node
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::PathElement)
-        .filter_map(|path_elem| {
-            path_elem
-                .children_with_tokens()
-                .filter_map(|elem| elem.into_token())
-                .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                .map(|tok| tok.text().to_string())
-        })
-        .collect()
+    kestrel_syntax_tree::utils::extract_path_segments(path_node)
 }
 
 /// Extract identifier text from a Name syntax node
 pub fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
-    name_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-        .map(|tok| tok.text().to_string())
+    kestrel_syntax_tree::utils::extract_identifier_from_name(name_node)
 }
 
 /// Resolve conformances/inheritance from syntax and add as ConformancesBehavior

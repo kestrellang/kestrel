@@ -30,7 +30,7 @@ use crate::diagnostics::{
     TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
     UnconstrainedTypeParameterMemberError,
 };
-use crate::syntax::get_node_span;
+use kestrel_syntax_tree::utils::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;

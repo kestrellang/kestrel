@@ -18,7 +18,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::resolution::LocalScope;
-use crate::syntax::get_node_span;
+use kestrel_syntax_tree::utils::get_node_span;
 
 use super::expressions::resolve_expression;
 use super::statements::{resolve_statement, resolve_variable_declaration};

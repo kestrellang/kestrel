@@ -14,9 +14,9 @@ use semantic_tree::symbol::Symbol;
 
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::resolver::{BindingContext, Resolver};
-use crate::syntax::{
-    extract_identifier_from_name, extract_visibility, find_child, find_visibility_scope,
-    get_node_span, get_visibility_span, parse_visibility,
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+use kestrel_syntax_tree::utils::{
+    extract_identifier_from_name, extract_visibility, find_child, get_node_span, get_visibility_span,
 };
 
 /// Resolver for initializer declarations
@@ -54,7 +54,7 @@ impl Resolver for InitializerResolver {
 
         // Extract visibility
         let visibility_str = extract_visibility(syntax);
-        let visibility_enum = visibility_str.as_deref().and_then(parse_visibility);
+        let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
 
         let visibility_span =
             get_visibility_span(syntax, source).unwrap_or(init_token_span.clone());

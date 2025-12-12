@@ -16,10 +16,13 @@ use semantic_tree::symbol::Symbol;
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::syntax::{
-    extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
-    get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility,
-    resolve_conformance_list,
+use crate::syntax::helpers::{
+    get_file_id_for_symbol, resolve_conformance_list,
+};
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+use kestrel_syntax_tree::utils::{
+    extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
+    get_visibility_span,
 };
 
 /// Resolver for struct declarations
@@ -43,7 +46,7 @@ impl Resolver for StructResolver {
 
         // Extract visibility
         let visibility_str = extract_visibility(syntax);
-        let visibility_enum = visibility_str.as_deref().and_then(parse_visibility);
+        let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
 
         let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span.clone());
 

@@ -9,7 +9,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
-use crate::syntax::get_node_span;
+use kestrel_syntax_tree::utils::get_node_span;
 
 /// Resolver for import declarations
 pub struct ImportResolver;

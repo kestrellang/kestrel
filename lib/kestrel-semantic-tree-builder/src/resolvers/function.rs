@@ -19,10 +19,11 @@ use crate::resolution::type_resolver::{
 };
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::syntax::{
-    extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility,
-    find_child, find_visibility_scope, get_file_id_for_symbol, get_node_span, get_visibility_span,
-    parse_visibility,
+use crate::syntax::helpers::get_file_id_for_symbol;
+use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
+use kestrel_syntax_tree::utils::{
+    extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility, find_child,
+    get_node_span, get_visibility_span,
 };
 
 /// Resolver for function declarations
@@ -46,7 +47,7 @@ impl Resolver for FunctionResolver {
 
         // Extract visibility
         let visibility_str = extract_visibility(syntax);
-        let visibility_enum = visibility_str.as_deref().and_then(parse_visibility);
+        let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
 
         let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span.clone());
 
@@ -483,7 +484,7 @@ fn resolve_type_equality(
             .children()
             .find(|child| child.kind() == SyntaxKind::Path)
         {
-            let right_path = crate::syntax::extract_path_segments(&path_node);
+            let right_path = kestrel_syntax_tree::utils::extract_path_segments(&path_node);
             let right_span = get_node_span(&ty_node, source);
 
             // Try resolving as type parameter or associated type first

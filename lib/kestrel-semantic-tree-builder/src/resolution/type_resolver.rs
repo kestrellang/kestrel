@@ -18,7 +18,7 @@ use crate::diagnostics::{
     AmbiguousTypeError, NotATypeError, NotGenericError, TooFewTypeArgumentsError,
     TooManyTypeArgumentsError, UnresolvedTypeError,
 };
-use crate::syntax::{extract_path_segments, get_node_span};
+use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
 
 /// Resolves types from syntax nodes during the bind phase
 ///

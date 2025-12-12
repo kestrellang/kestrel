@@ -25,6 +25,50 @@ impl fmt::Display for Visibility {
     }
 }
 
+impl Visibility {
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "public" => Some(Visibility::Public),
+            "private" => Some(Visibility::Private),
+            "internal" => Some(Visibility::Internal),
+            "fileprivate" => Some(Visibility::Fileprivate),
+            _ => None,
+        }
+    }
+}
+
+pub fn find_visibility_scope(
+    visibility: Option<&Visibility>,
+    parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
+    root: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Arc<dyn Symbol<KestrelLanguage>> {
+    use crate::symbol::kind::KestrelSymbolKind;
+
+    fn find_ancestor_of_kind(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        kind: KestrelSymbolKind,
+    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+        let mut current = Some(symbol.clone());
+
+        while let Some(s) = current {
+            if s.metadata().kind() == kind {
+                return Some(s);
+            }
+            current = s.metadata().parent();
+        }
+
+        None
+    }
+
+    match visibility {
+        Some(Visibility::Private) => parent.cloned().unwrap_or_else(|| root.clone()),
+        Some(Visibility::Fileprivate) => parent
+            .and_then(|p| find_ancestor_of_kind(p, KestrelSymbolKind::SourceFile))
+            .unwrap_or_else(|| root.clone()),
+        Some(Visibility::Internal) | Some(Visibility::Public) | None => root.clone(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VisibilityBehavior {
     visibility: Option<Visibility>,

@@ -73,7 +73,7 @@ impl BindingContext<'_> {
     ///
     /// Returns (file_id, source) where file_id falls back to self.file_id and source is cloned.
     pub fn get_file_context(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (usize, String) {
-        match crate::syntax::get_source_file_info(symbol, self.diagnostics) {
+        match crate::syntax::helpers::get_source_file_info(symbol, self.diagnostics) {
             Some(info) => {
                 let source = self
                     .sources
