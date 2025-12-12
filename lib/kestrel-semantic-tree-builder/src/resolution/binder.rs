@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_model::{ExtensionRegistry, SemanticModel, SymbolRegistry};
 use kestrel_semantic_tree::behavior::callable::CallableSignature;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -18,12 +18,10 @@ use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{ExtensionRegistry, SymbolRegistry};
 use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::resolver::{BindingContext, ResolverRegistry};
 use crate::syntax::get_file_id_for_symbol;
 use crate::tree::{SemanticTree, SourceMap, SyntaxMap};
-use crate::validation::{ValidationConfig, ValidationRunner};
 
 /// Binder for resolving references in a semantic tree
 ///
@@ -59,17 +57,8 @@ impl SemanticBinder {
     /// This is the primary entry point for the binding phase. It consumes the
     /// tree, runs all binding passes, and returns a SemanticModel.
     pub fn bind(tree: SemanticTree, diagnostics: &mut DiagnosticContext) -> SemanticModel {
-        Self::bind_with_config(tree, diagnostics, None)
-    }
-
-    /// Bind a semantic tree with explicit validation configuration
-    pub fn bind_with_config(
-        tree: SemanticTree,
-        diagnostics: &mut DiagnosticContext,
-        config: Option<&ValidationConfig>,
-    ) -> SemanticModel {
         let mut binder = Self::from_tree(tree);
-        binder.run_binding(diagnostics, config)
+        binder.run_binding(diagnostics)
     }
 
     /// Create a binder from a semantic tree (internal)
@@ -107,7 +96,6 @@ impl SemanticBinder {
     fn run_binding(
         &mut self,
         diagnostics: &mut DiagnosticContext,
-        config: Option<&ValidationConfig>,
     ) -> SemanticModel {
         // Walk all symbols and call bind_declaration
         self.bind_symbol(&self.root.clone(), diagnostics, 0);
@@ -115,10 +103,7 @@ impl SemanticBinder {
         // Post-binding pass: detect duplicate function signatures
         self.check_duplicate_signatures(&self.root.clone(), diagnostics);
 
-        // Run validation passes
-        let validation_config = config.cloned().unwrap_or_default();
-        let runner = ValidationRunner::new();
-        runner.run(&self.root, &self.model, diagnostics, &validation_config);
+        // Validation passes migrated to analyzers; run in compiler/test harness after binding
 
         // Create SemanticModel with the shared registries
         SemanticModel::with_registries(
@@ -142,7 +127,9 @@ impl SemanticBinder {
         // Track file_id - when we enter a SourceFile, update the file_id
         let file_id = if kind == KestrelSymbolKind::SourceFile {
             let file_name = symbol.metadata().name().value.clone();
-            diagnostics.get_file_id(&file_name).unwrap_or(current_file_id)
+            diagnostics
+                .get_file_id(&file_name)
+                .unwrap_or(current_file_id)
         } else {
             current_file_id
         };
@@ -232,13 +219,12 @@ impl SemanticBinder {
                         })
                         .collect();
 
-                    diagnostics.throw(
-                        DuplicateFunctionSignatureError {
-                            signature: sig.display(),
-                            first_span,
-                            first_file_id,
-                            duplicate_spans,
-                        });
+                    diagnostics.throw(DuplicateFunctionSignatureError {
+                        signature: sig.display(),
+                        first_span,
+                        first_file_id,
+                        duplicate_spans,
+                    });
                 }
             }
         }

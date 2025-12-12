@@ -14,8 +14,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::TypePathResolution;
-use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
+use crate::diagnostics::{NotAProtocolContext, NotAProtocolError};
 use crate::resolver::BindingContext;
 
 /// Find a child node with the specified kind
@@ -67,8 +66,7 @@ pub fn get_node_span(node: &SyntaxNode, _source: &str) -> Span {
     let text_range = node.text_range();
     let end: usize = text_range.end().into();
 
-    let start =
-        find_first_non_trivia_start(node).unwrap_or_else(|| text_range.start().into());
+    let start = find_first_non_trivia_start(node).unwrap_or_else(|| text_range.start().into());
 
     Span::from(start..end)
 }
@@ -210,7 +208,7 @@ pub fn resolve_conformance_list(
     file_id: usize,
     error_context: NotAProtocolContext,
 ) {
-    use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+    use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 
     let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
         Some(node) => node,
@@ -232,7 +230,8 @@ pub fn resolve_conformance_list(
         let span = get_node_span(&ty_node, source);
 
         // Use full type resolution (handles type arguments like Add[MyInt])
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
         // Validate that it's a protocol
@@ -240,13 +239,14 @@ pub fn resolve_conformance_list(
             TyKind::Protocol { .. } => {
                 resolved.push(resolved_ty);
             }
-            TyKind::Struct { symbol: struct_sym, .. } => {
-                ctx.diagnostics.throw(
-                    NotAProtocolError {
-                        span: span.clone(),
-                        name: struct_sym.metadata().name().value.clone(),
-                        context: error_context,
-                    });
+            TyKind::Struct {
+                symbol: struct_sym, ..
+            } => {
+                ctx.diagnostics.throw(NotAProtocolError {
+                    span: span.clone(),
+                    name: struct_sym.metadata().name().value.clone(),
+                    context: error_context,
+                });
                 resolved.push(Ty::error(span));
             }
             TyKind::Error => {
@@ -255,12 +255,11 @@ pub fn resolve_conformance_list(
             }
             _ => {
                 let type_name = format!("{:?}", resolved_ty.kind());
-                ctx.diagnostics.throw(
-                    NotAProtocolError {
-                        span: span.clone(),
-                        name: type_name,
-                        context: error_context,
-                    });
+                ctx.diagnostics.throw(NotAProtocolError {
+                    span: span.clone(),
+                    name: type_name,
+                    context: error_context,
+                });
                 resolved.push(Ty::error(span));
             }
         }

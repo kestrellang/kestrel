@@ -26,6 +26,8 @@ fn walk_symbol(
     model: &SemanticModel,
     ctx: &mut AnalysisContext,
 ) {
+    // Track current symbol on the stack for analyzers needing context
+    ctx.push_symbol(symbol.clone());
     // Pre-visit
     for (i, a) in analyzers.iter_mut().enumerate() {
         ctx.current = AnalyzerId(i);
@@ -62,6 +64,8 @@ fn walk_symbol(
         ctx.current = AnalyzerId(i);
         a.visit_symbol_post(symbol, ctx);
     }
+    // Pop current symbol after finishing this node
+    ctx.pop_symbol();
 }
 
 fn walk_statement(stmt: &Statement, analyzers: &mut [&mut dyn Analyzer], model: &SemanticModel, ctx: &mut AnalysisContext) {
@@ -105,6 +109,10 @@ fn walk_expression(expr: &Expression, analyzers: &mut [&mut dyn Analyzer], model
         match &expr.kind {
             ExprKind::Array(elements) => {
                 for e in elements { walk_expression(e, analyzers, model, ctx); if ctx.stopped { return; } }
+            }
+            ExprKind::OverloadedRef(_) => { /* leaf */ }
+            ExprKind::Loop { body, .. } => {
+                for stmt in body { walk_statement(stmt, analyzers, model, ctx); if ctx.stopped { return; } }
             }
             ExprKind::Tuple(elements) => {
                 for e in elements { walk_expression(e, analyzers, model, ctx); if ctx.stopped { return; } }
@@ -152,12 +160,12 @@ fn walk_expression(expr: &Expression, analyzers: &mut [&mut dyn Analyzer], model
                     }
                 }
             }
-            ExprKind::While { condition, body } => {
+            ExprKind::While { condition, body, .. } => {
                 walk_expression(condition, analyzers, model, ctx);
                 for stmt in body { walk_statement(stmt, analyzers, model, ctx); if ctx.stopped { return; } }
             }
             // Leaf kinds or handled elsewhere
-            ExprKind::Literal(_) | ExprKind::NameRef(_) | ExprKind::SymbolRef(_) | ExprKind::ThisRef
+            ExprKind::Literal(_) | ExprKind::LocalRef(_) | ExprKind::SymbolRef(_)
             | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::Break { .. }
             | ExprKind::Continue { .. } | ExprKind::Return { value: None } | ExprKind::Error => {}
             ExprKind::Return { value: Some(v) } => { walk_expression(v, analyzers, model, ctx); }
@@ -207,4 +215,3 @@ fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<kest
     }
     None
 }
-

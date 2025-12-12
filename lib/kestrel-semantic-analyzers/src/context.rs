@@ -1,7 +1,9 @@
 use kestrel_reporting::DiagnosticContext;
-use crate::analyzer::Analyzer;
 use crate::runner::AnalyzerId;
 use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_tree::language::KestrelLanguage;
+use semantic_tree::symbol::Symbol;
+use std::sync::Arc;
 
 /// Context provided to analyzers during the walk.
 pub struct AnalysisContext<'a> {
@@ -12,11 +14,13 @@ pub struct AnalysisContext<'a> {
     pub(crate) skip_children: bool,
     // Index of current analyzer when running multiple
     pub(crate) current: AnalyzerId,
+    // Stack of symbols being visited; top is current
+    pub(crate) symbol_stack: Vec<Arc<dyn Symbol<KestrelLanguage>>>,
 }
 
 impl<'a> AnalysisContext<'a> {
     pub fn new(model: &'a SemanticModel, diagnostics: &'a mut DiagnosticContext) -> Self {
-        Self { model, diagnostics, stopped: false, skip_children: false, current: AnalyzerId(0) }
+        Self { model, diagnostics, stopped: false, skip_children: false, current: AnalyzerId(0), symbol_stack: Vec::new() }
     }
 
     /// Report a diagnostic
@@ -36,3 +40,10 @@ pub(crate) fn reset_node_flags(ctx: &mut AnalysisContext) {
     ctx.skip_children = false;
 }
 
+impl<'a> AnalysisContext<'a> {
+    pub fn push_symbol(&mut self, sym: Arc<dyn Symbol<KestrelLanguage>>) {
+        self.symbol_stack.push(sym);
+    }
+    pub fn pop_symbol(&mut self) { let _ = self.symbol_stack.pop(); }
+    pub fn current_symbol(&self) -> Option<Arc<dyn Symbol<KestrelLanguage>>> { self.symbol_stack.last().cloned() }
+}

@@ -1,0 +1,262 @@
+//! Analyzer that verifies initializer bodies correctly initialize all fields,
+//! restricts double-assignment to `let` fields, forbids reading fields before
+//! initialization, and using self/return before full initialization.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use crate::analyzer::Analyzer;
+use crate::context::AnalysisContext;
+
+use diagnostics::{InitializerError, UninitializedFieldsError};
+
+use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::expr::{ExprKind, Expression};
+use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_span::Span;
+use semantic_tree::symbol::Symbol;
+
+pub struct InitializerVerificationAnalyzer;
+
+impl InitializerVerificationAnalyzer { pub fn new() -> Self { Self } }
+impl Default for InitializerVerificationAnalyzer { fn default() -> Self { Self::new() } }
+
+impl Analyzer for InitializerVerificationAnalyzer {
+    fn name(&self) -> &'static str { "initializer_verification" }
+
+    fn visit_symbol(&mut self, symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut AnalysisContext) {
+        if symbol.metadata().kind() != KestrelSymbolKind::Initializer { return; }
+        validate_initializer(symbol, ctx);
+    }
+}
+
+fn validate_initializer(symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut AnalysisContext) {
+    // Parent must be a struct to know fields
+    let Some(parent) = symbol.metadata().parent() else { return; };
+    if parent.metadata().kind() != KestrelSymbolKind::Struct { return; }
+
+    // Collect field names and mutability
+    let fields: Vec<FieldInfo> = parent
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .map(|f| FieldInfo { name: f.metadata().name().value.clone(), is_let: !is_field_mutable(&f) })
+        .collect();
+
+    // Get initializer body
+    let Some(body) = get_executable_body(symbol) else { return; };
+
+    let all_fields: HashSet<String> = fields.iter().map(|f| f.name.clone()).collect();
+    let let_fields: HashSet<String> = fields.iter().filter(|f| f.is_let).map(|f| f.name.clone()).collect();
+
+    let mut vctx = VerificationContext { all_fields: all_fields.clone(), let_fields, state: InitState::new(), errors: Vec::new() };
+
+    let final_state = analyze_block(&body.statements, body.yield_expr.as_deref(), &mut vctx);
+
+    if !final_state.diverged {
+        let uninitialized: Vec<&String> = all_fields.iter().filter(|f| !final_state.assigned.contains(*f)).collect();
+        if !uninitialized.is_empty() {
+            let span = symbol.metadata().span().clone();
+            let field_list = uninitialized.iter().map(|s| format!("'{}'", s)).collect::<Vec<_>>().join(", ");
+            ctx.report(UninitializedFieldsError { span, fields: field_list });
+        }
+    }
+
+    for error in vctx.errors { ctx.report(error); }
+}
+
+struct FieldInfo { name: String, is_let: bool }
+
+#[derive(Clone, Debug)]
+struct InitState { assigned: HashSet<String>, let_assigned: HashSet<String>, diverged: bool }
+impl InitState { fn new() -> Self { Self { assigned: HashSet::new(), let_assigned: HashSet::new(), diverged: false } } }
+
+impl InitState {
+    fn merge(self, other: InitState) -> InitState {
+        if self.diverged && other.diverged {
+            InitState { assigned: self.assigned.intersection(&other.assigned).cloned().collect(), let_assigned: self.let_assigned.union(&other.let_assigned).cloned().collect(), diverged: true }
+        } else if self.diverged { other } else if other.diverged { self } else {
+            InitState { assigned: self.assigned.intersection(&other.assigned).cloned().collect(), let_assigned: self.let_assigned.union(&other.let_assigned).cloned().collect(), diverged: false }
+        }
+    }
+}
+
+struct VerificationContext { all_fields: HashSet<String>, let_fields: HashSet<String>, state: InitState, errors: Vec<InitializerError> }
+
+fn analyze_block(statements: &[Statement], yield_expr: Option<&Expression>, ctx: &mut VerificationContext) -> InitState {
+    let mut state = ctx.state.clone();
+    for stmt in statements {
+        if state.diverged { break; }
+        state = analyze_statement(stmt, state, ctx);
+    }
+    if !state.diverged {
+        if let Some(expr) = yield_expr { state = analyze_expression(expr, state, false, ctx); }
+    }
+    state
+}
+
+fn analyze_statement(stmt: &Statement, mut state: InitState, ctx: &mut VerificationContext) -> InitState {
+    match &stmt.kind {
+        StatementKind::Binding { pattern: _, value } => { if let Some(expr) = value { state = analyze_expression(expr, state, false, ctx); } }
+        StatementKind::Expr(expr) => { state = analyze_expression(expr, state, false, ctx); }
+    }
+    state
+}
+
+fn analyze_expression(expr: &Expression, mut state: InitState, is_assignment_target: bool, ctx: &mut VerificationContext) -> InitState {
+    match &expr.kind {
+        ExprKind::FieldAccess { object, field } => {
+            if is_self_expr(object) {
+                if !is_assignment_target {
+                    if !state.assigned.contains(field) { ctx.errors.push(InitializerError::FieldReadBeforeAssigned { span: expr.span.clone(), field_name: field.clone() }); }
+                }
+            } else {
+                state = analyze_expression(object, state, false, ctx);
+            }
+        }
+        ExprKind::Call { callee, arguments, .. } => {
+            if let ExprKind::MethodRef { receiver, .. } = &callee.kind {
+                if is_self_expr(receiver) {
+                    let uninitialized: Vec<String> = ctx.all_fields.iter().filter(|f| !state.assigned.contains(*f)).cloned().collect();
+                    if !uninitialized.is_empty() { ctx.errors.push(InitializerError::SelfUsedBeforeFullyInitialized { span: expr.span.clone(), uninitialized }); }
+                }
+            }
+            state = analyze_expression(callee, state, false, ctx);
+            for arg in arguments { state = analyze_expression(&arg.value, state, false, ctx); }
+        }
+        ExprKind::LocalRef(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::OverloadedRef(_) => {}
+        ExprKind::MethodRef { receiver, .. } => { state = analyze_expression(receiver, state, false, ctx); }
+        ExprKind::TupleIndex { tuple, .. } => { state = analyze_expression(tuple, state, false, ctx); }
+        ExprKind::Literal(_) => {}
+        ExprKind::Array(elements) => { for elem in elements { state = analyze_expression(elem, state, false, ctx); } }
+        ExprKind::Tuple(elements) => { for elem in elements { state = analyze_expression(elem, state, false, ctx); } }
+        ExprKind::Grouping(inner) => { state = analyze_expression(inner, state, false, ctx); }
+        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments { state = analyze_expression(&arg.value, state, false, ctx); }
+        }
+        ExprKind::ImplicitStructInit { arguments, .. } => { for arg in arguments { state = analyze_expression(&arg.value, state, false, ctx); } }
+        ExprKind::Assignment { target, value } => {
+            state = analyze_expression(value, state, false, ctx);
+            if let ExprKind::FieldAccess { object, field } = &target.kind {
+                if is_self_expr(object) {
+                    if ctx.let_fields.contains(field) && state.let_assigned.contains(field) {
+                        ctx.errors.push(InitializerError::LetFieldAssignedTwice { span: target.span.clone(), field_name: field.clone() });
+                    }
+                    state.assigned.insert(field.clone());
+                    if ctx.let_fields.contains(field) { state.let_assigned.insert(field.clone()); }
+                }
+            }
+            state = analyze_expression(target, state, true, ctx);
+        }
+        ExprKind::If { condition, then_branch, then_value, else_branch } => {
+            state = analyze_expression(condition, state, false, ctx);
+            let pre = state.clone();
+            // then
+            ctx.state = pre.clone();
+            let mut then_state = pre.clone();
+            for stmt in then_branch { if then_state.diverged { break; } then_state = analyze_statement(stmt, then_state, ctx); }
+            if !then_state.diverged { if let Some(value) = then_value { then_state = analyze_expression(value, then_state, false, ctx); } }
+            // else
+            let else_state = if let Some(else_branch) = else_branch {
+                ctx.state = pre.clone();
+                let mut else_state = pre.clone();
+                match else_branch {
+                    kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
+                        for stmt in statements { if else_state.diverged { break; } else_state = analyze_statement(stmt, else_state, ctx); }
+                        if !else_state.diverged { if let Some(value) = value { else_state = analyze_expression(value, else_state, false, ctx); } }
+                    }
+                    kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => { else_state = analyze_expression(if_expr, else_state, false, ctx); }
+                }
+                else_state
+            } else { pre.clone() };
+            state = then_state.merge(else_state);
+        }
+        ExprKind::While { condition, body, .. } => {
+            state = analyze_expression(condition, state, false, ctx);
+            // Body may execute zero times; so it doesn't contribute guaranteed initialization
+            let mut body_state = state.clone();
+            for stmt in body { if body_state.diverged { break; } body_state = analyze_statement(stmt, body_state, ctx); }
+            // Ignore yield for while
+        }
+        ExprKind::Loop { body, .. } => {
+            let mut break_states: Vec<InitState> = Vec::new();
+            let mut body_state = state.clone();
+            for stmt in body {
+                if body_state.diverged && contains_break_at_top_level(&stmt.kind) {
+                    let mut break_state = body_state.clone();
+                    break_state.diverged = false;
+                    break_states.push(break_state);
+                }
+            }
+            if break_states.is_empty() && !body_state.diverged { state.diverged = true; }
+            else if break_states.is_empty() { state = body_state; }
+            else { let mut merged = break_states.pop().unwrap(); for bs in break_states { merged = merged.merge(bs); } state = merged; }
+        }
+        ExprKind::Break { .. } | ExprKind::Continue { .. } => { state.diverged = true; }
+        ExprKind::Return { value } => {
+            if let Some(val) = value { state = analyze_expression(val, state, false, ctx); }
+            let uninitialized: Vec<String> = ctx.all_fields.iter().filter(|f| !state.assigned.contains(*f)).cloned().collect();
+            if !uninitialized.is_empty() { ctx.errors.push(InitializerError::ReturnBeforeFullyInitialized { span: expr.span.clone(), uninitialized }); }
+            state.diverged = true;
+        }
+        ExprKind::Error => {}
+    }
+    state
+}
+
+fn contains_break_at_top_level(kind: &StatementKind) -> bool {
+    match kind {
+        StatementKind::Expr(expr) => expr_contains_break_at_top_level(&expr.kind),
+        StatementKind::Binding { value: Some(expr), .. } => expr_contains_break_at_top_level(&expr.kind),
+        StatementKind::Binding { value: None, .. } => false,
+    }
+}
+
+fn expr_contains_break_at_top_level(kind: &ExprKind) -> bool {
+    match kind {
+        ExprKind::Break { .. } => true,
+        ExprKind::If { then_branch, then_value, else_branch, .. } => {
+            for stmt in then_branch { if contains_break_at_top_level(&stmt.kind) { return true; } }
+            if let Some(val) = then_value { if expr_contains_break_at_top_level(&val.kind) { return true; } }
+            if let Some(else_b) = else_branch {
+                match else_b {
+                    kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
+                        for stmt in statements { if contains_break_at_top_level(&stmt.kind) { return true; } }
+                        if let Some(val) = value { if expr_contains_break_at_top_level(&val.kind) { return true; } }
+                    }
+                    kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => { if expr_contains_break_at_top_level(&if_expr.kind) { return true; } }
+                }
+            }
+            false
+        }
+        ExprKind::While { .. } | ExprKind::Loop { .. } => false,
+        _ => false,
+    }
+}
+
+fn is_self_expr(expr: &Expression) -> bool {
+    match &expr.kind { ExprKind::LocalRef(local_id) => local_id.index() == 0, _ => false }
+}
+
+fn is_field_mutable(field: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
+    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+    if let Some(field_sym) = field.as_ref().downcast_ref::<FieldSymbol>() { field_sym.is_mutable() } else { true }
+}
+
+fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<CodeBlock> {
+    let behaviors = symbol.metadata().behaviors();
+    for b in behaviors.iter() {
+        if matches!(b.kind(), KestrelBehaviorKind::Executable) {
+            if let Some(exec) = b.as_ref().downcast_ref::<ExecutableBehavior>() { return Some(exec.body().clone()); }
+        }
+    }
+    None
+}
+
+pub mod diagnostics;
+

@@ -150,8 +150,18 @@ impl Test {
         // Build the semantic tree
         let tree = builder.build();
 
-        // Run binding phase (includes validation)
+        // Run binding phase
         let model = SemanticBinder::bind(tree, &mut diagnostics);
+
+        // Run analyzers (during migration we mirror builder validations here)
+        {
+            use kestrel_semantic_analyzers::{Analyzer, AnalysisContext, run_all, default_analyzers};
+            let mut owned = default_analyzers();
+            let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
+            for a in owned.iter_mut() { analyzers.push(a.as_mut()); }
+            let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
+            run_all(&mut analyzers, &model, &mut ctx);
+        }
 
         let has_errors = has_parse_errors || diagnostics.has_errors();
 

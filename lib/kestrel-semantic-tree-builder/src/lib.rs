@@ -15,7 +15,6 @@
 //! - `resolution`: Binding and type resolution (`SemanticBinder`, `TypeResolver`)
 //! - `syntax`: Syntax tree utilities
 //! - `diagnostics`: Error types for semantic analysis
-//! - `validation`: Validation passes
 //! - `resolvers`: Per-declaration resolvers
 //! - `body_resolver`: Function body resolution
 //!
@@ -45,7 +44,6 @@ mod tree;
 // Feature modules
 pub mod body_resolver;
 pub mod diagnostics;
-pub mod validation;
 
 // Re-exports for convenient access
 pub use builder::SemanticTreeBuilder;

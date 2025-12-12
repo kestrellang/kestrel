@@ -1,2 +1,36 @@
-// Concrete analyzers will be added here during migration.
+pub mod duplicate_symbol;
+pub mod function_body;
+pub mod protocol_method;
+pub mod static_context;
+pub mod visibility_consistency;
+pub mod imports;
+pub mod generics;
+pub mod type_alias_cycles;
+pub mod struct_cycles;
+pub mod extension_conflict;
+pub mod constraint_cycles;
+pub mod initializer_verification;
+pub mod assignment_validation;
+pub mod dead_code;
+pub mod exhaustive_return;
+pub mod conformance;
+pub mod type_check;
+pub mod type_assignability;
 
+pub use duplicate_symbol::DuplicateSymbolAnalyzer;
+pub use function_body::FunctionBodyAnalyzer;
+pub use protocol_method::ProtocolMethodAnalyzer;
+pub use static_context::StaticContextAnalyzer;
+pub use visibility_consistency::VisibilityConsistencyAnalyzer;
+pub use imports::ImportAnalyzer;
+pub use generics::GenericsAnalyzer;
+pub use type_alias_cycles::TypeAliasCycleAnalyzer;
+pub use struct_cycles::StructCycleAnalyzer;
+pub use extension_conflict::ExtensionConflictAnalyzer;
+pub use constraint_cycles::ConstraintCycleAnalyzer;
+pub use initializer_verification::InitializerVerificationAnalyzer;
+pub use assignment_validation::AssignmentValidationAnalyzer;
+pub use dead_code::DeadCodeAnalyzer;
+pub use exhaustive_return::ExhaustiveReturnAnalyzer;
+pub use conformance::ConformanceAnalyzer;
+pub use type_check::TypeCheckAnalyzer;

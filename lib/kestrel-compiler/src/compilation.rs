@@ -4,6 +4,8 @@ use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
+use kestrel_semantic_analyzers::{Analyzer, AnalysisContext, run_all};
+use kestrel_semantic_analyzers::analyzers::DuplicateSymbolAnalyzer;
 use kestrel_span::Span;
 
 /// Represents a compiled Kestrel project.
@@ -91,8 +93,18 @@ impl Compilation {
         // Build the semantic tree
         let tree = builder.build();
 
-        // Run binding phase (includes validation)
+        // Run binding phase (for now still includes most validations)
         let model = SemanticBinder::bind(tree, &mut diagnostics);
+
+        // Run extracted analyzers after binding (keeps output consistent during migration)
+        {
+            // Build default analyzers; expand as more validators migrate
+            let mut owned = kestrel_semantic_analyzers::default_analyzers();
+            let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
+            for a in owned.iter_mut() { analyzers.push(a.as_mut()); }
+            let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
+            run_all(&mut analyzers, &model, &mut ctx);
+        }
 
         Self {
             source_files,
