@@ -26,8 +26,10 @@ impl IntoDiagnostic for CircularStructContainmentError {
         let cycle_display = cycle_names.join(" -> ");
 
         let mut labels = vec![
-            Label::primary(self.field_span.file_id, self.field_span.range())
-                .with_message(format!("field '{}' creates infinite-size type", self.field_name)),
+            Label::primary(self.field_span.file_id, self.field_span.range()).with_message(format!(
+                "field '{}' creates infinite-size type",
+                self.field_name
+            )),
             Label::secondary(self.origin.span.file_id, self.origin.span.range())
                 .with_message("cycle starts here"),
         ];
@@ -40,11 +42,15 @@ impl IntoDiagnostic for CircularStructContainmentError {
         }
 
         Diagnostic::error()
-            .with_message(format!("circular struct containment: {} -> {}", cycle_display, self.origin.name))
+            .with_message(format!(
+                "circular struct containment: {} -> {}",
+                cycle_display, self.origin.name
+            ))
             .with_labels(labels)
             .with_notes(vec![
                 "structs cannot contain themselves directly or indirectly".to_string(),
-                "consider using an optional type, array, or reference to break the cycle".to_string(),
+                "consider using an optional type, array, or reference to break the cycle"
+                    .to_string(),
             ])
     }
 }
@@ -61,13 +67,17 @@ pub struct SelfContainingStructError {
 impl IntoDiagnostic for SelfContainingStructError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("struct '{}' cannot contain itself", self.struct_name))
+            .with_message(format!(
+                "struct '{}' cannot contain itself",
+                self.struct_name
+            ))
             .with_labels(vec![
-                Label::primary(self.field_span.file_id, self.field_span.range())
-                    .with_message(format!(
+                Label::primary(self.field_span.file_id, self.field_span.range()).with_message(
+                    format!(
                         "field '{}' has type '{}', creating infinite-size type",
                         self.field_name, self.struct_name
-                    )),
+                    ),
+                ),
                 Label::secondary(self.struct_span.file_id, self.struct_span.range())
                     .with_message("struct declared here"),
             ])
@@ -77,4 +87,3 @@ impl IntoDiagnostic for SelfContainingStructError {
             ])
     }
 }
-

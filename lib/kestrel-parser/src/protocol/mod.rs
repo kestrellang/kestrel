@@ -11,17 +11,15 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::event::{EventSink, TreeBuilder};
-use crate::common::{
-    visibility_parser_internal, token, identifier,
-    function_declaration_parser_internal,
-    initializer_declaration_parser_internal,
-    emit_protocol_declaration,
-    ProtocolDeclarationData, ProtocolBodyItem,
-};
-use crate::type_alias::type_alias_declaration_parser_internal;
-use crate::type_param::{type_parameter_list_parser, where_clause_parser, conformance_list_parser};
 use crate::common::ConformanceListData;
+use crate::common::{
+    ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
+    function_declaration_parser_internal, identifier, initializer_declaration_parser_internal,
+    token, visibility_parser_internal,
+};
+use crate::event::{EventSink, TreeBuilder};
+use crate::type_alias::type_alias_declaration_parser_internal;
+use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
 /// Represents a protocol declaration: (visibility)? protocol Name[T]? (where ...)? { ... }
 ///
@@ -54,7 +52,8 @@ impl ProtocolDeclaration {
 
     /// Get the visibility modifier if present
     pub fn visibility(&self) -> Option<SyntaxKind> {
-        let visibility_node = self.syntax
+        let visibility_node = self
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::Visibility)?;
 
@@ -93,15 +92,14 @@ impl ProtocolDeclaration {
 }
 
 /// Parser for protocol body items (functions, associated types, or initializers)
-fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = Simple<Token>> + Clone {
-    let function = function_declaration_parser_internal()
-        .map(ProtocolBodyItem::Function);
+fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = Simple<Token>> + Clone
+{
+    let function = function_declaration_parser_internal().map(ProtocolBodyItem::Function);
 
-    let associated_type = type_alias_declaration_parser_internal()
-        .map(ProtocolBodyItem::AssociatedType);
+    let associated_type =
+        type_alias_declaration_parser_internal().map(ProtocolBodyItem::AssociatedType);
 
-    let initializer = initializer_declaration_parser_internal()
-        .map(ProtocolBodyItem::Initializer);
+    let initializer = initializer_declaration_parser_internal().map(ProtocolBodyItem::Initializer);
 
     // Try function first, then associated type, then initializer
     // This works because:
@@ -115,7 +113,8 @@ fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = S
 /// Internal Chumsky parser for protocol declaration
 ///
 /// This is the single source of truth for protocol declaration parsing.
-pub fn protocol_declaration_parser_internal() -> impl Parser<Token, ProtocolDeclarationData, Error = Simple<Token>> + Clone {
+pub fn protocol_declaration_parser_internal()
+-> impl Parser<Token, ProtocolDeclarationData, Error = Simple<Token>> + Clone {
     visibility_parser_internal()
         .then(token(Token::Protocol))
         .then(identifier())
@@ -125,22 +124,36 @@ pub fn protocol_declaration_parser_internal() -> impl Parser<Token, ProtocolDecl
         .then(token(Token::LBrace))
         .then(protocol_body_item_parser().repeated())
         .then(token(Token::RBrace))
-        .map(|((((((((visibility, protocol_span), name_span), type_params), inherited), where_clause), lbrace_span), body), rbrace_span)| {
-            ProtocolDeclarationData {
-                visibility,
-                protocol_span,
-                name_span,
-                type_params,
-                inherited: inherited.map(|(colon_span, types)| ConformanceListData {
-                    colon_span,
-                    conformances: types,
-                }),
-                where_clause,
-                lbrace_span,
-                body,
+        .map(
+            |(
+                (
+                    (
+                        (
+                            ((((visibility, protocol_span), name_span), type_params), inherited),
+                            where_clause,
+                        ),
+                        lbrace_span,
+                    ),
+                    body,
+                ),
                 rbrace_span,
-            }
-        })
+            )| {
+                ProtocolDeclarationData {
+                    visibility,
+                    protocol_span,
+                    name_span,
+                    type_params,
+                    inherited: inherited.map(|(colon_span, types)| ConformanceListData {
+                        colon_span,
+                        conformances: types,
+                    }),
+                    where_clause,
+                    lbrace_span,
+                    body,
+                    rbrace_span,
+                }
+            },
+        )
 }
 
 /// Parse a protocol declaration and emit events
@@ -181,7 +194,10 @@ mod tests {
         let mut sink = EventSink::new();
         parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
-        ProtocolDeclaration { syntax: tree, span: Span::from(0..source.len()) }
+        ProtocolDeclaration {
+            syntax: tree,
+            span: Span::from(0..source.len()),
+        }
     }
 
     /// Helper to check if a syntax node exists as a child
@@ -252,7 +268,8 @@ mod tests {
         assert_eq!(decl.name(), Some("Container".to_string()));
         let methods = decl.methods();
         assert_eq!(methods.len(), 1);
-        let has_type_params = methods[0].children()
+        let has_type_params = methods[0]
+            .children()
             .any(|child| child.kind() == SyntaxKind::TypeParameterList);
         assert!(has_type_params, "Expected TypeParameterList on method");
     }
@@ -263,8 +280,13 @@ mod tests {
         assert_eq!(decl.name(), Some("Iterator".to_string()));
         // Check that the body contains the TypeAliasDeclaration
         let body = decl.body().expect("Protocol should have body");
-        let has_type_alias = body.children().any(|c| c.kind() == SyntaxKind::TypeAliasDeclaration);
-        assert!(has_type_alias, "Protocol body should contain TypeAliasDeclaration for associated type");
+        let has_type_alias = body
+            .children()
+            .any(|c| c.kind() == SyntaxKind::TypeAliasDeclaration);
+        assert!(
+            has_type_alias,
+            "Protocol body should contain TypeAliasDeclaration for associated type"
+        );
     }
 
     #[test]
@@ -275,8 +297,13 @@ mod tests {
         assert_eq!(decl.name(), Some("BadProtocol".to_string()));
         let methods = decl.methods();
         assert_eq!(methods.len(), 1);
-        let has_body = methods[0].children().any(|c| c.kind() == SyntaxKind::FunctionBody);
-        assert!(has_body, "Protocol method with body should parse and include FunctionBody node");
+        let has_body = methods[0]
+            .children()
+            .any(|c| c.kind() == SyntaxKind::FunctionBody);
+        assert!(
+            has_body,
+            "Protocol method with body should parse and include FunctionBody node"
+        );
     }
 
     #[test]
@@ -289,7 +316,8 @@ mod tests {
     #[test]
     fn test_protocol_multiple_inheritance() {
         let decl = parse("protocol Widget: Drawable, Clickable { }");
-        let conformance_list = decl.syntax
+        let conformance_list = decl
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::ConformanceList)
             .expect("Expected ConformanceList node");

@@ -248,7 +248,10 @@ mod multi_file {
     #[test]
     fn type_alias_with_imports() {
         Test::with_files(&[
-            ("collections.ks", "module System.Collections\npublic struct Array {}"),
+            (
+                "collections.ks",
+                "module System.Collections\npublic struct Array {}",
+            ),
             (
                 "graphics.ks",
                 r#"module Graphics
@@ -274,8 +277,7 @@ mod cycle_detection {
 
     #[test]
     fn self_reference_cycle() {
-        Test::new("module Test\ntype A = A;")
-            .expect(HasError("circular type alias"));
+        Test::new("module Test\ntype A = A;").expect(HasError("circular type alias"));
     }
 
     #[test]

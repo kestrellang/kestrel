@@ -85,13 +85,13 @@ impl ExecutableBehavior {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
     use crate::expr::Expression;
     use crate::pattern::{Mutability, Pattern};
     use crate::stmt::Statement;
     use crate::symbol::local::LocalId;
     use crate::ty::{IntBits, Ty};
+    use kestrel_span::Span;
 
     #[test]
     fn test_empty_code_block() {

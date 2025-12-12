@@ -3,7 +3,7 @@
 //! Ensures that functions outside of protocols have bodies.
 
 use kestrel_semantic_model::queries::AncestorOfKind;
-use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
+use kestrel_semantic_model::HasBody;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
@@ -51,12 +51,18 @@ impl Analyzer for FunctionBodyAnalyzer {
             return;
         }
 
-        // Get the FunctionDataBehavior
-        let Some(data) = symbol.metadata().get_behavior::<FunctionDataBehavior>() else { return; };
-        if data.has_body() { return; }
+        if ctx.model.query(HasBody {
+            function_id: symbol_id,
+        }) != Some(false)
+        {
+            return;
+        };
 
         let name = &symbol.metadata().name().value;
         let span = symbol.metadata().declaration_span().clone();
-        ctx.report(FunctionMissingBodyError { span, function_name: name.clone() });
+        ctx.report(FunctionMissingBodyError {
+            span,
+            function_name: name.clone(),
+        });
     }
 }

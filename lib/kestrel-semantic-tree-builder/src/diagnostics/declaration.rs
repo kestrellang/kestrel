@@ -17,7 +17,10 @@ pub struct DuplicateSymbolError {
 impl IntoDiagnostic for DuplicateSymbolError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("duplicate definition of {} '{}'", self.kind, self.name))
+            .with_message(format!(
+                "duplicate definition of {} '{}'",
+                self.kind, self.name
+            ))
             .with_labels(vec![
                 Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
                     .with_message(format!("{} defined here", self.kind)),
@@ -69,10 +72,7 @@ impl IntoDiagnostic for DuplicateFunctionSignatureError {
         ];
 
         for (span, fid) in &self.duplicate_spans {
-            labels.push(
-                Label::primary(*fid, span.range())
-                    .with_message("duplicate definition"),
-            );
+            labels.push(Label::primary(*fid, span.range()).with_message("duplicate definition"));
         }
 
         Diagnostic::error()
@@ -93,7 +93,7 @@ impl IntoDiagnostic for FunctionMissingBodyError {
             .with_message(format!("function '{}' requires a body", self.function_name))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("function declared without body")
+                    .with_message("function declared without body"),
             ])
     }
 }
@@ -120,8 +120,7 @@ impl IntoDiagnostic for StaticInWrongContextError {
         Diagnostic::error()
             .with_message(format!("'{}' cannot be static in this context", self.name))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(context_msg)
+                Label::primary(self.span.file_id, self.span.range()).with_message(context_msg),
             ])
     }
 }
@@ -154,12 +153,9 @@ impl IntoDiagnostic for TypeAliasRequiresTypeError {
             ),
         };
 
-        Diagnostic::error()
-            .with_message(main_msg)
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(context_msg)
-            ])
+        Diagnostic::error().with_message(main_msg).with_labels(vec![
+            Label::primary(self.span.file_id, self.span.range()).with_message(context_msg),
+        ])
     }
 }
 
@@ -175,7 +171,7 @@ impl IntoDiagnostic for AssociatedTypeBoundsInWrongContextError {
             .with_message(format!("type alias cannot have bounds: '{}'", self.name))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("bounds are only allowed on associated types in protocols")
+                    .with_message("bounds are only allowed on associated types in protocols"),
             ])
     }
 }

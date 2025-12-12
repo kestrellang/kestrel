@@ -11,10 +11,7 @@ impl IntoDiagnostic for FunctionMissingBodyError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("function '{}' requires a body", self.function_name))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("function declared without body")
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("function declared without body")])
     }
 }
-

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
+use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::associated_type::{AssociatedTypeSymbol, AssociatedTypeBoundsBehavior};
+use kestrel_semantic_tree::symbol::associated_type::{
+    AssociatedTypeBoundsBehavior, AssociatedTypeSymbol,
+};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -19,9 +21,9 @@ use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError, UnresolvedTypeError,
 };
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::syntax::{
     extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
     get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility,
@@ -92,7 +94,8 @@ impl Resolver for TypeAliasResolver {
                 // In struct or module: create TypeAliasSymbol
                 // Use error type as placeholder - actual type will be resolved during bind
                 let placeholder_type = Ty::error(full_span.clone());
-                let syntactic_typed_behavior = TypedBehavior::new(placeholder_type, full_span.clone());
+                let syntactic_typed_behavior =
+                    TypedBehavior::new(placeholder_type, full_span.clone());
 
                 // Create the type alias symbol
                 let type_alias_symbol = TypeAliasSymbol::new(
@@ -105,9 +108,12 @@ impl Resolver for TypeAliasResolver {
                 let type_alias_arc = Arc::new(type_alias_symbol);
 
                 // Add TypeAlias type as semantic identity
-                let type_alias_type =
-                    kestrel_semantic_tree::ty::Ty::type_alias(type_alias_arc.clone(), full_span.clone());
-                let semantic_typed_behavior = TypedBehavior::new(type_alias_type, full_span.clone());
+                let type_alias_type = kestrel_semantic_tree::ty::Ty::type_alias(
+                    type_alias_arc.clone(),
+                    full_span.clone(),
+                );
+                let semantic_typed_behavior =
+                    TypedBehavior::new(type_alias_type, full_span.clone());
                 type_alias_arc
                     .metadata()
                     .add_behavior(semantic_typed_behavior);
@@ -115,7 +121,8 @@ impl Resolver for TypeAliasResolver {
                 let type_alias_arc_dyn = type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
                 // Extract type parameters with correct parent (the type alias, not the module)
-                let type_parameters = extract_type_parameters(syntax, source, Some(type_alias_arc_dyn.clone()));
+                let type_parameters =
+                    extract_type_parameters(syntax, source, Some(type_alias_arc_dyn.clone()));
 
                 // Add type parameters as children
                 add_type_params_as_children(&type_parameters, &type_alias_arc_dyn);
@@ -150,7 +157,10 @@ impl Resolver for TypeAliasResolver {
             KestrelSymbolKind::TypeAlias => {
                 // Regular type alias or struct binding: resolve aliased type
                 // Enter cycle detector
-                if let Err(_) = semantic_tree::cycle::CycleDetector::enter_ref(context.type_alias_cycle_detector, symbol_id) {
+                if let Err(_) = semantic_tree::cycle::CycleDetector::enter_ref(
+                    context.type_alias_cycle_detector,
+                    symbol_id,
+                ) {
                     return;
                 }
 
@@ -162,8 +172,9 @@ impl Resolver for TypeAliasResolver {
                 // Check for bounds in module-level type aliases (not allowed)
                 if alias_context == TypeAliasContext::Module {
                     if has_associated_type_bounds(syntax) {
-                        context.diagnostics.throw(
-                            AssociatedTypeBoundsInWrongContextError {
+                        context
+                            .diagnostics
+                            .throw(AssociatedTypeBoundsInWrongContextError {
                                 span: span.clone(),
                                 name: name.clone(),
                             });
@@ -184,7 +195,9 @@ impl Resolver for TypeAliasResolver {
                 symbol.metadata().add_behavior(generics_behavior);
 
                 // Extract and resolve the aliased type from syntax
-                if let Some(resolved_type) = resolve_aliased_type_from_syntax(syntax, &source, symbol_id, context, file_id) {
+                if let Some(resolved_type) =
+                    resolve_aliased_type_from_syntax(syntax, &source, symbol_id, context, file_id)
+                {
                     // Validate constraint satisfaction for struct bindings
                     if alias_context == TypeAliasContext::Struct {
                         if let Some(parent) = symbol.metadata().parent() {
@@ -206,17 +219,18 @@ impl Resolver for TypeAliasResolver {
                     // In protocols, type aliases without `= Type` are valid (abstract associated types)
                     let diag_context = match alias_context {
                         TypeAliasContext::Module => Some(DiagTypeAliasContext::ModuleLevel),
-                        TypeAliasContext::Struct => Some(DiagTypeAliasContext::StructWithoutConformance),
+                        TypeAliasContext::Struct => {
+                            Some(DiagTypeAliasContext::StructWithoutConformance)
+                        }
                         TypeAliasContext::Protocol => None, // Abstract associated types are valid
                     };
 
                     if let Some(ctx) = diag_context {
-                        context.diagnostics.throw(
-                            TypeAliasRequiresTypeError {
-                                span,
-                                name,
-                                context: ctx,
-                            });
+                        context.diagnostics.throw(TypeAliasRequiresTypeError {
+                            span,
+                            name,
+                            context: ctx,
+                        });
                     }
                 }
 
@@ -262,7 +276,10 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
 
 /// Extract the name from a type alias declaration
 /// Handles both simple names (Name node) and qualified paths (AssociatedTypeTarget node)
-fn extract_type_alias_name(syntax: &SyntaxNode, source: &str) -> Option<(String, kestrel_span::Span)> {
+fn extract_type_alias_name(
+    syntax: &SyntaxNode,
+    source: &str,
+) -> Option<(String, kestrel_span::Span)> {
     // First try AssociatedTypeTarget (qualified path)
     if let Some(target_node) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
         // In qualified path, the name is the last Name node
@@ -312,7 +329,9 @@ fn bind_associated_type(
     // Resolve default type if present (= Int)
     // Note: Validation of defaults against bounds happens in a separate validation pass
     // after all conformances have been resolved (see ConformanceValidator)
-    if let Some(default_type) = resolve_aliased_type_from_syntax(syntax, source, symbol_id, context, file_id) {
+    if let Some(default_type) =
+        resolve_aliased_type_from_syntax(syntax, source, symbol_id, context, file_id)
+    {
         let typed_behavior = TypedBehavior::new(default_type, symbol.metadata().span().clone());
         symbol.metadata().add_behavior(typed_behavior);
     }
@@ -343,9 +362,13 @@ fn resolve_associated_type_bounds(
                 // Stop collecting bounds once we hit equals
                 break;
             }
-            SyntaxElement::Node(node) if after_colon && (node.kind() == SyntaxKind::Ty || node.kind() == SyntaxKind::TyPath) => {
+            SyntaxElement::Node(node)
+                if after_colon
+                    && (node.kind() == SyntaxKind::Ty || node.kind() == SyntaxKind::TyPath) =>
+            {
                 // This is a bound type
-                let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+                let mut type_ctx =
+                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
                 let bound_ty = resolve_type_from_ty_node(node, &mut type_ctx);
 
                 // Validate it's a protocol
@@ -416,7 +439,9 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx.model.query(SymbolFor { id: context_id })
+    let file_id = ctx
+        .model
+        .query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -424,7 +449,9 @@ fn resolve_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id) {
+            if let Some(constraint) =
+                resolve_type_bound(&child, source, context_id, ctx, type_params, file_id)
+            {
                 constraints.push(constraint);
             }
         }
@@ -451,7 +478,8 @@ fn resolve_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+    let param_span: kestrel_span::Span =
+        Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -474,36 +502,37 @@ fn resolve_type_bound(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    match resolved_ty.kind() {
-                        TyKind::Protocol { .. } => resolved_ty,
-                        TyKind::Struct { symbol, .. } => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
-                        TyKind::TypeAlias { symbol, .. } => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
-                        _ => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: bound_name.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
+            match ctx.model.query(ResolveTypePath {
+                path: segments,
+                context: context_id,
+            }) {
+                TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
+                    TyKind::Protocol { .. } => resolved_ty,
+                    TyKind::Struct { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
                     }
-                }
+                    TyKind::TypeAlias { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
+                    }
+                    _ => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: bound_name.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
+                    }
+                },
                 TypePathResolution::NotFound { .. } => {
                     ctx.diagnostics.throw(UnresolvedTypeError {
                         span: span.clone(),
@@ -528,7 +557,9 @@ fn resolve_type_bound(
     } else {
         match param_id {
             Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
-            None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
+            None => Some(Constraint::unresolved_type_bound(
+                param_name, param_span, bounds,
+            )),
         }
     }
 }
@@ -548,11 +579,12 @@ fn resolve_aliased_type_from_syntax(
     let aliased_type_node = find_child(syntax, SyntaxKind::AliasedType)?;
 
     // Try to find a Ty node first. If it doesn't exist, use the AliasedType node itself.
-    let ty_node = find_child(&aliased_type_node, SyntaxKind::Ty)
-        .unwrap_or_else(|| aliased_type_node.clone());
+    let ty_node =
+        find_child(&aliased_type_node, SyntaxKind::Ty).unwrap_or_else(|| aliased_type_node.clone());
 
     // Use unified type resolution
-    let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+    let mut type_ctx =
+        TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
     Some(resolve_type_from_ty_node(&ty_node, &mut type_ctx))
 }
 
@@ -604,7 +636,8 @@ fn validate_struct_associated_type_binding(
 
     // Get the struct's conformances
     let conformances = parent
-        .conformances_behavior()
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
         .map(|cb| cb.conformances().to_vec())
         .unwrap_or_default();
 
@@ -626,12 +659,11 @@ fn validate_struct_associated_type_binding(
                 });
 
                 if !conforms_to_protocol {
-                    ctx.diagnostics.throw(
-                        QualifiedBindingNotConformingError {
-                            span: binding_span,
-                            struct_name,
-                            protocol_name: protocol_name.clone(),
-                        });
+                    ctx.diagnostics.throw(QualifiedBindingNotConformingError {
+                        span: binding_span,
+                        struct_name,
+                        protocol_name: protocol_name.clone(),
+                    });
                     return;
                 }
 
@@ -651,12 +683,11 @@ fn validate_struct_associated_type_binding(
                 });
 
                 if !protocol_has_type {
-                    ctx.diagnostics.throw(
-                        QualifiedBindingWrongProtocolError {
-                            span: binding_span,
-                            protocol_name,
-                            type_name: type_name.to_string(),
-                        });
+                    ctx.diagnostics.throw(QualifiedBindingWrongProtocolError {
+                        span: binding_span,
+                        protocol_name,
+                        type_name: type_name.to_string(),
+                    });
                 }
             }
         }
@@ -681,12 +712,11 @@ fn validate_struct_associated_type_binding(
             .collect();
 
         if protocols_with_type.len() > 1 {
-            ctx.diagnostics.throw(
-                AmbiguousAssociatedTypeError {
-                    span: binding_span,
-                    type_name: type_name.to_string(),
-                    protocols: protocols_with_type,
-                });
+            ctx.diagnostics.throw(AmbiguousAssociatedTypeError {
+                span: binding_span,
+                type_name: type_name.to_string(),
+                protocols: protocols_with_type,
+            });
         }
     }
 
@@ -764,7 +794,8 @@ fn validate_struct_binding_constraint_satisfaction(
 
     // Get the struct's conformances
     let conformances = parent
-        .conformances_behavior()
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
         .map(|cb| cb.conformances().to_vec())
         .unwrap_or_default();
 
@@ -774,11 +805,18 @@ fn validate_struct_binding_constraint_satisfaction(
 
     // BFS to collect all protocols including inherited ones
     while let Some(conformance) = to_check.pop() {
-        if let TyKind::Protocol { symbol: protocol_symbol, .. } = conformance.kind() {
+        if let TyKind::Protocol {
+            symbol: protocol_symbol,
+            ..
+        } = conformance.kind()
+        {
             all_protocols.push(conformance.clone());
 
             // Add inherited protocols (protocol conformances)
-            if let Some(inherited_conformances) = protocol_symbol.conformances_behavior() {
+            if let Some(inherited_conformances) = protocol_symbol
+                .metadata()
+                .get_behavior::<ConformancesBehavior>()
+            {
                 for inherited in inherited_conformances.conformances() {
                     to_check.push(inherited.clone());
                 }
@@ -788,7 +826,11 @@ fn validate_struct_binding_constraint_satisfaction(
 
     // Find the protocol(s) that define this associated type and get their bounds
     for protocol in &all_protocols {
-        if let TyKind::Protocol { symbol: protocol_symbol, .. } = protocol.kind() {
+        if let TyKind::Protocol {
+            symbol: protocol_symbol,
+            ..
+        } = protocol.kind()
+        {
             let protocol_dyn = protocol_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
             // Find the associated type in this protocol
@@ -851,7 +893,11 @@ fn validate_type_satisfies_bounds(
             continue;
         }
 
-        if let TyKind::Protocol { symbol: required_proto_symbol, .. } = required_protocol.kind() {
+        if let TyKind::Protocol {
+            symbol: required_proto_symbol,
+            ..
+        } = required_protocol.kind()
+        {
             let required_protocol_name = required_proto_symbol.metadata().name().value.clone();
 
             // Check if the bound type conforms to this protocol
@@ -859,14 +905,18 @@ fn validate_type_satisfies_bounds(
                 TyKind::Struct { symbol, .. } => {
                     // Get the struct's conformances
                     let conformances = symbol
-                        .conformances_behavior()
+                        .metadata()
+                        .get_behavior::<ConformancesBehavior>()
                         .map(|cb| cb.conformances().to_vec())
                         .unwrap_or_default();
 
                     // Check if any conformance matches the required protocol
                     // We need to compare by symbol ID, not name, to handle same-named protocols in different scopes
                     conformances.iter().any(|conf| {
-                        if let TyKind::Protocol { symbol: proto_sym, .. } = conf.kind() {
+                        if let TyKind::Protocol {
+                            symbol: proto_sym, ..
+                        } = conf.kind()
+                        {
                             proto_sym.metadata().id() == required_proto_symbol.metadata().id()
                         } else {
                             false
@@ -889,8 +939,8 @@ fn validate_type_satisfies_bounds(
             };
 
             if !conforms {
-                ctx.diagnostics.throw(
-                    AssociatedTypeConstraintNotSatisfiedError {
+                ctx.diagnostics
+                    .throw(AssociatedTypeConstraintNotSatisfiedError {
                         span,
                         type_name: type_name.to_string(),
                         bound_type: bound_type_name.clone(),
@@ -920,11 +970,18 @@ fn validate_inherited_where_clause_constraints(
 
     // BFS to collect all protocols including inherited ones
     while let Some(conformance) = to_check.pop() {
-        if let TyKind::Protocol { symbol: protocol_symbol, .. } = conformance.kind() {
+        if let TyKind::Protocol {
+            symbol: protocol_symbol,
+            ..
+        } = conformance.kind()
+        {
             all_protocols.push(conformance.clone());
 
             // Add inherited protocols (protocol conformances)
-            if let Some(inherited_conformances) = protocol_symbol.conformances_behavior() {
+            if let Some(inherited_conformances) = protocol_symbol
+                .metadata()
+                .get_behavior::<ConformancesBehavior>()
+            {
                 for inherited in inherited_conformances.conformances() {
                     to_check.push(inherited.clone());
                 }
@@ -934,9 +991,16 @@ fn validate_inherited_where_clause_constraints(
 
     // For each protocol (including inherited ones)
     for protocol in &all_protocols {
-        if let TyKind::Protocol { symbol: protocol_symbol, .. } = protocol.kind() {
+        if let TyKind::Protocol {
+            symbol: protocol_symbol,
+            ..
+        } = protocol.kind()
+        {
             // Check if the protocol has a where clause with constraints on associated types
-            if let Some(generics) = protocol_symbol.generics_behavior() {
+            if let Some(generics) = protocol_symbol
+                .metadata()
+                .get_behavior::<GenericsBehavior>()
+            {
                 let where_clause = generics.where_clause();
 
                 // Look for constraints in the where clause

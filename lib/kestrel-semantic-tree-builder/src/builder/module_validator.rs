@@ -7,7 +7,9 @@ use kestrel_reporting::DiagnosticContext;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::diagnostics::{ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError};
+use crate::diagnostics::{
+    ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError,
+};
 
 /// Result of successful module validation
 pub struct ModuleDeclaration {

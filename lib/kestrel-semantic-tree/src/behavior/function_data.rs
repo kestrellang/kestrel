@@ -18,7 +18,10 @@ pub struct FunctionDataBehavior {
 impl FunctionDataBehavior {
     /// Create a new function data behavior
     pub fn new(has_body: bool, is_static: bool) -> Self {
-        Self { has_body, is_static }
+        Self {
+            has_body,
+            is_static,
+        }
     }
 
     /// Check if the function has a body

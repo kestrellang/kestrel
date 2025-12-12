@@ -139,12 +139,12 @@ impl LocalScope {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
     use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
     use kestrel_semantic_tree::language::KestrelLanguage;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
     use kestrel_span::Name;
+    use kestrel_span::Span;
     use semantic_tree::symbol::{Symbol, SymbolMetadataBuilder};
 
     // Helper to create a test root symbol for visibility scope
@@ -173,15 +173,16 @@ mod tests {
     fn create_test_function() -> Arc<FunctionSymbol> {
         let root = create_test_root();
         let name = Name::new("test".to_string(), Span::from(0..4));
-        let visibility = VisibilityBehavior::new(Some(Visibility::Internal), Span::from(0..0), root);
+        let visibility =
+            VisibilityBehavior::new(Some(Visibility::Internal), Span::from(0..0), root);
         let return_type = Ty::unit(Span::from(0..2));
 
         Arc::new(FunctionSymbol::new(
             name,
             Span::from(0..50),
             visibility,
-            true,  // is_static
-            true,  // has_body
+            true,   // is_static
+            true,   // has_body
             vec![], // no parameters
             return_type,
             None, // no parent

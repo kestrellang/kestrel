@@ -17,10 +17,8 @@ impl IntoDiagnostic for TypeMismatchError {
                 "type mismatch: expected `{}`, found `{}`",
                 self.expected, self.found
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected `{}`", self.expected)),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("expected `{}`", self.expected))])
             .with_notes(vec![format!(
                 "{}: expected `{}`, found `{}`",
                 self.context, self.expected, self.found
@@ -41,10 +39,8 @@ impl IntoDiagnostic for ConditionNotBoolError {
                 "{} condition must be `Bool`, found `{}`",
                 self.condition_kind, self.found
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected `Bool`, found `{}`", self.found)),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("expected `Bool`, found `{}`", self.found))])
     }
 }
 
@@ -92,10 +88,14 @@ impl IntoDiagnostic for ArrayElementTypeMismatchError {
                 self.expected, self.found
             ))
             .with_labels(vec![
-                Label::primary(self.element_span.file_id, self.element_span.range())
-                    .with_message(format!("expected `{}`, found `{}`", self.expected, self.found)),
-                Label::secondary(self.first_element_span.file_id, self.first_element_span.range())
-                    .with_message(format!("first element has type `{}`", self.expected)),
+                Label::primary(self.element_span.file_id, self.element_span.range()).with_message(
+                    format!("expected `{}`, found `{}`", self.expected, self.found),
+                ),
+                Label::secondary(
+                    self.first_element_span.file_id,
+                    self.first_element_span.range(),
+                )
+                .with_message(format!("first element has type `{}`", self.expected)),
             ])
             .with_notes(vec![format!(
                 "element at index {} has type `{}`, but array elements must all be `{}`",
@@ -103,4 +103,3 @@ impl IntoDiagnostic for ArrayElementTypeMismatchError {
             )])
     }
 }
-

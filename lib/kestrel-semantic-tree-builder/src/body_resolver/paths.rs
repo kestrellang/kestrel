@@ -4,7 +4,7 @@
 //! references, qualified names) including local variable lookup and module path resolution.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{SymbolFor, ResolveValuePath, ValuePathResolution};
+use kestrel_semantic_model::{ResolveValuePath, SymbolFor, ValuePathResolution};
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -27,10 +27,7 @@ use super::members::resolve_member_chain;
 use super::utils::{get_callable_behavior, is_expression_kind, substitute_type};
 
 /// Resolve a path expression (variable reference, function reference, or member access)
-pub fn resolve_path_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Check for nested expression inside the path (happens with member access on call expressions)
@@ -52,7 +49,10 @@ pub fn resolve_path_expression(
     }
 
     // Extract just the names for lookups
-    let path: Vec<String> = path_with_spans.iter().map(|(name, _)| name.clone()).collect();
+    let path: Vec<String> = path_with_spans
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect();
     let first_name = &path[0];
     let first_span = path_with_spans[0].1.clone();
 
@@ -97,8 +97,7 @@ pub fn resolve_path_expression(
             span: first_span.clone(),
             context,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -106,20 +105,16 @@ pub fn resolve_path_expression(
     let explicit_type_args = extract_type_arguments_from_path(node, ctx);
 
     // Not a local - resolve as a value path (module path)
-    match ctx.model.query(ResolveValuePath { path: path.clone(), context: ctx.function_id }) {
+    match ctx.model.query(ResolveValuePath {
+        path: path.clone(),
+        context: ctx.function_id,
+    }) {
         ValuePathResolution::Symbol { symbol_id, ty } => {
             // Check if type arguments were provided
             let final_ty = if let Some(ref type_args) = explicit_type_args {
                 if !type_args.is_empty() {
                     // Apply type arguments to the function type
-                    apply_type_args_to_function(
-                        symbol_id,
-                        &ty,
-                        type_args,
-                        &span,
-                        ctx,
-                    )
-                    .unwrap_or(ty)
+                    apply_type_args_to_function(symbol_id, &ty, type_args, &span, ctx).unwrap_or(ty)
                 } else {
                     ty
                 }
@@ -144,11 +139,14 @@ pub fn resolve_path_expression(
                 span: error_span,
                 name: segment,
             };
-            ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic());
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             Expression::error(span)
         }
-        ValuePathResolution::Ambiguous { segment, index, candidates } => {
+        ValuePathResolution::Ambiguous {
+            segment,
+            index,
+            candidates,
+        } => {
             // TODO: Report ambiguous name diagnostic
             let _ = (segment, index, candidates);
             Expression::error(span)
@@ -190,7 +188,9 @@ pub fn resolve_path_expression(
 ///
 /// Returns descriptions like "static method", "free function", etc.
 fn get_function_context(ctx: &BodyResolutionContext) -> String {
-    let Some(function) = ctx.model.query(SymbolFor { id: ctx.function_id }) else {
+    let Some(function) = ctx.model.query(SymbolFor {
+        id: ctx.function_id,
+    }) else {
         return "this context".to_string();
     };
 
@@ -254,7 +254,10 @@ fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(Str
 }
 
 /// Extract the name and span from a PathElement node
-fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> Option<(String, Span)> {
+fn extract_path_element_name_with_span(
+    element: &SyntaxNode,
+    _source: &str,
+) -> Option<(String, Span)> {
     // PathElement contains Name or Identifier
     if let Some(name_node) = element.children().find(|c| c.kind() == SyntaxKind::Name) {
         return name_node
@@ -263,7 +266,10 @@ fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> O
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .map(|t| {
                 let range = t.text_range();
-                (t.text().to_string(), Span::from(range.start().into()..range.end().into()))
+                (
+                    t.text().to_string(),
+                    Span::from(range.start().into()..range.end().into()),
+                )
             });
     }
 
@@ -274,7 +280,10 @@ fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> O
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| {
             let range = t.text_range();
-            (t.text().to_string(), Span::from(range.start().into()..range.end().into()))
+            (
+                t.text().to_string(),
+                Span::from(range.start().into()..range.end().into()),
+            )
         })
 }
 
@@ -345,15 +354,23 @@ fn has_type_arguments_on_first_segment(node: &SyntaxNode) -> bool {
     // First check if there's a Path child
     if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
         // Get the first PathElement
-        if let Some(first_elem) = path_node.children().find(|c| c.kind() == SyntaxKind::PathElement) {
-            return first_elem.children().any(|c| c.kind() == SyntaxKind::TypeArgumentList);
+        if let Some(first_elem) = path_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::PathElement)
+        {
+            return first_elem
+                .children()
+                .any(|c| c.kind() == SyntaxKind::TypeArgumentList);
         }
     }
 
     // Also check directly in ExprPath for simpler paths
     for child in node.children() {
         if child.kind() == SyntaxKind::PathElement {
-            if child.children().any(|c| c.kind() == SyntaxKind::TypeArgumentList) {
+            if child
+                .children()
+                .any(|c| c.kind() == SyntaxKind::TypeArgumentList)
+            {
                 return true;
             }
             // Only check the first PathElement

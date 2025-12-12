@@ -30,10 +30,7 @@ pub enum Event {
     /// Finish the current syntax node
     FinishNode,
     /// A parse error occurred
-    Error {
-        message: String,
-        span: Option<Span>,
-    },
+    Error { message: String, span: Option<Span> },
 }
 
 /// Collects events during parsing
@@ -45,9 +42,7 @@ pub struct EventSink {
 impl EventSink {
     /// Create a new empty event sink
     pub fn new() -> Self {
-        Self {
-            events: Vec::new(),
-        }
+        Self { events: Vec::new() }
     }
 
     /// Start a new syntax node
@@ -72,12 +67,18 @@ impl EventSink {
 
     /// Record a parse error at a specific span
     pub fn error_at(&mut self, message: String, span: Span) {
-        self.events.push(Event::Error { message, span: Some(span) });
+        self.events.push(Event::Error {
+            message,
+            span: Some(span),
+        });
     }
 
     /// Record a parse error without a specific span
     pub fn error_no_span(&mut self, message: String) {
-        self.events.push(Event::Error { message, span: None });
+        self.events.push(Event::Error {
+            message,
+            span: None,
+        });
     }
 
     /// Get the collected events
@@ -191,7 +192,10 @@ mod tests {
         let events = sink.events();
         assert_eq!(events.len(), 3);
         assert_eq!(events[0], Event::StartNode(SyntaxKind::ModulePath));
-        assert_eq!(events[1], Event::AddToken(SyntaxKind::Identifier, Span::from(0..1)));
+        assert_eq!(
+            events[1],
+            Event::AddToken(SyntaxKind::Identifier, Span::from(0..1))
+        );
         assert_eq!(events[2], Event::FinishNode);
     }
 

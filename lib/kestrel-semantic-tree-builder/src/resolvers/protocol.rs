@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
+use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -21,7 +21,8 @@ use crate::resolvers::flatten_protocol;
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::syntax::{
     extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
-    get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility, resolve_conformance_list,
+    get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility,
+    resolve_conformance_list,
 };
 
 /// Resolver for protocol declarations
@@ -76,7 +77,8 @@ impl Resolver for ProtocolResolver {
         let protocol_arc_dyn = protocol_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
         // Extract type parameters with correct parent (the protocol, not the module)
-        let type_parameters = extract_type_parameters(syntax, source, Some(protocol_arc_dyn.clone()));
+        let type_parameters =
+            extract_type_parameters(syntax, source, Some(protocol_arc_dyn.clone()));
 
         // Add type parameters as children of the protocol
         // This ensures type parameters are in scope during type resolution
@@ -158,7 +160,8 @@ fn resolve_generics(
 
     // Now resolve the where clause with fully resolved protocol types
     // Inherited protocols are already resolved (ConformancesBehavior is attached)
-    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters, symbol);
+    let where_clause =
+        resolve_where_clause(syntax, source, context_id, ctx, &type_parameters, symbol);
 
     GenericsBehavior::new(type_parameters, where_clause)
 }
@@ -177,7 +180,9 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx.model.query(SymbolFor { id: context_id })
+    let file_id = ctx
+        .model
+        .query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -185,7 +190,15 @@ fn resolve_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id, symbol) {
+            if let Some(constraint) = resolve_type_bound(
+                &child,
+                source,
+                context_id,
+                ctx,
+                type_params,
+                file_id,
+                symbol,
+            ) {
                 constraints.push(constraint);
             }
         }
@@ -240,9 +253,7 @@ fn resolve_type_bound(
                     // Create a constraint that represents the inherited associated type bound
                     // This is valid and should NOT be flagged as undeclared
                     return Some(Constraint::inherited_assoc_type_bound(
-                        full_name,
-                        span,
-                        bounds,
+                        full_name, span, bounds,
                     ));
                 }
                 // If associated type doesn't exist, fall through to produce an error
@@ -269,7 +280,8 @@ fn resolve_type_bound(
 
     let name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+    let span: kestrel_span::Span =
+        Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -307,7 +319,10 @@ fn find_inherited_protocol(
 
     // Find the protocol with matching name
     for ty in conformances.conformances() {
-        if let TyKind::Protocol { symbol: proto_sym, .. } = ty.kind() {
+        if let TyKind::Protocol {
+            symbol: proto_sym, ..
+        } = ty.kind()
+        {
             if proto_sym.metadata().name().value == protocol_name {
                 return Some(proto_sym.clone() as Arc<dyn Symbol<KestrelLanguage>>);
             }
@@ -338,36 +353,37 @@ fn resolve_bounds(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    match resolved_ty.kind() {
-                        TyKind::Protocol { .. } => resolved_ty,
-                        TyKind::Struct { symbol, .. } => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
-                        TyKind::TypeAlias { symbol, .. } => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
-                        _ => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: bound_name.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
+            match ctx.model.query(ResolveTypePath {
+                path: segments,
+                context: context_id,
+            }) {
+                TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
+                    TyKind::Protocol { .. } => resolved_ty,
+                    TyKind::Struct { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
                     }
-                }
+                    TyKind::TypeAlias { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
+                    }
+                    _ => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: bound_name.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
+                    }
+                },
                 TypePathResolution::NotFound { .. } => {
                     ctx.diagnostics.throw(UnresolvedTypeError {
                         span: span.clone(),

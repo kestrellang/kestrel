@@ -10,10 +10,10 @@
 //! - Dead code detection
 //! - Type checking
 
-mod mutability;
 mod cycles;
-mod misc;
-mod initializers;
 mod dead_code;
 mod exhaustive_return;
+mod initializers;
+mod misc;
+mod mutability;
 mod type_checking;

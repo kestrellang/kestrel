@@ -4,12 +4,12 @@
 //! representations. It dispatches to specialized modules for complex expressions
 //! like calls, operators, and paths.
 
+use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::{ElseBranch, Expression, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use kestrel_reporting::IntoDiagnostic;
 
 use crate::diagnostics::{
     BreakOutsideLoopError, ContinueOutsideLoopError, TupleIndexOnNonTupleError,
@@ -19,16 +19,15 @@ use crate::syntax::get_node_span;
 
 use super::calls::resolve_call_expression;
 use super::context::BodyResolutionContext;
-use super::operators::{resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression};
+use super::operators::{
+    resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression,
+};
 use super::paths::resolve_path_expression;
 use super::statements::resolve_statement;
 use super::utils::{format_type, is_expression_kind, validate_not_standalone_type_param};
 
 /// Resolve an expression syntax node into a semantic Expression
-pub fn resolve_expression(
-    expr_node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(expr_node, ctx.source);
 
     match expr_node.kind() {
@@ -64,74 +63,42 @@ pub fn resolve_expression(
             Expression::bool(value, span)
         }
 
-        SyntaxKind::ExprArray => {
-            resolve_array_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprArray => resolve_array_expression(expr_node, ctx),
 
-        SyntaxKind::ExprTuple => {
-            resolve_tuple_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprTuple => resolve_tuple_expression(expr_node, ctx),
 
-        SyntaxKind::ExprGrouping => {
-            resolve_grouping_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprGrouping => resolve_grouping_expression(expr_node, ctx),
 
-        SyntaxKind::ExprPath => {
-            resolve_path_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprPath => resolve_path_expression(expr_node, ctx),
 
-        SyntaxKind::ExprUnary => {
-            resolve_unary_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprUnary => resolve_unary_expression(expr_node, ctx),
 
-        SyntaxKind::ExprPostfix => {
-            resolve_postfix_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprPostfix => resolve_postfix_expression(expr_node, ctx),
 
-        SyntaxKind::ExprBinary => {
-            resolve_binary_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprBinary => resolve_binary_expression(expr_node, ctx),
 
         SyntaxKind::ExprNull => {
             // TODO: Handle null properly with optional types
             Expression::error(span)
         }
 
-        SyntaxKind::ExprCall => {
-            resolve_call_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprCall => resolve_call_expression(expr_node, ctx),
 
-        SyntaxKind::ExprAssignment => {
-            resolve_assignment_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprAssignment => resolve_assignment_expression(expr_node, ctx),
 
-        SyntaxKind::ExprIf => {
-            resolve_if_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprIf => resolve_if_expression(expr_node, ctx),
 
-        SyntaxKind::ExprWhile => {
-            resolve_while_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprWhile => resolve_while_expression(expr_node, ctx),
 
-        SyntaxKind::ExprLoop => {
-            resolve_loop_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprLoop => resolve_loop_expression(expr_node, ctx),
 
-        SyntaxKind::ExprBreak => {
-            resolve_break_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprBreak => resolve_break_expression(expr_node, ctx),
 
-        SyntaxKind::ExprContinue => {
-            resolve_continue_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprContinue => resolve_continue_expression(expr_node, ctx),
 
-        SyntaxKind::ExprReturn => {
-            resolve_return_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprReturn => resolve_return_expression(expr_node, ctx),
 
-        SyntaxKind::ExprTupleIndex => {
-            resolve_tuple_index_expression(expr_node, ctx)
-        }
+        SyntaxKind::ExprTupleIndex => resolve_tuple_index_expression(expr_node, ctx),
 
         _ => Expression::error(span),
     }
@@ -178,7 +145,7 @@ fn extract_string_value(node: &SyntaxNode) -> String {
             let text = t.text();
             // Strip surrounding quotes
             if text.len() >= 2 {
-                text[1..text.len()-1].to_string()
+                text[1..text.len() - 1].to_string()
             } else {
                 text.to_string()
             }
@@ -196,19 +163,18 @@ fn extract_bool_value(node: &SyntaxNode) -> bool {
 }
 
 /// Resolve an array expression: [1, 2, 3]
-fn resolve_array_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
-    let elements: Vec<Expression> = node.children()
+    let elements: Vec<Expression> = node
+        .children()
         .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
         .map(|c| resolve_expression(&c, ctx))
         .collect();
 
     // Infer element type from first element, or use type_var if empty
-    let element_ty = elements.first()
+    let element_ty = elements
+        .first()
         .map(|e| e.ty.clone())
         .unwrap_or_else(|| Ty::type_var(span.clone()));
 
@@ -216,13 +182,11 @@ fn resolve_array_expression(
 }
 
 /// Resolve a tuple expression: (1, 2, 3)
-fn resolve_tuple_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_tuple_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
-    let elements: Vec<Expression> = node.children()
+    let elements: Vec<Expression> = node
+        .children()
         .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
         .map(|c| resolve_expression(&c, ctx))
         .collect();
@@ -231,14 +195,12 @@ fn resolve_tuple_expression(
 }
 
 /// Resolve a grouping expression: (expr)
-fn resolve_grouping_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_grouping_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Find the inner expression
-    if let Some(inner_node) = node.children()
+    if let Some(inner_node) = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
     {
         let inner = resolve_expression(&inner_node, ctx);
@@ -249,15 +211,13 @@ fn resolve_grouping_expression(
 }
 
 /// Resolve an assignment expression: target = value
-fn resolve_assignment_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_assignment_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Find the LHS and RHS expressions
     // ExprAssignment contains: Expression, Equals token, Expression
-    let mut expr_children = node.children()
+    let mut expr_children = node
+        .children()
         .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
 
     let lhs_node = match expr_children.next() {
@@ -281,10 +241,7 @@ fn resolve_assignment_expression(
 }
 
 /// Resolve an if expression: if condition { then } else { else }
-fn resolve_if_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_if_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // ExprIf structure:
@@ -310,7 +267,8 @@ fn resolve_if_expression(
         .unwrap_or_else(|| (vec![], None));
 
     // Find optional else clause
-    let else_branch = node.children()
+    let else_branch = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::ElseClause)
         .and_then(|else_clause| resolve_else_clause(&else_clause, ctx));
 
@@ -415,17 +373,15 @@ fn resolve_else_clause(
 }
 
 /// Resolve a while expression: label: while condition { body }
-fn resolve_while_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_while_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Parse optional label
     let label_info = extract_loop_label(node);
 
     // Find condition expression
-    let condition = node.children()
+    let condition = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
         .map(|c| resolve_expression(&c, ctx))
         .unwrap_or_else(|| Expression::error(span.clone()));
@@ -436,7 +392,8 @@ fn resolve_while_expression(
     let loop_id = ctx.enter_loop(label_name, label_span);
 
     // Resolve the body
-    let body = node.children()
+    let body = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::CodeBlock)
         .map(|c| resolve_loop_body(&c, ctx))
         .unwrap_or_default();
@@ -448,10 +405,7 @@ fn resolve_while_expression(
 }
 
 /// Resolve a loop expression: label: loop { body }
-fn resolve_loop_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_loop_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Parse optional label
@@ -463,7 +417,8 @@ fn resolve_loop_expression(
     let loop_id = ctx.enter_loop(label_name, label_span);
 
     // Resolve the body
-    let body = node.children()
+    let body = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::CodeBlock)
         .map(|c| resolve_loop_body(&c, ctx))
         .unwrap_or_default();
@@ -475,10 +430,7 @@ fn resolve_loop_expression(
 }
 
 /// Resolve a break expression: break or break label
-fn resolve_break_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_break_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Check if we're in a loop
@@ -512,10 +464,7 @@ fn resolve_break_expression(
 }
 
 /// Resolve a continue expression: continue or continue label
-fn resolve_continue_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_continue_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Check if we're in a loop
@@ -549,16 +498,14 @@ fn resolve_continue_expression(
 }
 
 /// Resolve a return expression: return or return expr
-fn resolve_return_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Find the optional value expression
     // The ExprReturn contains: Return keyword, optional Expression child
     // Also validate that it's not a standalone type parameter reference
-    let value = node.children()
+    let value = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
         .map(|expr_node| {
             let expr = resolve_expression(&expr_node, ctx);
@@ -570,10 +517,7 @@ fn resolve_return_expression(
 
 /// Resolve the body of a loop, returning statements.
 /// This creates a new scope for the loop body.
-fn resolve_loop_body(
-    block_node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Vec<Statement> {
+fn resolve_loop_body(block_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<Statement> {
     ctx.local_scope.push_scope();
 
     let mut statements = Vec::new();
@@ -617,7 +561,8 @@ fn extract_loop_label(node: &SyntaxNode) -> Option<LabelInfo> {
         .find(|c| c.kind() == SyntaxKind::LoopLabel)
         .and_then(|label_node| {
             // The LoopLabel contains an Identifier token
-            label_node.children_with_tokens()
+            label_node
+                .children_with_tokens()
                 .filter_map(|e| e.into_token())
                 .find(|t| t.kind() == SyntaxKind::Identifier)
                 .map(|token| {
@@ -697,8 +642,7 @@ fn resolve_tuple_index_expression(
                     tuple_length: elements.len(),
                     tuple_type: format_type(base_ty),
                 };
-                ctx.diagnostics
-                    .add_diagnostic(error.into_diagnostic());
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                 return Expression::error(span);
             }
 
@@ -713,8 +657,7 @@ fn resolve_tuple_index_expression(
                 index,
                 base_type: format_type(base_ty),
             };
-            ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic());
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             Expression::error(span)
         }
     }
@@ -722,8 +665,8 @@ fn resolve_tuple_index_expression(
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_parse_integer_literal() {

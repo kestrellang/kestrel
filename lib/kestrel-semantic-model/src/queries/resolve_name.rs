@@ -2,15 +2,15 @@
 
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::{InheritedProtocolMember, ScopeFor, SymbolFor};
 use crate::query::Query;
 use crate::resolution::SymbolResolution;
-use crate::SemanticModel;
 
 /// Resolve a name in a given scope context.
 ///
@@ -85,7 +85,9 @@ fn find_in_extension_type_params(
     extension: &Arc<dyn Symbol<KestrelLanguage>>,
     name: &str,
 ) -> Option<SymbolResolution> {
-    let target_beh = extension.extension_target_behavior()?;
+    let target_beh = extension
+        .metadata()
+        .get_behavior::<ExtensionTargetBehavior>()?;
 
     for type_param in target_beh.referenced_type_parameters() {
         if type_param.metadata().name().value == name {
@@ -95,4 +97,3 @@ fn find_in_extension_type_params(
 
     None
 }
-

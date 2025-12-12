@@ -72,12 +72,12 @@ impl IntoDiagnostic for NoMatchingOverloadError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = format_argument_labels(&self.provided_labels);
 
-        let mut labels = vec![Label::primary(self.call_span.file_id, self.call_span.range()).with_message(
-            format!(
+        let mut labels = vec![
+            Label::primary(self.call_span.file_id, self.call_span.range()).with_message(format!(
                 "no matching overload for {} arguments with labels {}",
                 self.provided_arity, provided
-            ),
-        )];
+            )),
+        ];
 
         // Add secondary labels for available overloads (if we have location info)
         for overload in &self.available_overloads {
@@ -129,12 +129,12 @@ impl IntoDiagnostic for NoMatchingMethodError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = format_argument_labels(&self.provided_labels);
 
-        let mut labels = vec![Label::primary(self.call_span.file_id, self.call_span.range()).with_message(
-            format!(
+        let mut labels = vec![
+            Label::primary(self.call_span.file_id, self.call_span.range()).with_message(format!(
                 "no method '{}' with {} argument(s) and labels {}",
                 self.method_name, self.provided_arity, provided
-            ),
-        )];
+            )),
+        ];
 
         // Add secondary labels for available overloads (if we have location info)
         for overload in &self.available_overloads {
@@ -150,10 +150,7 @@ impl IntoDiagnostic for NoMatchingMethodError {
 
         let mut notes = vec![];
         if !self.available_overloads.is_empty() {
-            notes.push(format!(
-                "available methods on '{}':",
-                self.receiver_type
-            ));
+            notes.push(format!("available methods on '{}':", self.receiver_type));
             for overload in &self.available_overloads {
                 notes.push(format!("  - {}", overload.display()));
             }
@@ -190,8 +187,10 @@ impl IntoDiagnostic for PrimitiveMethodArityError {
                 "method '{}' on '{}' takes {} argument(s), but {} were provided",
                 self.method_name, self.receiver_type, self.expected_arity, self.provided_arity
             ))
-            .with_labels(vec![Label::primary(self.call_span.file_id, self.call_span.range())
-                .with_message(format!("expected {} argument(s)", self.expected_arity))])
+            .with_labels(vec![
+                Label::primary(self.call_span.file_id, self.call_span.range())
+                    .with_message(format!("expected {} argument(s)", self.expected_arity)),
+            ])
     }
 }
 
@@ -212,8 +211,10 @@ impl IntoDiagnostic for PrimitiveMethodNotCallableError {
                 "primitive method '{}' on '{}' must be called",
                 self.method_name, self.receiver_type
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("add () to call this method")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("add () to call this method"),
+            ])
             .with_notes(vec![format!(
                 "primitive methods cannot be used as first-class values; use {}.{}() instead",
                 self.receiver_type, self.method_name
@@ -238,8 +239,10 @@ impl IntoDiagnostic for NoSuchMethodError {
                 "no method '{}' on type '{}'",
                 self.method_name, self.receiver_type
             ))
-            .with_labels(vec![Label::primary(self.call_span.file_id, self.call_span.range())
-                .with_message("method not found")])
+            .with_labels(vec![
+                Label::primary(self.call_span.file_id, self.call_span.range())
+                    .with_message("method not found"),
+            ])
     }
 }
 
@@ -255,10 +258,13 @@ impl IntoDiagnostic for SelfOutsideInstanceMethodError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("cannot use 'self' in {}", self.context))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("'self' is only available in instance methods")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("'self' is only available in instance methods"),
+            ])
             .with_notes(vec![
-                "'self' is implicitly defined only in non-static methods of structs and protocols".to_string(),
+                "'self' is implicitly defined only in non-static methods of structs and protocols"
+                    .to_string(),
             ])
     }
 }
@@ -275,8 +281,10 @@ impl IntoDiagnostic for UndefinedNameError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("undefined name '{}'", self.name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("not found in this scope")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not found in this scope"),
+            ])
     }
 }
 
@@ -297,8 +305,10 @@ impl IntoDiagnostic for InstanceMethodOnTypeError {
                 "cannot call instance method '{}' on type '{}'",
                 self.method_name, self.type_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("instance method requires an instance")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("instance method requires an instance"),
+            ])
             .with_notes(vec![format!(
                 "call this method on an instance of '{}', not the type itself",
                 self.type_name
@@ -321,8 +331,10 @@ impl IntoDiagnostic for TypeArgsOnNonGenericError {
                 "type arguments cannot be applied to {}",
                 self.callee_description
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("type arguments not allowed here")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("type arguments not allowed here"),
+            ])
             .with_notes(vec![
                 "type arguments can only be applied to generic functions or types".to_string(),
             ])

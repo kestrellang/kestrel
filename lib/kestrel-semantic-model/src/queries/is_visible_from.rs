@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::visibility::Visibility;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::{AncestorOfKind, SymbolFor};
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Check if a target symbol is visible from a context.
 ///
@@ -34,7 +34,10 @@ impl Query for IsVisibleFrom {
             None => return false,
         };
 
-        let Some(visibility_behavior) = target_symbol.visibility_behavior() else {
+        let Some(visibility_behavior) = target_symbol
+            .metadata()
+            .get_behavior::<VisibilityBehavior>()
+        else {
             // No visibility behavior means default (internal), which is always visible
             return true;
         };

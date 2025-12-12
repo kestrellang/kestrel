@@ -1,4 +1,4 @@
-use kestrel_reporting::{DiagnosticContext, IntoDiagnostic, Diagnostic, Label, Severity};
+use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label, Severity};
 use kestrel_span::Span;
 
 /// Example error type that implements IntoDiagnostic
@@ -13,7 +13,7 @@ impl IntoDiagnostic for SyntaxError {
             .with_message(&self.message)
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("syntax error here")
+                    .with_message("syntax error here"),
             ])
     }
 }
@@ -30,11 +30,12 @@ impl IntoDiagnostic for UnusedVariable {
             .with_message(format!("unused variable `{}`", self.name))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("not used in this scope")
+                    .with_message("not used in this scope"),
             ])
-            .with_notes(vec![
-                format!("consider prefixing with an underscore: `_{}`", self.name)
-            ])
+            .with_notes(vec![format!(
+                "consider prefixing with an underscore: `_{}`",
+                self.name
+            )])
     }
 }
 
@@ -64,13 +65,11 @@ fn main() {
     let complex_diagnostic = Diagnostic::error()
         .with_message("type mismatch")
         .with_labels(vec![
-            Label::primary(file_id, 16..17)
-                .with_message("expected `String`, found `i32`"),
-            Label::secondary(file_id, 20..21)
-                .with_message("this has type `i32`"),
+            Label::primary(file_id, 16..17).with_message("expected `String`, found `i32`"),
+            Label::secondary(file_id, 20..21).with_message("this has type `i32`"),
         ])
         .with_notes(vec![
-            "help: you can convert an integer to a string using `.to_string()`".to_string()
+            "help: you can convert an integer to a string using `.to_string()`".to_string(),
         ]);
     ctx.add_diagnostic(complex_diagnostic);
 

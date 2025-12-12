@@ -36,10 +36,26 @@ struct Counter {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Counter").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("Counter.getValue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("Counter.increment").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("Counter.consume").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("Counter")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Counter.getValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("Counter.increment")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("Counter.consume")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -62,8 +78,16 @@ struct Factory {
         )
         .expect(Compiles)
         .expect(Symbol::new("Factory").is(SymbolKind::Struct))
-        .expect(Symbol::new("Factory.create").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
-        .expect(Symbol::new("Factory.build").is(SymbolKind::Function).has(Behavior::IsStatic(false)));
+        .expect(
+            Symbol::new("Factory.create")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true)),
+        )
+        .expect(
+            Symbol::new("Factory.build")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(false)),
+        );
     }
 
     #[test]
@@ -117,7 +141,11 @@ struct Point {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(3)))
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(3)),
+        )
         .expect(Symbol::new("Point.getX").is(SymbolKind::Function))
         .expect(Symbol::new("Point.getY").is(SymbolKind::Function))
         .expect(Symbol::new("Point.setZ").is(SymbolKind::Function));
@@ -194,9 +222,21 @@ func test(c: Calculator) -> Int {
         )
         .expect(Compiles)
         .expect(Symbol::new("Calculator").is(SymbolKind::Struct))
-        .expect(Symbol::new("Calculator.getValue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("Calculator.add").is(SymbolKind::Function).has(Behavior::ParameterCount(1)))
-        .expect(Symbol::new("Calculator.multiply").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+        .expect(
+            Symbol::new("Calculator.getValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("Calculator.add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        )
+        .expect(
+            Symbol::new("Calculator.multiply")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 
     #[test]
@@ -284,10 +324,26 @@ func test(c: Counter) -> Int {
         )
         .expect(Compiles)
         .expect(Symbol::new("Counter").is(SymbolKind::Struct))
-        .expect(Symbol::new("Counter.zero").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
-        .expect(Symbol::new("Counter.max").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
-        .expect(Symbol::new("Counter.getValue").is(SymbolKind::Function).has(Behavior::IsStatic(false)))
-        .expect(Symbol::new("Counter.increment").is(SymbolKind::Function).has(Behavior::IsStatic(false)));
+        .expect(
+            Symbol::new("Counter.zero")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true)),
+        )
+        .expect(
+            Symbol::new("Counter.max")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true)),
+        )
+        .expect(
+            Symbol::new("Counter.getValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(false)),
+        )
+        .expect(
+            Symbol::new("Counter.increment")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(false)),
+        );
     }
 
     // === Mutating and Consuming Methods ===
@@ -369,11 +425,23 @@ struct Wrapper[T] {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Container").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Container")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("Container.isEmpty").is(SymbolKind::Function))
-        .expect(Symbol::new("Wrapper").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Wrapper")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("Wrapper.getValue").is(SymbolKind::Function))
-        .expect(Symbol::new("Wrapper.isEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("Wrapper.isEqual")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     // === Edge Cases and Complex Scenarios ===
@@ -436,8 +504,16 @@ struct Point {
         .expect(Symbol::new("Empty.doNothing").is(SymbolKind::Function))
         .expect(Symbol::new("Outer.getInner").is(SymbolKind::Function))
         .expect(Symbol::new("Inner.getValue").is(SymbolKind::Function))
-        .expect(Symbol::new("Builder.withValue").is(SymbolKind::Function).has(Behavior::ParameterCount(1)))
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(
+            Symbol::new("Builder.withValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        )
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
         .expect(Symbol::new("Point.getX").is(SymbolKind::Function))
         .expect(Symbol::new("Point.printX").is(SymbolKind::Function))
         .expect(Symbol::new("Point.copyX").is(SymbolKind::Function));
@@ -460,7 +536,9 @@ func test(x: Int) -> () {
 }
 "#,
         )
-        .expect(HasError("primitive method 'toString' on 'I64' must be called"));
+        .expect(HasError(
+            "primitive method 'toString' on 'I64' must be called",
+        ));
     }
 }
 
@@ -508,9 +586,21 @@ func test(p: Point, c: Calculator, f: Formatter) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point.origin").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("Calculator.add").is(SymbolKind::Function).has(Behavior::ParameterCount(2)))
-        .expect(Symbol::new("Formatter.format").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("Point.origin")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("Calculator.add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        )
+        .expect(
+            Symbol::new("Formatter.format")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     // === Chained Method Calls ===
@@ -600,9 +690,23 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Factory.defaultValue").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
-        .expect(Symbol::new("MathUtils.max").is(SymbolKind::Function).has(Behavior::IsStatic(true)).has(Behavior::ParameterCount(2)))
-        .expect(Symbol::new("MathUtils.min").is(SymbolKind::Function).has(Behavior::IsStatic(true)).has(Behavior::ParameterCount(2)));
+        .expect(
+            Symbol::new("Factory.defaultValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true)),
+        )
+        .expect(
+            Symbol::new("MathUtils.max")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true))
+                .has(Behavior::ParameterCount(2)),
+        )
+        .expect(
+            Symbol::new("MathUtils.min")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true))
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 
     // === Method Call Errors ===
@@ -681,4 +785,3 @@ func test(w: Widget) -> Int {
         .expect(Compiles);
     }
 }
-

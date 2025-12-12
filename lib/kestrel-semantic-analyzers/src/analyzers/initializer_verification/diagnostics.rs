@@ -3,10 +3,22 @@ use kestrel_span::Span;
 
 #[derive(Clone, Debug)]
 pub enum InitializerError {
-    LetFieldAssignedTwice { span: Span, field_name: String },
-    FieldReadBeforeAssigned { span: Span, field_name: String },
-    SelfUsedBeforeFullyInitialized { span: Span, uninitialized: Vec<String> },
-    ReturnBeforeFullyInitialized { span: Span, uninitialized: Vec<String> },
+    LetFieldAssignedTwice {
+        span: Span,
+        field_name: String,
+    },
+    FieldReadBeforeAssigned {
+        span: Span,
+        field_name: String,
+    },
+    SelfUsedBeforeFullyInitialized {
+        span: Span,
+        uninitialized: Vec<String>,
+    },
+    ReturnBeforeFullyInitialized {
+        span: Span,
+        uninitialized: Vec<String>,
+    },
 }
 
 impl IntoDiagnostic for InitializerError {
@@ -17,22 +29,38 @@ impl IntoDiagnostic for InitializerError {
                     "cannot assign to 'let' field '{}' more than once",
                     field_name
                 ))
-                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message("second assignment here")]),
+                .with_labels(vec![Label::primary(span.file_id, span.range())
+                    .with_message("second assignment here")]),
             InitializerError::FieldReadBeforeAssigned { span, field_name } => Diagnostic::error()
-                .with_message(format!("cannot read field '{}' before it is initialized", field_name))
-                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message("field read here")]),
-            InitializerError::SelfUsedBeforeFullyInitialized { span, uninitialized } => {
+                .with_message(format!(
+                    "cannot read field '{}' before it is initialized",
+                    field_name
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message("field read here")
+                ]),
+            InitializerError::SelfUsedBeforeFullyInitialized {
+                span,
+                uninitialized,
+            } => {
                 let fields = uninitialized.join(", ");
                 Diagnostic::error()
                     .with_message("cannot use 'self' before all fields are initialized")
-                    .with_labels(vec![Label::primary(span.file_id, span.range()).with_message("self used here")])
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message("self used here")
+                    ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
             }
-            InitializerError::ReturnBeforeFullyInitialized { span, uninitialized } => {
+            InitializerError::ReturnBeforeFullyInitialized {
+                span,
+                uninitialized,
+            } => {
                 let fields = uninitialized.join(", ");
                 Diagnostic::error()
                     .with_message("cannot return before all fields are initialized")
-                    .with_labels(vec![Label::primary(span.file_id, span.range()).with_message("return here")])
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message("return here")
+                    ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
             }
         }
@@ -51,7 +79,7 @@ impl IntoDiagnostic for UninitializedFieldsError {
                 "initializer does not initialize all fields: {}",
                 self.fields
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range()).with_message("in this initializer")])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("in this initializer")])
     }
 }
-

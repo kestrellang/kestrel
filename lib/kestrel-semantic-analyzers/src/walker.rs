@@ -6,7 +6,6 @@ use crate::runner::AnalyzerId;
 
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::Pattern;
@@ -15,7 +14,11 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
-pub(crate) fn walk_root(analyzers: &mut [&mut dyn Analyzer], model: &SemanticModel, ctx: &mut AnalysisContext) {
+pub(crate) fn walk_root(
+    analyzers: &mut [&mut dyn Analyzer],
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
     let root = model.root().clone();
     walk_symbol(&root, analyzers, model, ctx);
 }
@@ -34,19 +37,28 @@ fn walk_symbol(
         a.visit_symbol(symbol, ctx);
     }
 
-    if ctx.stopped { return; }
+    if ctx.stopped {
+        return;
+    }
     if !ctx.skip_children {
         // Visit body if function or initializer
         let kind = symbol.metadata().kind();
-        if matches!(kind, KestrelSymbolKind::Function | KestrelSymbolKind::Initializer) {
+        if matches!(
+            kind,
+            KestrelSymbolKind::Function | KestrelSymbolKind::Initializer
+        ) {
             if let Some(body) = get_executable_body(symbol) {
                 for stmt in &body.statements {
                     walk_statement(stmt, analyzers, model, ctx);
-                    if ctx.stopped { return; }
+                    if ctx.stopped {
+                        return;
+                    }
                 }
                 if let Some(yield_expr) = body.yield_expr() {
                     walk_expression(yield_expr, analyzers, model, ctx);
-                    if ctx.stopped { return; }
+                    if ctx.stopped {
+                        return;
+                    }
                 }
             }
         }
@@ -55,7 +67,9 @@ fn walk_symbol(
         for child in symbol.metadata().children() {
             reset_node_flags(ctx);
             walk_symbol(&child, analyzers, model, ctx);
-            if ctx.stopped { return; }
+            if ctx.stopped {
+                return;
+            }
         }
     }
 
@@ -68,14 +82,21 @@ fn walk_symbol(
     ctx.pop_symbol();
 }
 
-fn walk_statement(stmt: &Statement, analyzers: &mut [&mut dyn Analyzer], model: &SemanticModel, ctx: &mut AnalysisContext) {
+fn walk_statement(
+    stmt: &Statement,
+    analyzers: &mut [&mut dyn Analyzer],
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
     // Pre-visit
     for (i, a) in analyzers.iter_mut().enumerate() {
         ctx.current = AnalyzerId(i);
         a.visit_statement(stmt, ctx);
     }
 
-    if ctx.stopped { return; }
+    if ctx.stopped {
+        return;
+    }
     if !ctx.skip_children {
         match &stmt.kind {
             StatementKind::Binding { pattern, value } => {
@@ -97,25 +118,47 @@ fn walk_statement(stmt: &Statement, analyzers: &mut [&mut dyn Analyzer], model: 
     }
 }
 
-fn walk_expression(expr: &Expression, analyzers: &mut [&mut dyn Analyzer], model: &SemanticModel, ctx: &mut AnalysisContext) {
+fn walk_expression(
+    expr: &Expression,
+    analyzers: &mut [&mut dyn Analyzer],
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
     // Pre-visit
     for (i, a) in analyzers.iter_mut().enumerate() {
         ctx.current = AnalyzerId(i);
         a.visit_expression(expr, ctx);
     }
 
-    if ctx.stopped { return; }
+    if ctx.stopped {
+        return;
+    }
     if !ctx.skip_children {
         match &expr.kind {
             ExprKind::Array(elements) => {
-                for e in elements { walk_expression(e, analyzers, model, ctx); if ctx.stopped { return; } }
+                for e in elements {
+                    walk_expression(e, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
             ExprKind::OverloadedRef(_) => { /* leaf */ }
             ExprKind::Loop { body, .. } => {
-                for stmt in body { walk_statement(stmt, analyzers, model, ctx); if ctx.stopped { return; } }
+                for stmt in body {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
             ExprKind::Tuple(elements) => {
-                for e in elements { walk_expression(e, analyzers, model, ctx); if ctx.stopped { return; } }
+                for e in elements {
+                    walk_expression(e, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
             ExprKind::Grouping(inner) => {
                 walk_expression(inner, analyzers, model, ctx);
@@ -129,30 +172,70 @@ fn walk_expression(expr: &Expression, analyzers: &mut [&mut dyn Analyzer], model
             ExprKind::MethodRef { receiver, .. } => {
                 walk_expression(receiver, analyzers, model, ctx);
             }
-            ExprKind::Call { callee, arguments, .. } => {
+            ExprKind::Call {
+                callee, arguments, ..
+            } => {
                 walk_expression(callee, analyzers, model, ctx);
-                for arg in arguments { walk_expression(&arg.value, analyzers, model, ctx); if ctx.stopped { return; } }
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
-            ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+            ExprKind::PrimitiveMethodCall {
+                receiver,
+                arguments,
+                ..
+            } => {
                 walk_expression(receiver, analyzers, model, ctx);
-                for arg in arguments { walk_expression(&arg.value, analyzers, model, ctx); if ctx.stopped { return; } }
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
             ExprKind::ImplicitStructInit { arguments, .. } => {
-                for arg in arguments { walk_expression(&arg.value, analyzers, model, ctx); if ctx.stopped { return; } }
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
             ExprKind::Assignment { target, value } => {
                 walk_expression(target, analyzers, model, ctx);
                 walk_expression(value, analyzers, model, ctx);
             }
-            ExprKind::If { condition, then_branch, then_value, else_branch } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                then_value,
+                else_branch,
+            } => {
                 walk_expression(condition, analyzers, model, ctx);
-                for stmt in then_branch { walk_statement(stmt, analyzers, model, ctx); if ctx.stopped { return; } }
-                if let Some(v) = then_value { walk_expression(v, analyzers, model, ctx); }
+                for stmt in then_branch {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+                if let Some(v) = then_value {
+                    walk_expression(v, analyzers, model, ctx);
+                }
                 if let Some(else_br) = else_branch {
                     match else_br {
                         kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
-                            for stmt in statements { walk_statement(stmt, analyzers, model, ctx); if ctx.stopped { return; } }
-                            if let Some(v) = value { walk_expression(v, analyzers, model, ctx); }
+                            for stmt in statements {
+                                walk_statement(stmt, analyzers, model, ctx);
+                                if ctx.stopped {
+                                    return;
+                                }
+                            }
+                            if let Some(v) = value {
+                                walk_expression(v, analyzers, model, ctx);
+                            }
                         }
                         kestrel_semantic_tree::expr::ElseBranch::ElseIf(e) => {
                             walk_expression(e, analyzers, model, ctx);
@@ -160,15 +243,30 @@ fn walk_expression(expr: &Expression, analyzers: &mut [&mut dyn Analyzer], model
                     }
                 }
             }
-            ExprKind::While { condition, body, .. } => {
+            ExprKind::While {
+                condition, body, ..
+            } => {
                 walk_expression(condition, analyzers, model, ctx);
-                for stmt in body { walk_statement(stmt, analyzers, model, ctx); if ctx.stopped { return; } }
+                for stmt in body {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
             }
             // Leaf kinds or handled elsewhere
-            ExprKind::Literal(_) | ExprKind::LocalRef(_) | ExprKind::SymbolRef(_)
-            | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::Break { .. }
-            | ExprKind::Continue { .. } | ExprKind::Return { value: None } | ExprKind::Error => {}
-            ExprKind::Return { value: Some(v) } => { walk_expression(v, analyzers, model, ctx); }
+            ExprKind::Literal(_)
+            | ExprKind::LocalRef(_)
+            | ExprKind::SymbolRef(_)
+            | ExprKind::TypeRef(_)
+            | ExprKind::TypeParameterRef(_)
+            | ExprKind::Break { .. }
+            | ExprKind::Continue { .. }
+            | ExprKind::Return { value: None }
+            | ExprKind::Error => {}
+            ExprKind::Return { value: Some(v) } => {
+                walk_expression(v, analyzers, model, ctx);
+            }
         }
     }
 
@@ -179,7 +277,12 @@ fn walk_expression(expr: &Expression, analyzers: &mut [&mut dyn Analyzer], model
     }
 }
 
-fn walk_pattern(pattern: &Pattern, analyzers: &mut [&mut dyn Analyzer], _model: &SemanticModel, ctx: &mut AnalysisContext) {
+fn walk_pattern(
+    pattern: &Pattern,
+    analyzers: &mut [&mut dyn Analyzer],
+    _model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
     // Pre-visit
     for (i, a) in analyzers.iter_mut().enumerate() {
         ctx.current = AnalyzerId(i);
@@ -193,7 +296,12 @@ fn walk_pattern(pattern: &Pattern, analyzers: &mut [&mut dyn Analyzer], _model: 
 }
 
 #[allow(dead_code)]
-fn walk_type(ty: &Ty, analyzers: &mut [&mut dyn Analyzer], _model: &SemanticModel, ctx: &mut AnalysisContext) {
+fn walk_type(
+    ty: &Ty,
+    analyzers: &mut [&mut dyn Analyzer],
+    _model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
     for (i, a) in analyzers.iter_mut().enumerate() {
         ctx.current = AnalyzerId(i);
         a.visit_type(ty, ctx);
@@ -204,14 +312,11 @@ fn walk_type(ty: &Ty, analyzers: &mut [&mut dyn Analyzer], _model: &SemanticMode
     }
 }
 
-fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
-    let behaviors = symbol.metadata().behaviors();
-    for b in behaviors.iter() {
-        if matches!(b.kind(), KestrelBehaviorKind::Executable) {
-            if let Some(exec) = b.as_ref().downcast_ref::<ExecutableBehavior>() {
-                return Some(exec.body().clone());
-            }
-        }
-    }
-    None
+fn get_executable_body(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
+    symbol
+        .metadata()
+        .get_behavior::<ExecutableBehavior>()
+        .map(|exec| exec.body().clone())
 }

@@ -15,7 +15,11 @@ impl IntoDiagnostic for DuplicateExtensionMethodError {
             .iter()
             .enumerate()
             .map(|(i, span)| {
-                let msg = if i == 0 { "first definition here" } else { "conflicting definition here" };
+                let msg = if i == 0 {
+                    "first definition here"
+                } else {
+                    "conflicting definition here"
+                };
                 // Preserve existing behavior that didn't thread file_id (legacy uses 0)
                 Label::primary(0, span.range()).with_message(msg)
             })
@@ -56,8 +60,10 @@ impl IntoDiagnostic for StructExtensionMethodConflictError {
             ))
             .with_labels(vec![
                 // Preserve legacy behavior using file_id 0
-                Label::primary(0, self.struct_method_span.range()).with_message("method defined here on struct"),
-                Label::secondary(0, self.extension_method_span.range()).with_message("conflicting extension method here"),
+                Label::primary(0, self.struct_method_span.range())
+                    .with_message("method defined here on struct"),
+                Label::secondary(0, self.extension_method_span.range())
+                    .with_message("conflicting extension method here"),
             ])
             .with_notes(vec![
                 "Extensions cannot define methods that already exist on the struct".to_string(),
@@ -65,4 +71,3 @@ impl IntoDiagnostic for StructExtensionMethodConflictError {
             ])
     }
 }
-

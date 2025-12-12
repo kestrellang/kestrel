@@ -31,10 +31,7 @@ pub struct GenericsBehavior {
 
 impl GenericsBehavior {
     /// Create a new generics behavior with the given type parameters and where clause
-    pub fn new(
-        type_parameters: Vec<Arc<TypeParameterSymbol>>,
-        where_clause: WhereClause,
-    ) -> Self {
+    pub fn new(type_parameters: Vec<Arc<TypeParameterSymbol>>, where_clause: WhereClause) -> Self {
         Self {
             type_parameters,
             where_clause,

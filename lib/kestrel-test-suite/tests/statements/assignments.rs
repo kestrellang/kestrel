@@ -22,9 +22,12 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -44,12 +47,18 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("getValue").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)))
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("getValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -67,9 +76,12 @@ func test() -> [Int] {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -89,9 +101,12 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -109,9 +124,12 @@ func test(value: Int) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(1))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -129,9 +147,12 @@ func test() -> String {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -153,8 +174,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 }

@@ -57,60 +57,60 @@
 //! let decl = ModuleDeclaration { syntax: tree, span: Span::from(0..source.len()) };
 //! ```
 
-pub mod event;
+pub mod block;
 pub mod common;
-pub mod module;
-pub mod import;
-pub mod protocol;
-pub mod r#struct;
+pub mod declaration_item;
+pub mod event;
+pub mod expr;
 pub mod extension;
 pub mod field;
 pub mod function;
+pub mod import;
+pub mod module;
+pub mod parser;
+pub mod protocol;
+pub mod stmt;
+pub mod r#struct;
+pub mod ty;
 pub mod type_alias;
 pub mod type_param;
-pub mod declaration_item;
-pub mod parser;
-pub mod ty;
-pub mod expr;
-pub mod stmt;
-pub mod block;
 
+use event::{EventSink, TreeBuilder};
 use kestrel_lexer::Token;
 use kestrel_span::Span;
-use event::{EventSink, TreeBuilder};
 
 // Re-export commonly used types
-pub use module::{ModuleDeclaration, ModulePath};
-pub use import::ImportDeclaration;
-pub use protocol::ProtocolDeclaration;
-pub use r#struct::StructDeclaration;
+pub use block::CodeBlock;
+pub use declaration_item::DeclarationItem;
+pub use expr::Expression;
 pub use extension::ExtensionDeclaration;
 pub use field::FieldDeclaration;
 pub use function::FunctionDeclaration;
-pub use type_alias::TypeAliasDeclaration;
-pub use declaration_item::DeclarationItem;
-pub use ty::TyExpression;
-pub use expr::Expression;
+pub use import::ImportDeclaration;
+pub use module::{ModuleDeclaration, ModulePath};
+pub use protocol::ProtocolDeclaration;
 pub use stmt::Statement;
-pub use block::CodeBlock;
+pub use r#struct::StructDeclaration;
+pub use ty::TyExpression;
+pub use type_alias::TypeAliasDeclaration;
 
 // Re-export event-driven parse functions
-pub use module::{parse_module_declaration, parse_module_path};
-pub use import::parse_import_declaration;
-pub use protocol::parse_protocol_declaration;
-pub use r#struct::parse_struct_declaration;
+pub use block::parse_code_block;
+pub use declaration_item::{parse_declaration_item, parse_source_file};
+pub use expr::parse_expr;
 pub use extension::parse_extension_declaration;
 pub use field::parse_field_declaration;
 pub use function::parse_function_declaration;
-pub use type_alias::parse_type_alias_declaration;
-pub use declaration_item::{parse_declaration_item, parse_source_file};
-pub use ty::parse_ty;
-pub use expr::parse_expr;
+pub use import::parse_import_declaration;
+pub use module::{parse_module_declaration, parse_module_path};
+pub use protocol::parse_protocol_declaration;
 pub use stmt::parse_stmt;
-pub use block::parse_code_block;
+pub use r#struct::parse_struct_declaration;
+pub use ty::parse_ty;
+pub use type_alias::parse_type_alias_declaration;
 
 // Re-export Parser API
-pub use parser::{Parser, ParseResult, ParseError, ParseErrorKind};
+pub use parser::{ParseError, ParseErrorKind, ParseResult, Parser};
 
 /// Convenience function to parse a module declaration from source and tokens
 /// Returns a fully built ModuleDeclaration with its syntax tree

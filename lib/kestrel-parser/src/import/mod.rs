@@ -3,12 +3,9 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::module::ModulePath;
+use crate::common::{emit_import_declaration, import_declaration_parser_internal};
 use crate::event::EventSink;
-use crate::common::{
-    import_declaration_parser_internal,
-    emit_import_declaration,
-};
+use crate::module::ModulePath;
 
 /// Represents an import declaration
 ///
@@ -38,17 +35,20 @@ impl ImportDeclaration {
 
     /// Check if this import has an alias (e.g., `import A.B.C as D`)
     pub fn has_alias(&self) -> bool {
-        self.syntax
-            .children_with_tokens()
-            .any(|elem| elem.as_token().map(|t| t.kind() == SyntaxKind::As).unwrap_or(false))
-            && !self.has_items()
+        self.syntax.children_with_tokens().any(|elem| {
+            elem.as_token()
+                .map(|t| t.kind() == SyntaxKind::As)
+                .unwrap_or(false)
+        }) && !self.has_items()
     }
 
     /// Check if this import has an items list (e.g., `import A.B.C.(D, E)`)
     pub fn has_items(&self) -> bool {
-        self.syntax
-            .children_with_tokens()
-            .any(|elem| elem.as_token().map(|t| t.kind() == SyntaxKind::LParen).unwrap_or(false))
+        self.syntax.children_with_tokens().any(|elem| {
+            elem.as_token()
+                .map(|t| t.kind() == SyntaxKind::LParen)
+                .unwrap_or(false)
+        })
     }
 
     /// Get the alias identifier if present (for `import A.B.C as D`)
@@ -109,8 +109,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer::lex;
     use crate::event::TreeBuilder;
+    use kestrel_lexer::lex;
 
     #[test]
     fn test_import_all() {
@@ -180,14 +180,16 @@ mod tests {
         assert_eq!(items.len(), 2);
 
         // Check first item (D)
-        let first_id = items[0].children_with_tokens()
+        let first_id = items[0]
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .unwrap();
         assert_eq!(first_id.text(), "D");
 
         // Check second item (E)
-        let second_id = items[1].children_with_tokens()
+        let second_id = items[1]
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .unwrap();
@@ -218,7 +220,8 @@ mod tests {
         assert_eq!(items.len(), 2);
 
         // Check first item (D as E)
-        let first_tokens: Vec<_> = items[0].children_with_tokens()
+        let first_tokens: Vec<_> = items[0]
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .filter(|t| t.kind() == SyntaxKind::Identifier)
             .collect();
@@ -227,7 +230,8 @@ mod tests {
         assert_eq!(first_tokens[1].text(), "E");
 
         // Check second item (F as G)
-        let second_tokens: Vec<_> = items[1].children_with_tokens()
+        let second_tokens: Vec<_> = items[1]
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .filter(|t| t.kind() == SyntaxKind::Identifier)
             .collect();

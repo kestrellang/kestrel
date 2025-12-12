@@ -10,7 +10,7 @@ mod basic {
             .expect(
                 Symbol::new("Drawable")
                     .is(SymbolKind::Protocol)
-                    .has(Behavior::ChildCount(0))
+                    .has(Behavior::ChildCount(0)),
             );
     }
 
@@ -22,7 +22,7 @@ mod basic {
                 Symbol::new("Equatable")
                     .is(SymbolKind::Protocol)
                     .has(Behavior::Visibility(Visibility::Public))
-                    .has(Behavior::ChildCount(0))
+                    .has(Behavior::ChildCount(0)),
             );
     }
 
@@ -39,13 +39,13 @@ mod basic {
         .expect(
             Symbol::new("Hashable")
                 .is(SymbolKind::Protocol)
-                .has(Behavior::ChildCount(1))
+                .has(Behavior::ChildCount(1)),
         )
         .expect(
             Symbol::new("Hashable.hash")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0))
-                .has(Behavior::HasBody(false))
+                .has(Behavior::HasBody(false)),
         );
     }
 
@@ -64,22 +64,22 @@ mod basic {
         .expect(
             Symbol::new("Comparable")
                 .is(SymbolKind::Protocol)
-                .has(Behavior::ChildCount(3))
+                .has(Behavior::ChildCount(3)),
         )
         .expect(
             Symbol::new("Comparable.lessThan")
                 .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1))
+                .has(Behavior::ParameterCount(1)),
         )
         .expect(
             Symbol::new("Comparable.greaterThan")
                 .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1))
+                .has(Behavior::ParameterCount(1)),
         )
         .expect(
             Symbol::new("Comparable.equals")
                 .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1))
+                .has(Behavior::ParameterCount(1)),
         );
     }
 }
@@ -100,7 +100,7 @@ mod conformance {
         .expect(
             Symbol::new("Point")
                 .is(SymbolKind::Struct)
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(1)),
         );
     }
 
@@ -117,7 +117,7 @@ mod conformance {
         .expect(
             Symbol::new("Point")
                 .is(SymbolKind::Struct)
-                .has(Behavior::ConformanceCount(2))
+                .has(Behavior::ConformanceCount(2)),
         );
     }
 
@@ -135,12 +135,12 @@ mod conformance {
                 .is(SymbolKind::Struct)
                 .has(Behavior::TypeParamCount(1))
                 .has(Behavior::IsGeneric(true))
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(1)),
         )
         .expect(
             Symbol::new("Container")
                 .is(SymbolKind::Protocol)
-                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::TypeParamCount(1)),
         );
     }
 
@@ -159,7 +159,7 @@ mod conformance {
                 .is(SymbolKind::Struct)
                 .has(Behavior::TypeParamCount(1))
                 .has(Behavior::IsGeneric(true))
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(1)),
         );
     }
 }
@@ -180,7 +180,7 @@ mod inheritance {
         .expect(
             Symbol::new("Shape")
                 .is(SymbolKind::Protocol)
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(1)),
         );
     }
 
@@ -198,7 +198,7 @@ mod inheritance {
             Symbol::new("Widget")
                 .is(SymbolKind::Protocol)
                 .has(Behavior::ConformanceCount(2))
-                .has(Behavior::ChildCount(0))
+                .has(Behavior::ChildCount(0)),
         );
     }
 
@@ -219,13 +219,13 @@ mod inheritance {
             Symbol::new("Shape")
                 .is(SymbolKind::Protocol)
                 .has(Behavior::ConformanceCount(1))
-                .has(Behavior::ChildCount(1))
+                .has(Behavior::ChildCount(1)),
         )
         .expect(
             Symbol::new("Shape.area")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0))
-                .has(Behavior::HasBody(false))
+                .has(Behavior::HasBody(false)),
         );
     }
 
@@ -243,7 +243,7 @@ mod inheritance {
                 .is(SymbolKind::Protocol)
                 .has(Behavior::TypeParamCount(1))
                 .has(Behavior::IsGeneric(true))
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(1)),
         );
     }
 }
@@ -268,13 +268,13 @@ mod validation {
             Symbol::new("Circle")
                 .is(SymbolKind::Struct)
                 .has(Behavior::ConformanceCount(1))
-                .has(Behavior::ChildCount(1))
+                .has(Behavior::ChildCount(1)),
         )
         .expect(
             Symbol::new("Circle.draw")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0))
-                .has(Behavior::HasBody(true))
+                .has(Behavior::HasBody(true)),
         );
     }
 
@@ -310,17 +310,17 @@ mod validation {
             Symbol::new("Number")
                 .is(SymbolKind::Struct)
                 .has(Behavior::ConformanceCount(1))
-                .has(Behavior::ChildCount(2))
+                .has(Behavior::ChildCount(2)),
         )
         .expect(
             Symbol::new("Number.lessThan")
                 .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1))
+                .has(Behavior::ParameterCount(1)),
         )
         .expect(
             Symbol::new("Number.equals")
                 .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1))
+                .has(Behavior::ParameterCount(1)),
         );
     }
 
@@ -361,7 +361,7 @@ mod validation {
             Symbol::new("Circle")
                 .is(SymbolKind::Struct)
                 .has(Behavior::ConformanceCount(1))
-                .has(Behavior::ChildCount(2))
+                .has(Behavior::ChildCount(2)),
         );
     }
 
@@ -434,7 +434,7 @@ mod validation {
             Symbol::new("Button")
                 .is(SymbolKind::Struct)
                 .has(Behavior::ConformanceCount(2))
-                .has(Behavior::ChildCount(2))
+                .has(Behavior::ChildCount(2)),
         )
         .expect(Symbol::new("Button.draw").is(SymbolKind::Function))
         .expect(Symbol::new("Button.onClick").is(SymbolKind::Function));
@@ -471,7 +471,7 @@ mod validation {
             Symbol::new("Point")
                 .is(SymbolKind::Struct)
                 .has(Behavior::ConformanceCount(1))
-                .has(Behavior::ChildCount(0))
+                .has(Behavior::ChildCount(0)),
         );
     }
 
@@ -491,12 +491,12 @@ mod validation {
         .expect(
             Symbol::new("Person")
                 .is(SymbolKind::Struct)
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(1)),
         )
         .expect(
             Symbol::new("Person.greet")
                 .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1))
+                .has(Behavior::ParameterCount(1)),
         );
     }
 

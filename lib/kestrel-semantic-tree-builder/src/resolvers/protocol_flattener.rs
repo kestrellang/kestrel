@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_semantic_model::SymbolFor;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -13,9 +13,7 @@ use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::cycle::{Cycle, CycleDetector};
 use semantic_tree::symbol::Symbol;
 
-use crate::diagnostics::{
-    CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError,
-};
+use crate::diagnostics::{CircularProtocolInheritanceError, InheritedAssociatedTypeConflictError};
 use crate::resolver::BindingContext;
 
 /// Flatten a protocol's inheritance hierarchy, collecting all methods and associated types.
@@ -99,30 +97,31 @@ fn flatten_protocol_recursive(
     let protocol_name = protocol.metadata().name().value.clone();
 
     // First recurse into inherited protocols (so we get parent definitions first)
-    let result = if let Some(conformances) = protocol.conformances_behavior() {
-        let mut res = Ok(());
-        for parent_ty in conformances.conformances() {
-            if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind() {
-                if let Err(e) = flatten_protocol_recursive(
-                    parent,
-                    methods,
-                    associated_types,
-                    cycle_detector,
-                    visited,
-                    depth + 1,
-                    max_depth,
-                    ctx,
-                    file_id,
-                ) {
-                    res = Err(e);
-                    break;
+    let result =
+        if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
+            let mut res = Ok(());
+            for parent_ty in conformances.conformances() {
+                if let TyKind::Protocol { symbol: parent, .. } = parent_ty.kind() {
+                    if let Err(e) = flatten_protocol_recursive(
+                        parent,
+                        methods,
+                        associated_types,
+                        cycle_detector,
+                        visited,
+                        depth + 1,
+                        max_depth,
+                        ctx,
+                        file_id,
+                    ) {
+                        res = Err(e);
+                        break;
+                    }
                 }
             }
-        }
-        res
-    } else {
-        Ok(())
-    };
+            res
+        } else {
+            Ok(())
+        };
 
     // If recursion failed, exit and return error
     if result.is_err() {
@@ -135,11 +134,14 @@ fn flatten_protocol_recursive(
         match child.metadata().kind() {
             KestrelSymbolKind::Function => {
                 let method_name = child.metadata().name().value.clone();
-                methods.entry(method_name).or_default().push(FlattenedMethod {
-                    symbol: child.clone(),
-                    source_protocol_name: protocol_name.clone(),
-                    definition_span: child.metadata().name().span.clone(),
-                });
+                methods
+                    .entry(method_name)
+                    .or_default()
+                    .push(FlattenedMethod {
+                        symbol: child.clone(),
+                        source_protocol_name: protocol_name.clone(),
+                        definition_span: child.metadata().name().span.clone(),
+                    });
             }
             KestrelSymbolKind::AssociatedType => {
                 let type_name = child.metadata().name().value.clone();

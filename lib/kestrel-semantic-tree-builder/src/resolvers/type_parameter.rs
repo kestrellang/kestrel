@@ -51,7 +51,9 @@ pub fn add_type_params_as_children(
     owner: &Arc<dyn Symbol<KestrelLanguage>>,
 ) {
     for type_param in type_params {
-        owner.metadata().add_child(&(type_param.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        owner
+            .metadata()
+            .add_child(&(type_param.clone() as Arc<dyn Symbol<KestrelLanguage>>));
     }
 }
 
@@ -83,13 +85,17 @@ fn parse_type_parameter(
 }
 
 /// Extract the name from a TypeParameter node.
-fn extract_type_param_name(syntax: &SyntaxNode, _source: &str) -> Option<(String, kestrel_span::Span)> {
+fn extract_type_param_name(
+    syntax: &SyntaxNode,
+    _source: &str,
+) -> Option<(String, kestrel_span::Span)> {
     // Look for direct Identifier token
     for child in syntax.children_with_tokens() {
         if let Some(token) = child.into_token() {
             if token.kind() == SyntaxKind::Identifier {
                 let text_range = token.text_range();
-                let span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+                let span: kestrel_span::Span =
+                    Span::from((text_range.start().into())..(text_range.end().into()));
                 return Some((token.text().to_string(), span));
             }
         }
@@ -101,7 +107,8 @@ fn extract_type_param_name(syntax: &SyntaxNode, _source: &str) -> Option<(String
             if let Some(token) = child.into_token() {
                 if token.kind() == SyntaxKind::Identifier {
                     let text_range = token.text_range();
-                    let span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+                    let span: kestrel_span::Span =
+                        Span::from((text_range.start().into())..(text_range.end().into()));
                     return Some((token.text().to_string(), span));
                 }
             }
@@ -225,7 +232,8 @@ fn parse_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+    let param_span: kestrel_span::Span =
+        Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -250,7 +258,9 @@ fn parse_type_bound(
         // Create resolved or unresolved constraint based on whether param was found
         match param_id {
             Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
-            None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
+            None => Some(Constraint::unresolved_type_bound(
+                param_name, param_span, bounds,
+            )),
         }
     }
 }
@@ -271,10 +281,7 @@ fn parse_type_bound(
 ///     TyPath
 ///       ...
 /// ```
-fn parse_type_equality(
-    syntax: &SyntaxNode,
-    source: &str,
-) -> Option<Constraint> {
+fn parse_type_equality(syntax: &SyntaxNode, source: &str) -> Option<Constraint> {
     let span = get_node_span(syntax, source);
 
     // Extract left side (AssociatedTypeTarget contains Path)

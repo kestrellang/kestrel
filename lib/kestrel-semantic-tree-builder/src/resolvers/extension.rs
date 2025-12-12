@@ -64,8 +64,7 @@ impl Resolver for ExtensionResolver {
         let (file_id, source) = context.get_file_context(symbol);
 
         // Resolve the target type from the Ty node
-        let target_result =
-            resolve_extension_target(syntax, &source, symbol_id, context, file_id);
+        let target_result = resolve_extension_target(syntax, &source, symbol_id, context, file_id);
 
         if let Some((target_ty, target_struct, type_arguments, referenced_params)) = target_result {
             // Get the target struct's where clause constraints (inherited)
@@ -82,7 +81,8 @@ impl Resolver for ExtensionResolver {
             );
 
             // Combine inherited and extension constraints
-            let combined_where_clause = combine_where_clauses(inherited_where_clause, extension_where_clause);
+            let combined_where_clause =
+                combine_where_clauses(inherited_where_clause, extension_where_clause);
 
             // Create and add ExtensionTargetBehavior
             let target_behavior = ExtensionTargetBehavior::new(
@@ -96,7 +96,9 @@ impl Resolver for ExtensionResolver {
             // Register extension in the ExtensionRegistry
             let target_id = target_struct.metadata().id();
             if let Ok(extension_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
-                context.model.register_extension(target_id, extension_symbol);
+                context
+                    .model
+                    .register_extension(target_id, extension_symbol);
             }
         }
 
@@ -125,7 +127,12 @@ fn resolve_extension_target(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     file_id: usize,
-) -> Option<(Ty, Arc<StructSymbol>, Vec<Ty>, Vec<Arc<TypeParameterSymbol>>)> {
+) -> Option<(
+    Ty,
+    Arc<StructSymbol>,
+    Vec<Ty>,
+    Vec<Arc<TypeParameterSymbol>>,
+)> {
     // Find the Ty node (target type expression)
     let ty_node = find_child(syntax, SyntaxKind::Ty)?;
     let ty_span = get_node_span(&ty_node, source);
@@ -146,25 +153,26 @@ fn resolve_extension_target(
     }
 
     // First, resolve just the base type (without type arguments) to get the struct
-    let base_resolution = ctx.model.query(ResolveTypePath { path: segments.clone(), context: context_id });
+    let base_resolution = ctx.model.query(ResolveTypePath {
+        path: segments.clone(),
+        context: context_id,
+    });
     let struct_symbol = match base_resolution {
         TypePathResolution::Resolved(ty) => match ty.kind() {
             TyKind::Struct { symbol, .. } => symbol.clone(),
             _ => {
-                ctx.diagnostics.throw(
-                    CannotExtendTypeError {
-                        span: ty_span.clone(),
-                        type_name: format_type_kind(ty.kind()),
-                    });
+                ctx.diagnostics.throw(CannotExtendTypeError {
+                    span: ty_span.clone(),
+                    type_name: format_type_kind(ty.kind()),
+                });
                 return None;
             }
         },
         TypePathResolution::NotFound { segment, .. } => {
-            ctx.diagnostics.throw(
-                UnresolvedTypeError {
-                    span: ty_span.clone(),
-                    type_name: segment,
-                });
+            ctx.diagnostics.throw(UnresolvedTypeError {
+                span: ty_span.clone(),
+                type_name: segment,
+            });
             return None;
         }
         _ => return None,
@@ -201,9 +209,13 @@ fn resolve_extension_target(
             // (not self-referential, e.g., U in T's position)
             if arg_param_id != param_id {
                 // Check if it's actually one of the struct's type parameters but in wrong position
-                let is_struct_param_wrong_position = struct_type_params.iter().enumerate().any(|(other_index, other_param)| {
-                    other_param.metadata().id() == arg_param_id && other_index != index
-                });
+                let is_struct_param_wrong_position =
+                    struct_type_params
+                        .iter()
+                        .enumerate()
+                        .any(|(other_index, other_param)| {
+                            other_param.metadata().id() == arg_param_id && other_index != index
+                        });
 
                 if is_struct_param_wrong_position {
                     // Error: type parameter in wrong position (e.g., extend Pair[U, T])
@@ -254,19 +266,21 @@ fn resolve_extension_type_arguments(
     };
 
     // Count the type arguments in the syntax
-    let ty_nodes: Vec<_> = arg_list.children().filter(|c| c.kind() == SyntaxKind::Ty).collect();
+    let ty_nodes: Vec<_> = arg_list
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Ty)
+        .collect();
     let arg_count = ty_nodes.len();
     let expected_count = struct_type_params.len();
 
     // Check for type parameter count mismatch
     if arg_count != expected_count {
         let arg_list_span = get_node_span(&arg_list, source);
-        ctx.diagnostics.throw(
-            WrongTypeParameterCountError {
-                span: arg_list_span,
-                expected: expected_count,
-                actual: arg_count,
-            });
+        ctx.diagnostics.throw(WrongTypeParameterCountError {
+            span: arg_list_span,
+            expected: expected_count,
+            actual: arg_count,
+        });
         return None;
     }
 
@@ -280,7 +294,10 @@ fn resolve_extension_type_arguments(
 
         if let Some(name) = simple_name {
             // Check if this name matches any of the struct's type parameters
-            if let Some(type_param) = struct_type_params.iter().find(|p| p.metadata().name().value == name) {
+            if let Some(type_param) = struct_type_params
+                .iter()
+                .find(|p| p.metadata().name().value == name)
+            {
                 // This is a reference to the struct's type parameter
                 type_args.push(Ty::type_parameter(type_param.clone(), ty_span));
                 continue;
@@ -288,7 +305,8 @@ fn resolve_extension_type_arguments(
         }
 
         // Not a type parameter reference - resolve as a normal type
-        let mut type_resolver = TypeResolver::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_resolver =
+            TypeResolver::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         type_args.push(type_resolver.resolve(&ty_node));
     }
 
@@ -299,10 +317,15 @@ fn resolve_extension_type_arguments(
 /// Returns None if the type is complex (has type arguments, is a function type, etc.)
 fn extract_simple_type_name(ty_node: &SyntaxNode) -> Option<String> {
     // Find TyPath
-    let ty_path = ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath)?;
+    let ty_path = ty_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::TyPath)?;
 
     // Check it doesn't have type arguments (which would make it not a simple name)
-    if ty_path.children().any(|c| c.kind() == SyntaxKind::TypeArgumentList) {
+    if ty_path
+        .children()
+        .any(|c| c.kind() == SyntaxKind::TypeArgumentList)
+    {
         return None;
     }
 
@@ -365,11 +388,10 @@ impl kestrel_reporting::IntoDiagnostic for CannotExtendTypeError {
                 "cannot extend type '{}' - only structs can be extended",
                 self.type_name
             ))
-            .with_labels(vec![kestrel_reporting::Label::primary(
-                self.span.file_id,
-                self.span.range(),
-            )
-            .with_message("not a struct type")])
+            .with_labels(vec![
+                kestrel_reporting::Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not a struct type"),
+            ])
             .with_notes(vec![
                 "Extensions can only be applied to struct types".to_string(),
             ])
@@ -399,11 +421,10 @@ impl kestrel_reporting::IntoDiagnostic for WrongTypeParameterCountError {
         };
         kestrel_reporting::Diagnostic::error()
             .with_message(message)
-            .with_labels(vec![kestrel_reporting::Label::primary(
-                self.span.file_id,
-                self.span.range(),
-            )
-            .with_message(format!("expected {} type parameter(s)", self.expected))])
+            .with_labels(vec![
+                kestrel_reporting::Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected {} type parameter(s)", self.expected)),
+            ])
     }
 }
 
@@ -461,7 +482,8 @@ fn resolve_extension_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+    let param_span: kestrel_span::Span =
+        Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter in the referenced params (not all struct params)
     let param = referenced_params
@@ -485,52 +507,50 @@ fn resolve_extension_type_bound(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
+            match ctx.model.query(ResolveTypePath {
+                path: segments,
+                context: context_id,
+            }) {
                 TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
                     TyKind::Protocol { .. } => resolved_ty,
                     TyKind::Struct { symbol, .. } => {
-                        ctx.diagnostics.throw(
-                            NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
                         Ty::error(span)
                     }
                     TyKind::TypeAlias { symbol, .. } => {
-                        ctx.diagnostics.throw(
-                            NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
                         Ty::error(span)
                     }
                     _ => {
-                        ctx.diagnostics.throw(
-                            NotAProtocolError {
-                                span: span.clone(),
-                                name: bound_name.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                        Ty::error(span)
-                    }
-                },
-                TypePathResolution::NotFound { .. } => {
-                    ctx.diagnostics.throw(
-                        UnresolvedTypeError {
-                            span: span.clone(),
-                            type_name: bound_name.clone(),
-                        });
-                    Ty::error(span)
-                }
-                TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                    ctx.diagnostics.throw(
-                        NotAProtocolError {
+                        ctx.diagnostics.throw(NotAProtocolError {
                             span: span.clone(),
                             name: bound_name.clone(),
                             context: NotAProtocolContext::Bound,
                         });
+                        Ty::error(span)
+                    }
+                },
+                TypePathResolution::NotFound { .. } => {
+                    ctx.diagnostics.throw(UnresolvedTypeError {
+                        span: span.clone(),
+                        type_name: bound_name.clone(),
+                    });
+                    Ty::error(span)
+                }
+                TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
+                    ctx.diagnostics.throw(NotAProtocolError {
+                        span: span.clone(),
+                        name: bound_name.clone(),
+                        context: NotAProtocolContext::Bound,
+                    });
                     Ty::error(span)
                 }
             }

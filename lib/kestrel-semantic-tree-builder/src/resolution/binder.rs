@@ -93,10 +93,7 @@ impl SemanticBinder {
     }
 
     /// Run the binding phase and return the semantic model (internal)
-    fn run_binding(
-        &mut self,
-        diagnostics: &mut DiagnosticContext,
-    ) -> SemanticModel {
+    fn run_binding(&mut self, diagnostics: &mut DiagnosticContext) -> SemanticModel {
         // Walk all symbols and call bind_declaration
         self.bind_symbol(&self.root.clone(), diagnostics, 0);
 

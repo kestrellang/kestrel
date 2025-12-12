@@ -7,11 +7,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::{emit_function_declaration, function_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
-use crate::common::{
-    function_declaration_parser_internal,
-    emit_function_declaration,
-};
 
 /// Represents a function declaration: (visibility)? (static)? fn name[T]?(params) (-> return_type)? (where ...)? { }
 ///
@@ -44,7 +41,8 @@ impl FunctionDeclaration {
 
     /// Get the visibility modifier if present
     pub fn visibility(&self) -> Option<SyntaxKind> {
-        let visibility_node = self.syntax
+        let visibility_node = self
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::Visibility)?;
 

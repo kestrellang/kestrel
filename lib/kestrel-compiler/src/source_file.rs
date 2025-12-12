@@ -12,11 +12,7 @@ pub struct SourceFile {
 
 impl SourceFile {
     /// Create a new source file.
-    pub(crate) fn new(
-        name: String,
-        source: String,
-        syntax_tree: SyntaxNode,
-    ) -> Self {
+    pub(crate) fn new(name: String, source: String, syntax_tree: SyntaxNode) -> Self {
         Self {
             name,
             source,

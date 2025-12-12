@@ -338,8 +338,7 @@ fn desugar_binary_op(
         rhs_span: rhs.span.clone(),
         rhs_type: super::utils::format_type(&rhs.ty),
     };
-    ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic());
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
 }
 
@@ -403,8 +402,7 @@ fn desugar_unary_op(
         operand_span: operand.span.clone(),
         operand_type: super::utils::format_type(&operand.ty),
     };
-    ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic());
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
 }
 

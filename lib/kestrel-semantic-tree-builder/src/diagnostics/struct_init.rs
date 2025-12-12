@@ -32,11 +32,12 @@ impl IntoDiagnostic for ImplicitInitArityError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected {} argument(s)", self.expected))
+                    .with_message(format!("expected {} argument(s)", self.expected)),
             ])
             .with_notes(vec![
                 format!("fields: {}", fields_list),
-                "implicit memberwise init requires an argument for each field in declaration order".to_string(),
+                "implicit memberwise init requires an argument for each field in declaration order"
+                    .to_string(),
             ])
     }
 }
@@ -65,15 +66,18 @@ impl IntoDiagnostic for ImplicitInitLabelError {
         Diagnostic::error()
             .with_message(format!(
                 "argument {} has {} label, but expected '{}'",
-                self.arg_index + 1, provided_desc, self.expected_label
+                self.arg_index + 1,
+                provided_desc,
+                self.expected_label
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected label '{}'", self.expected_label))
+                    .with_message(format!("expected label '{}'", self.expected_label)),
             ])
-            .with_notes(vec![
-                format!("struct '{}' requires labeled arguments matching field names in declaration order", self.struct_name),
-            ])
+            .with_notes(vec![format!(
+                "struct '{}' requires labeled arguments matching field names in declaration order",
+                self.struct_name
+            )])
     }
 }
 
@@ -96,26 +100,30 @@ impl IntoDiagnostic for NoMatchingInitializerError {
         let provided = super::call::format_argument_labels(&self.provided_labels);
 
         let mut labels = vec![
-            Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
-                    "no matching initializer for {} argument(s) with labels {}",
-                    self.provided_arity, provided
-                ))
+            Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                "no matching initializer for {} argument(s) with labels {}",
+                self.provided_arity, provided
+            )),
         ];
 
         // Add secondary labels for available initializers
         for init in &self.available_initializers {
-            if let (Some(span), Some(def_file_id)) = (&init.definition_span, init.definition_file_id) {
+            if let (Some(span), Some(def_file_id)) =
+                (&init.definition_span, init.definition_file_id)
+            {
                 labels.push(
                     Label::secondary(def_file_id, span.range())
-                        .with_message(format!("candidate: {}", init.display()))
+                        .with_message(format!("candidate: {}", init.display())),
                 );
             }
         }
 
         let mut notes = vec![];
         if !self.available_initializers.is_empty() {
-            notes.push(format!("available initializers for '{}':", self.struct_name));
+            notes.push(format!(
+                "available initializers for '{}':",
+                self.struct_name
+            ));
             for init in &self.available_initializers {
                 notes.push(format!("  - {}", init.display()));
             }
@@ -154,7 +162,7 @@ impl IntoDiagnostic for FieldNotVisibleForInitError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("implicit init not available")
+                    .with_message("implicit init not available"),
             ])
             .with_notes(vec![
                 format!("field '{}' is not visible from this scope", self.field_name),
@@ -181,9 +189,10 @@ impl IntoDiagnostic for ExplicitInitSuppressesImplicitError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = super::call::format_argument_labels(&self.provided_labels);
 
-        let mut notes = vec![
-            format!("struct '{}' has explicit initializers, so implicit memberwise init is not available", self.struct_name),
-        ];
+        let mut notes = vec![format!(
+            "struct '{}' has explicit initializers, so implicit memberwise init is not available",
+            self.struct_name
+        )];
 
         if !self.available_initializers.is_empty() {
             notes.push("available initializers:".to_string());
@@ -199,7 +208,7 @@ impl IntoDiagnostic for ExplicitInitSuppressesImplicitError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("no initializer matches labels {}", provided))
+                    .with_message(format!("no initializer matches labels {}", provided)),
             ])
             .with_notes(notes)
     }

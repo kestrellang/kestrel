@@ -3,9 +3,9 @@
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::SymbolId;
 
+use crate::SemanticModel;
 use crate::queries::SymbolFor;
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Find the nearest ancestor of a specific kind.
 ///

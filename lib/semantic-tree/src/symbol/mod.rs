@@ -5,7 +5,7 @@ mod table;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use downcast_rs::{impl_downcast, DowncastSync};
+use downcast_rs::{DowncastSync, impl_downcast};
 
 pub use collection::SymbolCollection;
 pub use metadata::SymbolMetadata;

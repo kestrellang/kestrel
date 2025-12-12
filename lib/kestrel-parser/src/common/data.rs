@@ -6,9 +6,9 @@
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
+use crate::block::CodeBlockData;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
-use crate::block::CodeBlockData;
 
 /// Raw parsed data for a single parameter
 ///
@@ -119,8 +119,13 @@ pub enum StructBodyItem {
     Initializer(InitializerDeclarationData),
     Struct(StructDeclarationData),
     TypeAlias(TypeAliasDeclarationData), // Associated type bindings
-    Module(Span, Vec<Span>), // module_span, path_segments
-    Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>), // import_span, path, alias, items
+    Module(Span, Vec<Span>),             // module_span, path_segments
+    Import(
+        Span,
+        Vec<Span>,
+        Option<Span>,
+        Option<Vec<(Span, Option<Span>)>>,
+    ), // import_span, path, alias, items
 }
 
 /// Raw parsed data for protocol declaration internals

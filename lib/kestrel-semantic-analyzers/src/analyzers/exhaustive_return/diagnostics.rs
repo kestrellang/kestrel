@@ -13,13 +13,10 @@ impl IntoDiagnostic for MissingReturnError {
                 "function '{}' does not return a value on all code paths",
                 self.func_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("this function has a non-unit return type"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("this function has a non-unit return type")])
             .with_notes(vec![
                 "all code paths must end with a return statement or a value expression".to_string(),
             ])
     }
 }
-

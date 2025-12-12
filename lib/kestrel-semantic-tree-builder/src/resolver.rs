@@ -75,7 +75,11 @@ impl BindingContext<'_> {
     pub fn get_file_context(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (usize, String) {
         match crate::syntax::get_source_file_info(symbol, self.diagnostics) {
             Some(info) => {
-                let source = self.sources.get(&info.file_name).cloned().unwrap_or_default();
+                let source = self
+                    .sources
+                    .get(&info.file_name)
+                    .cloned()
+                    .unwrap_or_default();
                 (info.file_id, source)
             }
             None => (self.file_id, String::new()),
@@ -96,13 +100,22 @@ impl ResolverRegistry {
         // Register declaration resolvers
         resolvers.insert(SyntaxKind::ModuleDeclaration, Box::new(ModuleResolver));
         resolvers.insert(SyntaxKind::ImportDeclaration, Box::new(ImportResolver));
-        resolvers.insert(SyntaxKind::TypeAliasDeclaration, Box::new(TypeAliasResolver));
+        resolvers.insert(
+            SyntaxKind::TypeAliasDeclaration,
+            Box::new(TypeAliasResolver),
+        );
         resolvers.insert(SyntaxKind::ProtocolDeclaration, Box::new(ProtocolResolver));
         resolvers.insert(SyntaxKind::StructDeclaration, Box::new(StructResolver));
-        resolvers.insert(SyntaxKind::ExtensionDeclaration, Box::new(ExtensionResolver));
+        resolvers.insert(
+            SyntaxKind::ExtensionDeclaration,
+            Box::new(ExtensionResolver),
+        );
         resolvers.insert(SyntaxKind::FieldDeclaration, Box::new(FieldResolver));
         resolvers.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionResolver));
-        resolvers.insert(SyntaxKind::InitializerDeclaration, Box::new(InitializerResolver));
+        resolvers.insert(
+            SyntaxKind::InitializerDeclaration,
+            Box::new(InitializerResolver),
+        );
 
         // Register terminal resolvers
         resolvers.insert(SyntaxKind::Visibility, Box::new(TerminalResolver));

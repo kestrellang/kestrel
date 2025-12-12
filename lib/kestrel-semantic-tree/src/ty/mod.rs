@@ -317,7 +317,10 @@ impl Ty {
         use semantic_tree::symbol::Symbol;
 
         match &self.kind {
-            TyKind::TypeAlias { symbol, substitutions } => {
+            TyKind::TypeAlias {
+                symbol,
+                substitutions,
+            } => {
                 // Get the resolved type from the TypeAliasTypedBehavior
                 let behaviors = symbol.metadata().behaviors();
                 let resolved = behaviors
@@ -562,7 +565,10 @@ impl Ty {
     /// Get function parameters and return type if this is a function type
     pub fn as_function(&self) -> Option<(&Vec<Ty>, &Ty)> {
         match &self.kind {
-            TyKind::Function { params, return_type } => Some((params, return_type)),
+            TyKind::Function {
+                params,
+                return_type,
+            } => Some((params, return_type)),
             _ => None,
         }
     }
@@ -594,7 +600,10 @@ impl Ty {
     /// Get protocol symbol and substitutions if this is a protocol type
     pub fn as_protocol_with_subs(&self) -> Option<(&Arc<ProtocolSymbol>, &Substitutions)> {
         match &self.kind {
-            TyKind::Protocol { symbol, substitutions } => Some((symbol, substitutions)),
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => Some((symbol, substitutions)),
             _ => None,
         }
     }
@@ -610,7 +619,10 @@ impl Ty {
     /// Get struct symbol and substitutions if this is a struct type
     pub fn as_struct_with_subs(&self) -> Option<(&Arc<StructSymbol>, &Substitutions)> {
         match &self.kind {
-            TyKind::Struct { symbol, substitutions } => Some((symbol, substitutions)),
+            TyKind::Struct {
+                symbol,
+                substitutions,
+            } => Some((symbol, substitutions)),
             _ => None,
         }
     }
@@ -626,7 +638,10 @@ impl Ty {
     /// Get type alias symbol and substitutions if this is a type alias type
     pub fn as_type_alias_with_subs(&self) -> Option<(&Arc<TypeAliasSymbol>, &Substitutions)> {
         match &self.kind {
-            TyKind::TypeAlias { symbol, substitutions } => Some((symbol, substitutions)),
+            TyKind::TypeAlias {
+                symbol,
+                substitutions,
+            } => Some((symbol, substitutions)),
             _ => None,
         }
     }
@@ -640,7 +655,9 @@ impl Ty {
     }
 
     /// Get associated type symbol and container if this is an associated type reference
-    pub fn as_associated_type_with_container(&self) -> Option<(&Arc<AssociatedTypeSymbol>, Option<&Ty>)> {
+    pub fn as_associated_type_with_container(
+        &self,
+    ) -> Option<(&Arc<AssociatedTypeSymbol>, Option<&Ty>)> {
         match &self.kind {
             TyKind::AssociatedType { symbol, container } => {
                 Some((symbol, container.as_ref().map(|b| b.as_ref())))
@@ -682,8 +699,8 @@ fn substitutions_equal(a: &Substitutions, b: &Substitutions) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_unit_type() {
@@ -730,7 +747,10 @@ mod tests {
 
     #[test]
     fn test_tuple_type() {
-        let ty = Ty::tuple(vec![Ty::unit(Span::from(0..2)), Ty::never(Span::from(3..4))], Span::from(0..5));
+        let ty = Ty::tuple(
+            vec![Ty::unit(Span::from(0..2)), Ty::never(Span::from(3..4))],
+            Span::from(0..5),
+        );
         assert!(ty.is_tuple());
         assert!(!ty.is_unit());
 
@@ -759,8 +779,15 @@ mod tests {
 
     #[test]
     fn test_nested_types() {
-        let tuple_param = Ty::tuple(vec![Ty::unit(Span::from(1..3)), Ty::never(Span::from(5..6))], Span::from(0..7));
-        let fn_ty = Ty::function(vec![tuple_param], Ty::unit(Span::from(12..14)), Span::from(0..14));
+        let tuple_param = Ty::tuple(
+            vec![Ty::unit(Span::from(1..3)), Ty::never(Span::from(5..6))],
+            Span::from(0..7),
+        );
+        let fn_ty = Ty::function(
+            vec![tuple_param],
+            Ty::unit(Span::from(12..14)),
+            Span::from(0..14),
+        );
 
         assert!(fn_ty.is_function());
 
@@ -884,11 +911,17 @@ mod tests {
     #[test]
     fn test_assignable_tuples() {
         let tuple1 = Ty::tuple(
-            vec![Ty::int(IntBits::I64, Span::from(0..3)), Ty::bool(Span::from(4..8))],
+            vec![
+                Ty::int(IntBits::I64, Span::from(0..3)),
+                Ty::bool(Span::from(4..8)),
+            ],
             Span::from(0..9),
         );
         let tuple2 = Ty::tuple(
-            vec![Ty::int(IntBits::I64, Span::from(10..13)), Ty::bool(Span::from(14..18))],
+            vec![
+                Ty::int(IntBits::I64, Span::from(10..13)),
+                Ty::bool(Span::from(14..18)),
+            ],
             Span::from(10..19),
         );
         assert!(tuple1.is_assignable_to(&tuple2));
@@ -951,7 +984,10 @@ mod tests {
 
         // Different arity
         let fn5 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(0..3)), Ty::int(IntBits::I64, Span::from(4..7))],
+            vec![
+                Ty::int(IntBits::I64, Span::from(0..3)),
+                Ty::int(IntBits::I64, Span::from(4..7)),
+            ],
             Ty::bool(Span::from(8..12)),
             Span::from(0..13),
         );

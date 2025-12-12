@@ -14,8 +14,10 @@ impl IntoDiagnostic for BreakOutsideLoopError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("`break` outside of loop")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("`break` can only be used inside a loop")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("`break` can only be used inside a loop"),
+            ])
     }
 }
 
@@ -28,8 +30,10 @@ impl IntoDiagnostic for ContinueOutsideLoopError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("`continue` outside of loop")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("`continue` can only be used inside a loop")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("`continue` can only be used inside a loop"),
+            ])
     }
 }
 
@@ -43,10 +47,13 @@ impl IntoDiagnostic for UndeclaredLabelError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("use of undeclared label `{}`", self.label_name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("undeclared label")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("undeclared label"),
+            ])
             .with_notes(vec![
-                "labels must be declared on a loop using `label: while ...` or `label: loop ...`".to_string(),
+                "labels must be declared on a loop using `label: while ...` or `label: loop ...`"
+                    .to_string(),
             ])
     }
 }

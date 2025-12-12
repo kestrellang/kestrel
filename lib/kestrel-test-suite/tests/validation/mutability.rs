@@ -19,9 +19,12 @@ mod local_variables {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::ParameterCount(0))
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -66,8 +69,11 @@ mod local_variables {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        );
     }
 }
 
@@ -90,8 +96,11 @@ mod field_access {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]
@@ -111,8 +120,11 @@ mod field_access {
         "#,
         )
         .expect(HasError("cannot assign to immutable field"))
-        .expect(Symbol::new("Point").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]
@@ -132,8 +144,11 @@ mod field_access {
         "#,
         )
         .expect(HasError("cannot assign to immutable field"))
-        .expect(Symbol::new("Point").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]
@@ -155,10 +170,16 @@ mod field_access {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -180,10 +201,16 @@ mod field_access {
         "#,
         )
         .expect(HasError("cannot assign to immutable field"))
-        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -205,10 +232,16 @@ mod field_access {
         "#,
         )
         .expect(HasError("cannot assign to immutable field"))
-        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -230,10 +263,16 @@ mod field_access {
         "#,
         )
         .expect(HasError("cannot assign to immutable field"))
-        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 }
 
@@ -316,8 +355,11 @@ mod invalid_targets {
         "#,
         )
         .expect(HasError("cannot assign to this expression"))
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -332,10 +374,16 @@ mod invalid_targets {
         "#,
         )
         .expect(HasError("cannot assign to this expression"))
-        .expect(Symbol::new("getValue").is(SymbolKind::Function)
-            .has(Behavior::HasBody(true)))
-        .expect(Symbol::new("test").is(SymbolKind::Function)
-            .has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("getValue")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -353,8 +401,11 @@ mod invalid_targets {
         "#,
         )
         .expect(HasError("cannot assign to this expression"))
-        .expect(Symbol::new("Point").is(SymbolKind::Struct)
-            .has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]

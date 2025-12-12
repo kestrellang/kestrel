@@ -17,9 +17,15 @@ macro_rules! compiles_fn {
     ($name:ident, $sig:expr, $body:expr) => {
         #[test]
         fn $name() {
-            Test::new(concat!("module Test\nfunc test", $sig, " {\n", $body, "\n}"))
-                .expect(Compiles)
-                .expect(Symbol::new("Test.test").is(SymbolKind::Function));
+            Test::new(concat!(
+                "module Test\nfunc test",
+                $sig,
+                " {\n",
+                $body,
+                "\n}"
+            ))
+            .expect(Compiles)
+            .expect(Symbol::new("Test.test").is(SymbolKind::Function));
         }
     };
 }
@@ -32,9 +38,15 @@ mod path_expressions {
 
     #[test]
     fn paths_in_containers() {
-        Test::new("module Test\nfunc test(foo: Int, bar: Int) {\n[foo, bar];\n(foo, bar);\n(foo)\n}")
-            .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+        Test::new(
+            "module Test\nfunc test(foo: Int, bar: Int) {\n[foo, bar];\n(foo, bar);\n(foo)\n}",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Test.test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 }
 
@@ -47,13 +59,22 @@ mod variable_declarations {
 
     #[test]
     fn multiple_declarations() {
-        Test::new("module Test\nfunc test() {\nlet x: Int = 1;\nlet y: Int = 2;\nlet z: Int = 3;\n}")
-            .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::HasBody(true)));
+        Test::new(
+            "module Test\nfunc test() {\nlet x: Int = 1;\nlet y: Int = 2;\nlet z: Int = 3;\n}",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Test.test")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     compiles_fn!(let_with_path_initializer, "(foo: Int)", "let x: Int = foo;");
-    compiles!(let_with_complex_type, r#"let x: (Int, String) = (1, "hello");"#);
+    compiles!(
+        let_with_complex_type,
+        r#"let x: (Int, String) = (1, "hello");"#
+    );
     compiles!(let_with_array_type, "let x: [Int] = [1, 2, 3];");
 }
 
@@ -64,9 +85,15 @@ mod variable_shadowing {
 
     #[test]
     fn sequential_shadowing() {
-        Test::new("module Test\nfunc test() {\nlet x: Int = 1;\nlet x: Int = 2;\nlet x: Int = 3;\n}")
-            .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::HasBody(true)));
+        Test::new(
+            "module Test\nfunc test() {\nlet x: Int = 1;\nlet x: Int = 2;\nlet x: Int = 3;\n}",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Test.test")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        );
     }
 }
 
@@ -79,7 +106,11 @@ mod parameter_usage {
     fn multiple_parameters_usage() {
         Test::new("module Test\nfunc test(x: Int, label y: Int) {\nx;\ny;\n}")
             .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+            .expect(
+                Symbol::new("Test.test")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(2)),
+            );
     }
 }
 
@@ -120,13 +151,19 @@ mod complex_expressions {
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
-    compiles_fn!(let_with_function_type, "(foo: (Int) -> Int)", "let f: (Int) -> Int = foo;");
+    compiles_fn!(
+        let_with_function_type,
+        "(foo: (Int) -> Int)",
+        "let f: (Int) -> Int = foo;"
+    );
 
     #[test]
     fn numeric_literal_variants() {
-        Test::new("module Test\nfunc test() {\n0xFF;\n0b1010;\n0o777;\n1.5e10;\n1_000_000;\n0xFF_FF;\n}")
-            .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function));
+        Test::new(
+            "module Test\nfunc test() {\n0xFF;\n0b1010;\n0o777;\n1.5e10;\n1_000_000;\n0xFF_FF;\n}",
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
     compiles!(string_with_escapes, r#""hello\nworld";"#);
@@ -153,7 +190,11 @@ mod edge_cases {
     fn unary_operators_on_paths() {
         Test::new("module Test\nfunc test(x: Int, b: Bool) {\n-x;\n!b;\n-!-!x;\n}")
             .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+            .expect(
+                Symbol::new("Test.test")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(2)),
+            );
     }
 
     #[test]
@@ -197,14 +238,22 @@ mod edge_cases {
     fn special_types() {
         Test::new("module Test\nfunc test(foo: !) {\nlet x: ! = foo;\nlet y: () = ();\n}")
             .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+            .expect(
+                Symbol::new("Test.test")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(1)),
+            );
     }
 
     #[test]
     fn underscore_and_unicode_identifiers() {
         Test::new("module Test\nfunc test(_private: Int, café: Int) {\n_private;\ncafé;\n}")
             .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+            .expect(
+                Symbol::new("Test.test")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(2)),
+            );
     }
 
     #[test]
@@ -265,7 +314,11 @@ mod edge_cases {
             .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(4)));
     }
 
-    compiles_fn!(function_type_with_many_params, "(foo: (Int, Int, Int, Int) -> (Int, Int))", "let f: (Int, Int, Int, Int) -> (Int, Int) = foo;");
+    compiles_fn!(
+        function_type_with_many_params,
+        "(foo: (Int, Int, Int, Int) -> (Int, Int))",
+        "let f: (Int, Int, Int, Int) -> (Int, Int) = foo;"
+    );
 
     #[test]
     fn mixed_statements_and_expressions() {

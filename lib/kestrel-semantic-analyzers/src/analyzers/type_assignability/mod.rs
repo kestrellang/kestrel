@@ -4,10 +4,10 @@
 //! equality constraints in scope.
 
 use kestrel_semantic_model::{SemanticModel, SymbolFor};
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
-use semantic_tree::symbol::SymbolId;
 use semantic_tree::symbol::Symbol;
+use semantic_tree::symbol::SymbolId;
 
 /// Collect all where clauses from the context by walking up the parent chain.
 pub fn collect_where_clauses(model: &SemanticModel, context_id: SymbolId) -> Vec<WhereClause> {
@@ -15,11 +15,15 @@ pub fn collect_where_clauses(model: &SemanticModel, context_id: SymbolId) -> Vec
     let mut current_id = Some(context_id);
 
     while let Some(id) = current_id {
-        let Some(symbol) = model.query(SymbolFor { id }) else { break };
+        let Some(symbol) = model.query(SymbolFor { id }) else {
+            break;
+        };
 
-        if let Some(generics_beh) = symbol.generics_behavior() {
+        if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
             let wc = generics_beh.where_clause();
-            if !wc.is_empty() { clauses.push(wc.clone()); }
+            if !wc.is_empty() {
+                clauses.push(wc.clone());
+            }
         }
 
         current_id = symbol.metadata().parent().map(|p| p.metadata().id());
@@ -35,7 +39,9 @@ pub fn is_assignable_with_constraints(
     model: &SemanticModel,
     context_id: SymbolId,
 ) -> bool {
-    if from.is_assignable_to(to) { return true; }
+    if from.is_assignable_to(to) {
+        return true;
+    }
 
     let where_clauses = collect_where_clauses(model, context_id);
     let equalities: Vec<(&Ty, &Ty)> = where_clauses
@@ -43,7 +49,9 @@ pub fn is_assignable_with_constraints(
         .flat_map(|wc| wc.equality_constraints())
         .collect();
 
-    if equalities.is_empty() { return false; }
+    if equalities.is_empty() {
+        return false;
+    }
 
     let from_normalized = normalize_type(from, &equalities);
     let to_normalized = normalize_type(to, &equalities);
@@ -52,8 +60,12 @@ pub fn is_assignable_with_constraints(
 
 fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
     for (left, right) in equalities {
-        if types_match(ty, left) { return (*right).clone(); }
-        if types_match(ty, right) { return (*left).clone(); }
+        if types_match(ty, left) {
+            return (*right).clone();
+        }
+        if types_match(ty, right) {
+            return (*left).clone();
+        }
     }
     match ty.kind() {
         TyKind::Tuple(elements) => {
@@ -67,7 +79,10 @@ fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
             let normalized = normalize_type(element, equalities);
             Ty::array(normalized, ty.span().clone())
         }
-        TyKind::Function { params, return_type } => {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             let normalized_params: Vec<Ty> = params
                 .iter()
                 .map(|p| normalize_type(p, equalities))
@@ -85,10 +100,18 @@ fn types_match(a: &Ty, b: &Ty) -> bool {
             a_param.metadata().id() == b_param.metadata().id()
         }
         (
-            TyKind::AssociatedType { symbol: a_sym, container: a_cont },
-            TyKind::AssociatedType { symbol: b_sym, container: b_cont },
+            TyKind::AssociatedType {
+                symbol: a_sym,
+                container: a_cont,
+            },
+            TyKind::AssociatedType {
+                symbol: b_sym,
+                container: b_cont,
+            },
         ) => {
-            if a_sym.metadata().id() != b_sym.metadata().id() { return false; }
+            if a_sym.metadata().id() != b_sym.metadata().id() {
+                return false;
+            }
             match (a_cont, b_cont) {
                 (Some(a_c), Some(b_c)) => types_match(a_c, b_c),
                 (None, None) => true,

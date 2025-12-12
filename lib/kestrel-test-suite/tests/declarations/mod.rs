@@ -9,11 +9,11 @@
 //! - Import statements
 //! - Extensions with conformances
 
-mod structs;
-mod functions;
-mod protocols;
-mod protocol_method_linking;
-mod type_aliases;
 mod associated_types;
-mod imports;
 mod extensions;
+mod functions;
+mod imports;
+mod protocol_method_linking;
+mod protocols;
+mod structs;
+mod type_aliases;

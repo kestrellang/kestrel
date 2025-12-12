@@ -4,12 +4,9 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::visibility::VisibilityBehavior,
-    behavior_ext::BehaviorExt,
-    language::KestrelLanguage,
-    symbol::kind::KestrelSymbolKind,
-    symbol::type_parameter::TypeParameterSymbol,
-    ty::WhereClause,
+    behavior::generics::GenericsBehavior, behavior::visibility::VisibilityBehavior,
+    language::KestrelLanguage, symbol::kind::KestrelSymbolKind,
+    symbol::type_parameter::TypeParameterSymbol, ty::WhereClause,
 };
 
 /// Represents a struct declaration in the semantic tree.
@@ -61,7 +58,7 @@ impl StructSymbol {
     /// TypeParameter children directly. After BIND, it uses the GenericsBehavior.
     pub fn type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
         // First try GenericsBehavior (available after BIND)
-        if let Some(g) = self.metadata.generics_behavior() {
+        if let Some(g) = self.metadata.get_behavior::<GenericsBehavior>() {
             return g.type_parameters().to_vec();
         }
 
@@ -82,7 +79,7 @@ impl StructSymbol {
     /// Check if this struct is generic (has type parameters)
     pub fn is_generic(&self) -> bool {
         self.metadata
-            .generics_behavior()
+            .get_behavior::<GenericsBehavior>()
             .map(|g| g.is_generic())
             .unwrap_or(false)
     }
@@ -93,7 +90,7 @@ impl StructSymbol {
     /// TypeParameter children. After BIND, it uses the GenericsBehavior.
     pub fn type_parameter_count(&self) -> usize {
         // First try GenericsBehavior (available after BIND)
-        if let Some(g) = self.metadata.generics_behavior() {
+        if let Some(g) = self.metadata.get_behavior::<GenericsBehavior>() {
             return g.type_parameter_count();
         }
 
@@ -110,7 +107,7 @@ impl StructSymbol {
     /// Delegates to GenericsBehavior. Returns empty where clause if not yet bound.
     pub fn where_clause(&self) -> WhereClause {
         self.metadata
-            .generics_behavior()
+            .get_behavior::<GenericsBehavior>()
             .map(|g| g.where_clause().clone())
             .unwrap_or_else(WhereClause::new)
     }

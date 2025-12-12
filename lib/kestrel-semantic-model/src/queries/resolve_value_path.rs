@@ -2,15 +2,16 @@
 
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::{ExtensionsFor, IsVisibleFrom, ResolveName, SymbolFor, VisibleChildrenByName};
 use crate::query::Query;
 use crate::resolution::{SymbolResolution, ValuePathResolution};
-use crate::SemanticModel;
 
 /// Resolve a value path to a value.
 ///
@@ -133,7 +134,9 @@ impl Query for ResolveValuePath {
                             })
                         {
                             // Check if it's a static method (no receiver)
-                            if let Some(callable) = child.callable_behavior() {
+                            if let Some(callable) =
+                                child.metadata().get_behavior::<CallableBehavior>()
+                            {
                                 if callable.is_static() {
                                     matches.push(child);
                                 }
@@ -204,7 +207,7 @@ fn extract_value_from_symbols(
     let symbol = &symbols[0];
 
     // Check for ValueBehavior
-    if let Some(value_beh) = symbol.value_behavior() {
+    if let Some(value_beh) = symbol.metadata().get_behavior::<ValueBehavior>() {
         return ValuePathResolution::Symbol {
             symbol_id: symbol.metadata().id(),
             ty: value_beh.ty().clone(),
@@ -212,7 +215,7 @@ fn extract_value_from_symbols(
     }
 
     // Check for CallableBehavior (functions are values)
-    if let Some(callable_beh) = symbol.callable_behavior() {
+    if let Some(callable_beh) = symbol.metadata().get_behavior::<CallableBehavior>() {
         return ValuePathResolution::Symbol {
             symbol_id: symbol.metadata().id(),
             ty: callable_beh.function_type(),

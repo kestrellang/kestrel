@@ -97,15 +97,11 @@ impl ExtensionTargetBehavior {
 
     /// Check if this extension is fully generic (all type params)
     pub fn is_fully_generic(&self) -> bool {
-        self.type_arguments
-            .iter()
-            .all(|ty| ty.is_type_parameter())
+        self.type_arguments.iter().all(|ty| ty.is_type_parameter())
     }
 
     /// Check if this extension is fully specialized (no type params)
     pub fn is_fully_specialized(&self) -> bool {
-        self.type_arguments
-            .iter()
-            .all(|ty| !ty.is_type_parameter())
+        self.type_arguments.iter().all(|ty| !ty.is_type_parameter())
     }
 }

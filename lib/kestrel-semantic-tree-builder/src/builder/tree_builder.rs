@@ -13,7 +13,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolTable};
 
 use crate::resolver::ResolverRegistry;
-use crate::tree::{build_module_hierarchy, SemanticTree};
+use crate::tree::{SemanticTree, build_module_hierarchy};
 
 use super::ModuleValidator;
 
@@ -75,11 +75,15 @@ impl SemanticTreeBuilder {
 
         // Step 3: Create a SourceFile symbol under the module
         let file_name_spanned = Spanned::new(file_name.to_string(), Span::from(0..file_name.len()));
-        let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> =
-            Arc::new(SourceFileSymbol::new(file_name_spanned, Span::from(0..source.len())));
+        let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(SourceFileSymbol::new(
+            file_name_spanned,
+            Span::from(0..source.len()),
+        ));
 
         parent_module.metadata().add_child(&source_file_symbol);
-        self.tree.symbol_table_mut().insert(source_file_symbol.clone());
+        self.tree
+            .symbol_table_mut()
+            .insert(source_file_symbol.clone());
 
         // Step 4: Process all top-level declarations
         let mut created_symbols = Vec::new();
@@ -88,12 +92,7 @@ impl SemanticTreeBuilder {
                 continue;
             }
 
-            if let Some(symbol) = self.walk_node(
-                &child,
-                source,
-                Some(&source_file_symbol),
-                &root,
-            ) {
+            if let Some(symbol) = self.walk_node(&child, source, Some(&source_file_symbol), &root) {
                 created_symbols.push(symbol);
             }
         }
@@ -104,7 +103,9 @@ impl SemanticTreeBuilder {
         }
 
         // Step 5: Store source code for the bind phase
-        self.tree.sources_mut().insert(file_name.to_string(), source.to_string());
+        self.tree
+            .sources_mut()
+            .insert(file_name.to_string(), source.to_string());
     }
 
     /// Finalize and return the built semantic tree

@@ -1,8 +1,8 @@
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::event::{EventSink, TreeBuilder};
 use crate::common::module_path_parser_internal;
+use crate::event::{EventSink, TreeBuilder};
 
 /// Represents a module path like A.B.C
 ///

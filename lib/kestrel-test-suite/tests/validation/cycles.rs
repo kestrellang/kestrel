@@ -100,7 +100,11 @@ struct Node {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Node").is(SymbolKind::Struct).has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Node")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -117,7 +121,11 @@ struct TreeNode {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("TreeNode").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("TreeNode")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]
@@ -145,9 +153,21 @@ struct Triangle {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("Line").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("Triangle").is(SymbolKind::Struct).has(Behavior::FieldCount(3)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Line")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Triangle")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(3)),
+        );
     }
 
     #[test]
@@ -171,9 +191,21 @@ struct Outer {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Middle").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Outer").is(SymbolKind::Struct).has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Middle")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 }
 
@@ -203,7 +235,11 @@ func swap[T: Container[U], U: Container[T]](a: T, b: U) -> () {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Container").is(SymbolKind::Protocol).has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Container")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -333,9 +369,21 @@ protocol Derived: Middle {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Base").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(0)))
-        .expect(Symbol::new("Middle").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)))
-        .expect(Symbol::new("Derived").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)));
+        .expect(
+            Symbol::new("Base")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(0)),
+        )
+        .expect(
+            Symbol::new("Middle")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(1)),
+        )
+        .expect(
+            Symbol::new("Derived")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(1)),
+        );
     }
 
     #[test]
@@ -359,8 +407,20 @@ protocol C: A {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("A").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(0)))
-        .expect(Symbol::new("B").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)))
-        .expect(Symbol::new("C").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)));
+        .expect(
+            Symbol::new("A")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(0)),
+        )
+        .expect(
+            Symbol::new("B")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(1)),
+        )
+        .expect(
+            Symbol::new("C")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(1)),
+        );
     }
 }

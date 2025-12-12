@@ -49,8 +49,8 @@ impl TypedBehavior {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_typed_behavior_unit() {

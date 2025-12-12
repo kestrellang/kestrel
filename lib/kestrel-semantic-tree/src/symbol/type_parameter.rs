@@ -46,11 +46,7 @@ impl Symbol<KestrelLanguage> for TypeParameterSymbol {
 
 impl TypeParameterSymbol {
     /// Create a new TypeParameterSymbol with a name, span, and optional parent
-    pub fn new(
-        name: Name,
-        span: Span,
-        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
-    ) -> Self {
+    pub fn new(name: Name, span: Span, parent: Option<Arc<dyn Symbol<KestrelLanguage>>>) -> Self {
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::TypeParameter)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
@@ -97,8 +93,8 @@ impl TypeParameterSymbol {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
     use kestrel_span::Spanned;
 
     #[test]

@@ -5,9 +5,7 @@ use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::KestrelBehaviorKind,
-    language::KestrelLanguage,
-    symbol::kind::KestrelSymbolKind,
+    behavior::KestrelBehaviorKind, language::KestrelLanguage, symbol::kind::KestrelSymbolKind,
 };
 
 #[derive(Debug)]
@@ -23,11 +21,7 @@ impl Symbol<KestrelLanguage> for ImportSymbol {
 
 impl ImportSymbol {
     /// Create a new ImportSymbol
-    pub fn new(
-        name: Name,
-        parent: Arc<dyn Symbol<KestrelLanguage>>,
-        span: Span,
-    ) -> Self {
+    pub fn new(name: Name, parent: Arc<dyn Symbol<KestrelLanguage>>, span: Span) -> Self {
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Import)
             .with_parent(Arc::downgrade(&parent))
             .with_name(name.clone())
@@ -89,7 +83,10 @@ impl ImportDataBehavior {
 
     /// Get the module path as a slice of segment names
     pub fn module_path(&self) -> Vec<String> {
-        self.module_path_segments.iter().map(|(s, _)| s.clone()).collect()
+        self.module_path_segments
+            .iter()
+            .map(|(s, _)| s.clone())
+            .collect()
     }
 
     /// Get the module path segments with their spans
@@ -108,10 +105,7 @@ impl ImportDataBehavior {
 
     /// Returns a clone of the import items.
     pub fn items(&self) -> Vec<ImportItem> {
-        self.items
-            .read()
-            .expect("RwLock poisoned")
-            .clone()
+        self.items.read().expect("RwLock poisoned").clone()
     }
 
     /// Set the resolved target_id for an import item by name.

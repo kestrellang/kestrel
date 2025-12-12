@@ -9,10 +9,10 @@
 //! - Control flow (if/else, while/loop, break/continue, return)
 
 mod body_literals;
+mod calls;
+mod control_flow;
+mod field_access;
+mod loops;
 mod operators;
 mod paths;
-mod calls;
-mod field_access;
-mod control_flow;
-mod loops;
 mod returns;

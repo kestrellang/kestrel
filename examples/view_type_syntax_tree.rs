@@ -15,7 +15,12 @@ fn print_syntax_tree(node: &SyntaxNode, indent: usize) {
         if let Some(child_node) = child.as_node() {
             print_syntax_tree(child_node, indent + 1);
         } else if let Some(token) = child.as_token() {
-            println!("{}  Token: {:?} = \"{}\"", indent_str, token.kind(), token.text());
+            println!(
+                "{}  Token: {:?} = \"{}\"",
+                indent_str,
+                token.kind(),
+                token.text()
+            );
         }
     }
 }
@@ -51,7 +56,10 @@ fn parse_type_file(path: &str) {
         .map(|spanned| (spanned.value, spanned.span))
         .collect();
 
-    println!("Tokens: {:?}\n", tokens.iter().map(|(t, _)| t).collect::<Vec<_>>());
+    println!(
+        "Tokens: {:?}\n",
+        tokens.iter().map(|(t, _)| t).collect::<Vec<_>>()
+    );
 
     // Parse the type
     let ty = parse_ty_from_source(&code, tokens.into_iter());

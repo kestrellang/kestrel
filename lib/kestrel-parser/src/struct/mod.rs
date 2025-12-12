@@ -8,18 +8,16 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::event::{EventSink, TreeBuilder};
-use crate::common::{
-    visibility_parser_internal, token, identifier,
-    module_declaration_parser_internal, import_declaration_parser_internal,
-    function_declaration_parser_internal, field_declaration_parser_internal,
-    initializer_declaration_parser_internal,
-    emit_struct_declaration,
-    StructDeclarationData, StructBodyItem,
-};
-use crate::type_alias::type_alias_declaration_parser_internal;
-use crate::type_param::{type_parameter_list_parser, where_clause_parser, conformance_list_parser};
 use crate::common::ConformanceListData;
+use crate::common::{
+    StructBodyItem, StructDeclarationData, emit_struct_declaration,
+    field_declaration_parser_internal, function_declaration_parser_internal, identifier,
+    import_declaration_parser_internal, initializer_declaration_parser_internal,
+    module_declaration_parser_internal, token, visibility_parser_internal,
+};
+use crate::event::{EventSink, TreeBuilder};
+use crate::type_alias::type_alias_declaration_parser_internal;
+use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
 /// Represents a struct declaration: (visibility)? struct Name[T]? (where ...)? { ... }
 ///
@@ -52,7 +50,8 @@ impl StructDeclaration {
 
     /// Get the visibility modifier if present
     pub fn visibility(&self) -> Option<SyntaxKind> {
-        let visibility_node = self.syntax
+        let visibility_node = self
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::Visibility)?;
 
@@ -99,17 +98,20 @@ impl StructDeclaration {
 ///
 /// Struct bodies can contain: fields, functions, initializers, nested structs, type aliases, modules, and imports.
 fn struct_body_item_parser_internal(
-    struct_parser: impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone
+    struct_parser: impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone,
 ) -> impl Parser<Token, StructBodyItem, Error = Simple<Token>> + Clone {
     let module_parser = module_declaration_parser_internal()
         .map(|(module_span, path)| StructBodyItem::Module(module_span, path));
 
-    let import_parser = import_declaration_parser_internal()
-        .map(|(import_span, path, alias, items)| StructBodyItem::Import(import_span, path, alias, items));
+    let import_parser =
+        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
+            StructBodyItem::Import(import_span, path, alias, items)
+        });
 
     let nested_struct_parser = struct_parser.map(StructBodyItem::Struct);
 
-    let initializer_parser = initializer_declaration_parser_internal().map(StructBodyItem::Initializer);
+    let initializer_parser =
+        initializer_declaration_parser_internal().map(StructBodyItem::Initializer);
 
     let function_parser = function_declaration_parser_internal().map(StructBodyItem::Function);
 
@@ -129,7 +131,8 @@ fn struct_body_item_parser_internal(
 /// Internal Chumsky parser for struct declaration
 ///
 /// This is the single source of truth for struct declaration parsing.
-pub fn struct_declaration_parser_internal() -> impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone {
+pub fn struct_declaration_parser_internal()
+-> impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone {
     recursive(|struct_parser| {
         visibility_parser_internal()
             .then(token(Token::Struct))
@@ -140,22 +143,39 @@ pub fn struct_declaration_parser_internal() -> impl Parser<Token, StructDeclarat
             .then(token(Token::LBrace))
             .then(struct_body_item_parser_internal(struct_parser).repeated())
             .then(token(Token::RBrace))
-            .map(|((((((((visibility, struct_span), name_span), type_params), conformances), where_clause), lbrace_span), body), rbrace_span)| {
-                StructDeclarationData {
-                    visibility,
-                    struct_span,
-                    name_span,
-                    type_params,
-                    conformances: conformances.map(|(colon_span, types)| ConformanceListData {
-                        colon_span,
-                        conformances: types,
-                    }),
-                    where_clause,
-                    lbrace_span,
-                    body,
+            .map(
+                |(
+                    (
+                        (
+                            (
+                                (
+                                    (((visibility, struct_span), name_span), type_params),
+                                    conformances,
+                                ),
+                                where_clause,
+                            ),
+                            lbrace_span,
+                        ),
+                        body,
+                    ),
                     rbrace_span,
-                }
-            })
+                )| {
+                    StructDeclarationData {
+                        visibility,
+                        struct_span,
+                        name_span,
+                        type_params,
+                        conformances: conformances.map(|(colon_span, types)| ConformanceListData {
+                            colon_span,
+                            conformances: types,
+                        }),
+                        where_clause,
+                        lbrace_span,
+                        body,
+                        rbrace_span,
+                    }
+                },
+            )
     })
 }
 
@@ -197,7 +217,10 @@ mod tests {
         let mut sink = EventSink::new();
         parse_struct_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
-        StructDeclaration { syntax: tree, span: Span::from(0..source.len()) }
+        StructDeclaration {
+            syntax: tree,
+            span: Span::from(0..source.len()),
+        }
     }
 
     /// Helper to check if a syntax node exists as a child
@@ -279,7 +302,8 @@ mod tests {
     #[test]
     fn test_struct_with_multiple_conformances() {
         let decl = parse("struct Point: Drawable, Equatable { }");
-        let conformance_list = decl.syntax
+        let conformance_list = decl
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::ConformanceList)
             .expect("Expected ConformanceList node");

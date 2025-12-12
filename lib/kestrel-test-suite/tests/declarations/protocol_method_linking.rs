@@ -19,7 +19,7 @@ mod basic {
         .expect(
             Symbol::new("Circle.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Drawable", "draw"))
+                .has(Behavior::ImplementsProtocol("Drawable", "draw")),
         );
     }
 
@@ -39,7 +39,7 @@ mod basic {
         .expect(
             Symbol::new("Number.compare")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Comparable", "compare"))
+                .has(Behavior::ImplementsProtocol("Comparable", "compare")),
         );
     }
 
@@ -59,7 +59,7 @@ mod basic {
         .expect(
             Symbol::new("Person.greet")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Greetable", "greet"))
+                .has(Behavior::ImplementsProtocol("Greetable", "greet")),
         );
     }
 
@@ -79,7 +79,7 @@ mod basic {
         .expect(
             Symbol::new("Point.hash")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Hashable", "hash"))
+                .has(Behavior::ImplementsProtocol("Hashable", "hash")),
         );
     }
 
@@ -101,12 +101,12 @@ mod basic {
         .expect(
             Symbol::new("Number.lessThan")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Comparable", "lessThan"))
+                .has(Behavior::ImplementsProtocol("Comparable", "lessThan")),
         )
         .expect(
             Symbol::new("Number.equals")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Comparable", "equals"))
+                .has(Behavior::ImplementsProtocol("Comparable", "equals")),
         );
     }
 
@@ -127,12 +127,12 @@ mod basic {
         .expect(
             Symbol::new("Circle.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Drawable", "draw"))
+                .has(Behavior::ImplementsProtocol("Drawable", "draw")),
         )
         .expect(
             Symbol::new("Circle.rotate")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocolNone)
+                .has(Behavior::ImplementsProtocolNone),
         );
     }
 }
@@ -160,12 +160,12 @@ mod inheritance {
         .expect(
             Symbol::new("Circle.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Drawable", "draw"))
+                .has(Behavior::ImplementsProtocol("Drawable", "draw")),
         )
         .expect(
             Symbol::new("Circle.area")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Shape", "area"))
+                .has(Behavior::ImplementsProtocol("Shape", "area")),
         );
     }
 
@@ -193,17 +193,17 @@ mod inheritance {
         .expect(
             Symbol::new("Button.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Drawable", "draw"))
+                .has(Behavior::ImplementsProtocol("Drawable", "draw")),
         )
         .expect(
             Symbol::new("Button.onClick")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Clickable", "onClick"))
+                .has(Behavior::ImplementsProtocol("Clickable", "onClick")),
         )
         .expect(
             Symbol::new("Button.update")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Widget", "update"))
+                .has(Behavior::ImplementsProtocol("Widget", "update")),
         );
     }
 }
@@ -227,7 +227,7 @@ mod self_type {
         .expect(
             Symbol::new("Number.compare")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Comparable", "compare"))
+                .has(Behavior::ImplementsProtocol("Comparable", "compare")),
         );
     }
 
@@ -247,7 +247,7 @@ mod self_type {
         .expect(
             Symbol::new("Point.clone")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Cloneable", "clone"))
+                .has(Behavior::ImplementsProtocol("Cloneable", "clone")),
         );
     }
 
@@ -267,7 +267,7 @@ mod self_type {
         .expect(
             Symbol::new("Item.getAll")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Collection", "getAll"))
+                .has(Behavior::ImplementsProtocol("Collection", "getAll")),
         );
     }
 }
@@ -293,7 +293,7 @@ mod associated_types {
         .expect(
             Symbol::new("Box.add")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Container", "add"))
+                .has(Behavior::ImplementsProtocol("Container", "add")),
         );
     }
 
@@ -315,7 +315,7 @@ mod associated_types {
         .expect(
             Symbol::new("Counter.next")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Iterator", "next"))
+                .has(Behavior::ImplementsProtocol("Iterator", "next")),
         );
     }
 
@@ -337,7 +337,7 @@ mod associated_types {
         .expect(
             Symbol::new("IntArray.getAll")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Collection", "getAll"))
+                .has(Behavior::ImplementsProtocol("Collection", "getAll")),
         );
     }
 }
@@ -365,12 +365,12 @@ mod multiple_conformances {
         .expect(
             Symbol::new("Button.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Drawable", "draw"))
+                .has(Behavior::ImplementsProtocol("Drawable", "draw")),
         )
         .expect(
             Symbol::new("Button.onClick")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Clickable", "onClick"))
+                .has(Behavior::ImplementsProtocol("Clickable", "onClick")),
         );
     }
 }
@@ -449,7 +449,7 @@ mod receiver_kinds {
         .expect(
             Symbol::new("Item.create")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Factory", "create"))
+                .has(Behavior::ImplementsProtocol("Factory", "create")),
         );
     }
 
@@ -469,7 +469,7 @@ mod receiver_kinds {
         .expect(
             Symbol::new("Counter.increment")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Incrementable", "increment"))
+                .has(Behavior::ImplementsProtocol("Incrementable", "increment")),
         );
     }
 
@@ -489,7 +489,7 @@ mod receiver_kinds {
         .expect(
             Symbol::new("Resource.dispose")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Disposable", "dispose"))
+                .has(Behavior::ImplementsProtocol("Disposable", "dispose")),
         );
     }
 }
@@ -511,7 +511,7 @@ mod edge_cases {
         .expect(
             Symbol::new("Point.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocolNone)
+                .has(Behavior::ImplementsProtocolNone),
         );
     }
 
@@ -528,7 +528,7 @@ mod edge_cases {
         .expect(
             Symbol::new("Point.draw")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocolNone)
+                .has(Behavior::ImplementsProtocolNone),
         );
     }
 
@@ -550,7 +550,7 @@ mod edge_cases {
         .expect(
             Symbol::new("Console.print")
                 .is(SymbolKind::Function)
-                .has(Behavior::ImplementsProtocol("Printer", "print"))
+                .has(Behavior::ImplementsProtocol("Printer", "print")),
         );
     }
 }

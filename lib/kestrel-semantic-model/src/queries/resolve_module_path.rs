@@ -5,8 +5,8 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
-use crate::query::Query;
 use crate::SemanticModel;
+use crate::query::Query;
 
 /// Resolve a module path from a context.
 ///

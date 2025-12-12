@@ -28,8 +28,16 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("getNumber").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("test").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("getNumber")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -49,7 +57,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("double").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("double")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -69,7 +81,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("add").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+        .expect(
+            Symbol::new("add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 
     #[test]
@@ -89,7 +105,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("combine").is(SymbolKind::Function).has(Behavior::ParameterCount(3)));
+        .expect(
+            Symbol::new("combine")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(3)),
+        );
     }
 
     // === Labeled Arguments ===
@@ -111,7 +131,11 @@ func test() -> String {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("greet").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("greet")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -131,7 +155,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("createPoint").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+        .expect(
+            Symbol::new("createPoint")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 
     #[test]
@@ -151,7 +179,11 @@ func test() -> String {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("format").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
+        .expect(
+            Symbol::new("format")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 
     #[test]
@@ -171,7 +203,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("build").is(SymbolKind::Function).has(Behavior::ParameterCount(3)));
+        .expect(
+            Symbol::new("build")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(3)),
+        );
     }
 
     // === Nested Calls ===
@@ -197,8 +233,16 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("add").is(SymbolKind::Function).has(Behavior::ParameterCount(2)))
-        .expect(Symbol::new("double").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        )
+        .expect(
+            Symbol::new("double")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -218,7 +262,11 @@ func test() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("id").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("id")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -242,8 +290,16 @@ func test() -> String {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("format").is(SymbolKind::Function).has(Behavior::ParameterCount(2)))
-        .expect(Symbol::new("double").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("format")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        )
+        .expect(
+            Symbol::new("double")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     // === Return Type Propagation ===
@@ -287,8 +343,16 @@ func test() -> () {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("doSomething").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("test").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("doSomething")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     // === Error Cases ===
@@ -384,4 +448,3 @@ func test() -> String {
         .expect(HasError("no matching overload"));
     }
 }
-

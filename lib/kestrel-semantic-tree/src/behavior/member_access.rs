@@ -70,9 +70,9 @@ impl MemberAccessBehavior {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
     use crate::ty::IntBits;
+    use kestrel_span::Span;
 
     #[test]
     fn test_member_access_mutable_field() {

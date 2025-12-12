@@ -11,8 +11,8 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::resolver::{BindingContext, Resolver};
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::syntax::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -107,7 +107,8 @@ impl Resolver for FieldResolver {
         let (file_id, source) = context.get_file_context(symbol);
 
         // Resolve the type directly from syntax
-        let resolved_type = resolve_field_type_from_syntax(syntax, &source, symbol_id, context, file_id);
+        let resolved_type =
+            resolve_field_type_from_syntax(syntax, &source, symbol_id, context, file_id);
 
         // Add a TypedBehavior with the resolved type
         let typed_behavior = TypedBehavior::new(resolved_type.clone(), span);
@@ -123,7 +124,8 @@ impl Resolver for FieldResolver {
             .map(|f| f.is_mutable())
             .unwrap_or(false);
 
-        let member_access_behavior = MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
+        let member_access_behavior =
+            MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
         symbol.metadata().add_behavior(member_access_behavior);
     }
 }
@@ -138,8 +140,12 @@ fn resolve_field_type_from_syntax(
     file_id: usize,
 ) -> Ty {
     // Find the Ty node and resolve using shared utility
-    if let Some(ty_node) = syntax.children().find(|child| child.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+    if let Some(ty_node) = syntax
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Ty)
+    {
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 

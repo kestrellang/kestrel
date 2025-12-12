@@ -6,9 +6,9 @@
 //! - `LocalScope`: Manages local variable scopes in function bodies
 
 mod binder;
-pub mod type_resolver;
 mod local_scope;
+pub mod type_resolver;
 
 pub use binder::SemanticBinder;
-pub use type_resolver::TypeResolver;
 pub use local_scope::LocalScope;
+pub use type_resolver::TypeResolver;

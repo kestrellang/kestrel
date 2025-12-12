@@ -7,16 +7,19 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{SymbolFor, ExtensionsFor, IsVisibleFrom};
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SymbolFor};
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
-use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -32,8 +35,8 @@ use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, format_type, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context,
-    matches_signature, substitute_self,
+    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, matches_signature,
+    substitute_self,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -90,8 +93,7 @@ pub fn resolve_member_access(
             method_name: primitive_method.name().to_string(),
             receiver_type: format_type(base_ty),
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -118,8 +120,7 @@ pub fn resolve_member_access(
                 span: full_span.clone(),
                 base_type: format_type(base_ty),
             };
-            ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic());
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(full_span.clone());
         }
     };
@@ -133,11 +134,14 @@ pub fn resolve_member_access(
 
     // Get applicable extensions once for reuse
     let container_id = container.metadata().id();
-    let extensions = ctx.model.query(ExtensionsFor { target_id: container_id });
+    let extensions = ctx.model.query(ExtensionsFor {
+        target_id: container_id,
+    });
     // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
     let resolved_base_ty_for_extensions = resolve_self_type_to_concrete(base_ty, ctx);
     // Filter to only applicable extensions (now with cycle detection in substitutions)
-    let applicable_extensions = filter_applicable_extensions(extensions, &resolved_base_ty_for_extensions, ctx);
+    let applicable_extensions =
+        filter_applicable_extensions(extensions, &resolved_base_ty_for_extensions, ctx);
 
     // If not found in direct children, search extensions
     let member = match member {
@@ -158,8 +162,7 @@ pub fn resolve_member_access(
                         base_span,
                         base_type: format_type(base_ty),
                     };
-                    ctx.diagnostics
-                        .add_diagnostic(error.into_diagnostic());
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                     return Expression::error(full_span.clone());
                 }
             }
@@ -173,10 +176,10 @@ pub fn resolve_member_access(
         context: ctx.function_id,
     }) {
         use kestrel_semantic_tree::behavior::visibility::Visibility;
-        use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 
         let visibility = member
-            .visibility_behavior()
+            .metadata()
+            .get_behavior::<VisibilityBehavior>()
             .and_then(|v| v.visibility().cloned())
             .unwrap_or(Visibility::Internal);
 
@@ -187,8 +190,7 @@ pub fn resolve_member_access(
             base_type: format_type(base_ty),
             visibility: visibility.to_string(),
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span.clone());
     }
 
@@ -236,7 +238,12 @@ pub fn resolve_member_access(
             }
         }
 
-        return Expression::method_ref(base, candidates, member_name.to_string(), full_span.clone());
+        return Expression::method_ref(
+            base,
+            candidates,
+            member_name.to_string(),
+            full_span.clone(),
+        );
     }
 
     // Member exists but doesn't have MemberAccessBehavior (e.g., type alias, nested type)
@@ -247,8 +254,7 @@ pub fn resolve_member_access(
         base_type: format_type(base_ty),
         member_kind: format_symbol_kind(member.metadata().kind()),
     };
-    ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic());
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span.clone())
 }
 
@@ -283,8 +289,7 @@ fn resolve_constrained_member_access(
             member_name: member_name.to_string(),
             type_param_name,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -303,8 +308,7 @@ fn resolve_constrained_member_access(
                     span: bound.span().clone(),
                     protocol_name: proto_name,
                 };
-                ctx.diagnostics
-                    .add_diagnostic(error.into_diagnostic());
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                 return Expression::error(full_span);
             }
 
@@ -320,8 +324,7 @@ fn resolve_constrained_member_access(
             type_param_name,
             bound_names,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -333,7 +336,8 @@ fn resolve_constrained_member_access(
 
     if unique_protocols.len() > 1 {
         // Ambiguous - method found in multiple different protocols
-        let protocol_names: Vec<String> = candidates.iter().map(|c| c.protocol_name.clone()).collect();
+        let protocol_names: Vec<String> =
+            candidates.iter().map(|c| c.protocol_name.clone()).collect();
         let definition_spans: Vec<(String, Span)> = candidates
             .iter()
             .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
@@ -345,8 +349,7 @@ fn resolve_constrained_member_access(
             protocol_names,
             definition_spans,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -364,7 +367,7 @@ fn collect_protocol_method_candidates(
     _ctx: &BodyResolutionContext,
 ) {
     // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol.flattened_protocol_behavior() {
+    if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
         if let Some(methods) = flattened.methods().get(method_name) {
             for method in methods {
                 candidates.push(ProtocolMethodCandidate {
@@ -394,7 +397,7 @@ fn collect_protocol_method_candidates(
     }
 
     // Search inherited protocols
-    if let Some(conformances) = protocol.conformances_behavior() {
+    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
         for parent_proto_ty in conformances.conformances() {
             if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
                 collect_protocol_method_candidates(parent, method_name, candidates, _ctx);
@@ -452,8 +455,7 @@ pub fn resolve_member_call(
                 method_name: member_name.to_string(),
                 receiver_type: format_type(base_ty),
             };
-            ctx.diagnostics
-                .add_diagnostic(error.into_diagnostic());
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(span);
         }
     };
@@ -472,12 +474,15 @@ pub fn resolve_member_call(
     // If not found in direct children, search extensions
     if methods.is_empty() {
         let container_id = container.metadata().id();
-        let extensions = ctx.model.query(ExtensionsFor { target_id: container_id });
+        let extensions = ctx.model.query(ExtensionsFor {
+            target_id: container_id,
+        });
 
         // Resolve Self to concrete type for extension filtering (Self doesn't have substitutions)
         let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
         // Filter to applicable extensions, sorted by specificity (now with cycle detection)
-        let applicable_extensions = filter_applicable_extensions(extensions, &resolved_base_ty, ctx);
+        let applicable_extensions =
+            filter_applicable_extensions(extensions, &resolved_base_ty, ctx);
 
         for extension in applicable_extensions {
             for child in extension.metadata().children() {
@@ -497,8 +502,7 @@ pub fn resolve_member_call(
             method_name: member_name.to_string(),
             receiver_type: format_type(base_ty),
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -552,8 +556,7 @@ pub fn resolve_member_call(
         provided_arity: arguments.len(),
         available_overloads,
     };
-    ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic());
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -604,8 +607,7 @@ fn resolve_constrained_member_call(
             member_name: member_name.to_string(),
             type_param_name,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -624,19 +626,12 @@ fn resolve_constrained_member_call(
                     span: bound.span().clone(),
                     protocol_name: proto_name,
                 };
-                ctx.diagnostics
-                    .add_diagnostic(error.into_diagnostic());
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                 return Expression::error(span);
             }
 
             // Collect methods from this protocol (including inherited)
-            collect_protocol_methods(
-                proto,
-                member_name,
-                receiver_ty,
-                &mut candidates,
-                ctx,
-            );
+            collect_protocol_methods(proto, member_name, receiver_ty, &mut candidates, ctx);
         }
     }
 
@@ -647,8 +642,7 @@ fn resolve_constrained_member_call(
             type_param_name,
             bound_names,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -660,7 +654,10 @@ fn resolve_constrained_member_call(
 
     if matching.is_empty() {
         // No matching signature - report error with available overloads
-        let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method.metadata().id()).collect();
+        let method_ids: Vec<SymbolId> = candidates
+            .iter()
+            .map(|c| c.method.metadata().id())
+            .collect();
         let available_overloads = collect_overload_descriptions(&method_ids, ctx.model);
 
         let error = NoMatchingMethodError {
@@ -671,8 +668,7 @@ fn resolve_constrained_member_call(
             provided_arity: arguments.len(),
             available_overloads,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -686,7 +682,10 @@ fn resolve_constrained_member_call(
 
     if unique_matching.len() > 1 {
         // Multiple different protocols have matching method with same signature
-        let protocol_names: Vec<String> = unique_matching.iter().map(|c| c.protocol_name.clone()).collect();
+        let protocol_names: Vec<String> = unique_matching
+            .iter()
+            .map(|c| c.protocol_name.clone())
+            .collect();
         let definition_spans: Vec<(String, Span)> = unique_matching
             .iter()
             .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
@@ -698,8 +697,7 @@ fn resolve_constrained_member_call(
             protocol_names,
             definition_spans,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -730,7 +728,7 @@ fn collect_protocol_methods(
     ctx: &BodyResolutionContext,
 ) {
     // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol.flattened_protocol_behavior() {
+    if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
         if let Some(methods) = flattened.methods().get(method_name) {
             for method in methods {
                 if let Some(callable) = get_callable_behavior(&method.symbol) {
@@ -772,7 +770,7 @@ fn collect_protocol_methods(
     }
 
     // Search inherited protocols
-    if let Some(conformances) = protocol.conformances_behavior() {
+    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
         for parent_proto_ty in conformances.conformances() {
             if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
                 collect_protocol_methods(parent, method_name, receiver_ty, candidates, ctx);
@@ -845,8 +843,7 @@ fn resolve_type_parameter_static_member(
             member_name: member_name.to_string(),
             type_param_name,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -875,8 +872,7 @@ fn resolve_type_parameter_static_member(
             type_param_name,
             bound_names,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -904,8 +900,7 @@ fn resolve_type_parameter_static_member(
             protocol_names,
             definition_spans,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(full_span);
     }
 
@@ -915,7 +910,11 @@ fn resolve_type_parameter_static_member(
 
     // Use the type parameter type for the receiver so Self substitution works correctly
     Expression::method_ref(
-        Expression::type_parameter_ref(symbol_id, type_param_ty.clone(), Span::from(full_span.start..full_span.start)),
+        Expression::type_parameter_ref(
+            symbol_id,
+            type_param_ty.clone(),
+            Span::from(full_span.start..full_span.start),
+        ),
         method_ids,
         member_name.to_string(),
         full_span,
@@ -937,7 +936,7 @@ fn collect_protocol_static_methods(
     candidates: &mut Vec<StaticMethodCandidate>,
 ) {
     // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol.flattened_protocol_behavior() {
+    if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
         if let Some(methods) = flattened.methods().get(method_name) {
             for method in methods {
                 if let Some(callable) = get_callable_behavior(&method.symbol) {
@@ -977,7 +976,7 @@ fn collect_protocol_static_methods(
     }
 
     // Search inherited protocols
-    if let Some(conformances) = protocol.conformances_behavior() {
+    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
         for parent_proto_ty in conformances.conformances() {
             if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
                 collect_protocol_static_methods(parent, method_name, _self_replacement, candidates);
@@ -1003,9 +1002,9 @@ fn filter_applicable_extensions(
     actual_ty: &Ty,
     ctx: &BodyResolutionContext,
 ) -> Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>> {
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
-    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use super::utils::type_satisfies_bound;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 
     // Get substitutions from actual type
     let actual_subs = match actual_ty.as_struct_with_subs() {
@@ -1179,18 +1178,20 @@ fn types_match_simple(a: &Ty, b: &Ty) -> bool {
 /// When `self` is used in an extension method like `extend Box[Int]`, its type is SelfType,
 /// but we need the actual type `Box[Int]` (with substitutions) for member access.
 pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty {
-    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
-
     match ty.kind() {
         TyKind::SelfType => {
             // Get the function symbol, then its parent (struct/protocol/extension)
-            if let Some(function) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
+            if let Some(function) = ctx.model.query(SymbolFor {
+                id: ctx.function_id,
+            }) {
                 if let Some(parent) = function.metadata().parent() {
                     match parent.metadata().kind() {
                         KestrelSymbolKind::Extension => {
                             // For extension methods, get the target type from ExtensionTargetBehavior
                             // This gives us the type with substitutions (e.g., Box[Int] not Box[T])
-                            if let Some(target_beh) = parent.extension_target_behavior() {
+                            if let Some(target_beh) =
+                                parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                            {
                                 let target_ty = target_beh.target_type();
                                 // Make sure target type isn't also SelfType (should never happen, but prevent infinite recursion)
                                 if !matches!(target_ty.kind(), TyKind::SelfType) {
@@ -1226,7 +1227,9 @@ fn find_member_in_extensions(
     let container_id = container.metadata().id();
 
     // Get all extensions for this type from the registry
-    let extensions = ctx.model.query(ExtensionsFor { target_id: container_id });
+    let extensions = ctx.model.query(ExtensionsFor {
+        target_id: container_id,
+    });
 
     // Filter to only applicable extensions (now with cycle detection in substitutions)
     let applicable_extensions = filter_applicable_extensions(extensions, base_ty, ctx);

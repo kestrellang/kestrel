@@ -4,7 +4,7 @@ use kestrel_span::{Span, Spanned};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior_ext::BehaviorExt,
+    behavior::extension_target::ExtensionTargetBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::type_parameter::TypeParameterSymbol,
@@ -41,10 +41,7 @@ impl ExtensionSymbol {
     ///
     /// Extensions use a synthetic name "(extension)" since they don't have
     /// user-defined names like structs or functions.
-    pub fn new(
-        span: Span,
-        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
-    ) -> Self {
+    pub fn new(span: Span, parent: Option<Arc<dyn Symbol<KestrelLanguage>>>) -> Self {
         // Use a synthetic name for extensions since they don't have user-defined names
         let synthetic_name = Spanned::new("(extension)".to_string(), span.clone());
 
@@ -67,7 +64,7 @@ impl ExtensionSymbol {
     /// Available after BIND phase when ExtensionTargetBehavior is attached.
     pub fn target_type(&self) -> Option<Ty> {
         self.metadata
-            .extension_target_behavior()
+            .get_behavior::<ExtensionTargetBehavior>()
             .map(|b| b.target_type().clone())
     }
 
@@ -76,7 +73,7 @@ impl ExtensionSymbol {
     /// For `extend Box[T, Int]`, returns [TypeParameter(T), Concrete(Int)]
     pub fn type_arguments(&self) -> Vec<Ty> {
         self.metadata
-            .extension_target_behavior()
+            .get_behavior::<ExtensionTargetBehavior>()
             .map(|b| b.type_arguments().to_vec())
             .unwrap_or_default()
     }
@@ -87,7 +84,7 @@ impl ExtensionSymbol {
     /// type parameters. Used for scope resolution within extension methods.
     pub fn referenced_type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
         self.metadata
-            .extension_target_behavior()
+            .get_behavior::<ExtensionTargetBehavior>()
             .map(|b| b.referenced_type_parameters().to_vec())
             .unwrap_or_default()
     }
@@ -97,7 +94,7 @@ impl ExtensionSymbol {
     /// Extensions inherit constraints from their target type and can add additional ones.
     pub fn where_clause(&self) -> WhereClause {
         self.metadata
-            .extension_target_behavior()
+            .get_behavior::<ExtensionTargetBehavior>()
             .map(|b| b.where_clause().clone())
             .unwrap_or_else(WhereClause::new)
     }

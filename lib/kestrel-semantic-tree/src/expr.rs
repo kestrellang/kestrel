@@ -22,11 +22,7 @@ use crate::ty::{Substitutions, Ty};
 ///
 /// Note: This is used for computing if branch types, where the "trailing value"
 /// distinction matters less than getting the actual type of what the block evaluates to.
-pub fn compute_block_type(
-    statements: &[Statement],
-    value: Option<&Expression>,
-    span: &Span,
-) -> Ty {
+pub fn compute_block_type(statements: &[Statement], value: Option<&Expression>, span: &Span) -> Ty {
     // If there's a trailing value, use its type
     if let Some(v) = value {
         return v.ty.clone();
@@ -965,16 +961,9 @@ impl Expression {
     /// Create a break expression.
     ///
     /// Type is `Never` - control transfers out of the loop.
-    pub fn break_expr(
-        loop_id: LoopId,
-        label: Option<LabelInfo>,
-        span: Span,
-    ) -> Self {
+    pub fn break_expr(loop_id: LoopId, label: Option<LabelInfo>, span: Span) -> Self {
         Expression {
-            kind: ExprKind::Break {
-                loop_id,
-                label,
-            },
+            kind: ExprKind::Break { loop_id, label },
             ty: Ty::never(span.clone()),
             span,
             mutable: false,
@@ -984,16 +973,9 @@ impl Expression {
     /// Create a continue expression.
     ///
     /// Type is `Never` - control transfers to the loop condition.
-    pub fn continue_expr(
-        loop_id: LoopId,
-        label: Option<LabelInfo>,
-        span: Span,
-    ) -> Self {
+    pub fn continue_expr(loop_id: LoopId, label: Option<LabelInfo>, span: Span) -> Self {
         Expression {
-            kind: ExprKind::Continue {
-                loop_id,
-                label,
-            },
+            kind: ExprKind::Continue { loop_id, label },
             ty: Ty::never(span.clone()),
             span,
             mutable: false,
@@ -1003,10 +985,7 @@ impl Expression {
     /// Create a return expression.
     ///
     /// Type is `Never` - control transfers out of the function.
-    pub fn return_expr(
-        value: Option<Expression>,
-        span: Span,
-    ) -> Self {
+    pub fn return_expr(value: Option<Expression>, span: Span) -> Self {
         Expression {
             kind: ExprKind::Return {
                 value: value.map(Box::new),
@@ -1043,8 +1022,8 @@ impl Expression {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_integer_literal() {
@@ -1067,7 +1046,10 @@ mod tests {
 
     #[test]
     fn test_tuple_expression() {
-        let elements = vec![Expression::integer(1, Span::from(1..2)), Expression::integer(2, Span::from(4..5))];
+        let elements = vec![
+            Expression::integer(1, Span::from(1..2)),
+            Expression::integer(2, Span::from(4..5)),
+        ];
         let expr = Expression::tuple(elements, Span::from(0..6));
         assert!(expr.ty.is_tuple());
     }

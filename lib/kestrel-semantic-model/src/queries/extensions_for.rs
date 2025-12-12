@@ -5,8 +5,8 @@ use std::sync::Arc;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use semantic_tree::symbol::SymbolId;
 
-use crate::query::Query;
 use crate::SemanticModel;
+use crate::query::Query;
 
 /// Get all extensions registered for a target type.
 pub struct ExtensionsFor {
@@ -17,6 +17,8 @@ impl Query for ExtensionsFor {
     type Output = Vec<Arc<ExtensionSymbol>>;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
-        model.extension_registry().get_extensions_for(self.target_id)
+        model
+            .extension_registry()
+            .get_extensions_for(self.target_id)
     }
 }

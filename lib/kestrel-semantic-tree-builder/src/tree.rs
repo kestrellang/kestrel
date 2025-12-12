@@ -165,7 +165,8 @@ pub(crate) fn build_module_hierarchy(
             // Create new module
             let name = Spanned::new(segment.clone(), Span::from(0..segment.len()));
             let span = Span::from(0..segment.len()); // Placeholder span
-            let visibility = VisibilityBehavior::new(Some(Visibility::Public), Span::from(0..6), root.clone());
+            let visibility =
+                VisibilityBehavior::new(Some(Visibility::Public), Span::from(0..6), root.clone());
 
             let module = ModuleSymbol::new(name, span, visibility);
             let module_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(module);

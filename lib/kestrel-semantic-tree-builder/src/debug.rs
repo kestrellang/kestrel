@@ -126,7 +126,11 @@ pub fn format_type(ty: &Ty) -> String {
             return_type,
         } => {
             let param_strs: Vec<String> = params.iter().map(format_type).collect();
-            format!("({}) -> {}", param_strs.join(", "), format_type(return_type))
+            format!(
+                "({}) -> {}",
+                param_strs.join(", "),
+                format_type(return_type)
+            )
         }
         TyKind::TypeParameter(param_symbol) => param_symbol.metadata().name().value.clone(),
         TyKind::Protocol {

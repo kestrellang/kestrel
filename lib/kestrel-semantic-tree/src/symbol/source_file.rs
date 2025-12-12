@@ -1,10 +1,7 @@
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
-use crate::{
-    language::KestrelLanguage,
-    symbol::kind::KestrelSymbolKind,
-};
+use crate::{language::KestrelLanguage, symbol::kind::KestrelSymbolKind};
 
 #[derive(Debug)]
 pub struct SourceFileSymbol {

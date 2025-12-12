@@ -94,11 +94,11 @@ impl Statement {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
     use crate::expr::Expression;
     use crate::pattern::{Mutability, Pattern};
     use crate::symbol::local::LocalId;
+    use kestrel_span::Span;
 
     #[test]
     fn test_binding_statement() {

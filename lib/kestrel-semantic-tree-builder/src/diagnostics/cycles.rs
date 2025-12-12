@@ -44,11 +44,10 @@ impl IntoDiagnostic for CircularStructContainmentError {
         let cycle_display = cycle_names.join(" -> ");
 
         let mut labels = vec![
-            Label::primary(self.field_span.file_id, self.field_span.range())
-                .with_message(format!(
-                    "field '{}' creates infinite-size type",
-                    self.field_name
-                )),
+            Label::primary(self.field_span.file_id, self.field_span.range()).with_message(format!(
+                "field '{}' creates infinite-size type",
+                self.field_name
+            )),
             Label::secondary(self.origin.span.file_id, self.origin.span.range())
                 .with_message("cycle starts here"),
         ];
@@ -97,8 +96,10 @@ impl IntoDiagnostic for CircularConstraintError {
             .collect();
         let cycle_display = cycle_names.join(" -> ");
 
-        let mut labels = vec![Label::primary(self.origin.span.file_id, self.origin.span.range())
-            .with_message("cycle starts here")];
+        let mut labels = vec![
+            Label::primary(self.origin.span.file_id, self.origin.span.range())
+                .with_message("cycle starts here"),
+        ];
 
         // Add secondary labels for each participant in the cycle
         for participant in &self.cycle {
@@ -146,10 +147,12 @@ impl IntoDiagnostic for SelfContainingStructError {
                 self.struct_name
             ))
             .with_labels(vec![
-                Label::primary(self.field_span.file_id, self.field_span.range()).with_message(format!(
-                    "field '{}' has type '{}', creating infinite-size type",
-                    self.field_name, self.struct_name
-                )),
+                Label::primary(self.field_span.file_id, self.field_span.range()).with_message(
+                    format!(
+                        "field '{}' has type '{}', creating infinite-size type",
+                        self.field_name, self.struct_name
+                    ),
+                ),
                 Label::secondary(self.struct_span.file_id, self.struct_span.range())
                     .with_message("struct declared here"),
             ])

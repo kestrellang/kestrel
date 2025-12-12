@@ -12,8 +12,8 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::resolver::{BindingContext, Resolver};
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::syntax::{
     extract_identifier_from_name, extract_visibility, find_child, find_visibility_scope,
     get_node_span, get_visibility_span, parse_visibility,
@@ -56,7 +56,8 @@ impl Resolver for InitializerResolver {
         let visibility_str = extract_visibility(syntax);
         let visibility_enum = visibility_str.as_deref().and_then(parse_visibility);
 
-        let visibility_span = get_visibility_span(syntax, source).unwrap_or(init_token_span.clone());
+        let visibility_span =
+            get_visibility_span(syntax, source).unwrap_or(init_token_span.clone());
 
         // Determine visibility scope
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), Some(parent), root);
@@ -99,7 +100,8 @@ impl Resolver for InitializerResolver {
         let (file_id, source) = context.get_file_context(symbol);
 
         // Extract and resolve parameters from syntax
-        let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context, file_id);
+        let resolved_params =
+            resolve_parameters_from_syntax(syntax, &source, symbol_id, context, file_id);
 
         // Initializers always return Self (the struct type)
         // Get the parent struct to determine Self type
@@ -123,7 +125,14 @@ impl Resolver for InitializerResolver {
 
         // Resolve initializer body
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
-            resolve_initializer_body(symbol, &body_node, &resolved_params, context, file_id, &source);
+            resolve_initializer_body(
+                symbol,
+                &body_node,
+                &resolved_params,
+                context,
+                file_id,
+                &source,
+            );
         }
     }
 }
@@ -137,11 +146,11 @@ fn resolve_initializer_body(
     file_id: usize,
     source: &str,
 ) {
-    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-    use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
     use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
-    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+    use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 
     // Downcast to InitializerSymbol
     let Some(init_sym) = symbol.as_ref().downcast_ref::<InitializerSymbol>() else {
@@ -149,18 +158,28 @@ fn resolve_initializer_body(
     };
 
     // Get the symbol from db
-    let Some(init_arc) = context.model.query(SymbolFor { id: symbol.metadata().id() }) else {
+    let Some(init_arc) = context.model.query(SymbolFor {
+        id: symbol.metadata().id(),
+    }) else {
         return;
     };
 
     // Verify it's an InitializerSymbol
-    if init_arc.as_ref().downcast_ref::<InitializerSymbol>().is_none() {
+    if init_arc
+        .as_ref()
+        .downcast_ref::<InitializerSymbol>()
+        .is_none()
+    {
         return;
     }
 
     // Create a temporary FunctionSymbol for LocalScope (reuse existing infrastructure)
     let temp_name = Spanned::new("__init_body_temp".to_string(), Span::from(0..0));
-    let temp_vis = VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), init_arc.clone());
+    let temp_vis = VisibilityBehavior::new(
+        Some(Visibility::Private),
+        Span::from(0..0),
+        init_arc.clone(),
+    );
     let temp_func = Arc::new(FunctionSymbol::new(
         temp_name,
         Span::from(0..0),
@@ -180,7 +199,12 @@ fn resolve_initializer_body(
         let self_span = Span::from(symbol.metadata().span().start..symbol.metadata().span().start);
 
         // Add self to local scope (mutable because we're initializing it)
-        local_scope.bind("self".to_string(), self_type.clone(), true, self_span.clone());
+        local_scope.bind(
+            "self".to_string(),
+            self_type.clone(),
+            true,
+            self_span.clone(),
+        );
         // Add to the actual initializer symbol
         init_sym.add_local("self".to_string(), self_type, true, self_span);
     }
@@ -191,7 +215,12 @@ fn resolve_initializer_body(
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
         // Add to local scope
-        local_scope.bind(param_name.clone(), param_ty.clone(), false, param_span.clone());
+        local_scope.bind(
+            param_name.clone(),
+            param_ty.clone(),
+            false,
+            param_span.clone(),
+        );
         // Add to the actual initializer symbol
         init_sym.add_local(param_name, param_ty, false, param_span);
     }
@@ -250,7 +279,9 @@ fn resolve_parameters_from_syntax(
     param_list
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| resolve_single_parameter(&param_node, source, context_id, ctx, file_id))
+        .filter_map(|param_node| {
+            resolve_single_parameter(&param_node, source, context_id, ctx, file_id)
+        })
         .collect()
 }
 
@@ -287,7 +318,10 @@ fn resolve_single_parameter(
             extract_identifier_from_name(&name_nodes[1])?,
             get_name_span(&name_nodes[1]),
         );
-        (label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0]))), bind_name)
+        (
+            label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0]))),
+            bind_name,
+        )
     } else {
         // One name: it's both the label AND the bind_name
         // In Kestrel, `init(value: Int)` means value is the external label too
@@ -300,7 +334,8 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable
@@ -312,5 +347,9 @@ fn resolve_single_parameter(
         Ty::type_var(param_span)
     };
 
-    Some(Parameter { label, bind_name, ty })
+    Some(Parameter {
+        label,
+        bind_name,
+        ty,
+    })
 }

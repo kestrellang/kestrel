@@ -26,8 +26,8 @@
 //! assert_eq!(syntax.kind(), SyntaxKind::ModulePath);
 //! ```
 
-use rowan::Language;
 use kestrel_lexer::Token;
+use rowan::Language;
 
 // Re-export for use by parsers
 pub use rowan::GreenNodeBuilder;
@@ -63,10 +63,10 @@ pub enum SyntaxKind {
     StaticModifier,
 
     // Generic type parameter nodes
-    TypeParameterList,   // [T, U, V]
-    TypeParameter,       // T or T = Default
-    TypeArgumentList,    // [Int, String] in type use position
-    DefaultType,         // = SomeType
+    TypeParameterList, // [T, U, V]
+    TypeParameter,     // T or T = Default
+    TypeArgumentList,  // [Int, String] in type use position
+    DefaultType,       // = SomeType
 
     // Where clause nodes
     WhereClause,         // where T: Proto, U: Other
@@ -78,8 +78,8 @@ pub enum SyntaxKind {
     AssociatedTypeTarget, // Iterator.Item or Add[Int].Output (qualified target in type binding)
 
     // Conformance nodes
-    ConformanceList,     // : Proto1, Proto2 (after struct/protocol name)
-    ConformanceItem,     // Each individual conformance (a type reference)
+    ConformanceList, // : Proto1, Proto2 (after struct/protocol name)
+    ConformanceItem, // Each individual conformance (a type reference)
 
     // Type nodes
     Ty,
@@ -88,9 +88,9 @@ pub enum SyntaxKind {
     TyTuple,
     TyFunction,
     TyPath,
-    TyArray,             // [T] - array/list type
+    TyArray, // [T] - array/list type
     TyList,
-    TyInferred,          // _ - inferred type placeholder
+    TyInferred, // _ - inferred type placeholder
 
     // Path nodes (shared between types and other constructs)
     Path,
@@ -103,33 +103,33 @@ pub enum SyntaxKind {
     VariableDeclaration, // let/var name: Type = expr;
 
     // Expression nodes
-    Expression,          // Wrapper for expression variants
-    ExprUnit,            // ()
-    ExprInteger,         // 42, 0xFF, 0b1010, 0o17
-    ExprFloat,           // 3.14, 1.0e10
-    ExprString,          // "hello"
-    ExprBool,            // true, false
-    ExprArray,           // [1, 2, 3]
-    ExprTuple,           // (1, 2, 3)
-    ExprGrouping,        // (expr)
-    ExprPath,            // a.b.c (path expression)
-    ExprUnary,           // -expr, !expr (prefix)
-    ExprPostfix,         // expr! (postfix)
-    ExprBinary,          // a + b, a * b, etc.
-    ExprNull,            // null
-    ExprCall,            // foo(1, 2) or expr(args)
-    ExprAssignment,      // lhs = rhs
-    ExprIf,              // if condition { then } else { else }
-    ElseClause,          // else { ... } or else if ...
-    ExprWhile,           // while condition { body }
-    ExprLoop,            // loop { body }
-    ExprBreak,           // break or break label
-    ExprContinue,        // continue or continue label
-    ExprReturn,          // return or return expr
-    ExprTupleIndex,      // tuple.0, tuple.1 (tuple element access)
-    LoopLabel,           // label: (before while/loop)
-    ArgumentList,        // (arg1, label: arg2, ...)
-    Argument,            // Single argument: expr or label: expr
+    Expression,     // Wrapper for expression variants
+    ExprUnit,       // ()
+    ExprInteger,    // 42, 0xFF, 0b1010, 0o17
+    ExprFloat,      // 3.14, 1.0e10
+    ExprString,     // "hello"
+    ExprBool,       // true, false
+    ExprArray,      // [1, 2, 3]
+    ExprTuple,      // (1, 2, 3)
+    ExprGrouping,   // (expr)
+    ExprPath,       // a.b.c (path expression)
+    ExprUnary,      // -expr, !expr (prefix)
+    ExprPostfix,    // expr! (postfix)
+    ExprBinary,     // a + b, a * b, etc.
+    ExprNull,       // null
+    ExprCall,       // foo(1, 2) or expr(args)
+    ExprAssignment, // lhs = rhs
+    ExprIf,         // if condition { then } else { else }
+    ElseClause,     // else { ... } or else if ...
+    ExprWhile,      // while condition { body }
+    ExprLoop,       // loop { body }
+    ExprBreak,      // break or break label
+    ExprContinue,   // continue or continue label
+    ExprReturn,     // return or return expr
+    ExprTupleIndex, // tuple.0, tuple.1 (tuple element access)
+    LoopLabel,      // label: (before while/loop)
+    ArgumentList,   // (arg1, label: arg2, ...)
+    Argument,       // Single argument: expr or label: expr
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -646,8 +646,14 @@ mod tests {
     #[test]
     fn test_syntax_kind_conversion() {
         // Test that Token to SyntaxKind conversion works
-        assert_eq!(SyntaxKind::from(kestrel_lexer::Token::Module), SyntaxKind::Module);
-        assert_eq!(SyntaxKind::from(kestrel_lexer::Token::Identifier), SyntaxKind::Identifier);
+        assert_eq!(
+            SyntaxKind::from(kestrel_lexer::Token::Module),
+            SyntaxKind::Module
+        );
+        assert_eq!(
+            SyntaxKind::from(kestrel_lexer::Token::Identifier),
+            SyntaxKind::Identifier
+        );
         assert_eq!(SyntaxKind::from(kestrel_lexer::Token::Dot), SyntaxKind::Dot);
     }
 

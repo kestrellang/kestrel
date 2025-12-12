@@ -31,7 +31,9 @@ impl IntoDiagnostic for CannotAssignToExpressionError {
             .with_message("cannot assign to this expression")
             .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("not a valid assignment target")])
-            .with_notes(vec!["assignment target must be a variable or field".to_string()])
+            .with_notes(vec![
+                "assignment target must be a variable or field".to_string()
+            ])
     }
 }
 
@@ -43,10 +45,14 @@ pub struct CannotAssignToImmutableFieldError {
 impl IntoDiagnostic for CannotAssignToImmutableFieldError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("cannot assign to immutable field '{}'", self.field_name))
+            .with_message(format!(
+                "cannot assign to immutable field '{}'",
+                self.field_name
+            ))
             .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("assignment to immutable field")])
-            .with_notes(vec!["this field was declared with `let`, not `var`".to_string()])
+            .with_notes(vec![
+                "this field was declared with `let`, not `var`".to_string()
+            ])
     }
 }
-

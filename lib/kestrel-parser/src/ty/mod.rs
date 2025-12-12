@@ -93,7 +93,7 @@ impl TyExpression {
                         .find(|tok| tok.kind() == SyntaxKind::Identifier)
                         .map(|tok| tok.text().to_string())
                 })
-                .collect()
+                .collect(),
         )
     }
 
@@ -111,7 +111,7 @@ impl TyExpression {
             tuple_node
                 .children()
                 .filter(|child| child.kind() == SyntaxKind::Ty)
-                .count()
+                .count(),
         )
     }
 }
@@ -130,8 +130,7 @@ fn unit_type_parser() -> impl Parser<Token, (Span, Span), Error = Simple<Token>>
 fn never_type_parser() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
     use crate::common::skip_trivia;
 
-    skip_trivia()
-        .ignore_then(just(Token::Bang).map_with_span(|_, span| Span::from(span)))
+    skip_trivia().ignore_then(just(Token::Bang).map_with_span(|_, span| Span::from(span)))
 }
 
 /// Internal parser for path segments: Ident or Ident.Ident.Ident
@@ -139,15 +138,14 @@ fn never_type_parser() -> impl Parser<Token, Span, Error = Simple<Token>> + Clon
 fn path_segments_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
     use crate::common::skip_trivia;
 
-    skip_trivia()
-        .ignore_then(
-            filter_map(|span, token| match token {
-                Token::Identifier => Ok(Span::from(span)),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            })
-            .separated_by(just(Token::Dot))
-            .at_least(1)
-        )
+    skip_trivia().ignore_then(
+        filter_map(|span, token| match token {
+            Token::Identifier => Ok(Span::from(span)),
+            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+        })
+        .separated_by(just(Token::Dot))
+        .at_least(1),
+    )
 }
 
 /// Combined type parser that returns a variant
@@ -168,11 +166,7 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
         let paren_types = {
             skip_trivia()
                 .ignore_then(just(Token::LParen).map_with_span(|_, span| Span::from(span)))
-                .then(
-                    ty.clone()
-                        .separated_by(just(Token::Comma))
-                        .allow_trailing()
-                )
+                .then(ty.clone().separated_by(just(Token::Comma)).allow_trailing())
                 .then(just(Token::RParen).map_with_span(|_, span| Span::from(span)))
                 .then(
                     // Optional arrow and return type for function types
@@ -180,7 +174,7 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
                         .ignore_then(just(Token::Arrow))
                         .map_with_span(|_, span| Span::from(span))
                         .then(ty.clone())
-                        .or_not()
+                        .or_not(),
                 )
                 .map(|(((lparen, types), rparen), arrow_and_return)| {
                     if let Some((arrow_span, return_ty)) = arrow_and_return {
@@ -199,14 +193,10 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
                 // Optional type arguments: [T1, T2]
                 skip_trivia()
                     .ignore_then(just(Token::LBracket))
-                    .ignore_then(
-                        ty.clone()
-                            .separated_by(just(Token::Comma))
-                            .allow_trailing()
-                    )
+                    .ignore_then(ty.clone().separated_by(just(Token::Comma)).allow_trailing())
                     .then_ignore(skip_trivia())
                     .then_ignore(just(Token::RBracket))
-                    .or_not()
+                    .or_not(),
             )
             .map(|(segments, args)| TyVariant::Path { segments, args });
 
@@ -216,7 +206,7 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
             .then(ty.clone())
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span)))
+                    .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span))),
             )
             .map(|((lbracket, element_ty), rbracket)| {
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
@@ -266,7 +256,14 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
             emit_tuple_type(sink, lparen.clone(), types, rparen.clone());
         }
         TyVariant::Function(lparen, params, rparen, arrow, return_ty) => {
-            emit_function_type(sink, lparen.clone(), params, rparen.clone(), arrow.clone(), return_ty);
+            emit_function_type(
+                sink,
+                lparen.clone(),
+                params,
+                rparen.clone(),
+                arrow.clone(),
+                return_ty,
+            );
         }
         TyVariant::Path { segments, args } => {
             emit_path_type(sink, segments, args.as_ref());
@@ -345,7 +342,11 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
 /// Emit events for a path type with optional type arguments
 /// Structure: Ty -> TyPath -> Path -> PathElement -> Identifier
 ///            (optional) TypeArgumentList -> Ty...
-pub(crate) fn emit_path_type(sink: &mut EventSink, segments: &[Span], args: Option<&Vec<TyVariant>>) {
+pub(crate) fn emit_path_type(
+    sink: &mut EventSink,
+    segments: &[Span],
+    args: Option<&Vec<TyVariant>>,
+) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyPath);
     emit_path(sink, segments);
@@ -364,7 +365,12 @@ pub(crate) fn emit_path_type(sink: &mut EventSink, segments: &[Span], args: Opti
 }
 
 /// Emit events for a tuple type
-pub(crate) fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: &[TyVariant], rparen: Span) {
+pub(crate) fn emit_tuple_type(
+    sink: &mut EventSink,
+    lparen: Span,
+    types: &[TyVariant],
+    rparen: Span,
+) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyTuple);
 

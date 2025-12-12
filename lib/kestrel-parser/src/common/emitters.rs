@@ -9,11 +9,10 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    AssociatedTypeBoundsData, AssociatedTypeTargetData,
-    ExtensionBodyItem, ExtensionDeclarationData,
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterData,
-    ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructBodyItem, StructDeclarationData,
-    TypeAliasDeclarationData,
+    AssociatedTypeBoundsData, AssociatedTypeTargetData, ExtensionBodyItem,
+    ExtensionDeclarationData, FieldDeclarationData, FunctionDeclarationData,
+    InitializerDeclarationData, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
+    ReceiverModifier, StructBodyItem, StructDeclarationData, TypeAliasDeclarationData,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -62,7 +61,10 @@ pub fn emit_import_declaration(
 
     if let Some(items_list) = &items {
         let last_segment_end = path_segments.last().unwrap().end;
-        sink.add_token(SyntaxKind::Dot, Span::from(last_segment_end..last_segment_end + 1));
+        sink.add_token(
+            SyntaxKind::Dot,
+            Span::from(last_segment_end..last_segment_end + 1),
+        );
         sink.add_token(
             SyntaxKind::LParen,
             Span::from(last_segment_end + 1..last_segment_end + 2),
@@ -97,7 +99,10 @@ pub fn emit_import_declaration(
         } else {
             last_item.0.end
         };
-        sink.add_token(SyntaxKind::RParen, Span::from(last_item_end..last_item_end + 1));
+        sink.add_token(
+            SyntaxKind::RParen,
+            Span::from(last_item_end..last_item_end + 1),
+        );
     } else if let Some(alias_span) = alias {
         let as_start = path_segments.last().unwrap().end + 1;
         sink.add_token(SyntaxKind::As, Span::from(as_start..as_start + 2));
@@ -365,8 +370,12 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
     for item in data.body {
         match item {
             ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
-            ProtocolBodyItem::AssociatedType(type_data) => emit_type_alias_declaration(sink, type_data),
-            ProtocolBodyItem::Initializer(init_data) => emit_initializer_declaration(sink, init_data),
+            ProtocolBodyItem::AssociatedType(type_data) => {
+                emit_type_alias_declaration(sink, type_data)
+            }
+            ProtocolBodyItem::Initializer(init_data) => {
+                emit_initializer_declaration(sink, init_data)
+            }
         }
     }
 
@@ -384,7 +393,11 @@ fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTarg
         AssociatedTypeTargetData::Simple(name_span) => {
             emit_name(sink, name_span.clone());
         }
-        AssociatedTypeTargetData::Qualified { protocol_path, dot_span, name_span } => {
+        AssociatedTypeTargetData::Qualified {
+            protocol_path,
+            dot_span,
+            name_span,
+        } => {
             sink.start_node(SyntaxKind::AssociatedTypeTarget);
             emit_ty_variant(sink, protocol_path);
             sink.add_token(SyntaxKind::Dot, dot_span.clone());

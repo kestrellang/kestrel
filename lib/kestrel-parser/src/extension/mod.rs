@@ -10,13 +10,11 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::event::{EventSink, TreeBuilder};
 use crate::common::{
-    token,
-    function_declaration_parser_internal, initializer_declaration_parser_internal,
-    emit_extension_declaration,
-    ExtensionDeclarationData, ExtensionBodyItem, ConformanceListData,
+    ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
+    function_declaration_parser_internal, initializer_declaration_parser_internal, token,
 };
+use crate::event::{EventSink, TreeBuilder};
 use crate::ty::ty_parser;
 use crate::type_param::{conformance_list_parser, where_clause_parser};
 
@@ -76,13 +74,12 @@ impl ExtensionDeclaration {
 /// Internal parser for extension body items
 ///
 /// Extension bodies can contain: functions and initializers
-fn extension_body_item_parser_internal(
-) -> impl Parser<Token, ExtensionBodyItem, Error = Simple<Token>> + Clone {
-    let initializer_parser = initializer_declaration_parser_internal()
-        .map(ExtensionBodyItem::Initializer);
+fn extension_body_item_parser_internal()
+-> impl Parser<Token, ExtensionBodyItem, Error = Simple<Token>> + Clone {
+    let initializer_parser =
+        initializer_declaration_parser_internal().map(ExtensionBodyItem::Initializer);
 
-    let function_parser = function_declaration_parser_internal()
-        .map(ExtensionBodyItem::Function);
+    let function_parser = function_declaration_parser_internal().map(ExtensionBodyItem::Function);
 
     initializer_parser.or(function_parser)
 }
@@ -91,7 +88,8 @@ fn extension_body_item_parser_internal(
 ///
 /// This is the single source of truth for extension declaration parsing.
 /// Syntax: extend Type: Protocol where ... { ... }
-pub fn extension_declaration_parser_internal() -> impl Parser<Token, ExtensionDeclarationData, Error = Simple<Token>> + Clone {
+pub fn extension_declaration_parser_internal()
+-> impl Parser<Token, ExtensionDeclarationData, Error = Simple<Token>> + Clone {
     token(Token::Extend)
         .then(ty_parser())
         .then(conformance_list_parser().or_not())
@@ -99,20 +97,25 @@ pub fn extension_declaration_parser_internal() -> impl Parser<Token, ExtensionDe
         .then(token(Token::LBrace))
         .then(extension_body_item_parser_internal().repeated())
         .then(token(Token::RBrace))
-        .map(|((((((extend_span, target_type), conformances), where_clause), lbrace_span), body), rbrace_span)| {
-            ExtensionDeclarationData {
-                extend_span,
-                target_type,
-                conformances: conformances.map(|(colon_span, types)| ConformanceListData {
-                    colon_span,
-                    conformances: types,
-                }),
-                where_clause,
-                lbrace_span,
-                body,
+        .map(
+            |(
+                (((((extend_span, target_type), conformances), where_clause), lbrace_span), body),
                 rbrace_span,
-            }
-        })
+            )| {
+                ExtensionDeclarationData {
+                    extend_span,
+                    target_type,
+                    conformances: conformances.map(|(colon_span, types)| ConformanceListData {
+                        colon_span,
+                        conformances: types,
+                    }),
+                    where_clause,
+                    lbrace_span,
+                    body,
+                    rbrace_span,
+                }
+            },
+        )
 }
 
 /// Parse an extension declaration and emit events
@@ -153,7 +156,10 @@ mod tests {
         let mut sink = EventSink::new();
         parse_extension_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
-        ExtensionDeclaration { syntax: tree, span: Span::from(0..source.len()) }
+        ExtensionDeclaration {
+            syntax: tree,
+            span: Span::from(0..source.len()),
+        }
     }
 
     /// Helper to check if a syntax node exists as a child
@@ -220,7 +226,8 @@ mod tests {
     fn test_extension_with_multiple_conformances() {
         let decl = parse("extend Point: Drawable, Hashable { }");
         assert!(has_child(&decl, SyntaxKind::ConformanceList));
-        let conformance_list = decl.syntax
+        let conformance_list = decl
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::ConformanceList)
             .expect("Expected ConformanceList node");

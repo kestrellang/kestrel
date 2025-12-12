@@ -36,11 +36,31 @@ func remainder() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("sum").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("diff").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("product").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("quotient").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("remainder").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("sum")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("diff")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("product")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("quotient")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("remainder")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -99,12 +119,36 @@ func isGreaterOrEqual() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("isEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("isNotEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("isLess").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("isGreater").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("isLessOrEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("isGreaterOrEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("isEqual")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("isNotEqual")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("isLess")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("isGreater")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("isLessOrEqual")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("isGreaterOrEqual")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -131,9 +175,21 @@ func negate() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("bothTrue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("eitherTrue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("negate").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("bothTrue")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("eitherTrue")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("negate")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -168,11 +224,31 @@ func shiftRight() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("bitwiseAnd").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("bitwiseOr").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("bitwiseXor").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("shiftLeft").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("shiftRight").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("bitwiseAnd")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("bitwiseOr")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("bitwiseXor")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("shiftLeft")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("shiftRight")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -203,10 +279,26 @@ func invert() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("negateInt").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("negateFloat").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("identity").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("invert").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("negateInt")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("negateFloat")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("identity")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("invert")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -226,7 +318,11 @@ func compute() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("compute")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -242,7 +338,11 @@ func compute() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("compute")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -258,7 +358,11 @@ func check() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("check").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("check")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -274,7 +378,11 @@ func check() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("check").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("check")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -291,7 +399,11 @@ func compute() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("compute")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -307,7 +419,11 @@ func compute() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("compute")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -332,8 +448,16 @@ func divide() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("subtract").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("divide").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("subtract")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("divide")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -349,7 +473,11 @@ func check() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("check").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("check")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -385,11 +513,31 @@ func comparisonInLogical() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("deeplyNested").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("mixedPrecedence").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("parenthesized").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("deeplyGrouped").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("comparisonInLogical").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("deeplyNested")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("mixedPrecedence")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("parenthesized")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("deeplyGrouped")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("comparisonInLogical")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -413,9 +561,21 @@ func doubleLogicalNot() -> Bool {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("unaryInBinary").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("doubleNegation").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("doubleLogicalNot").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("unaryInBinary")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("doubleNegation")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("doubleLogicalNot")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     // NOTE: binary_with_function_call test removed because function call return types
@@ -489,10 +649,26 @@ func compute(v: Values) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("Values").is(SymbolKind::Struct).has(Behavior::FieldCount(3)))
-        .expect(Symbol::new("add").is(SymbolKind::Function).has(Behavior::ParameterCount(1)))
-        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Values")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(3)),
+        )
+        .expect(
+            Symbol::new("add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        )
+        .expect(
+            Symbol::new("compute")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -511,7 +687,15 @@ func compute(a: Int, b: Int, c: Int) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("add").is(SymbolKind::Function).has(Behavior::ParameterCount(2)))
-        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(3)));
+        .expect(
+            Symbol::new("add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        )
+        .expect(
+            Symbol::new("compute")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(3)),
+        );
     }
 }

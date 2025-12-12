@@ -411,12 +411,10 @@ impl OperatorRegistry {
 
     /// Get the prefix action for a token, if it's a valid prefix operator.
     pub fn prefix(&self, token: SyntaxKind) -> Option<PrefixAction> {
-        self.prefix
-            .get(&token)
-            .map(|entry| PrefixAction {
-                op: entry.op,
-                precedence: entry.precedence,
-            })
+        self.prefix.get(&token).map(|entry| PrefixAction {
+            op: entry.op,
+            precedence: entry.precedence,
+        })
     }
 
     /// Determine what action to take given current token and minimum precedence.
@@ -476,8 +474,8 @@ impl OperatorRegistry {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_precedence_mul_higher_than_add() {

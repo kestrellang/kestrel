@@ -23,11 +23,31 @@ mod basic {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Public").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
-        .expect(Symbol::new("Private").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Private)))
-        .expect(Symbol::new("Internal").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Internal)))
-        .expect(Symbol::new("Fileprivate").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Fileprivate)))
-        .expect(Symbol::new("Default").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Internal)));
+        .expect(
+            Symbol::new("Public")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("Private")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Private)),
+        )
+        .expect(
+            Symbol::new("Internal")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        )
+        .expect(
+            Symbol::new("Fileprivate")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Fileprivate)),
+        )
+        .expect(
+            Symbol::new("Default")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        );
     }
 
     #[test]
@@ -91,7 +111,11 @@ mod nested {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Container").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(
+            Symbol::new("Container")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
         .expect(Symbol::new("Container.Nested").is(SymbolKind::Struct))
         .expect(Symbol::new("Container.nested").is(SymbolKind::Field));
     }
@@ -226,7 +250,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]
@@ -333,8 +361,16 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Single").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Many").is(SymbolKind::Struct).has(Behavior::FieldCount(5)));
+        .expect(
+            Symbol::new("Single")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Many")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(5)),
+        );
     }
 
     #[test]
@@ -355,8 +391,16 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
-        .expect(Symbol::new("Outer").is(SymbolKind::Struct).has(Behavior::FieldCount(1)));
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -385,8 +429,16 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("takePoint").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("takePoint")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -413,8 +465,16 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Immutable").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("Mixed").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Immutable")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Mixed")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 }
 
@@ -504,7 +564,11 @@ mod instantiation_errors {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]

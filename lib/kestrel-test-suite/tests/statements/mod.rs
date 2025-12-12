@@ -4,5 +4,5 @@
 //! - Variable declarations (let/var)
 //! - Assignment statements
 
-mod variables;
 mod assignments;
+mod variables;

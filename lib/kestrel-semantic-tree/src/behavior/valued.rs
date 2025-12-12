@@ -51,8 +51,8 @@ impl ValueBehavior {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_value_behavior_simple() {

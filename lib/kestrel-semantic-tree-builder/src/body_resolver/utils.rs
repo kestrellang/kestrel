@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::SymbolFor;
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -22,35 +24,38 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::diagnostics::{TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError};
 use super::context::BodyResolutionContext;
+use crate::diagnostics::{
+    TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError,
+};
 
 /// Check if a syntax kind is an expression kind
 pub fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(kind,
+    matches!(
+        kind,
         SyntaxKind::Expression
-        | SyntaxKind::ExprUnit
-        | SyntaxKind::ExprInteger
-        | SyntaxKind::ExprFloat
-        | SyntaxKind::ExprString
-        | SyntaxKind::ExprBool
-        | SyntaxKind::ExprArray
-        | SyntaxKind::ExprTuple
-        | SyntaxKind::ExprGrouping
-        | SyntaxKind::ExprPath
-        | SyntaxKind::ExprUnary
-        | SyntaxKind::ExprPostfix
-        | SyntaxKind::ExprBinary
-        | SyntaxKind::ExprNull
-        | SyntaxKind::ExprCall
-        | SyntaxKind::ExprAssignment
-        | SyntaxKind::ExprIf
-        | SyntaxKind::ExprWhile
-        | SyntaxKind::ExprLoop
-        | SyntaxKind::ExprBreak
-        | SyntaxKind::ExprContinue
-        | SyntaxKind::ExprReturn
-        | SyntaxKind::ExprTupleIndex
+            | SyntaxKind::ExprUnit
+            | SyntaxKind::ExprInteger
+            | SyntaxKind::ExprFloat
+            | SyntaxKind::ExprString
+            | SyntaxKind::ExprBool
+            | SyntaxKind::ExprArray
+            | SyntaxKind::ExprTuple
+            | SyntaxKind::ExprGrouping
+            | SyntaxKind::ExprPath
+            | SyntaxKind::ExprUnary
+            | SyntaxKind::ExprPostfix
+            | SyntaxKind::ExprBinary
+            | SyntaxKind::ExprNull
+            | SyntaxKind::ExprCall
+            | SyntaxKind::ExprAssignment
+            | SyntaxKind::ExprIf
+            | SyntaxKind::ExprWhile
+            | SyntaxKind::ExprLoop
+            | SyntaxKind::ExprBreak
+            | SyntaxKind::ExprContinue
+            | SyntaxKind::ExprReturn
+            | SyntaxKind::ExprTupleIndex
     )
 }
 
@@ -67,7 +72,9 @@ pub fn validate_not_standalone_type_param(
 ) -> Expression {
     if let ExprKind::TypeParameterRef(symbol_id) = &expr.kind {
         // Get the type parameter name for the error message
-        let type_param_name = ctx.model.query(SymbolFor { id: *symbol_id })
+        let type_param_name = ctx
+            .model
+            .query(SymbolFor { id: *symbol_id })
             .map(|s| s.metadata().name().value.clone())
             .unwrap_or_else(|| "T".to_string());
 
@@ -83,7 +90,11 @@ pub fn validate_not_standalone_type_param(
 }
 
 /// Check if a callable signature matches the given arity and labels
-pub fn matches_signature(callable: &CallableBehavior, arity: usize, labels: &[Option<String>]) -> bool {
+pub fn matches_signature(
+    callable: &CallableBehavior,
+    arity: usize,
+    labels: &[Option<String>],
+) -> bool {
     let params = callable.parameters();
 
     // Check arity
@@ -104,7 +115,9 @@ pub fn matches_signature(callable: &CallableBehavior, arity: usize, labels: &[Op
 }
 
 /// Get the CallableBehavior from a symbol if it has one
-pub fn get_callable_behavior(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<CallableBehavior> {
+pub fn get_callable_behavior(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<CallableBehavior> {
     for behavior in symbol.metadata().behaviors() {
         if behavior.kind() == KestrelBehaviorKind::Callable {
             if let Some(callable) = behavior.as_ref().downcast_ref::<CallableBehavior>() {
@@ -114,7 +127,6 @@ pub fn get_callable_behavior(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Optio
     }
     None
 }
-
 
 /// Create a struct type from a struct symbol.
 ///
@@ -260,22 +272,28 @@ fn get_field_type(field: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
 }
 
 /// Get the container symbol from a type (for member lookup)
-pub fn get_type_container(ty: &Ty, ctx: &BodyResolutionContext) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+pub fn get_type_container(
+    ty: &Ty,
+    ctx: &BodyResolutionContext,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
     match ty.kind() {
         TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::Protocol { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::SelfType => {
             // Resolve Self to the containing struct/protocol
             // Get the function symbol, then its parent (which should be the struct/protocol)
-            let function = ctx.model.query(SymbolFor { id: ctx.function_id })?;
+            let function = ctx.model.query(SymbolFor {
+                id: ctx.function_id,
+            })?;
             let parent = function.metadata().parent()?;
             match parent.metadata().kind() {
                 KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
                 KestrelSymbolKind::Extension => {
                     // For extension methods, Self refers to the target type
                     // Get the ExtensionTargetBehavior and return the target struct
-                    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
-                    if let Some(target_beh) = parent.extension_target_behavior() {
+                    if let Some(target_beh) =
+                        parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                    {
                         match target_beh.target_type().kind() {
                             TyKind::Struct { symbol, .. } => {
                                 Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
@@ -319,8 +337,15 @@ pub fn get_where_clause(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereCla
 ///
 /// This is a low-level helper that collects all bounds for a given parameter
 /// from a single where clause.
-fn extract_bounds_for_param(where_clause: &WhereClause, param_id: semantic_tree::symbol::SymbolId) -> Vec<Ty> {
-    where_clause.bounds_for(param_id).into_iter().cloned().collect()
+fn extract_bounds_for_param(
+    where_clause: &WhereClause,
+    param_id: semantic_tree::symbol::SymbolId,
+) -> Vec<Ty> {
+    where_clause
+        .bounds_for(param_id)
+        .into_iter()
+        .cloned()
+        .collect()
 }
 
 /// Filter and extract only resolved Protocol bounds for a type parameter.
@@ -328,7 +353,10 @@ fn extract_bounds_for_param(where_clause: &WhereClause, param_id: semantic_tree:
 /// The where clause stores bounds as Ty::error() placeholders during BUILD phase.
 /// This function filters to only include bounds that have been resolved to Protocol types.
 /// Unresolved bounds (Ty::error) are skipped - they'll be caught by validation.
-fn filter_resolved_bounds(where_clause: &WhereClause, param_id: semantic_tree::symbol::SymbolId) -> Vec<Ty> {
+fn filter_resolved_bounds(
+    where_clause: &WhereClause,
+    param_id: semantic_tree::symbol::SymbolId,
+) -> Vec<Ty> {
     extract_bounds_for_param(where_clause, param_id)
         .into_iter()
         .filter(|ty| matches!(ty.kind(), TyKind::Protocol { .. }))
@@ -341,9 +369,7 @@ fn filter_resolved_bounds(where_clause: &WhereClause, param_id: semantic_tree::s
 /// to find all protocol bounds for the given type parameter.
 ///
 /// Returns a list of protocol types that the type parameter is constrained to.
-pub fn get_type_parameter_bounds(
-    type_param: &Arc<TypeParameterSymbol>,
-) -> Vec<Ty> {
+pub fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
     let param_id = type_param.metadata().id();
     let mut bounds = Vec::new();
 
@@ -387,12 +413,12 @@ pub fn get_type_parameter_bounds_by_id(
     param_id: SymbolId,
     ctx: &mut BodyResolutionContext,
 ) -> Vec<Ty> {
-    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
-
     let mut bounds = Vec::new();
 
     // Start from the current function
-    if let Some(function) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
+    if let Some(function) = ctx.model.query(SymbolFor {
+        id: ctx.function_id,
+    }) {
         // Check function's where clause
         if let Some(where_clause) = get_where_clause(function.as_ref()) {
             bounds.extend(filter_resolved_bounds(&where_clause, param_id));
@@ -403,7 +429,9 @@ pub fn get_type_parameter_bounds_by_id(
             // For extensions, get the combined where clause from ExtensionTargetBehavior
             // This includes both inherited struct constraints AND extension's own constraints
             if parent.metadata().kind() == KestrelSymbolKind::Extension {
-                if let Some(target_beh) = parent.extension_target_behavior() {
+                if let Some(target_beh) =
+                    parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                {
                     let where_clause = target_beh.where_clause();
                     bounds.extend(filter_resolved_bounds(where_clause, param_id));
                 }
@@ -415,21 +443,28 @@ pub fn get_type_parameter_bounds_by_id(
 
     // Validate that no bounds use generic protocols (with type arguments)
     // Filter them out and emit errors
-    bounds = bounds.into_iter().filter(|bound| {
-        if let TyKind::Protocol { symbol, substitutions } = bound.kind() {
-            if !substitutions.is_empty() {
-                // This is a generic protocol bound like Container[E]
-                let protocol_name = symbol.metadata().name().value.clone();
-                let error = UnsupportedGenericProtocolBoundError {
-                    span: bound.span().clone(),
-                    protocol_name,
-                };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                return false; // Filter out this bound
+    bounds = bounds
+        .into_iter()
+        .filter(|bound| {
+            if let TyKind::Protocol {
+                symbol,
+                substitutions,
+            } = bound.kind()
+            {
+                if !substitutions.is_empty() {
+                    // This is a generic protocol bound like Container[E]
+                    let protocol_name = symbol.metadata().name().value.clone();
+                    let error = UnsupportedGenericProtocolBoundError {
+                        span: bound.span().clone(),
+                        protocol_name,
+                    };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    return false; // Filter out this bound
+                }
             }
-        }
-        true
-    }).collect();
+            true
+        })
+        .collect();
 
     bounds
 }
@@ -452,9 +487,10 @@ where
 
     // Otherwise, recursively traverse composite types
     match ty.kind() {
-        TyKind::Array(element) => {
-            Ty::array(apply_type_transformation(element, transform), ty.span().clone())
-        }
+        TyKind::Array(element) => Ty::array(
+            apply_type_transformation(element, transform),
+            ty.span().clone(),
+        ),
         TyKind::Tuple(elements) => {
             let new_elements: Vec<Ty> = elements
                 .iter()
@@ -462,7 +498,10 @@ where
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
         }
-        TyKind::Function { params, return_type } => {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             let new_params: Vec<Ty> = params
                 .iter()
                 .map(|p| apply_type_transformation(p, transform))
@@ -504,20 +543,29 @@ pub fn format_type(ty: &Ty) -> String {
             format!("({})", items.join(", "))
         }
         TyKind::Array(elem) => format!("[{}]", format_type(elem)),
-        TyKind::Function { params, return_type } => {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             let params_str: Vec<_> = params.iter().map(format_type).collect();
-            format!("({}) -> {}", params_str.join(", "), format_type(return_type))
+            format!(
+                "({}) -> {}",
+                params_str.join(", "),
+                format_type(return_type)
+            )
         }
         TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
         TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::AssociatedType { symbol, container } => {
-            match container {
-                Some(container_ty) => format!("{}.{}", format_type(container_ty), symbol.metadata().name().value),
-                None => symbol.metadata().name().value.clone(),
-            }
-        }
+        TyKind::AssociatedType { symbol, container } => match container {
+            Some(container_ty) => format!(
+                "{}.{}",
+                format_type(container_ty),
+                symbol.metadata().name().value
+            ),
+            None => symbol.metadata().name().value.clone(),
+        },
         TyKind::SelfType => "Self".to_string(),
         TyKind::TypeVar(_) => "_".to_string(),
         TyKind::Error => "<error>".to_string(),
@@ -532,25 +580,36 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
     match ty.kind() {
         TyKind::TypeParameter(param) => {
             let param_id = param.metadata().id();
-            substitutions.get(param_id).cloned().unwrap_or_else(|| ty.clone())
+            substitutions
+                .get(param_id)
+                .cloned()
+                .unwrap_or_else(|| ty.clone())
         }
         TyKind::Array(element) => {
             Ty::array(substitute_type(element, substitutions), ty.span().clone())
         }
         TyKind::Tuple(elements) => {
-            let new_elements: Vec<Ty> = elements.iter()
+            let new_elements: Vec<Ty> = elements
+                .iter()
                 .map(|e| substitute_type(e, substitutions))
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
         }
-        TyKind::Function { params, return_type } => {
-            let new_params: Vec<Ty> = params.iter()
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let new_params: Vec<Ty> = params
+                .iter()
                 .map(|p| substitute_type(p, substitutions))
                 .collect();
             let new_return = substitute_type(return_type, substitutions);
             Ty::function(new_params, new_return, ty.span().clone())
         }
-        TyKind::Struct { symbol, substitutions: inner_subs } => {
+        TyKind::Struct {
+            symbol,
+            substitutions: inner_subs,
+        } => {
             // Apply our substitutions to the inner substitutions
             let mut new_subs = Substitutions::new();
             for (id, inner_ty) in inner_subs.iter() {
@@ -654,8 +713,15 @@ fn infer_from_type(
         }
 
         // For function types, recurse into params and return type
-        TyKind::Function { params, return_type } => {
-            if let TyKind::Function { params: arg_params, return_type: arg_ret } = arg_ty.kind() {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            if let TyKind::Function {
+                params: arg_params,
+                return_type: arg_ret,
+            } = arg_ty.kind()
+            {
                 for (pp, ap) in params.iter().zip(arg_params.iter()) {
                     infer_from_type(pp, ap, type_params, substitutions);
                 }
@@ -664,8 +730,15 @@ fn infer_from_type(
         }
 
         // For struct types with substitutions, match the inner type arguments
-        TyKind::Struct { symbol: param_struct, substitutions: param_subs } => {
-            if let TyKind::Struct { symbol: arg_struct, substitutions: arg_subs } = arg_ty.kind() {
+        TyKind::Struct {
+            symbol: param_struct,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Struct {
+                symbol: arg_struct,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+            {
                 // Only if same struct
                 if param_struct.metadata().id() == arg_struct.metadata().id() {
                     // Match substitutions
@@ -687,7 +760,6 @@ fn infer_from_type(
 // Call-Site Constraint Verification
 // =============================================================================
 
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use crate::diagnostics::ConstraintNotSatisfiedError;
 
 /// Verify that type arguments satisfy the constraints of a generic callable.
@@ -750,11 +822,19 @@ pub fn verify_type_argument_constraints(
 ///
 /// This checks if a concrete type conforms to a protocol, either directly
 /// or transitively through other constraints.
-pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, model: &kestrel_semantic_model::SemanticModel) -> bool {
+pub fn type_satisfies_bound(
+    ty: &Ty,
+    bound: &Ty,
+    model: &kestrel_semantic_model::SemanticModel,
+) -> bool {
     use kestrel_semantic_model::ExtensionsFor;
 
     // Get the protocol from the bound
-    let TyKind::Protocol { symbol: required_proto, .. } = bound.kind() else {
+    let TyKind::Protocol {
+        symbol: required_proto,
+        ..
+    } = bound.kind()
+    else {
         // Bound is not a protocol - shouldn't happen with proper validation
         return false;
     };
@@ -763,9 +843,12 @@ pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, model: &kestrel_semantic_model:
         // Concrete struct - check if it conforms to the protocol
         TyKind::Struct { symbol, .. } => {
             // Check direct conformances
-            if let Some(conformances) = symbol.conformances_behavior() {
+            if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
                 for conf in conformances.conformances() {
-                    if let TyKind::Protocol { symbol: conf_proto, .. } = conf.kind() {
+                    if let TyKind::Protocol {
+                        symbol: conf_proto, ..
+                    } = conf.kind()
+                    {
                         if conf_proto.metadata().id() == required_proto.metadata().id() {
                             return true;
                         }
@@ -776,11 +859,18 @@ pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, model: &kestrel_semantic_model:
 
             // Also check extension conformances
             let struct_id = symbol.metadata().id();
-            let extensions = model.query(ExtensionsFor { target_id: struct_id });
+            let extensions = model.query(ExtensionsFor {
+                target_id: struct_id,
+            });
             for extension in extensions {
-                if let Some(conformances) = extension.conformances_behavior() {
+                if let Some(conformances) =
+                    extension.metadata().get_behavior::<ConformancesBehavior>()
+                {
                     for conf in conformances.conformances() {
-                        if let TyKind::Protocol { symbol: conf_proto, .. } = conf.kind() {
+                        if let TyKind::Protocol {
+                            symbol: conf_proto, ..
+                        } = conf.kind()
+                        {
                             if conf_proto.metadata().id() == required_proto.metadata().id() {
                                 return true;
                             }
@@ -797,7 +887,10 @@ pub fn type_satisfies_bound(ty: &Ty, bound: &Ty, model: &kestrel_semantic_model:
         TyKind::TypeParameter(param) => {
             let param_bounds = get_type_parameter_bounds(param);
             for pb in &param_bounds {
-                if let TyKind::Protocol { symbol: pb_proto, .. } = pb.kind() {
+                if let TyKind::Protocol {
+                    symbol: pb_proto, ..
+                } = pb.kind()
+                {
                     if pb_proto.metadata().id() == required_proto.metadata().id() {
                         return true;
                     }

@@ -1,13 +1,13 @@
 //! InheritedProtocolMember query - search inherited protocols for a member
 
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::SymbolFor;
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Search inherited protocols for a member (e.g., associated type).
 ///
@@ -22,8 +22,10 @@ impl Query for InheritedProtocolMember {
     type Output = Option<SymbolId>;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
-        let protocol = model.query(SymbolFor { id: self.protocol_id })?;
-        let conformances_beh = protocol.conformances_behavior()?;
+        let protocol = model.query(SymbolFor {
+            id: self.protocol_id,
+        })?;
+        let conformances_beh = protocol.metadata().get_behavior::<ConformancesBehavior>()?;
 
         for parent_ty in conformances_beh.conformances() {
             if let TyKind::Protocol {

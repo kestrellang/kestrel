@@ -6,11 +6,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::{emit_field_declaration, field_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
-use crate::common::{
-    field_declaration_parser_internal,
-    emit_field_declaration,
-};
 
 /// Represents a field declaration: (visibility)? (static)? let/var name: Type
 ///
@@ -43,7 +40,8 @@ impl FieldDeclaration {
 
     /// Get the visibility modifier if present
     pub fn visibility(&self) -> Option<SyntaxKind> {
-        let visibility_node = self.syntax
+        let visibility_node = self
+            .syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::Visibility)?;
 

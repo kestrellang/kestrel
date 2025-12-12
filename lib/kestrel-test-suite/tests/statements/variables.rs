@@ -13,17 +13,25 @@ mod local_variables {
         // Combined test for let and var declarations with type and initializer
         Test::new("module Main\nfunc test() -> Int { let x: Int = 42; var y: Int = 99; x }")
             .expect(Compiles)
-            .expect(Symbol::new("test").is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(0)));
+            .expect(
+                Symbol::new("test")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(0)),
+            );
     }
 
     #[test]
     fn multiple_variable_declarations_in_sequence() {
         // Multiple let and var declarations with proper scoping
-        Test::new("module Main\nfunc test() -> Int { let x: Int = 1; let y: Int = 2; var z: Int = 3; x }")
-            .expect(Compiles)
-            .expect(Symbol::new("test").is(SymbolKind::Function)
-                .has(Behavior::HasBody(true)));
+        Test::new(
+            "module Main\nfunc test() -> Int { let x: Int = 1; let y: Int = 2; var z: Int = 3; x }",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -31,9 +39,12 @@ mod local_variables {
         // Variable holding string value
         Test::new("module Main\nfunc getString() -> String { let msg: String = \"hello\"; msg }")
             .expect(Compiles)
-            .expect(Symbol::new("getString").is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(0))
-                .has(Behavior::HasBody(true)));
+            .expect(
+                Symbol::new("getString")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(0))
+                    .has(Behavior::HasBody(true)),
+            );
     }
 
     #[test]
@@ -41,8 +52,11 @@ mod local_variables {
         // Local variable shadows function parameter
         Test::new("module Main\nfunc test(x: Int) -> Int { let x: Int = 99; x }")
             .expect(Compiles)
-            .expect(Symbol::new("test").is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(1)));
+            .expect(
+                Symbol::new("test")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(1)),
+            );
     }
 
     #[test]
@@ -50,8 +64,11 @@ mod local_variables {
         // Variable with array type
         Test::new("module Main\nfunc getArray() -> [Int] { let arr: [Int] = [1, 2, 3]; arr }")
             .expect(Compiles)
-            .expect(Symbol::new("getArray").is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(0)));
+            .expect(
+                Symbol::new("getArray")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(0)),
+            );
     }
 
     #[test]
@@ -80,4 +97,3 @@ mod local_variables {
                 .has(Behavior::HasBody(true)));
     }
 }
-

@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use kestrel_prelude::primitives;
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -14,10 +14,10 @@ use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::{InheritedProtocolMember, ResolveName, SymbolFor, VisibleChildrenByName};
 use crate::query::Query;
 use crate::resolution::{SymbolResolution, TypePathResolution};
-use crate::SemanticModel;
 
 /// Resolve a type path to a Type.
 ///
@@ -58,15 +58,17 @@ impl Query for ResolveTypePath {
         });
 
         let mut current_symbol = match first_resolution {
-            SymbolResolution::Found(ids) if ids.len() == 1 => match model.query(SymbolFor { id: ids[0] }) {
-                Some(s) => s,
-                None => {
-                    return TypePathResolution::NotFound {
-                        segment: first.clone(),
-                        index: 0,
-                    };
+            SymbolResolution::Found(ids) if ids.len() == 1 => {
+                match model.query(SymbolFor { id: ids[0] }) {
+                    Some(s) => s,
+                    None => {
+                        return TypePathResolution::NotFound {
+                            segment: first.clone(),
+                            index: 0,
+                        };
+                    }
                 }
-            },
+            }
             SymbolResolution::Found(ids) => {
                 return TypePathResolution::Ambiguous {
                     segment: first.clone(),
@@ -94,9 +96,13 @@ impl Query for ResolveTypePath {
             // Special case: if current symbol is a TypeParameter, look up associated types
             // from its protocol bounds (e.g., T.Item where T: Iterator)
             if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
-                if let Some(symbol) = model.query(SymbolFor { id: current_symbol.metadata().id() }) {
-                    if let Ok(type_param_arc) =
-                        symbol.clone().into_any_arc().downcast::<TypeParameterSymbol>()
+                if let Some(symbol) = model.query(SymbolFor {
+                    id: current_symbol.metadata().id(),
+                }) {
+                    if let Ok(type_param_arc) = symbol
+                        .clone()
+                        .into_any_arc()
+                        .downcast::<TypeParameterSymbol>()
                     {
                         // Use context (the function/struct where this type is being resolved)
                         // instead of type_param's parent, since the parent may not be set correctly
@@ -142,7 +148,9 @@ impl Query for ResolveTypePath {
 
         // Handle TypeParameterSymbol specially
         if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
-            if let Some(symbol) = model.query(SymbolFor { id: current_symbol.metadata().id() }) {
+            if let Some(symbol) = model.query(SymbolFor {
+                id: current_symbol.metadata().id(),
+            }) {
                 if let Ok(type_param_arc) = symbol.into_any_arc().downcast::<TypeParameterSymbol>()
                 {
                     let span = type_param_arc.metadata().span().clone();
@@ -154,9 +162,10 @@ impl Query for ResolveTypePath {
 
         // Handle AssociatedTypeSymbol specially
         if current_symbol.metadata().kind() == KestrelSymbolKind::AssociatedType {
-            if let Some(symbol) = model.query(SymbolFor { id: current_symbol.metadata().id() }) {
-                if let Ok(assoc_type_arc) =
-                    symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+            if let Some(symbol) = model.query(SymbolFor {
+                id: current_symbol.metadata().id(),
+            }) {
+                if let Ok(assoc_type_arc) = symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
                 {
                     let span = assoc_type_arc.metadata().span().clone();
                     let ty = Ty::associated_type(assoc_type_arc, span);
@@ -229,7 +238,7 @@ fn resolve_associated_type_from_type_param_with_context(
     let context = model.query(SymbolFor { id: context_id })?;
 
     // Get the where clause from the context's GenericsBehavior
-    let generics_beh = context.generics_behavior()?;
+    let generics_beh = context.metadata().get_behavior::<GenericsBehavior>()?;
     let where_clause = generics_beh.where_clause();
 
     // Get protocol bounds for this type parameter
@@ -253,7 +262,9 @@ fn resolve_associated_type_from_type_param_with_context(
                     && child.metadata().name().value == segment
                 {
                     // Found it! Create a qualified associated type
-                    if let Some(symbol) = model.query(SymbolFor { id: child.metadata().id() }) {
+                    if let Some(symbol) = model.query(SymbolFor {
+                        id: child.metadata().id(),
+                    }) {
                         if let Ok(assoc_type_arc) =
                             symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
                         {
@@ -302,8 +313,7 @@ fn resolve_associated_type_from_type_param_with_context(
                     {
                         let span = type_param.metadata().span().clone();
                         let container_ty = Ty::type_parameter(type_param.clone(), span.clone());
-                        let ty =
-                            Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
+                        let ty = Ty::qualified_associated_type(assoc_type_arc, container_ty, span);
                         return Some(TypePathResolution::Resolved(ty));
                     }
                 }
@@ -346,7 +356,9 @@ fn resolve_nested_associated_type(
                 if child.metadata().kind() == KestrelSymbolKind::AssociatedType
                     && child.metadata().name().value == *segment
                 {
-                    if let Some(symbol) = model.query(SymbolFor { id: child.metadata().id() }) {
+                    if let Some(symbol) = model.query(SymbolFor {
+                        id: child.metadata().id(),
+                    }) {
                         if let Ok(inner_assoc_arc) =
                             symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
                         {
@@ -385,8 +397,7 @@ fn resolve_nested_associated_type(
                         symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
                     {
                         let span = container_ty.span().clone();
-                        let ty =
-                            Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
+                        let ty = Ty::qualified_associated_type(inner_assoc_arc, container_ty, span);
                         return Some(TypePathResolution::Resolved(ty));
                     }
                 }

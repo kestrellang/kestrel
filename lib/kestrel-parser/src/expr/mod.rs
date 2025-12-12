@@ -402,13 +402,17 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 expr.clone()
                     .then(
                         skip_trivia()
-                            .ignore_then(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
+                            .ignore_then(
+                                just(Token::Comma).map_with_span(|_, span| Span::from(span)),
+                            )
                             .then(skip_trivia().ignore_then(expr.clone()))
                             .repeated(),
                     )
                     .then(
                         skip_trivia()
-                            .ignore_then(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
+                            .ignore_then(
+                                just(Token::Comma).map_with_span(|_, span| Span::from(span)),
+                            )
                             .or_not(),
                     )
                     .map(|((first, rest), trailing)| {
@@ -425,7 +429,10 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                     })
                     .or_not(),
             )
-            .then(skip_trivia().ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span))),
+            )
             .map(|((lbracket, contents), rbracket)| {
                 let (elements, commas) = contents.unwrap_or_else(|| (vec![], vec![]));
                 ExprVariant::Array(lbracket, elements, commas, rbracket)
@@ -444,15 +451,19 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         expr.clone()
                             .then(
                                 skip_trivia()
-                                    .ignore_then(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
+                                    .ignore_then(
+                                        just(Token::Comma)
+                                            .map_with_span(|_, span| Span::from(span)),
+                                    )
                                     .then(
                                         skip_trivia()
                                             .ignore_then(expr.clone())
                                             .then(
                                                 skip_trivia()
                                                     .ignore_then(
-                                                        just(Token::Comma)
-                                                            .map_with_span(|_, span| Span::from(span)),
+                                                        just(Token::Comma).map_with_span(
+                                                            |_, span| Span::from(span),
+                                                        ),
                                                     )
                                                     .then(skip_trivia().ignore_then(expr.clone()))
                                                     .repeated(),
@@ -460,8 +471,9 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                                             .then(
                                                 skip_trivia()
                                                     .ignore_then(
-                                                        just(Token::Comma)
-                                                            .map_with_span(|_, span| Span::from(span)),
+                                                        just(Token::Comma).map_with_span(
+                                                            |_, span| Span::from(span),
+                                                        ),
                                                     )
                                                     .or_not(),
                                             )
@@ -481,10 +493,9 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                                     )
                                     .or_not(),
                             )
-                            .then(
-                                skip_trivia()
-                                    .ignore_then(just(Token::RParen).map_with_span(|_, span| Span::from(span))),
-                            )
+                            .then(skip_trivia().ignore_then(
+                                just(Token::RParen).map_with_span(|_, span| Span::from(span)),
+                            ))
                             .map(|((first, comma_rest), rparen)| {
                                 match comma_rest {
                                     None => {
@@ -536,7 +547,10 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 Token::Identifier => Ok(Span::from(span)),
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             })
-            .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span))),
+            )
             .then(skip_trivia().ignore_then(expr.clone()))
             .map(|((label, colon), value)| CallArg {
                 label: Some(label),
@@ -565,19 +579,24 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                             .clone()
                             .then(
                                 skip_trivia()
-                                    .ignore_then(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
+                                    .ignore_then(
+                                        just(Token::Comma)
+                                            .map_with_span(|_, span| Span::from(span)),
+                                    )
                                     .then(skip_trivia().ignore_then(argument.clone()))
                                     .repeated(),
                             )
                             .then(
                                 skip_trivia()
-                                    .ignore_then(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
+                                    .ignore_then(
+                                        just(Token::Comma)
+                                            .map_with_span(|_, span| Span::from(span)),
+                                    )
                                     .or_not(),
                             )
-                            .then(
-                                skip_trivia()
-                                    .ignore_then(just(Token::RParen).map_with_span(|_, span| Span::from(span))),
-                            )
+                            .then(skip_trivia().ignore_then(
+                                just(Token::RParen).map_with_span(|_, span| Span::from(span)),
+                            ))
                             .map(|(((first, rest), trailing), rparen)| {
                                 let mut arguments = vec![first];
                                 let mut commas = Vec::new();
@@ -783,7 +802,9 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         .or_not(),
                 )
                 .then(
-                    skip_trivia().ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span))),
+                    skip_trivia().ignore_then(
+                        just(Token::Semicolon).map_with_span(|_, span| Span::from(span)),
+                    ),
                 )
                 .map(
                     |(
@@ -806,14 +827,15 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         };
 
         // Inline expression statement parser (uses expr)
-        let inline_expr_stmt = {
-            let expr_for_stmt = expr.clone();
-            expr_for_stmt
-                .then(
-                    skip_trivia().ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span))),
-                )
-                .map(|(e, semi)| StmtVariant::Expression(e, semi))
-        };
+        let inline_expr_stmt =
+            {
+                let expr_for_stmt = expr.clone();
+                expr_for_stmt
+                    .then(skip_trivia().ignore_then(
+                        just(Token::Semicolon).map_with_span(|_, span| Span::from(span)),
+                    ))
+                    .map(|(e, semi)| StmtVariant::Expression(e, semi))
+            };
 
         // Inline statement parser (for statements with semicolons)
         let inline_stmt = inline_var_decl.clone().or(inline_expr_stmt.clone());
@@ -842,7 +864,10 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                     .or(expr_for_stmt_like
                         .then(
                             skip_trivia()
-                                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
+                                .ignore_then(
+                                    just(Token::Semicolon)
+                                        .map_with_span(|_, span| Span::from(span)),
+                                )
                                 .map(Some)
                                 .or(empty().map(|_| None)),
                         )
@@ -872,7 +897,10 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                             statements
                         }),
                 )
-                .then(skip_trivia().ignore_then(just(Token::RBrace).map_with_span(|_, span| Span::from(span))))
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::RBrace).map_with_span(|_, span| Span::from(span))),
+                )
                 .map(|((lbrace, items), rbrace)| CodeBlockData {
                     lbrace,
                     items,
@@ -922,14 +950,20 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 Token::Identifier => Ok(Span::from(span)),
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             }))
-            .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span))),
+            )
             .map(|(name, colon)| LabelData { name, colon });
 
         // While expression: label: while condition { body }
         let while_expr = label_parser
             .clone()
             .or_not()
-            .then(skip_trivia().ignore_then(just(Token::While).map_with_span(|_, span| Span::from(span))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::While).map_with_span(|_, span| Span::from(span))),
+            )
             .then(condition_binary.clone())
             .then(inline_code_block.clone())
             .map(
@@ -944,7 +978,10 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         // Loop expression: label: loop { body }
         let loop_expr = label_parser
             .or_not()
-            .then(skip_trivia().ignore_then(just(Token::Loop).map_with_span(|_, span| Span::from(span))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Loop).map_with_span(|_, span| Span::from(span))),
+            )
             .then(inline_code_block.clone())
             .map(|((label, loop_span), body)| ExprVariant::Loop {
                 label,

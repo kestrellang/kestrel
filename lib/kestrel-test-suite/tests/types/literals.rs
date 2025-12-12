@@ -11,7 +11,11 @@ mod integers {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("test").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("test")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -306,11 +310,35 @@ mod complex {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("integer").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("floating").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("text").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("boolean").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("sequence").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("pair").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("integer")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("floating")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("text")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("boolean")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("sequence")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("pair")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }

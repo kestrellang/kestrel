@@ -16,9 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -29,9 +31,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use kestrel_semantic_model::{ExtensionsFor, SemanticModel};
 
-use crate::diagnostics::{
-    AmbiguousProtocolMethodError, ProtocolMethodReceiverMismatchError,
-};
+use crate::diagnostics::{AmbiguousProtocolMethodError, ProtocolMethodReceiverMismatchError};
 use crate::syntax::get_file_id_for_symbol;
 
 /// Link struct methods to protocol methods based on signature matching
@@ -51,15 +51,19 @@ pub fn link_protocol_methods_for_struct(
     let struct_id = struct_sym.metadata().id();
 
     let mut conformances = struct_dyn
-        .conformances_behavior()
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
         .map(|cb| cb.conformances().to_vec())
         .unwrap_or_default();
 
     // Also collect conformances from extensions
-    let extensions = model.query(ExtensionsFor { target_id: struct_id });
+    let extensions = model.query(ExtensionsFor {
+        target_id: struct_id,
+    });
     for extension in &extensions {
         let extension_conformances = extension
-            .conformances_behavior()
+            .metadata()
+            .get_behavior::<ConformancesBehavior>()
             .map(|cb| cb.conformances().to_vec())
             .unwrap_or_default();
         conformances.extend(extension_conformances);
@@ -71,10 +75,17 @@ pub fn link_protocol_methods_for_struct(
 
     // Collect all protocol methods with substitutions
     // The tuple contains: (defining_protocol, method, substituted_signature, bindings)
-    let mut protocol_methods: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, CallableSignature, HashMap<String, SignatureType>)> = Vec::new();
+    let mut protocol_methods: Vec<(
+        Arc<ProtocolSymbol>,
+        Arc<FunctionSymbol>,
+        CallableSignature,
+        HashMap<String, SignatureType>,
+    )> = Vec::new();
 
     for conformance_ty in &conformances {
-        if let Some((_conforming_protocol, bindings)) = resolve_protocol_type(conformance_ty, struct_dyn, struct_name) {
+        if let Some((_conforming_protocol, bindings)) =
+            resolve_protocol_type(conformance_ty, struct_dyn, struct_name)
+        {
             // Get all protocol methods (including inherited), each paired with its defining protocol
             let methods = collect_all_protocol_methods(&_conforming_protocol, model);
 
@@ -83,7 +94,12 @@ pub fn link_protocol_methods_for_struct(
                 // Substitute with type parameters, associated types, and Self
                 let substituted_sig = substitute_signature(&sig, &bindings);
                 // Use defining_protocol (not conforming_protocol) so methods are attributed correctly
-                protocol_methods.push((defining_protocol, method, substituted_sig, bindings.clone()));
+                protocol_methods.push((
+                    defining_protocol,
+                    method,
+                    substituted_sig,
+                    bindings.clone(),
+                ));
             }
         }
     }
@@ -93,11 +109,14 @@ pub fn link_protocol_methods_for_struct(
 
     // Also collect methods from applicable extensions
     let struct_id = struct_sym.metadata().id();
-    let extensions = model.query(ExtensionsFor { target_id: struct_id });
+    let extensions = model.query(ExtensionsFor {
+        target_id: struct_id,
+    });
     for extension in extensions {
         // TODO: Filter by applicability (check type arguments and where clauses)
         // For now, include all extensions since filtering can cause stack overflow
-        let extension_methods = collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        let extension_methods =
+            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
         all_methods.extend(extension_methods);
     }
 
@@ -113,22 +132,27 @@ pub fn link_protocol_methods_for_struct(
         for (protocol, protocol_method, substituted_sig, _bindings) in &protocol_methods {
             if signatures_match(&struct_sig, substituted_sig) {
                 // Signature matches, now check receiver kind
-                let struct_receiver = struct_method.callable_behavior().and_then(|cb| cb.receiver());
-                let protocol_receiver = protocol_method.callable_behavior().and_then(|cb| cb.receiver());
+                let struct_receiver = struct_method
+                    .metadata()
+                    .get_behavior::<CallableBehavior>()
+                    .and_then(|cb| cb.receiver());
+                let protocol_receiver = protocol_method
+                    .metadata()
+                    .get_behavior::<CallableBehavior>()
+                    .and_then(|cb| cb.receiver());
 
                 if receivers_match(&struct_receiver, &protocol_receiver) {
                     matches.push((protocol.clone(), protocol_method.clone()));
                 } else {
                     // Receiver kind mismatch - report error
                     let protocol_name = protocol.metadata().name().value.clone();
-                    diagnostics.throw(
-                        ProtocolMethodReceiverMismatchError {
-                            span: method_span.clone(),
-                            method_name: method_name.clone(),
-                            protocol_name,
-                            expected_receiver: receiver_kind_to_string(&protocol_receiver),
-                            actual_receiver: receiver_kind_to_string(&struct_receiver),
-                        });
+                    diagnostics.throw(ProtocolMethodReceiverMismatchError {
+                        span: method_span.clone(),
+                        method_name: method_name.clone(),
+                        protocol_name,
+                        expected_receiver: receiver_kind_to_string(&protocol_receiver),
+                        actual_receiver: receiver_kind_to_string(&struct_receiver),
+                    });
                 }
             }
         }
@@ -140,19 +164,16 @@ pub fn link_protocol_methods_for_struct(
                 .map(|(p, _)| p.metadata().name().value.clone())
                 .collect();
 
-            diagnostics.throw(
-                AmbiguousProtocolMethodError {
-                    span: method_span,
-                    method_name: method_name.clone(),
-                    protocols: protocol_names,
-                });
+            diagnostics.throw(AmbiguousProtocolMethodError {
+                span: method_span,
+                method_name: method_name.clone(),
+                protocols: protocol_names,
+            });
         } else if matches.len() == 1 {
             // Exactly one match - add ImplementsBehavior
             let (protocol, protocol_method) = &matches[0];
-            let implements_behavior = ImplementsBehavior::new(
-                protocol.metadata().id(),
-                protocol_method.metadata().id(),
-            );
+            let implements_behavior =
+                ImplementsBehavior::new(protocol.metadata().id(), protocol_method.metadata().id());
 
             struct_method.metadata().add_behavior(implements_behavior);
         }
@@ -184,7 +205,8 @@ fn resolve_protocol_type(
 
             // Add Self -> struct type binding
             let self_type = struct_dyn
-                .typed_behavior()
+                .metadata()
+                .get_behavior::<TypedBehavior>()
                 .map(|tb| SignatureType::from_ty(tb.ty()))
                 .unwrap_or_else(|| SignatureType::Named(vec![struct_name.to_string()]));
             bindings.insert("Self".to_string(), self_type);
@@ -238,7 +260,9 @@ fn collect_associated_type_bindings(
 }
 
 /// Collect all methods from a symbol
-fn collect_methods_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec<Arc<FunctionSymbol>> {
+fn collect_methods_from_symbol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Vec<Arc<FunctionSymbol>> {
     symbol
         .metadata()
         .children()
@@ -281,7 +305,10 @@ fn collect_protocol_methods_recursive(
 
     // First, collect methods from inherited protocols
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-    if let Some(conformances_behavior) = protocol_dyn.conformances_behavior() {
+    if let Some(conformances_behavior) = protocol_dyn
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+    {
         for inherited_ty in conformances_behavior.conformances() {
             if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
                 collect_protocol_methods_recursive(symbol, model, methods, visited);
@@ -347,18 +374,19 @@ fn substitute_associated_types(
                 sig_type.clone()
             }
         }
-        SignatureType::Tuple(elements) => {
-            SignatureType::Tuple(
-                elements
-                    .iter()
-                    .map(|e| substitute_associated_types(e, bindings))
-                    .collect(),
-            )
-        }
+        SignatureType::Tuple(elements) => SignatureType::Tuple(
+            elements
+                .iter()
+                .map(|e| substitute_associated_types(e, bindings))
+                .collect(),
+        ),
         SignatureType::Array(element) => {
             SignatureType::Array(Box::new(substitute_associated_types(element, bindings)))
         }
-        SignatureType::Function { params, return_type } => SignatureType::Function {
+        SignatureType::Function {
+            params,
+            return_type,
+        } => SignatureType::Function {
             params: params
                 .iter()
                 .map(|p| substitute_associated_types(p, bindings))

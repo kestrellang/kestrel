@@ -47,7 +47,11 @@ impl WhereClause {
         self.constraints
             .iter()
             .filter_map(|c| match c {
-                Constraint::TypeBound { param: Some(id), bounds, .. } if *id == param_id => Some(bounds),
+                Constraint::TypeBound {
+                    param: Some(id),
+                    bounds,
+                    ..
+                } if *id == param_id => Some(bounds),
                 Constraint::TypeBound { .. } => None,
                 // Inherited associated type bounds don't apply to type parameters
                 Constraint::InheritedAssociatedTypeBound { .. } => None,
@@ -117,13 +121,28 @@ pub enum Constraint {
 
 impl Constraint {
     /// Create a new type bound constraint with a resolved parameter
-    pub fn type_bound(param: SymbolId, param_name: String, param_span: Span, bounds: Vec<Ty>) -> Self {
-        Constraint::TypeBound { param: Some(param), param_name, param_span, bounds }
+    pub fn type_bound(
+        param: SymbolId,
+        param_name: String,
+        param_span: Span,
+        bounds: Vec<Ty>,
+    ) -> Self {
+        Constraint::TypeBound {
+            param: Some(param),
+            param_name,
+            param_span,
+            bounds,
+        }
     }
 
     /// Create a new type bound constraint with an unresolved (undeclared) parameter
     pub fn unresolved_type_bound(param_name: String, param_span: Span, bounds: Vec<Ty>) -> Self {
-        Constraint::TypeBound { param: None, param_name, param_span, bounds }
+        Constraint::TypeBound {
+            param: None,
+            param_name,
+            param_span,
+            bounds,
+        }
     }
 
     /// Create an inherited associated type bound constraint
@@ -208,8 +227,8 @@ impl Constraint {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_empty_where_clause() {
@@ -224,7 +243,8 @@ mod tests {
         // Use error type as placeholder for protocol bound in test
         let bound = Ty::error(Span::from(0..8));
 
-        let constraint = Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
+        let constraint =
+            Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         assert!(!wc.is_empty());
@@ -241,7 +261,8 @@ mod tests {
         // Use error type as placeholder for protocol bound in test
         let bound = Ty::error(Span::from(0..8));
 
-        let constraint = Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
+        let constraint =
+            Constraint::type_bound(param_id, "T".to_string(), Span::from(0..1), vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         // Looking for bounds on a different param
@@ -253,7 +274,8 @@ mod tests {
     fn test_unresolved_constraint() {
         // Use error type as placeholder for protocol bound in test
         let bound = Ty::error(Span::from(0..8));
-        let constraint = Constraint::unresolved_type_bound("U".to_string(), Span::from(0..1), vec![bound]);
+        let constraint =
+            Constraint::unresolved_type_bound("U".to_string(), Span::from(0..1), vec![bound]);
 
         assert!(constraint.is_unresolved());
         assert_eq!(constraint.param_name(), "U");

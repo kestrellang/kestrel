@@ -6,8 +6,8 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 use crate::{
     behavior::callable::{CallableBehavior, CallableSignature, SignatureType},
     behavior::function_data::FunctionDataBehavior,
+    behavior::generics::GenericsBehavior,
     behavior::visibility::VisibilityBehavior,
-    behavior_ext::BehaviorExt,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::local::{Local, LocalId},
@@ -133,7 +133,9 @@ impl FunctionSymbol {
     ///
     /// Returns `None` if bind phase hasn't occurred yet (CallableBehavior is added during bind).
     fn get_callable(&self) -> Option<CallableBehavior> {
-        self.metadata.callable_behavior()
+        self.metadata
+            .get_behavior::<CallableBehavior>()
+            .map(|b| (*b).clone())
     }
 
     /// Get the callable behavior (cloned)
@@ -168,7 +170,14 @@ impl FunctionSymbol {
     pub fn signature(&self) -> CallableSignature {
         self.get_callable()
             .map(|c| c.signature(&self.metadata.name().value))
-            .unwrap_or_else(|| CallableSignature::new(self.metadata.name().value.clone(), vec![], vec![], SignatureType::Unit))
+            .unwrap_or_else(|| {
+                CallableSignature::new(
+                    self.metadata.name().value.clone(),
+                    vec![],
+                    vec![],
+                    SignatureType::Unit,
+                )
+            })
     }
 
     /// Get the function signature as a Ty::Function
@@ -185,7 +194,12 @@ impl FunctionSymbol {
     /// Returns a list of external labels (or None for unlabeled parameters).
     pub fn parameter_labels(&self) -> Vec<Option<String>> {
         self.get_callable()
-            .map(|c| c.parameters().iter().map(|p| p.external_label().map(|s| s.to_string())).collect())
+            .map(|c| {
+                c.parameters()
+                    .iter()
+                    .map(|p| p.external_label().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -195,7 +209,7 @@ impl FunctionSymbol {
     /// TypeParameter children directly. After BIND, it uses the GenericsBehavior.
     pub fn type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
         // First try GenericsBehavior (available after BIND)
-        if let Some(g) = self.metadata.generics_behavior() {
+        if let Some(g) = self.metadata.get_behavior::<GenericsBehavior>() {
             return g.type_parameters().to_vec();
         }
 
@@ -216,7 +230,7 @@ impl FunctionSymbol {
     /// Check if this function is generic (has type parameters)
     pub fn is_generic(&self) -> bool {
         self.metadata
-            .generics_behavior()
+            .get_behavior::<GenericsBehavior>()
             .map(|g| g.is_generic())
             .unwrap_or(false)
     }
@@ -227,7 +241,7 @@ impl FunctionSymbol {
     /// TypeParameter children. After BIND, it uses the GenericsBehavior.
     pub fn type_parameter_count(&self) -> usize {
         // First try GenericsBehavior (available after BIND)
-        if let Some(g) = self.metadata.generics_behavior() {
+        if let Some(g) = self.metadata.get_behavior::<GenericsBehavior>() {
             return g.type_parameter_count();
         }
 
@@ -244,7 +258,7 @@ impl FunctionSymbol {
     /// Delegates to GenericsBehavior. Returns empty where clause if not yet bound.
     pub fn where_clause(&self) -> WhereClause {
         self.metadata
-            .generics_behavior()
+            .get_behavior::<GenericsBehavior>()
             .map(|g| g.where_clause().clone())
             .unwrap_or_else(WhereClause::new)
     }

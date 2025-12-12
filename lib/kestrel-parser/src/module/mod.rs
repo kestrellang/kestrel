@@ -7,8 +7,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::{emit_module_path, module_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
-use crate::common::{module_declaration_parser_internal, emit_module_path};
 
 /// Represents a module declaration: module A.B.C
 ///
@@ -125,7 +125,10 @@ mod tests {
         let path = ModulePath { syntax: tree };
 
         assert_eq!(path.segment_count(), 3);
-        assert_eq!(path.segment_names(), vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        assert_eq!(
+            path.segment_names(),
+            vec!["A".to_string(), "B".to_string(), "C".to_string()]
+        );
 
         // Verify syntax tree: A.B.C = 3 identifiers + 2 dots = 5 tokens
         assert_eq!(path.syntax.kind(), SyntaxKind::ModulePath);
@@ -151,7 +154,10 @@ mod tests {
         let path = decl.path();
 
         assert_eq!(path.segment_count(), 3);
-        assert_eq!(path.segment_names(), vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        assert_eq!(
+            path.segment_names(),
+            vec!["A".to_string(), "B".to_string(), "C".to_string()]
+        );
 
         // Verify syntax tree structure
         assert_eq!(decl.syntax.kind(), SyntaxKind::ModuleDeclaration);

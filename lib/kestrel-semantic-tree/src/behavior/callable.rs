@@ -229,7 +229,12 @@ pub struct MethodLookupKey {
 
 impl CallableSignature {
     /// Create a new signature
-    pub fn new(name: String, labels: Vec<Option<String>>, param_types: Vec<SignatureType>, return_type: SignatureType) -> Self {
+    pub fn new(
+        name: String,
+        labels: Vec<Option<String>>,
+        param_types: Vec<SignatureType>,
+        return_type: SignatureType,
+    ) -> Self {
         Self {
             name,
             labels,
@@ -258,11 +263,9 @@ impl CallableSignature {
             .labels
             .iter()
             .zip(self.param_types.iter())
-            .map(|(label, ty)| {
-                match label {
-                    Some(l) => format!("{}: {:?}", l, ty),
-                    None => format!("_: {:?}", ty),
-                }
+            .map(|(label, ty)| match label {
+                Some(l) => format!("{}: {:?}", l, ty),
+                None => format!("_: {:?}", ty),
             })
             .collect();
 
@@ -392,17 +395,14 @@ impl CallableBehavior {
 
     /// Get parameter labels for display/debugging
     pub fn parameter_labels(&self) -> Vec<Option<&str>> {
-        self.parameters
-            .iter()
-            .map(|p| p.external_label())
-            .collect()
+        self.parameters.iter().map(|p| p.external_label()).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
     use kestrel_span::Spanned;
 
     fn make_name(s: &str) -> Name {

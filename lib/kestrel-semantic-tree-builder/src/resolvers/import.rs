@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use kestrel_semantic_model::{SymbolFor, ResolveModulePath};
+use kestrel_parser::import::ImportDeclaration;
+use kestrel_semantic_model::{ResolveModulePath, SymbolFor};
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::import::{ImportSymbol, ImportDataBehavior, ImportItem};
+use kestrel_semantic_tree::symbol::import::{ImportDataBehavior, ImportItem, ImportSymbol};
 use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use kestrel_parser::import::ImportDeclaration;
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::{Resolver, BindingContext};
+use crate::resolver::{BindingContext, Resolver};
 use crate::syntax::get_node_span;
 
 /// Resolver for import declarations
@@ -45,7 +45,11 @@ impl Resolver for ImportResolver {
         let import_name = if let Some(ref alias) = alias {
             alias.clone()
         } else {
-            module_path_segments.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(".")
+            module_path_segments
+                .iter()
+                .map(|(s, _)| s.as_str())
+                .collect::<Vec<_>>()
+                .join(".")
         };
 
         // NOTE: Span may be incorrect due to rowan position calculation issue
@@ -58,7 +62,8 @@ impl Resolver for ImportResolver {
         let import_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(import_symbol);
 
         // Store import data in behavior for bind phase
-        let import_data = ImportDataBehavior::new(module_path_segments, module_path_span, alias, items);
+        let import_data =
+            ImportDataBehavior::new(module_path_segments, module_path_span, alias, items);
         import_arc.metadata().add_behavior(import_data);
 
         // Add to parent
@@ -137,17 +142,15 @@ fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<I
         .into_iter()
         .filter_map(|item_node| {
             // Get the name (first identifier) and its span
-            let (name, span) = item_node
-                .children_with_tokens()
-                .find_map(|elem| {
-                    elem.as_token()
-                        .filter(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| {
-                            let range = t.text_range();
-                            let span: Span = Span::from(range.start().into()..range.end().into());
-                            (t.text().to_string(), span)
-                        })
-                })?;
+            let (name, span) = item_node.children_with_tokens().find_map(|elem| {
+                elem.as_token()
+                    .filter(|t| t.kind() == SyntaxKind::Identifier)
+                    .map(|t| {
+                        let range = t.text_range();
+                        let span: Span = Span::from(range.start().into()..range.end().into());
+                        (t.text().to_string(), span)
+                    })
+            })?;
 
             // Check for alias (identifier after "as" keyword)
             let mut found_as = false;
@@ -172,5 +175,3 @@ fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<I
         })
         .collect()
 }
-
-

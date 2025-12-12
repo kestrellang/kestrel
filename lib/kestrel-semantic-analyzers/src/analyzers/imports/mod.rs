@@ -231,8 +231,8 @@ struct NameSource {
 }
 
 fn get_visibility_info(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (String, kestrel_span::Span) {
-    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
-    match symbol.visibility_behavior() {
+    use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+    match symbol.metadata().get_behavior::<VisibilityBehavior>() {
         Some(vb) => {
             let vis_str = match vb.visibility() {
                 Some(v) => v.to_string(),

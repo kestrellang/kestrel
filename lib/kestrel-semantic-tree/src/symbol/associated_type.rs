@@ -5,7 +5,7 @@ use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::{typed::TypedBehavior, visibility::VisibilityBehavior, KestrelBehaviorKind},
+    behavior::{KestrelBehaviorKind, typed::TypedBehavior, visibility::VisibilityBehavior},
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     ty::Ty,
@@ -72,7 +72,11 @@ impl AssociatedTypeSymbol {
             .behaviors()
             .into_iter()
             .find(|b| matches!(b.kind(), KestrelBehaviorKind::AssociatedTypeBounds))
-            .and_then(|b| b.as_ref().downcast_ref::<AssociatedTypeBoundsBehavior>().cloned())
+            .and_then(|b| {
+                b.as_ref()
+                    .downcast_ref::<AssociatedTypeBoundsBehavior>()
+                    .cloned()
+            })
             .map(|b| b.bounds().to_vec())
     }
 

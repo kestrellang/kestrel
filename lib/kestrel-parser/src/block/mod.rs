@@ -11,10 +11,10 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::event::{EventSink, TreeBuilder};
 use crate::common::skip_trivia;
-use crate::expr::{expr_parser, ExprVariant, emit_expr_variant};
-use crate::stmt::{stmt_parser, StmtVariant, emit_stmt_variant};
+use crate::event::{EventSink, TreeBuilder};
+use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
+use crate::stmt::{StmtVariant, emit_stmt_variant, stmt_parser};
 
 /// Represents a code block
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,13 +36,9 @@ impl CodeBlock {
         // Check if there are no statement or expression children
         self.syntax
             .children()
-            .filter(|child| {
-                matches!(
-                    child.kind(),
-                    SyntaxKind::Statement | SyntaxKind::Expression
-                )
-            })
-            .count() == 0
+            .filter(|child| matches!(child.kind(), SyntaxKind::Statement | SyntaxKind::Expression))
+            .count()
+            == 0
     }
 
     /// Check if the block has a trailing expression (no semicolon)
@@ -50,12 +46,7 @@ impl CodeBlock {
         // If the last child (excluding closing brace) is an Expression, it's trailing
         self.syntax
             .children()
-            .filter(|child| {
-                matches!(
-                    child.kind(),
-                    SyntaxKind::Statement | SyntaxKind::Expression
-                )
-            })
+            .filter(|child| matches!(child.kind(), SyntaxKind::Statement | SyntaxKind::Expression))
             .last()
             .map(|child| child.kind() == SyntaxKind::Expression)
             .unwrap_or(false)
@@ -98,23 +89,20 @@ pub fn code_block_parser() -> impl Parser<Token, CodeBlockData, Error = Simple<T
         .then(code_block_items_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with_span(|_, span| Span::from(span)))
+                .ignore_then(just(Token::RBrace).map_with_span(|_, span| Span::from(span))),
         )
-        .map(|((lbrace, items), rbrace)| {
-            CodeBlockData {
-                lbrace,
-                items,
-                rbrace,
-            }
+        .map(|((lbrace, items), rbrace)| CodeBlockData {
+            lbrace,
+            items,
+            rbrace,
         })
 }
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon)
 fn is_statement_like_expr(expr: &ExprVariant) -> bool {
-    matches!(expr,
-        ExprVariant::If { .. }
-        | ExprVariant::While { .. }
-        | ExprVariant::Loop { .. }
+    matches!(
+        expr,
+        ExprVariant::If { .. } | ExprVariant::While { .. } | ExprVariant::Loop { .. }
     )
 }
 
@@ -140,40 +128,36 @@ fn code_block_items_parser() -> impl Parser<Token, Vec<BlockItem>, Error = Simpl
     // 2. A statement-like expression followed by more content (not at end)
 
     // Parse a single block item (not the trailing expression)
-    let block_item = stmt_parser()
-        .map(BlockItem::Statement)
-        .or(
-            // Try to parse a statement-like expression
-            // We need to look ahead to see if there's more content after it
-            expr_parser()
-                .then(
-                    // Check if there's a semicolon (making it a regular statement)
-                    skip_trivia()
-                        .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
-                        .map(Some)
-                        .or(empty().map(|_| None))
-                )
-                .try_map(|(expr, maybe_semi), span| {
-                    if let Some(semi) = maybe_semi {
-                        // Has semicolon - it's a regular expression statement
-                        Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi)))
-                    } else if is_statement_like_expr(&expr) {
-                        // No semicolon but it's statement-like - OK
-                        Ok(BlockItem::StatementExpr(expr))
-                    } else {
-                        // No semicolon and not statement-like - fail, let it be parsed as trailing
-                        Err(Simple::custom(span, "expected semicolon"))
-                    }
-                })
-        );
+    let block_item = stmt_parser().map(BlockItem::Statement).or(
+        // Try to parse a statement-like expression
+        // We need to look ahead to see if there's more content after it
+        expr_parser()
+            .then(
+                // Check if there's a semicolon (making it a regular statement)
+                skip_trivia()
+                    .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
+                    .map(Some)
+                    .or(empty().map(|_| None)),
+            )
+            .try_map(|(expr, maybe_semi), span| {
+                if let Some(semi) = maybe_semi {
+                    // Has semicolon - it's a regular expression statement
+                    Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi)))
+                } else if is_statement_like_expr(&expr) {
+                    // No semicolon but it's statement-like - OK
+                    Ok(BlockItem::StatementExpr(expr))
+                } else {
+                    // No semicolon and not statement-like - fail, let it be parsed as trailing
+                    Err(Simple::custom(span, "expected semicolon"))
+                }
+            }),
+    );
 
     block_item
         .repeated()
         .then(
             // Optional trailing expression (any expression without semicolon at the end)
-            expr_parser()
-                .map(BlockItem::TrailingExpression)
-                .or_not()
+            expr_parser().map(BlockItem::TrailingExpression).or_not(),
         )
         .map(|(mut items, trailing)| {
             if let Some(expr) = trailing {

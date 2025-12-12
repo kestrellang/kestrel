@@ -8,8 +8,8 @@
 
 mod extension_registry;
 mod model;
-mod query;
 pub mod queries;
+mod query;
 mod registry;
 mod resolution;
 mod scope;
@@ -17,9 +17,11 @@ mod scope;
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
-    AncestorOfKind, ChildByName, ExtensionsFor, ImportsInScope, InheritedProtocolMember,
-    IsVisibleFrom, ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath, ScopeFor,
-    SymbolFor, VisibleChildren, VisibleChildrenByName,
+    AncestorOfKind, ChildByName, DeclaredName, DeclaredNamesInScope, ExecutableBodyFor,
+    ExtensionMethods, ExtensionsFor, FunctionsInSymbol, GenericsData, GenericsDataFor, HasBody,
+    ImportsInScope, InheritedProtocolMember, IsInsideAny, IsVisibleFrom, ResolveModulePath,
+    ResolveName, ResolveTypePath, ResolveValuePath, ResolvedAliasedType, ScopeFor, StructFieldInfo,
+    StructFields, StructMethods, SymbolFor, VisibleChildren, VisibleChildrenByName,
 };
 pub use query::Query;
 pub use registry::SymbolRegistry;

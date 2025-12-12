@@ -46,7 +46,10 @@ pub fn resolve_expression_statement(
     ctx: &mut BodyResolutionContext,
 ) -> Option<Statement> {
     // Find the expression child
-    if let Some(expr_node) = stmt_node.children().find(|c| c.kind() == SyntaxKind::Expression) {
+    if let Some(expr_node) = stmt_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression)
+    {
         let expr = resolve_expression(&expr_node, ctx);
         let span = get_node_span(stmt_node, ctx.source);
         return Some(Statement::expr(expr, span));
@@ -72,9 +75,14 @@ pub fn resolve_variable_declaration(
     let span = get_node_span(decl_node, ctx.source);
 
     // Determine if let or var
-    let is_mutable = decl_node.children_with_tokens()
+    let is_mutable = decl_node
+        .children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Var);
-    let mutability = if is_mutable { Mutability::Mutable } else { Mutability::Immutable };
+    let mutability = if is_mutable {
+        Mutability::Mutable
+    } else {
+        Mutability::Immutable
+    };
 
     // Extract name
     let name = extract_var_name(decl_node)?;
@@ -84,7 +92,8 @@ pub fn resolve_variable_declaration(
 
     // Extract initializer (if any)
     // Also validate that it's not a standalone type parameter reference
-    let value = decl_node.children()
+    let value = decl_node
+        .children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
         .map(|expr_node| {
             let expr = resolve_expression(&expr_node, ctx);
@@ -93,14 +102,20 @@ pub fn resolve_variable_declaration(
 
     // Determine the type from annotation or initializer
     let resolved_ty = ty.unwrap_or_else(|| {
-        value.as_ref()
+        value
+            .as_ref()
             .map(|e| e.ty.clone())
             .unwrap_or_else(|| Ty::type_var(span.clone()))
     });
 
     // Bind the local variable
     let name_span = get_name_span(decl_node, ctx.source).unwrap_or(span.clone());
-    let local_id = ctx.local_scope.bind(name.clone(), resolved_ty.clone(), is_mutable, name_span.clone());
+    let local_id = ctx.local_scope.bind(
+        name.clone(),
+        resolved_ty.clone(),
+        is_mutable,
+        name_span.clone(),
+    );
 
     // Create the pattern
     let pattern = Pattern::local(local_id, mutability, name, resolved_ty, name_span);
@@ -113,14 +128,16 @@ fn extract_var_name(decl_node: &SyntaxNode) -> Option<String> {
     // Look for Name node
     if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
         // Get identifier token from Name
-        return name_node.children_with_tokens()
+        return name_node
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::Identifier)
             .map(|t| t.text().to_string());
     }
 
     // Fallback: look for bare Identifier
-    decl_node.children_with_tokens()
+    decl_node
+        .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| t.text().to_string())
@@ -139,7 +156,8 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
     use crate::resolution::TypeResolver;
 
     // Look for Ty node
-    decl_node.children()
+    decl_node
+        .children()
         .find(|c| c.kind() == SyntaxKind::Ty)
         .map(|ty_node| {
             // Resolve the type using the database

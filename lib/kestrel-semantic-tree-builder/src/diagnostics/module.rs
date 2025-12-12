@@ -14,7 +14,7 @@ impl IntoDiagnostic for NoModuleDeclarationError {
             .with_message("no module declaration found in file")
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("module declaration should appear here")
+                    .with_message("module declaration should appear here"),
             ])
             .with_notes(vec![
                 "Every Kestrel file must start with a module declaration.".to_string(),
@@ -36,7 +36,10 @@ impl IntoDiagnostic for ModuleNotFirstError {
             .with_message("module declaration must be the first statement in the file")
             .with_labels(vec![
                 Label::secondary(self.first_item_span.file_id, self.first_item_span.range())
-                    .with_message(format!("{} appears before module declaration", self.first_item_kind)),
+                    .with_message(format!(
+                        "{} appears before module declaration",
+                        self.first_item_kind
+                    )),
                 Label::primary(self.module_span.file_id, self.module_span.range())
                     .with_message("module declaration should be first"),
             ])
@@ -63,7 +66,7 @@ impl IntoDiagnostic for MultipleModuleDeclarationsError {
         for (i, span) in self.duplicate_spans.iter().enumerate() {
             labels.push(
                 Label::secondary(span.file_id, span.range())
-                    .with_message(format!("duplicate module declaration #{}", i + 2))
+                    .with_message(format!("duplicate module declaration #{}", i + 2)),
             );
         }
 

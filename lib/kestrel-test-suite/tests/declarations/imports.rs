@@ -7,10 +7,17 @@ mod basic {
     fn import_entire_module() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct PublicClass {}"),
-            ("consumer.ks", "module Consumer\nimport Library\nstruct UsesPublic {}"),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library\nstruct UsesPublic {}",
+            ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(
+            Symbol::new("PublicClass")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
         .expect(Symbol::new("UsesPublic").is(SymbolKind::Struct));
     }
 
@@ -42,7 +49,11 @@ mod basic {
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(
+            Symbol::new("PublicClass")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
         .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 
@@ -56,7 +67,11 @@ mod basic {
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(
+            Symbol::new("PublicClass")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
         .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 }
@@ -77,8 +92,16 @@ mod nested_modules {
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
-        .expect(Symbol::new("Circle").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("Circle")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
         .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 
@@ -113,8 +136,16 @@ mod nested_modules {
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("Polynomial").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
-        .expect(Symbol::new("Equation").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(
+            Symbol::new("Polynomial")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("Equation")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
         .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 }
@@ -142,15 +173,21 @@ mod visibility {
 
     #[test]
     fn internal_symbols_visible_within_same_module() {
-        Test::with_files(&[
-            (
-                "internal_lib.ks",
-                "module InternalLib\ninternal struct InternalClass {}\npublic struct PublicClass {}",
-            ),
-        ])
+        Test::with_files(&[(
+            "internal_lib.ks",
+            "module InternalLib\ninternal struct InternalClass {}\npublic struct PublicClass {}",
+        )])
         .expect(Compiles)
-        .expect(Symbol::new("InternalClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Internal)))
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)));
+        .expect(
+            Symbol::new("InternalClass")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        )
+        .expect(
+            Symbol::new("PublicClass")
+                .is(SymbolKind::Struct)
+                .has(Behavior::Visibility(Visibility::Public)),
+        );
     }
 }
 
@@ -188,7 +225,10 @@ mod errors {
     fn error_on_importing_nonexistent_nested_module() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Foo {}"),
-            ("consumer.ks", "module Consumer\nimport Library.Nonexistent\nstruct Bar {}"),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library.Nonexistent\nstruct Bar {}",
+            ),
         ])
         .expect(HasError("module 'Library.Nonexistent' not found"));
     }
@@ -197,7 +237,10 @@ mod errors {
     fn error_on_importing_nonexistent_item_from_module() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Foo {}"),
-            ("consumer.ks", "module Consumer\nimport Library.(Bar)\nstruct Test {}"),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library.(Bar)\nstruct Test {}",
+            ),
         ])
         .expect(HasError("symbol 'Bar' not found in module 'Library'"));
     }
@@ -205,17 +248,31 @@ mod errors {
     #[test]
     fn error_on_importing_nonexistent_item_from_nested_module() {
         Test::with_files(&[
-            ("math_geometry.ks", "module Math.Geometry\npublic struct Point {}"),
-            ("consumer.ks", "module Consumer\nimport Math.Geometry.(Circle)\nstruct Test {}"),
+            (
+                "math_geometry.ks",
+                "module Math.Geometry\npublic struct Point {}",
+            ),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Math.Geometry.(Circle)\nstruct Test {}",
+            ),
         ])
-        .expect(HasError("symbol 'Circle' not found in module 'Math.Geometry'"));
+        .expect(HasError(
+            "symbol 'Circle' not found in module 'Math.Geometry'",
+        ));
     }
 
     #[test]
     fn error_on_importing_private_item() {
         Test::with_files(&[
-            ("library.ks", "module Library\nprivate struct PrivateClass {}\npublic struct PublicClass {}"),
-            ("consumer.ks", "module Consumer\nimport Library.(PrivateClass)\nstruct Test {}"),
+            (
+                "library.ks",
+                "module Library\nprivate struct PrivateClass {}\npublic struct PublicClass {}",
+            ),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library.(PrivateClass)\nstruct Test {}",
+            ),
         ])
         .expect(HasError("'PrivateClass' is not accessible"));
     }
@@ -232,8 +289,14 @@ mod errors {
     #[ignore = "Internal visibility across modules - needs investigation of import context"]
     fn error_on_importing_internal_item_from_different_module() {
         Test::with_files(&[
-            ("library.ks", "module Library\ninternal struct InternalClass {}\npublic struct PublicClass {}"),
-            ("consumer.ks", "module Consumer\nimport Library.(InternalClass)\nstruct Test {}"),
+            (
+                "library.ks",
+                "module Library\ninternal struct InternalClass {}\npublic struct PublicClass {}",
+            ),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library.(InternalClass)\nstruct Test {}",
+            ),
         ])
         .expect(HasError("'InternalClass' is not accessible"));
     }
@@ -242,7 +305,10 @@ mod errors {
     fn error_on_duplicate_import_same_item() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Foo {}"),
-            ("consumer.ks", "module Consumer\nimport Library.(Foo)\nimport Library.(Foo)\nstruct Test {}"),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library.(Foo)\nimport Library.(Foo)\nstruct Test {}",
+            ),
         ])
         .expect(HasError("'Foo' is already imported"));
     }
@@ -251,7 +317,10 @@ mod errors {
     fn error_when_imported_item_conflicts_with_local_declaration() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Widget {}"),
-            ("consumer.ks", "module Consumer\nimport Library\nstruct Widget {}"),
+            (
+                "consumer.ks",
+                "module Consumer\nimport Library\nstruct Widget {}",
+            ),
         ])
         .expect(HasError("'Widget' is already declared"));
     }
@@ -261,9 +330,11 @@ mod errors {
         Test::with_files(&[
             ("library_a.ks", "module LibraryA\npublic struct Widget {}"),
             ("library_b.ks", "module LibraryB\npublic struct Widget {}"),
-            ("consumer.ks", "module Consumer\nimport LibraryA.(Widget)\nimport LibraryB\nstruct Test {}"),
+            (
+                "consumer.ks",
+                "module Consumer\nimport LibraryA.(Widget)\nimport LibraryB\nstruct Test {}",
+            ),
         ])
         .expect(HasError("'Widget' is already imported"));
     }
 }
-

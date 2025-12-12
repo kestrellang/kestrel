@@ -3,8 +3,7 @@ use std::sync::Arc;
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_model::ExecutableBodyFor;
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
@@ -18,44 +17,77 @@ use diagnostics::MissingReturnError;
 
 pub struct ExhaustiveReturnAnalyzer;
 
-impl ExhaustiveReturnAnalyzer { pub fn new() -> Self { Self } }
-impl Default for ExhaustiveReturnAnalyzer { fn default() -> Self { Self::new() } }
+impl ExhaustiveReturnAnalyzer {
+    pub fn new() -> Self {
+        Self
+    }
+}
+impl Default for ExhaustiveReturnAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Analyzer for ExhaustiveReturnAnalyzer {
-    fn name(&self) -> &'static str { "exhaustive_return" }
+    fn name(&self) -> &'static str {
+        "exhaustive_return"
+    }
 
-    fn visit_symbol(&mut self, symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut AnalysisContext) {
+    fn visit_symbol(
+        &mut self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        ctx: &mut AnalysisContext,
+    ) {
         // Only check functions
-        if symbol.metadata().kind() != KestrelSymbolKind::Function { return; }
+        if symbol.metadata().kind() != KestrelSymbolKind::Function {
+            return;
+        }
 
         // Downcast to FunctionSymbol
-        let Some(func) = symbol.as_any().downcast_ref::<FunctionSymbol>() else { return; };
+        let Ok(func) = symbol.clone().downcast_arc::<FunctionSymbol>() else {
+            return;
+        };
 
         // Skip unit return types
         let return_ty = func.return_type();
-        if is_unit_type(return_ty.kind()) { return; }
-
-        // Get body
-        if let Some(body) = get_executable_body(symbol) {
-            let state = analyze_block(&body.statements, body.yield_expr.as_deref());
-            if !state.definitely_returns() {
-                let func_name = symbol.metadata().name().value.clone();
-                let span = symbol.metadata().declaration_span().clone();
-                ctx.report(MissingReturnError { span, func_name });
-            }
+        if is_unit_type(return_ty.kind()) {
+            return;
         }
+
+        let symbol_id = symbol.metadata().id();
+        let Some(body) = ctx.model.query(ExecutableBodyFor { symbol_id }) else {
+            return;
+        };
+        let state = analyze_block(&body.statements, body.yield_expr.as_deref());
+        if state.definitely_returns() {
+            return;
+        }
+
+        let func_name = symbol.metadata().name().value.clone();
+        let span = symbol.metadata().declaration_span().clone();
+        ctx.report(MissingReturnError { span, func_name });
     }
 }
 
 fn is_unit_type(kind: &TyKind) -> bool {
-    match kind { TyKind::Unit => true, TyKind::Tuple(elements) => elements.is_empty(), _ => false }
+    match kind {
+        TyKind::Unit => true,
+        TyKind::Tuple(elements) => elements.is_empty(),
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReturnState { Returns, Diverges, MayFallThrough }
+enum ReturnState {
+    Returns,
+    Diverges,
+    MayFallThrough,
+}
 
 impl ReturnState {
-    fn definitely_returns(self) -> bool { matches!(self, ReturnState::Returns | ReturnState::Diverges) }
+    fn definitely_returns(self) -> bool {
+        matches!(self, ReturnState::Returns | ReturnState::Diverges)
+    }
     fn merge(self, other: ReturnState) -> ReturnState {
         match (self, other) {
             (ReturnState::Returns, ReturnState::Returns) => ReturnState::Returns,
@@ -70,13 +102,17 @@ impl ReturnState {
 fn analyze_block(statements: &[Statement], yield_expr: Option<&Expression>) -> ReturnState {
     let mut state = ReturnState::MayFallThrough;
     for stmt in statements {
-        if state.definitely_returns() { return state; }
+        if state.definitely_returns() {
+            return state;
+        }
         state = analyze_statement(stmt);
     }
     if !state.definitely_returns() {
         if let Some(expr) = yield_expr {
             let expr_state = analyze_expression(expr);
-            if expr_state.definitely_returns() { return expr_state; }
+            if expr_state.definitely_returns() {
+                return expr_state;
+            }
             return ReturnState::Returns;
         }
     }
@@ -85,7 +121,9 @@ fn analyze_block(statements: &[Statement], yield_expr: Option<&Expression>) -> R
 
 fn analyze_statement(stmt: &Statement) -> ReturnState {
     match &stmt.kind {
-        StatementKind::Binding { value: Some(expr), .. } => analyze_expression(expr),
+        StatementKind::Binding {
+            value: Some(expr), ..
+        } => analyze_expression(expr),
         StatementKind::Binding { value: None, .. } => ReturnState::MayFallThrough,
         StatementKind::Expr(expr) => analyze_expression(expr),
     }
@@ -95,21 +133,36 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
     match &expr.kind {
         ExprKind::Return { .. } => ReturnState::Returns,
         ExprKind::Break { .. } | ExprKind::Continue { .. } => ReturnState::Diverges,
-        ExprKind::If { condition, then_branch, then_value, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             let cond_state = analyze_expression(condition);
-            if cond_state.definitely_returns() { return cond_state; }
+            if cond_state.definitely_returns() {
+                return cond_state;
+            }
             let then_state = analyze_block(then_branch, then_value.as_deref());
             let else_state = if let Some(else_b) = else_branch {
                 match else_b {
-                    ElseBranch::Block { statements, value } => analyze_block(statements, value.as_deref()),
+                    ElseBranch::Block { statements, value } => {
+                        analyze_block(statements, value.as_deref())
+                    }
                     ElseBranch::ElseIf(if_expr) => analyze_expression(if_expr),
                 }
-            } else { ReturnState::MayFallThrough };
+            } else {
+                ReturnState::MayFallThrough
+            };
             then_state.merge(else_state)
         }
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             let cond_state = analyze_expression(condition);
-            if cond_state.definitely_returns() { return cond_state; }
+            if cond_state.definitely_returns() {
+                return cond_state;
+            }
             let _ = analyze_block(body, None);
             ReturnState::MayFallThrough
         }
@@ -117,44 +170,90 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             let mut body_state = ReturnState::MayFallThrough;
             let mut has_break = false;
             for stmt in body {
-                if body_state.definitely_returns() { break; }
+                if body_state.definitely_returns() {
+                    break;
+                }
                 body_state = analyze_statement(stmt);
-                if statement_contains_break(&stmt.kind) { has_break = true; }
+                if statement_contains_break(&stmt.kind) {
+                    has_break = true;
+                }
             }
-            if body_state == ReturnState::Returns { return ReturnState::Returns; }
-            if !has_break && body_state != ReturnState::Returns { return ReturnState::Diverges; }
+            if body_state == ReturnState::Returns {
+                return ReturnState::Returns;
+            }
+            if !has_break && body_state != ReturnState::Returns {
+                return ReturnState::Diverges;
+            }
             ReturnState::MayFallThrough
         }
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             let state = analyze_expression(callee);
-            if state.definitely_returns() { return state; }
-            for arg in arguments { let s = analyze_expression(&arg.value); if s.definitely_returns() { return s; } }
+            if state.definitely_returns() {
+                return state;
+            }
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
             ReturnState::MayFallThrough
         }
         ExprKind::Assignment { target, value } => {
             let state = analyze_expression(value);
-            if state.definitely_returns() { return state; }
+            if state.definitely_returns() {
+                return state;
+            }
             analyze_expression(target)
         }
         ExprKind::Grouping(inner) => analyze_expression(inner),
         ExprKind::Array(elements) => {
-            for e in elements { let s = analyze_expression(e); if s.definitely_returns() { return s; } }
+            for e in elements {
+                let s = analyze_expression(e);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
             ReturnState::MayFallThrough
         }
         ExprKind::Tuple(elements) => {
-            for e in elements { let s = analyze_expression(e); if s.definitely_returns() { return s; } }
+            for e in elements {
+                let s = analyze_expression(e);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
             ReturnState::MayFallThrough
         }
         ExprKind::FieldAccess { object, .. } => analyze_expression(object),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver),
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
-            let s = analyze_expression(receiver); if s.definitely_returns() { return s; }
-            for arg in arguments { let s = analyze_expression(&arg.value); if s.definitely_returns() { return s; } }
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let s = analyze_expression(receiver);
+            if s.definitely_returns() {
+                return s;
+            }
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
             ReturnState::MayFallThrough
         }
         ExprKind::ImplicitStructInit { arguments, .. } => {
-            for arg in arguments { let s = analyze_expression(&arg.value); if s.definitely_returns() { return s; } }
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
             ReturnState::MayFallThrough
         }
         ExprKind::Literal(_)
@@ -170,7 +269,9 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
 fn statement_contains_break(kind: &StatementKind) -> bool {
     match kind {
         StatementKind::Expr(expr) => expr_contains_break(&expr.kind),
-        StatementKind::Binding { value: Some(expr), .. } => expr_contains_break(&expr.kind),
+        StatementKind::Binding {
+            value: Some(expr), ..
+        } => expr_contains_break(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
     }
 }
@@ -178,16 +279,41 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
 fn expr_contains_break(kind: &ExprKind) -> bool {
     match kind {
         ExprKind::Break { .. } => true,
-        ExprKind::If { then_branch, then_value, else_branch, .. } => {
-            for stmt in then_branch { if statement_contains_break(&stmt.kind) { return true; } }
-            if let Some(val) = then_value { if expr_contains_break(&val.kind) { return true; } }
+        ExprKind::If {
+            then_branch,
+            then_value,
+            else_branch,
+            ..
+        } => {
+            for stmt in then_branch {
+                if statement_contains_break(&stmt.kind) {
+                    return true;
+                }
+            }
+            if let Some(val) = then_value {
+                if expr_contains_break(&val.kind) {
+                    return true;
+                }
+            }
             if let Some(else_b) = else_branch {
                 match else_b {
                     ElseBranch::Block { statements, value } => {
-                        for stmt in statements { if statement_contains_break(&stmt.kind) { return true; } }
-                        if let Some(val) = value { if expr_contains_break(&val.kind) { return true; } }
+                        for stmt in statements {
+                            if statement_contains_break(&stmt.kind) {
+                                return true;
+                            }
+                        }
+                        if let Some(val) = value {
+                            if expr_contains_break(&val.kind) {
+                                return true;
+                            }
+                        }
                     }
-                    ElseBranch::ElseIf(if_expr) => { if expr_contains_break(&if_expr.kind) { return true; } }
+                    ElseBranch::ElseIf(if_expr) => {
+                        if expr_contains_break(&if_expr.kind) {
+                            return true;
+                        }
+                    }
                 }
             }
             false
@@ -197,16 +323,3 @@ fn expr_contains_break(kind: &ExprKind) -> bool {
         _ => false,
     }
 }
-
-fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
-    let behaviors = symbol.metadata().behaviors();
-    for b in behaviors.iter() {
-        if matches!(b.kind(), KestrelBehaviorKind::Executable) {
-            if let Some(exec) = b.as_ref().downcast_ref::<ExecutableBehavior>() {
-                return Some(exec.body().clone());
-            }
-        }
-    }
-    None
-}
-

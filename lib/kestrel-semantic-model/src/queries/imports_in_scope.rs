@@ -6,10 +6,10 @@ use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::SymbolId;
 
+use crate::SemanticModel;
 use crate::queries::SymbolFor;
 use crate::query::Query;
 use crate::scope::{Import, ImportItem};
-use crate::SemanticModel;
 
 /// Get all imports in scope for a symbol.
 ///

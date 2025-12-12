@@ -42,7 +42,6 @@ pub enum PatternKind {
         name: String,
     },
     // Future: Tuple, Struct, Wildcard, etc.
-
     /// Error pattern (poison value).
     /// Used when pattern resolution fails - prevents cascading errors.
     Error,
@@ -69,7 +68,13 @@ impl Pattern {
     }
 
     /// Create a local binding pattern.
-    pub fn local(local_id: LocalId, mutability: Mutability, name: String, ty: Ty, span: Span) -> Self {
+    pub fn local(
+        local_id: LocalId,
+        mutability: Mutability,
+        name: String,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
         Pattern {
             kind: PatternKind::Local {
                 local_id,
@@ -127,8 +132,8 @@ impl Pattern {
 
 #[cfg(test)]
 mod tests {
-    use kestrel_span::Span;
     use super::*;
+    use kestrel_span::Span;
 
     #[test]
     fn test_local_pattern() {

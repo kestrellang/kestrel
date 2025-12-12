@@ -6,14 +6,14 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{SemanticModel, SymbolFor, ExtensionsFor, IsVisibleFrom};
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
-use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind};
+use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SemanticModel, SymbolFor};
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
@@ -37,20 +37,20 @@ use super::expressions::resolve_expression;
 use super::members::{resolve_member_call, substitute_callable_self};
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args, format_type,
-    get_callable_behavior, get_type_parameter_bounds_by_id, is_expression_kind, matches_signature,
-    substitute_type, validate_not_standalone_type_param, verify_type_argument_constraints,
-    infer_type_arguments,
+    get_callable_behavior, get_type_parameter_bounds_by_id, infer_type_arguments,
+    is_expression_kind, matches_signature, substitute_type, validate_not_standalone_type_param,
+    verify_type_argument_constraints,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
-pub fn resolve_call_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Find the callee expression (first child that's an Expression)
-    let callee_node = match node.children().find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind())) {
+    let callee_node = match node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+    {
         Some(n) => n,
         None => return Expression::error(span.clone()),
     };
@@ -59,7 +59,9 @@ pub fn resolve_call_expression(
     let explicit_type_args = extract_type_arguments_from_callee(&callee_node, ctx);
 
     // Find the argument list
-    let arg_list_node = node.children().find(|c| c.kind() == SyntaxKind::ArgumentList);
+    let arg_list_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ArgumentList);
 
     // Resolve callee first
     let callee = resolve_expression(&callee_node, ctx);
@@ -72,12 +74,17 @@ pub fn resolve_call_expression(
     };
 
     // Get labels for overload resolution (owned strings)
-    let arg_labels: Vec<Option<String>> = arguments.iter()
-        .map(|a| a.label.clone())
-        .collect();
+    let arg_labels: Vec<Option<String>> = arguments.iter().map(|a| a.label.clone()).collect();
 
     // Now resolve based on callee type
-    resolve_call(callee, arguments, &arg_labels, explicit_type_args, span, ctx)
+    resolve_call(
+        callee,
+        arguments,
+        &arg_labels,
+        explicit_type_args,
+        span,
+        ctx,
+    )
 }
 
 /// Extract type arguments from a callee expression node.
@@ -213,10 +220,7 @@ fn extract_type_arguments_from_callee(
 }
 
 /// Resolve an argument list node into CallArguments
-fn resolve_argument_list(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Vec<CallArgument> {
+fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
     let mut arguments = Vec::new();
 
     for child in node.children() {
@@ -231,10 +235,7 @@ fn resolve_argument_list(
 }
 
 /// Resolve a single argument node
-fn resolve_argument(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Option<CallArgument> {
+fn resolve_argument(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Option<CallArgument> {
     let span = get_node_span(node, ctx.source);
 
     // Check for label (Identifier followed by Colon)
@@ -259,19 +260,19 @@ fn resolve_argument(
 
     // Find the value expression
     // Also validate that it's not a standalone type parameter reference
-    let value_node = node.children()
+    let value_node = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))?;
 
     let value = resolve_expression(&value_node, ctx);
     let value = validate_not_standalone_type_param(value, ctx);
 
-    Some(CallArgument::unlabeled(value, span))
-        .map(|mut arg| {
-            if let Some(l) = label {
-                arg.label = Some(l);
-            }
-            arg
-        })
+    Some(CallArgument::unlabeled(value, span)).map(|mut arg| {
+        if let Some(l) = label {
+            arg.label = Some(l);
+        }
+        arg
+    })
 }
 
 /// Resolve a call with the given callee, arguments, and optional explicit type arguments
@@ -289,9 +290,14 @@ pub fn resolve_call(
 
     match callee_kind {
         // Direct function reference
-        ExprKind::SymbolRef(symbol_id) => {
-            resolve_single_function_call(symbol_id, callee, arguments, explicit_type_args, span, ctx)
-        }
+        ExprKind::SymbolRef(symbol_id) => resolve_single_function_call(
+            symbol_id,
+            callee,
+            arguments,
+            explicit_type_args,
+            span,
+            ctx,
+        ),
 
         // Overloaded function reference - need to pick one
         ExprKind::OverloadedRef(ref candidates) => {
@@ -299,12 +305,26 @@ pub fn resolve_call(
         }
 
         // Method reference (from member access on a type)
-        ExprKind::MethodRef { ref receiver, ref candidates, ref method_name } => {
-            resolve_method_call(receiver, candidates, method_name, arguments, arg_labels, explicit_type_args, span, ctx)
-        }
+        ExprKind::MethodRef {
+            ref receiver,
+            ref candidates,
+            ref method_name,
+        } => resolve_method_call(
+            receiver,
+            candidates,
+            method_name,
+            arguments,
+            arg_labels,
+            explicit_type_args,
+            span,
+            ctx,
+        ),
 
         // Field access - might be method call on struct
-        ExprKind::FieldAccess { ref object, ref field } => {
+        ExprKind::FieldAccess {
+            ref object,
+            ref field,
+        } => {
             // This could be:
             // 1. A field with callable type (first-class function)
             // 2. A method call
@@ -312,9 +332,14 @@ pub fn resolve_call(
         }
 
         // Type reference - struct instantiation
-        ExprKind::TypeRef(symbol_id) => {
-            resolve_struct_instantiation(symbol_id, arguments, arg_labels, explicit_type_args, span, ctx)
-        }
+        ExprKind::TypeRef(symbol_id) => resolve_struct_instantiation(
+            symbol_id,
+            arguments,
+            arg_labels,
+            explicit_type_args,
+            span,
+            ctx,
+        ),
 
         // Type parameter reference - init call on type parameter (T())
         ExprKind::TypeParameterRef(symbol_id) => {
@@ -407,15 +432,12 @@ fn resolve_single_function_call(
             type_name,
             method_name,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
     // Check arity and labels
-    let arg_labels: Vec<Option<String>> = arguments.iter()
-        .map(|a| a.label.clone())
-        .collect();
+    let arg_labels: Vec<Option<String>> = arguments.iter().map(|a| a.label.clone()).collect();
 
     if !matches_signature(&callable, arguments.len(), &arg_labels) {
         // Report error - wrong arity or labels
@@ -429,8 +451,7 @@ fn resolve_single_function_call(
             provided_arity: arguments.len(),
             available_overloads,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -555,7 +576,9 @@ fn resolve_single_function_call(
 }
 
 /// Collect a single overload description from a symbol.
-fn collect_single_overload_description(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> OverloadDescription {
+fn collect_single_overload_description(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> OverloadDescription {
     let name = symbol.metadata().name().value.clone();
     let callable = get_callable_behavior(symbol);
 
@@ -566,11 +589,8 @@ fn collect_single_overload_description(symbol: &Arc<dyn Symbol<KestrelLanguage>>
                 .iter()
                 .map(|p| p.external_label().map(|s| s.to_string()))
                 .collect();
-            let param_types: Vec<String> = cb
-                .parameters()
-                .iter()
-                .map(|p| format_type(&p.ty))
-                .collect();
+            let param_types: Vec<String> =
+                cb.parameters().iter().map(|p| format_type(&p.ty)).collect();
 
             OverloadDescription {
                 name,
@@ -606,7 +626,12 @@ fn resolve_overloaded_call(
                 if matches_signature(&callable, arguments.len(), arg_labels) {
                     let return_ty = callable.return_type().clone();
                     // Functions are not mutable lvalues
-                    let resolved_callee = Expression::symbol_ref(candidate_id, callee.ty.clone(), false, callee.span.clone());
+                    let resolved_callee = Expression::symbol_ref(
+                        candidate_id,
+                        callee.ty.clone(),
+                        false,
+                        callee.span.clone(),
+                    );
                     return Expression::call(resolved_callee, arguments, return_ty, span);
                 }
             }
@@ -624,8 +649,7 @@ fn resolve_overloaded_call(
         provided_arity: arguments.len(),
         available_overloads,
     };
-    ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic());
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -670,11 +694,27 @@ pub fn resolve_struct_instantiation(
 
     if !explicit_inits.is_empty() {
         // Has explicit initializers - find matching one
-        return resolve_explicit_init_call(&explicit_inits, arguments, arg_labels, explicit_type_args, span, symbol.clone(), ctx);
+        return resolve_explicit_init_call(
+            &explicit_inits,
+            arguments,
+            arg_labels,
+            explicit_type_args,
+            span,
+            symbol.clone(),
+            ctx,
+        );
     }
 
     // No explicit initializers - try implicit memberwise init
-    resolve_implicit_init(symbol_id, arguments, arg_labels, explicit_type_args, span, symbol.clone(), ctx)
+    resolve_implicit_init(
+        symbol_id,
+        arguments,
+        arg_labels,
+        explicit_type_args,
+        span,
+        symbol.clone(),
+        ctx,
+    )
 }
 
 /// Resolve a call to an explicit initializer
@@ -704,7 +744,12 @@ fn resolve_explicit_init_call(
                 // For explicit init, create a Call expression
                 // Initializers are not mutable lvalues
                 let init_id = init_sym.metadata().id();
-                let init_ref = Expression::symbol_ref(init_id, Ty::type_var(span.clone()), false, span.clone());
+                let init_ref = Expression::symbol_ref(
+                    init_id,
+                    Ty::type_var(span.clone()),
+                    false,
+                    span.clone(),
+                );
                 return Expression::call(init_ref, arguments, struct_ty, span);
             }
         }
@@ -905,7 +950,13 @@ pub fn resolve_method_call(
                         span.clone(),
                     );
 
-                    return Expression::generic_call(method_ref, arguments, call_substitutions, return_ty, span);
+                    return Expression::generic_call(
+                        method_ref,
+                        arguments,
+                        call_substitutions,
+                        return_ty,
+                        span,
+                    );
                 }
             }
         }
@@ -923,8 +974,7 @@ pub fn resolve_method_call(
         provided_arity: arguments.len(),
         available_overloads,
     };
-    ctx.diagnostics
-        .add_diagnostic(error.into_diagnostic());
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
 
     Expression::error(span)
 }
@@ -940,7 +990,10 @@ fn get_function_name_from_candidates(candidates: &[SymbolId], model: &SemanticMo
 }
 
 /// Collect overload descriptions from a list of candidate symbol IDs.
-pub fn collect_overload_descriptions(candidates: &[SymbolId], model: &SemanticModel) -> Vec<OverloadDescription> {
+pub fn collect_overload_descriptions(
+    candidates: &[SymbolId],
+    model: &SemanticModel,
+) -> Vec<OverloadDescription> {
     let mut descriptions = Vec::new();
 
     for &candidate_id in candidates {
@@ -1009,8 +1062,7 @@ fn resolve_type_parameter_init_call(
             member_name: "init".to_string(),
             type_param_name,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1035,8 +1087,7 @@ fn resolve_type_parameter_init_call(
             type_param_name,
             bound_names,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1080,8 +1131,7 @@ fn resolve_type_parameter_init_call(
             provided_arity: arguments.len(),
             available_inits,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1109,8 +1159,7 @@ fn resolve_type_parameter_init_call(
             protocol_names,
             definition_spans,
         };
-        ctx.diagnostics
-            .add_diagnostic(error.into_diagnostic());
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
         return Expression::error(span);
     }
 
@@ -1160,7 +1209,7 @@ fn collect_protocol_initializers(
     }
 
     // Search inherited protocols
-    if let Some(conformances) = protocol.conformances_behavior() {
+    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
         for parent_proto_ty in conformances.conformances() {
             if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
                 collect_protocol_initializers(parent, self_replacement, candidates);

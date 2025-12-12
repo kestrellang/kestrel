@@ -25,11 +25,7 @@ pub mod primitives {
     pub const SELF_TYPE: &str = "Self";
 
     /// All primitive type names for iteration
-    pub const ALL: &[&str] = &[
-        INT, I8, I16, I32, I64,
-        FLOAT, F32, F64,
-        BOOL, STRING,
-    ];
+    pub const ALL: &[&str] = &[INT, I8, I16, I32, I64, FLOAT, F32, F64, BOOL, STRING];
 
     /// Check if a name is a primitive type
     pub fn is_primitive(name: &str) -> bool {

@@ -12,30 +12,45 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::module::{ModuleDeclaration, parse_module_declaration};
-use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::protocol::{ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal};
-use crate::r#struct::{StructDeclaration, parse_struct_declaration, struct_declaration_parser_internal};
-use crate::extension::{ExtensionDeclaration, parse_extension_declaration, extension_declaration_parser_internal};
+use crate::common::{
+    ExtensionDeclarationData,
+    FieldDeclarationData,
+    FunctionDeclarationData,
+    ProtocolDeclarationData,
+    // Shared data types
+    StructDeclarationData,
+    TypeAliasDeclarationData,
+    emit_extension_declaration,
+    emit_field_declaration,
+    emit_function_declaration,
+    emit_import_declaration,
+    // Shared emitters
+    emit_module_declaration,
+    emit_protocol_declaration,
+    emit_struct_declaration,
+    emit_type_alias_declaration,
+    field_declaration_parser_internal,
+    function_declaration_parser_internal,
+    import_declaration_parser_internal,
+    module_declaration_parser_internal,
+    skip_trivia,
+};
+use crate::event::EventSink;
+use crate::extension::{
+    ExtensionDeclaration, extension_declaration_parser_internal, parse_extension_declaration,
+};
 use crate::field::{FieldDeclaration, parse_field_declaration};
 use crate::function::{FunctionDeclaration, parse_function_declaration};
-use crate::type_alias::{TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal};
-use crate::event::EventSink;
-use crate::common::{
-    module_declaration_parser_internal, import_declaration_parser_internal,
-    function_declaration_parser_internal, field_declaration_parser_internal,
-    skip_trivia,
-    // Shared emitters
-    emit_module_declaration, emit_import_declaration,
-    emit_struct_declaration, emit_protocol_declaration,
-    emit_extension_declaration,
-    emit_function_declaration, emit_field_declaration,
-    emit_type_alias_declaration,
-    // Shared data types
-    StructDeclarationData, ProtocolDeclarationData,
-    ExtensionDeclarationData,
-    FunctionDeclarationData, FieldDeclarationData,
-    TypeAliasDeclarationData,
+use crate::import::{ImportDeclaration, parse_import_declaration};
+use crate::module::{ModuleDeclaration, parse_module_declaration};
+use crate::protocol::{
+    ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
+};
+use crate::r#struct::{
+    StructDeclaration, parse_struct_declaration, struct_declaration_parser_internal,
+};
+use crate::type_alias::{
+    TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
 };
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
@@ -85,7 +100,12 @@ impl DeclarationItem {
 #[derive(Debug, Clone)]
 enum DeclarationItemData {
     Module(Span, Vec<Span>),
-    Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
+    Import(
+        Span,
+        Vec<Span>,
+        Option<Span>,
+        Option<Vec<(Span, Option<Span>)>>,
+    ),
     Protocol(ProtocolDeclarationData),
     Struct(StructDeclarationData),
     Extension(ExtensionDeclarationData),
@@ -115,7 +135,10 @@ where
     let mut temp_sink = EventSink::new();
     parse_fn(source, tokens, &mut temp_sink);
 
-    let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
+    let has_errors = temp_sink
+        .events()
+        .iter()
+        .any(|e| matches!(e, crate::event::Event::Error { .. }));
     if !has_errors {
         copy_events(temp_sink, sink);
         true
@@ -128,31 +151,30 @@ where
 ///
 /// This parser ROUTES to the module-specific parsers - it does not implement
 /// parsing logic itself.
-fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
+fn declaration_item_parser_internal()
+-> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
     // Route to module-specific parsers
     let module_parser = module_declaration_parser_internal()
         .map(|(span, path)| DeclarationItemData::Module(span, path));
 
-    let import_parser = import_declaration_parser_internal()
-        .map(|(import_span, path, alias, items)| DeclarationItemData::Import(import_span, path, alias, items));
+    let import_parser =
+        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
+            DeclarationItemData::Import(import_span, path, alias, items)
+        });
 
-    let protocol_parser = protocol_declaration_parser_internal()
-        .map(DeclarationItemData::Protocol);
+    let protocol_parser = protocol_declaration_parser_internal().map(DeclarationItemData::Protocol);
 
-    let struct_parser = struct_declaration_parser_internal()
-        .map(DeclarationItemData::Struct);
+    let struct_parser = struct_declaration_parser_internal().map(DeclarationItemData::Struct);
 
-    let extension_parser = extension_declaration_parser_internal()
-        .map(DeclarationItemData::Extension);
+    let extension_parser =
+        extension_declaration_parser_internal().map(DeclarationItemData::Extension);
 
-    let function_parser = function_declaration_parser_internal()
-        .map(DeclarationItemData::Function);
+    let function_parser = function_declaration_parser_internal().map(DeclarationItemData::Function);
 
-    let field_parser = field_declaration_parser_internal()
-        .map(DeclarationItemData::Field);
+    let field_parser = field_declaration_parser_internal().map(DeclarationItemData::Field);
 
-    let type_alias_parser = type_alias_declaration_parser_internal()
-        .map(DeclarationItemData::TypeAlias);
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(DeclarationItemData::TypeAlias);
 
     // Try parsers in order - more specific first
     module_parser
@@ -166,7 +188,8 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
 }
 
 /// Internal Chumsky parser for multiple declaration items
-fn declaration_items_parser_internal() -> impl Parser<Token, Vec<DeclarationItemData>, Error = Simple<Token>> + Clone {
+fn declaration_items_parser_internal()
+-> impl Parser<Token, Vec<DeclarationItemData>, Error = Simple<Token>> + Clone {
     declaration_item_parser_internal()
         .repeated()
         .at_least(0)
@@ -214,14 +237,30 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     // Try each parser in order until one succeeds
-    if try_parse(source, tokens.clone(), sink, parse_module_declaration) { return; }
-    if try_parse(source, tokens.clone(), sink, parse_import_declaration) { return; }
-    if try_parse(source, tokens.clone(), sink, parse_protocol_declaration) { return; }
-    if try_parse(source, tokens.clone(), sink, parse_struct_declaration) { return; }
-    if try_parse(source, tokens.clone(), sink, parse_extension_declaration) { return; }
-    if try_parse(source, tokens.clone(), sink, parse_function_declaration) { return; }
-    if try_parse(source, tokens.clone(), sink, parse_field_declaration) { return; }
-    if try_parse(source, tokens, sink, parse_type_alias_declaration) { return; }
+    if try_parse(source, tokens.clone(), sink, parse_module_declaration) {
+        return;
+    }
+    if try_parse(source, tokens.clone(), sink, parse_import_declaration) {
+        return;
+    }
+    if try_parse(source, tokens.clone(), sink, parse_protocol_declaration) {
+        return;
+    }
+    if try_parse(source, tokens.clone(), sink, parse_struct_declaration) {
+        return;
+    }
+    if try_parse(source, tokens.clone(), sink, parse_extension_declaration) {
+        return;
+    }
+    if try_parse(source, tokens.clone(), sink, parse_function_declaration) {
+        return;
+    }
+    if try_parse(source, tokens.clone(), sink, parse_field_declaration) {
+        return;
+    }
+    if try_parse(source, tokens, sink, parse_type_alias_declaration) {
+        return;
+    }
 
     // All failed - emit error
     sink.error_no_span("Expected module, import, protocol, struct, extension, function, field, or type alias declaration".to_string());
@@ -314,7 +353,10 @@ mod tests {
         let has_type_param_list = events.iter().any(|e| {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::TypeParameterList)
         });
-        assert!(has_type_param_list, "Should have TypeParameterList in syntax tree");
+        assert!(
+            has_type_param_list,
+            "Should have TypeParameterList in syntax tree"
+        );
     }
 
     #[test]
@@ -335,8 +377,14 @@ mod tests {
         let has_protocol = events.iter().any(|e| {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::ProtocolDeclaration)
         });
-        assert!(has_protocol, "Should have ProtocolDeclaration in syntax tree");
-        assert!(has_type_param_list, "Should have TypeParameterList in syntax tree");
+        assert!(
+            has_protocol,
+            "Should have ProtocolDeclaration in syntax tree"
+        );
+        assert!(
+            has_type_param_list,
+            "Should have TypeParameterList in syntax tree"
+        );
     }
 
     #[test]
@@ -357,8 +405,14 @@ mod tests {
         let has_function = events.iter().any(|e| {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::FunctionDeclaration)
         });
-        assert!(has_function, "Should have FunctionDeclaration in syntax tree");
-        assert!(has_type_param_list, "Should have TypeParameterList in syntax tree");
+        assert!(
+            has_function,
+            "Should have FunctionDeclaration in syntax tree"
+        );
+        assert!(
+            has_type_param_list,
+            "Should have TypeParameterList in syntax tree"
+        );
     }
 
     #[test]
@@ -380,7 +434,10 @@ mod tests {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::FunctionDeclaration)
         });
         assert!(has_field, "Should have FieldDeclaration in syntax tree");
-        assert!(has_function, "Should have FunctionDeclaration in syntax tree");
+        assert!(
+            has_function,
+            "Should have FunctionDeclaration in syntax tree"
+        );
     }
 
     #[test]
@@ -405,8 +462,14 @@ mod tests {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::StructDeclaration)
         });
         assert!(has_struct, "Should have StructDeclaration in syntax tree");
-        assert_eq!(field_count, 2, "Should have 2 FieldDeclarations in syntax tree");
-        assert!(has_init, "Should have InitializerDeclaration in syntax tree");
+        assert_eq!(
+            field_count, 2,
+            "Should have 2 FieldDeclarations in syntax tree"
+        );
+        assert!(
+            has_init,
+            "Should have InitializerDeclaration in syntax tree"
+        );
     }
 
     #[test]
@@ -441,8 +504,14 @@ mod tests {
         });
 
         assert!(has_extension, "Should have ExtensionDeclaration");
-        assert_eq!(func_count, 2, "Should have 2 FunctionDeclarations (one in extension, one after)");
-        assert_eq!(func_body_count, 2, "Each function should have a FunctionBody");
+        assert_eq!(
+            func_count, 2,
+            "Should have 2 FunctionDeclarations (one in extension, one after)"
+        );
+        assert_eq!(
+            func_body_count, 2,
+            "Each function should have a FunctionBody"
+        );
     }
 
     #[test]
@@ -465,7 +534,10 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
 
         // Find all FunctionDeclaration nodes
-        fn find_nodes(node: &kestrel_syntax_tree::SyntaxNode, kind: SyntaxKind) -> Vec<kestrel_syntax_tree::SyntaxNode> {
+        fn find_nodes(
+            node: &kestrel_syntax_tree::SyntaxNode,
+            kind: SyntaxKind,
+        ) -> Vec<kestrel_syntax_tree::SyntaxNode> {
             let mut result = Vec::new();
             if node.kind() == kind {
                 result.push(node.clone());
@@ -481,8 +553,14 @@ mod tests {
 
         // Each FunctionDeclaration should have a FunctionBody child
         for (i, func_decl) in func_decls.iter().enumerate() {
-            let has_body = func_decl.children().any(|c| c.kind() == SyntaxKind::FunctionBody);
-            assert!(has_body, "FunctionDeclaration #{} should have FunctionBody as direct child", i);
+            let has_body = func_decl
+                .children()
+                .any(|c| c.kind() == SyntaxKind::FunctionBody);
+            assert!(
+                has_body,
+                "FunctionDeclaration #{} should have FunctionBody as direct child",
+                i
+            );
         }
     }
 }

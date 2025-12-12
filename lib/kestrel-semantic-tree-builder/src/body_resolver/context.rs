@@ -107,7 +107,9 @@ impl<'a> BodyResolutionContext<'a> {
             }
             Some(label_name) => {
                 // Search for labeled loop (from innermost to outermost)
-                self.loop_stack.iter().rev()
+                self.loop_stack
+                    .iter()
+                    .rev()
                     .find(|info| info.label.as_deref() == Some(label_name))
                     .map(|info| info.loop_id)
             }
@@ -121,20 +123,23 @@ impl<'a> BodyResolutionContext<'a> {
 }
 
 /// Resolve a function body syntax node into a CodeBlock
-pub fn resolve_function_body(
-    body_node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> CodeBlock {
+pub fn resolve_function_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> CodeBlock {
     // FunctionBody contains either a CodeBlock or a single Expression
     // FunctionBody -> { CodeBlock } | { Expression }
 
     // Check for CodeBlock child
-    if let Some(code_block) = body_node.children().find(|c| c.kind() == SyntaxKind::CodeBlock) {
+    if let Some(code_block) = body_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::CodeBlock)
+    {
         return resolve_code_block(&code_block, ctx);
     }
 
     // Check for Expression child (shorthand: func foo() -> Int = 42)
-    if let Some(expr_node) = body_node.children().find(|c| c.kind() == SyntaxKind::Expression) {
+    if let Some(expr_node) = body_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression)
+    {
         let expr = resolve_expression(&expr_node, ctx);
         return CodeBlock::new(vec![], Some(expr));
     }
@@ -144,10 +149,7 @@ pub fn resolve_function_body(
 }
 
 /// Resolve a code block (statements + optional yield expression)
-pub fn resolve_code_block(
-    block_node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> CodeBlock {
+pub fn resolve_code_block(block_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> CodeBlock {
     ctx.local_scope.push_scope();
 
     let mut statements = Vec::new();
@@ -210,14 +212,20 @@ pub fn resolve_and_attach_body(
     use kestrel_semantic_model::SymbolFor;
 
     // Verify it can be downcast to FunctionSymbol
-    if function_symbol.as_ref().downcast_ref::<FunctionSymbol>().is_none() {
+    if function_symbol
+        .as_ref()
+        .downcast_ref::<FunctionSymbol>()
+        .is_none()
+    {
         return;
     }
 
     // Create a new Arc for the function (we need to create LocalScope)
     // Since we already have a FunctionSymbol reference, we need to work around this
     // by getting it from the model
-    let Some(func_arc) = model.query(SymbolFor { id: function_symbol.metadata().id() }) else {
+    let Some(func_arc) = model.query(SymbolFor {
+        id: function_symbol.metadata().id(),
+    }) else {
         return;
     };
 
@@ -241,7 +249,8 @@ pub fn resolve_and_attach_body(
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
-        ctx.local_scope.bind(param_name, param_ty, false, param_span);
+        ctx.local_scope
+            .bind(param_name, param_ty, false, param_span);
     }
 
     // Resolve the body
@@ -268,7 +277,8 @@ fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> Loca
     // The actual local binding will go to this dummy, but that's okay
     // because we're attaching ExecutableBehavior to the real function
     let name = Spanned::new("__body_resolver_temp".to_string(), Span::from(0..0));
-    let visibility = VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
+    let visibility =
+        VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
     let return_type = Ty::unit(Span::from(0..0));
     let dummy_func = Arc::new(FunctionSymbol::new(
         name,

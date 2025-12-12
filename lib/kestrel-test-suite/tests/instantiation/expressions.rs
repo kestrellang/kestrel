@@ -3,23 +3,29 @@
 //! These tests exercise the new Expression, Statement, and CodeBlock types
 //! to ensure they work correctly with the semantic tree.
 
-use kestrel_test_suite::*;
 use kestrel_span::Span;
+use kestrel_test_suite::*;
 
 mod expression_types {
     use super::*;
 
     #[test]
     fn expression_struct_creation() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind, LiteralValue};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression, LiteralValue};
 
         // Test creating various expression types directly
         let int_expr = Expression::integer(42, Span::from(0..2));
-        assert!(matches!(int_expr.kind, ExprKind::Literal(LiteralValue::Integer(42))));
+        assert!(matches!(
+            int_expr.kind,
+            ExprKind::Literal(LiteralValue::Integer(42))
+        ));
         assert!(int_expr.ty.is_int());
 
         let float_expr = Expression::float(3.14, Span::from(0..4));
-        assert!(matches!(int_expr.kind, ExprKind::Literal(LiteralValue::Integer(_))));
+        assert!(matches!(
+            int_expr.kind,
+            ExprKind::Literal(LiteralValue::Integer(_))
+        ));
         assert!(float_expr.ty.is_float());
 
         let string_expr = Expression::string("hello".to_string(), Span::from(0..7));
@@ -34,8 +40,8 @@ mod expression_types {
 
     #[test]
     fn expression_array_creation() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
-        use kestrel_semantic_tree::ty::{Ty, IntBits};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
+        use kestrel_semantic_tree::ty::{IntBits, Ty};
 
         let elements = vec![
             Expression::integer(1, Span::from(1..2)),
@@ -51,7 +57,7 @@ mod expression_types {
 
     #[test]
     fn expression_tuple_creation() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
 
         let elements = vec![
             Expression::integer(1, Span::from(1..2)),
@@ -65,7 +71,7 @@ mod expression_types {
 
     #[test]
     fn expression_grouping_creation() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
 
         let inner = Expression::integer(42, Span::from(1..3));
         let grouped = Expression::grouping(inner, Span::from(0..4));
@@ -77,9 +83,9 @@ mod expression_types {
 
     #[test]
     fn expression_local_ref() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
         use kestrel_semantic_tree::symbol::local::LocalId;
-        use kestrel_semantic_tree::ty::{Ty, IntBits};
+        use kestrel_semantic_tree::ty::{IntBits, Ty};
 
         let local_id = LocalId(0);
         let ty = Ty::int(IntBits::I64, Span::from(0..3));
@@ -91,8 +97,8 @@ mod expression_types {
 
     #[test]
     fn expression_symbol_ref() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
-        use kestrel_semantic_tree::ty::{Ty, IntBits};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
+        use kestrel_semantic_tree::ty::{IntBits, Ty};
         use semantic_tree::symbol::SymbolId;
 
         let symbol_id = SymbolId::new();
@@ -105,7 +111,7 @@ mod expression_types {
 
     #[test]
     fn expression_overloaded_ref() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
         use semantic_tree::symbol::SymbolId;
 
         let candidates = vec![SymbolId::new(), SymbolId::new(), SymbolId::new()];
@@ -150,7 +156,10 @@ mod statement_types {
         assert!(stmt.is_binding());
         assert!(!stmt.is_expr());
         assert_eq!(stmt.pattern().and_then(|p| p.local_id()), Some(LocalId(0)));
-        assert_eq!(stmt.pattern().and_then(|p| p.mutability()), Some(Mutability::Immutable));
+        assert_eq!(
+            stmt.pattern().and_then(|p| p.mutability()),
+            Some(Mutability::Immutable)
+        );
     }
 
     #[test]
@@ -174,7 +183,10 @@ mod statement_types {
         assert!(stmt.is_binding());
         assert!(!stmt.is_expr());
         assert_eq!(stmt.pattern().and_then(|p| p.local_id()), Some(LocalId(1)));
-        assert_eq!(stmt.pattern().and_then(|p| p.mutability()), Some(Mutability::Mutable));
+        assert_eq!(
+            stmt.pattern().and_then(|p| p.mutability()),
+            Some(Mutability::Mutable)
+        );
     }
 
     #[test]
@@ -265,8 +277,16 @@ mod code_block_types {
             Ty::int(IntBits::I64, Span::from(11..12)),
             Span::from(11..12),
         );
-        let stmt1 = Statement::binding(pattern1, Some(Expression::integer(1, Span::from(0..1))), Span::from(0..10));
-        let stmt2 = Statement::binding(pattern2, Some(Expression::integer(2, Span::from(11..12))), Span::from(11..21));
+        let stmt1 = Statement::binding(
+            pattern1,
+            Some(Expression::integer(1, Span::from(0..1))),
+            Span::from(0..10),
+        );
+        let stmt2 = Statement::binding(
+            pattern2,
+            Some(Expression::integer(2, Span::from(11..12))),
+            Span::from(11..21),
+        );
 
         let block = CodeBlock::new(vec![stmt1, stmt2], None);
 
@@ -304,7 +324,11 @@ mod code_block_types {
             Ty::int(IntBits::I64, Span::from(0..1)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::integer(1, Span::from(0..1))), Span::from(0..10));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::integer(1, Span::from(0..1))),
+            Span::from(0..10),
+        );
         let yield_expr = Expression::integer(42, Span::from(11..13));
 
         let block = CodeBlock::new(vec![stmt], Some(yield_expr));
@@ -319,8 +343,8 @@ mod executable_behavior {
     use super::*;
     #[test]
     fn executable_behavior_creation() {
-        use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
         use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+        use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
         use semantic_tree::behavior::Behavior;
 
         let block = CodeBlock::empty();
@@ -346,7 +370,11 @@ mod executable_behavior {
             Ty::int(IntBits::I64, Span::from(0..1)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::integer(1, Span::from(0..1))), Span::from(0..10));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::integer(1, Span::from(0..1))),
+            Span::from(0..10),
+        );
         let yield_expr = Expression::integer(42, Span::from(11..13));
         let block = CodeBlock::new(vec![stmt], Some(yield_expr));
 
@@ -379,7 +407,11 @@ mod executable_behavior {
             Ty::int(IntBits::I64, Span::from(0..1)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::integer(1, Span::from(0..1))), Span::from(0..10));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::integer(1, Span::from(0..1))),
+            Span::from(0..10),
+        );
         behavior.body_mut().statements.push(stmt);
 
         assert_eq!(behavior.body().statements.len(), 1);
@@ -463,12 +495,22 @@ mod cloning {
             Ty::int(IntBits::I64, Span::from(0..2)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::integer(42, Span::from(0..2))), Span::from(0..10));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::integer(42, Span::from(0..2))),
+            Span::from(0..10),
+        );
         let cloned = stmt.clone();
 
         assert!(cloned.is_binding());
-        assert_eq!(cloned.pattern().and_then(|p| p.local_id()), Some(LocalId(0)));
-        assert_eq!(cloned.pattern().and_then(|p| p.mutability()), Some(Mutability::Immutable));
+        assert_eq!(
+            cloned.pattern().and_then(|p| p.local_id()),
+            Some(LocalId(0))
+        );
+        assert_eq!(
+            cloned.pattern().and_then(|p| p.mutability()),
+            Some(Mutability::Immutable)
+        );
         assert_eq!(cloned.span, Span::from(0..10));
     }
 
@@ -487,12 +529,22 @@ mod cloning {
             Ty::string(Span::from(0..6)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::string("hello".to_string(), Span::from(0..6))), Span::from(0..15));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::string("hello".to_string(), Span::from(0..6))),
+            Span::from(0..15),
+        );
         let cloned = stmt.clone();
 
         assert!(cloned.is_binding());
-        assert_eq!(cloned.pattern().and_then(|p| p.mutability()), Some(Mutability::Mutable));
-        assert_eq!(cloned.pattern().and_then(|p| p.local_id()), Some(LocalId(5)));
+        assert_eq!(
+            cloned.pattern().and_then(|p| p.mutability()),
+            Some(Mutability::Mutable)
+        );
+        assert_eq!(
+            cloned.pattern().and_then(|p| p.local_id()),
+            Some(LocalId(5))
+        );
     }
 
     #[test]
@@ -511,7 +563,11 @@ mod cloning {
             Ty::int(IntBits::I64, Span::from(0..1)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::integer(1, Span::from(0..1))), Span::from(0..10));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::integer(1, Span::from(0..1))),
+            Span::from(0..10),
+        );
         let yield_expr = Expression::integer(42, Span::from(11..13));
         let block = CodeBlock::new(vec![stmt], Some(yield_expr));
         let cloned = block.clone();
@@ -561,7 +617,11 @@ mod cloning {
             Ty::string(Span::from(0..5)),
             Span::from(0..1),
         );
-        let stmt = Statement::binding(pattern, Some(Expression::string("hi".to_string(), Span::from(0..5))), Span::from(0..10));
+        let stmt = Statement::binding(
+            pattern,
+            Some(Expression::string("hi".to_string(), Span::from(0..5))),
+            Span::from(0..10),
+        );
         let block = CodeBlock::new(vec![stmt], Some(Expression::unit(Span::from(11..13))));
         let behavior = ExecutableBehavior::new(block);
         let cloned = behavior.clone();
@@ -575,8 +635,8 @@ mod nested_expressions {
     use super::*;
     #[test]
     fn deeply_nested_array() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
-        use kestrel_semantic_tree::ty::{Ty, IntBits};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
+        use kestrel_semantic_tree::ty::{IntBits, Ty};
 
         // Create [[1, 2], [3, 4]]
         let inner1 = vec![
@@ -605,7 +665,7 @@ mod nested_expressions {
 
     #[test]
     fn nested_tuple_in_array() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
 
         // Create [(1, "a"), (2, "b")]
         let tuple1 = Expression::tuple(
@@ -638,7 +698,7 @@ mod nested_expressions {
 
     #[test]
     fn nested_grouping() {
-        use kestrel_semantic_tree::expr::{Expression, ExprKind};
+        use kestrel_semantic_tree::expr::{ExprKind, Expression};
 
         // Create (((42)))
         let inner = Expression::integer(42, Span::from(3..5));
@@ -677,10 +737,26 @@ mod integration {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("answer").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("greeting").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("nothing").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
-        .expect(Symbol::new("flag").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
+        .expect(
+            Symbol::new("answer")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("greeting")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("nothing")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        )
+        .expect(
+            Symbol::new("flag")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -709,6 +785,10 @@ mod integration {
         )
         .expect(Compiles)
         .expect(Symbol::new("Point").is(SymbolKind::Struct))
-        .expect(Symbol::new("Point.origin").is(SymbolKind::Function).has(Behavior::IsInstanceMethod(true)));
+        .expect(
+            Symbol::new("Point.origin")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsInstanceMethod(true)),
+        );
     }
 }

@@ -10,10 +10,10 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::event::{EventSink, TreeBuilder};
 use crate::common::skip_trivia;
-use crate::ty::{ty_parser, TyVariant, emit_ty_variant};
-use crate::expr::{expr_parser, ExprVariant, emit_expr_variant};
+use crate::event::{EventSink, TreeBuilder};
+use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
+use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
 /// Represents a statement
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,19 +79,19 @@ pub enum StmtVariant {
 /// Parser for variable declaration
 ///
 /// Syntax: let/var name (: Type)? (= expr)? ;
-fn variable_declaration_parser() -> impl Parser<Token, VariableDeclarationData, Error = Simple<Token>> + Clone {
+fn variable_declaration_parser()
+-> impl Parser<Token, VariableDeclarationData, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(
             just(Token::Let)
                 .map_with_span(|_, span| (Span::from(span), false))
-                .or(just(Token::Var).map_with_span(|_, span| (Span::from(span), true)))
+                .or(just(Token::Var).map_with_span(|_, span| (Span::from(span), true))),
         )
         .then(
-            skip_trivia()
-                .ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(Span::from(span)),
-                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                }))
+            skip_trivia().ignore_then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(Span::from(span)),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            })),
         )
         .then(
             // Optional type annotation: : Type
@@ -99,7 +99,7 @@ fn variable_declaration_parser() -> impl Parser<Token, VariableDeclarationData, 
                 .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
                 .then(ty_parser())
                 .map(|(colon, ty)| (colon, ty))
-                .or_not()
+                .or_not(),
         )
         .then(
             // Optional initializer: = expr
@@ -107,33 +107,37 @@ fn variable_declaration_parser() -> impl Parser<Token, VariableDeclarationData, 
                 .ignore_then(just(Token::Equals).map_with_span(|_, span| Span::from(span)))
                 .then(expr_parser())
                 .map(|(eq, expr)| (eq, expr))
-                .or_not()
+                .or_not(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
+                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span))),
         )
-        .map(|(((((mutability_span, is_mutable), name_span), type_annotation), initializer), semicolon)| {
-            VariableDeclarationData {
-                mutability_span,
-                is_mutable,
-                name_span,
-                type_annotation,
-                initializer,
+        .map(
+            |(
+                ((((mutability_span, is_mutable), name_span), type_annotation), initializer),
                 semicolon,
-            }
-        })
+            )| {
+                VariableDeclarationData {
+                    mutability_span,
+                    is_mutable,
+                    name_span,
+                    type_annotation,
+                    initializer,
+                    semicolon,
+                }
+            },
+        )
 }
 
 /// Parser for expression statement
 ///
 /// Syntax: expr ;
-fn expression_statement_parser() -> impl Parser<Token, (ExprVariant, Span), Error = Simple<Token>> + Clone {
-    expr_parser()
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span)))
-        )
+fn expression_statement_parser()
+-> impl Parser<Token, (ExprVariant, Span), Error = Simple<Token>> + Clone {
+    expr_parser().then(
+        skip_trivia().ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span))),
+    )
 }
 
 /// Parser for statements
@@ -143,12 +147,11 @@ fn expression_statement_parser() -> impl Parser<Token, (ExprVariant, Span), Erro
 /// - Expression statements: expr;
 pub fn stmt_parser() -> impl Parser<Token, StmtVariant, Error = Simple<Token>> + Clone {
     // Variable declaration starts with let or var
-    let var_decl = variable_declaration_parser()
-        .map(StmtVariant::VariableDeclaration);
+    let var_decl = variable_declaration_parser().map(StmtVariant::VariableDeclaration);
 
     // Expression statement is any expression followed by semicolon
-    let expr_stmt = expression_statement_parser()
-        .map(|(expr, semi)| StmtVariant::Expression(expr, semi));
+    let expr_stmt =
+        expression_statement_parser().map(|(expr, semi)| StmtVariant::Expression(expr, semi));
 
     // Try variable declaration first, then expression statement
     var_decl.or(expr_stmt)

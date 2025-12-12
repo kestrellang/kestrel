@@ -208,7 +208,6 @@ func test() -> Int {
         .expect(Compiles)
         .expect(Symbol::new("test").is(SymbolKind::Function));
     }
-
 }
 
 mod return_with_complex_expressions {

@@ -25,8 +25,16 @@ func getX(p: Point) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("getX").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("getX")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -51,8 +59,16 @@ func getStartX(line: Line) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("Line").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Line")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
         .expect(
             Symbol::new("getStartX")
                 .is(SymbolKind::Function)
@@ -101,8 +117,16 @@ func example(p: Point) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
-        .expect(Symbol::new("example").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("example")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -173,7 +197,11 @@ func sum(p: Point) -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::FieldCount(2)),
+        )
         .expect(
             Symbol::new("sum")
                 .is(SymbolKind::Function)
@@ -181,4 +209,3 @@ func sum(p: Point) -> Int {
         );
     }
 }
-

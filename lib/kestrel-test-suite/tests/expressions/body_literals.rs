@@ -36,11 +36,36 @@ func getUnit() -> () {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("getInt").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getFloat").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getString").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getBool").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getUnit").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("getInt")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getFloat")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getString")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getBool")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getUnit")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 }
 
@@ -67,9 +92,24 @@ func getMultiElementArray() -> [Int] {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("getSimpleArray").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getNestedArray").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getMultiElementArray").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("getSimpleArray")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getNestedArray")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getMultiElementArray")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -92,8 +132,23 @@ func getGroupedLiteral() -> Int {
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("getSimpleTuple").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getNestedTuple").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
-        .expect(Symbol::new("getGroupedLiteral").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)));
+        .expect(
+            Symbol::new("getSimpleTuple")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getNestedTuple")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        )
+        .expect(
+            Symbol::new("getGroupedLiteral")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 }

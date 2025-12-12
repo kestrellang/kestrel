@@ -37,8 +37,10 @@ public class Vector3D {
 
         // Access the unified semantic model
         if let Some(semantic_model) = compilation.semantic_model() {
-            println!("\n  Semantic model: {} top-level symbols",
-                     semantic_model.root().metadata().children().len());
+            println!(
+                "\n  Semantic model: {} top-level symbols",
+                semantic_model.root().metadata().children().len()
+            );
         }
     }
 

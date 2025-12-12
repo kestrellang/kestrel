@@ -6,7 +6,6 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 use crate::{
     behavior::callable::{CallableBehavior, CallableSignature, SignatureType},
     behavior::visibility::VisibilityBehavior,
-    behavior_ext::BehaviorExt,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::local::{Local, LocalId},
@@ -84,7 +83,9 @@ impl InitializerSymbol {
     ///
     /// Returns `None` if bind phase hasn't occurred yet (CallableBehavior is added during bind).
     fn get_callable(&self) -> Option<CallableBehavior> {
-        self.metadata.callable_behavior()
+        self.metadata
+            .get_behavior::<CallableBehavior>()
+            .map(|b| (*b).clone())
     }
 
     /// Get the callable behavior (cloned)
@@ -111,7 +112,9 @@ impl InitializerSymbol {
     pub fn signature(&self) -> CallableSignature {
         self.get_callable()
             .map(|c| c.signature("init"))
-            .unwrap_or_else(|| CallableSignature::new("init".to_string(), vec![], vec![], SignatureType::Unit))
+            .unwrap_or_else(|| {
+                CallableSignature::new("init".to_string(), vec![], vec![], SignatureType::Unit)
+            })
     }
 
     /// Get parameter labels for display/debugging

@@ -1,11 +1,11 @@
 use crate::source_file::SourceFile;
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser};
+use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_model::SemanticModel;
-use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
-use kestrel_semantic_analyzers::{Analyzer, AnalysisContext, run_all};
 use kestrel_semantic_analyzers::analyzers::DuplicateSymbolAnalyzer;
+use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
+use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
 use kestrel_span::Span;
 
 /// Represents a compiled Kestrel project.
@@ -78,14 +78,16 @@ impl Compilation {
             }
 
             // Phase 3: Add file to the semantic tree builder
-            builder.add_file(&name, &parse_result.tree, &source, &mut diagnostics, file_id);
+            builder.add_file(
+                &name,
+                &parse_result.tree,
+                &source,
+                &mut diagnostics,
+                file_id,
+            );
 
             // Create source file
-            let source_file = SourceFile::new(
-                name,
-                source,
-                parse_result.tree,
-            );
+            let source_file = SourceFile::new(name, source, parse_result.tree);
 
             source_files.push(source_file);
         }
@@ -101,7 +103,9 @@ impl Compilation {
             // Build default analyzers; expand as more validators migrate
             let mut owned = kestrel_semantic_analyzers::default_analyzers();
             let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
-            for a in owned.iter_mut() { analyzers.push(a.as_mut()); }
+            for a in owned.iter_mut() {
+                analyzers.push(a.as_mut());
+            }
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
             run_all(&mut analyzers, &model, &mut ctx);
         }
@@ -153,7 +157,7 @@ impl IntoDiagnostic for LexError {
             .with_message("invalid token")
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("unrecognized token")
+                    .with_message("unrecognized token"),
             ])
     }
 }
@@ -166,14 +170,12 @@ struct ParseErrorDiagnostic {
 
 impl IntoDiagnostic for ParseErrorDiagnostic {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let mut diagnostic = Diagnostic::error()
-            .with_message(&self.message);
+        let mut diagnostic = Diagnostic::error().with_message(&self.message);
 
         // Add span label if available
         if let Some(span) = &self.span {
             diagnostic = diagnostic.with_labels(vec![
-                Label::primary(span.file_id, span.range())
-                    .with_message("error occurred here")
+                Label::primary(span.file_id, span.range()).with_message("error occurred here"),
             ]);
         }
 

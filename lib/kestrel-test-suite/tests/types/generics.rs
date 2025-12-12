@@ -399,7 +399,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(
             Symbol::new("makeBox")
                 .is(SymbolKind::Function)
@@ -421,7 +425,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(
             Symbol::new("unbox")
                 .is(SymbolKind::Function)
@@ -441,7 +449,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("NestedBox").is(SymbolKind::TypeAlias));
     }
 
@@ -455,7 +467,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Map").is(SymbolKind::Struct).has(Behavior::TypeParamCount(2)))
+        .expect(
+            Symbol::new("Map")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(2)),
+        )
         .expect(Symbol::new("StringToInt").is(SymbolKind::TypeAlias));
     }
 
@@ -471,7 +487,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(
             Symbol::new("Container")
                 .is(SymbolKind::Protocol)
@@ -492,7 +512,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(
             Symbol::new("pair")
                 .is(SymbolKind::Function)
@@ -514,7 +538,11 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(
             Symbol::new("transform")
                 .is(SymbolKind::Function)
@@ -577,7 +605,11 @@ mod arity_errors {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Map").is(SymbolKind::Struct).has(Behavior::TypeParamCount(2)))
+        .expect(
+            Symbol::new("Map")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(2)),
+        )
         .expect(Symbol::new("IntMap").is(SymbolKind::TypeAlias))
         .expect(Symbol::new("IntToInt").is(SymbolKind::TypeAlias));
     }
@@ -700,7 +732,11 @@ mod type_alias_resolution {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Identity").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Identity")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("IntAlias").is(SymbolKind::TypeAlias));
     }
 
@@ -714,7 +750,11 @@ mod type_alias_resolution {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Pair").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Pair")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("IntPair").is(SymbolKind::TypeAlias));
     }
 
@@ -729,8 +769,16 @@ mod type_alias_resolution {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
-        .expect(Symbol::new("Boxed").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("Boxed")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("BoxedInt").is(SymbolKind::TypeAlias));
     }
 
@@ -744,7 +792,11 @@ mod type_alias_resolution {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Transformer").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(2)))
+        .expect(
+            Symbol::new("Transformer")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(2)),
+        )
         .expect(Symbol::new("IntToString").is(SymbolKind::TypeAlias));
     }
 
@@ -759,9 +811,21 @@ mod type_alias_resolution {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
-        .expect(Symbol::new("Boxed").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
-        .expect(Symbol::new("DoubleBoxed").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("Boxed")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("DoubleBoxed")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -1051,7 +1115,11 @@ mod edge_cases {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1)),
+        )
         .expect(Symbol::new("Deep").is(SymbolKind::TypeAlias));
     }
 

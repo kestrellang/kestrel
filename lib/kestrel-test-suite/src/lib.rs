@@ -52,16 +52,18 @@
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
-use kestrel_span::Span;
-use kestrel_parser::{parse_source_file, Parser};
+use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_builder::SemanticModel;
+use kestrel_span::Span;
 use semantic_tree::symbol::Symbol as SymbolTrait;
 
 // Re-export commonly used types
@@ -112,7 +114,7 @@ impl Test {
 
     /// Compile the test files and store the result
     fn compile(&mut self) {
-        use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
+        use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
 
         if self.context.is_some() {
             return; // Already compiled
@@ -139,7 +141,10 @@ impl Test {
                     let span = error.span.clone().unwrap_or(Span::from(0..1));
                     let diagnostic = kestrel_reporting::Diagnostic::error()
                         .with_message(&error.message)
-                        .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.range())]);
+                        .with_labels(vec![kestrel_reporting::Label::primary(
+                            file_id,
+                            span.range(),
+                        )]);
                     diagnostics.add_diagnostic(diagnostic);
                 }
             }
@@ -155,10 +160,14 @@ impl Test {
 
         // Run analyzers (during migration we mirror builder validations here)
         {
-            use kestrel_semantic_analyzers::{Analyzer, AnalysisContext, run_all, default_analyzers};
+            use kestrel_semantic_analyzers::{
+                AnalysisContext, Analyzer, default_analyzers, run_all,
+            };
             let mut owned = default_analyzers();
             let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
-            for a in owned.iter_mut() { analyzers.push(a.as_mut()); }
+            for a in owned.iter_mut() {
+                analyzers.push(a.as_mut());
+            }
             let mut ctx = AnalysisContext::new(&model, &mut diagnostics);
             run_all(&mut analyzers, &model, &mut ctx);
         }
@@ -251,10 +260,7 @@ impl Expectable for HasErrorCount {
         if actual == self.0 {
             Ok(())
         } else {
-            Err(format!(
-                "Expected {} error(s), but got {}",
-                self.0, actual
-            ))
+            Err(format!("Expected {} error(s), but got {}", self.0, actual))
         }
     }
 }
@@ -284,9 +290,7 @@ impl Expectable for HasWarning {
             .diagnostics
             .diagnostics()
             .iter()
-            .any(|diag| {
-                diag.severity == Severity::Warning && diag.message.contains(self.0)
-            });
+            .any(|diag| diag.severity == Severity::Warning && diag.message.contains(self.0));
 
         if has_matching_warning {
             Ok(())
@@ -567,7 +571,7 @@ impl Behavior {
     ) -> Result<(), String> {
         match self {
             Behavior::Visibility(expected) => {
-                match symbol.visibility_behavior() {
+                match symbol.metadata().get_behavior::<VisibilityBehavior>() {
                     Some(vb) => {
                         let actual = vb.visibility();
                         let matches = match (actual, expected) {
@@ -826,25 +830,35 @@ fn get_has_body(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> 
 
 /// Helper to get parameter count for a callable
 fn get_parameter_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<usize> {
-    symbol.callable_behavior().map(|cb| cb.arity())
+    symbol
+        .metadata()
+        .get_behavior::<CallableBehavior>()
+        .map(|cb| cb.arity())
 }
 
 /// Helper to get conformance count
 fn get_conformance_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
     symbol
-        .conformances_behavior()
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
         .map(|cb| cb.conformances().len())
         .unwrap_or(0)
 }
 
 /// Helper to check if a function is an instance method
 fn get_is_instance_method(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
-    symbol.callable_behavior().map(|cb| cb.is_instance_method())
+    symbol
+        .metadata()
+        .get_behavior::<CallableBehavior>()
+        .map(|cb| cb.is_instance_method())
 }
 
 /// Helper to get the receiver kind for a function
 fn get_receiver_kind(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<ReceiverKind> {
-    symbol.callable_behavior().and_then(|cb| cb.receiver())
+    symbol
+        .metadata()
+        .get_behavior::<CallableBehavior>()
+        .and_then(|cb| cb.receiver())
 }
 
 /// Helper to get FunctionDataBehavior from a symbol
@@ -864,8 +878,8 @@ fn get_function_data_behavior(
 fn get_implements_protocol_info(
     symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
 ) -> Option<(String, String)> {
-    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 
     // Look for ImplementsBehavior in the symbol's behaviors
     let impl_behavior = symbol

@@ -29,17 +29,18 @@ impl IntoDiagnostic for ModuleNotFoundError {
         Diagnostic::error()
             .with_message(format!("module '{}' not found", partial_path))
             .with_labels(vec![
-                Label::primary(self.failed_segment_span.file_id, self.failed_segment_span.range())
-                    .with_message(format!("no module named '{}'", failed_segment)),
+                Label::primary(
+                    self.failed_segment_span.file_id,
+                    self.failed_segment_span.range(),
+                )
+                .with_message(format!("no module named '{}'", failed_segment)),
                 Label::secondary(self.path_span.file_id, self.path_span.range())
                     .with_message("in this import"),
             ])
-            .with_notes(vec![
-                format!(
-                    "the module '{}' does not exist or is not visible from this scope",
-                    partial_path
-                ),
-            ])
+            .with_notes(vec![format!(
+                "the module '{}' does not exist or is not visible from this scope",
+                partial_path
+            )])
     }
 }
 
@@ -90,17 +91,12 @@ impl IntoDiagnostic for CannotImportFromNonModuleError {
         let path_str = self.path.join(".");
 
         Diagnostic::error()
-            .with_message(format!(
-                "cannot import from '{}': not a module",
-                path_str
-            ))
+            .with_message(format!("cannot import from '{}': not a module", path_str))
             .with_labels(vec![
                 Label::primary(self.path_span.file_id, self.path_span.range())
                     .with_message(format!("this is a {}, not a module", self.symbol_kind)),
             ])
-            .with_notes(vec![
-                "only modules can be imported from".to_string(),
-            ])
+            .with_notes(vec!["only modules can be imported from".to_string()])
     }
 }
 
@@ -158,8 +154,10 @@ impl IntoDiagnostic for SymbolNotVisibleError {
 
         if let Some(decl_span) = &self.declaration_span {
             labels.push(
-                Label::secondary(decl_span.file_id, decl_span.range())
-                    .with_message(format!("'{}' declared as {} here", self.symbol_name, self.visibility)),
+                Label::secondary(decl_span.file_id, decl_span.range()).with_message(format!(
+                    "'{}' declared as {} here",
+                    self.symbol_name, self.visibility
+                )),
             );
         }
 
@@ -168,7 +166,6 @@ impl IntoDiagnostic for SymbolNotVisibleError {
             .with_labels(labels)
     }
 }
-
 
 /// Error when wrong number of type arguments are provided
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,13 +270,19 @@ impl IntoDiagnostic for DefaultOrderingError {
                 self.param_with_default
             ))
             .with_labels(vec![
-                Label::primary(self.with_default_span.file_id, self.with_default_span.range())
-                    .with_message(format!("'{}' has a default", self.param_with_default)),
-                Label::secondary(self.without_default_span.file_id, self.without_default_span.range())
-                    .with_message(format!(
-                        "'{}' has no default and comes later",
-                        self.param_without_default
-                    )),
+                Label::primary(
+                    self.with_default_span.file_id,
+                    self.with_default_span.range(),
+                )
+                .with_message(format!("'{}' has a default", self.param_with_default)),
+                Label::secondary(
+                    self.without_default_span.file_id,
+                    self.without_default_span.range(),
+                )
+                .with_message(format!(
+                    "'{}' has no default and comes later",
+                    self.param_without_default
+                )),
             ])
             .with_notes(vec![
                 "type parameters with defaults must be declared after all required parameters"
@@ -307,7 +310,9 @@ impl IntoDiagnostic for NonProtocolBoundError {
                 Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("'{}' is a {}", self.type_name, self.type_kind)),
             ])
-            .with_notes(vec!["only protocols can be used as type bounds".to_string()])
+            .with_notes(vec![
+                "only protocols can be used as type bounds".to_string(),
+            ])
     }
 }
 
@@ -338,8 +343,7 @@ impl IntoDiagnostic for UndeclaredTypeParameterError {
                 self.name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("not declared"),
+                Label::primary(self.span.file_id, self.span.range()).with_message("not declared"),
             ])
             .with_notes(notes)
     }

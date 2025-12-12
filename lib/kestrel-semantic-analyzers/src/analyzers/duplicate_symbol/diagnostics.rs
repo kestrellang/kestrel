@@ -12,7 +12,10 @@ pub struct DuplicateSymbolError {
 impl IntoDiagnostic for DuplicateSymbolError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("duplicate definition of {} '{}'", self.kind, self.name))
+            .with_message(format!(
+                "duplicate definition of {} '{}'",
+                self.kind, self.name
+            ))
             .with_labels(vec![
                 Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
                     .with_message(format!("{} defined here", self.kind)),
@@ -34,7 +37,10 @@ pub struct DuplicateSymbolDifferentKindError {
 impl IntoDiagnostic for DuplicateSymbolDifferentKindError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("'{}' is already defined as a {}", self.name, self.original_kind))
+            .with_message(format!(
+                "'{}' is already defined as a {}",
+                self.name, self.original_kind
+            ))
             .with_labels(vec![
                 Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
                     .with_message(format!("{} defined here", self.new_kind)),
@@ -43,4 +49,3 @@ impl IntoDiagnostic for DuplicateSymbolDifferentKindError {
             ])
     }
 }
-

@@ -222,7 +222,7 @@ mod error_expectations {
             }
         "#,
         )
-        .expect(HasError("undefined"));  // Actual error message uses "undefined"
+        .expect(HasError("undefined")); // Actual error message uses "undefined"
     }
 }
 

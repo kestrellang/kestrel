@@ -15,10 +15,7 @@ impl IntoDiagnostic for ProtocolMethodHasBodyError {
                 "protocol method '{}' in '{}' cannot have a body",
                 self.method_name, self.protocol_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("body not allowed in protocol method")
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("body not allowed in protocol method")])
     }
 }
-

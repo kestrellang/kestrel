@@ -104,12 +104,11 @@ pub struct CannotAccessMemberOnTypeError {
 impl IntoDiagnostic for CannotAccessMemberOnTypeError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!(
-                "cannot access member on type '{}'",
-                self.base_type
-            ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("member access not supported")])
+            .with_message(format!("cannot access member on type '{}'", self.base_type))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("member access not supported"),
+            ])
             .with_notes(vec![format!(
                 "type '{}' does not have accessible members",
                 self.base_type
@@ -136,8 +135,10 @@ impl IntoDiagnostic for TupleIndexOutOfBoundsError {
                 "tuple index {} is out of bounds for tuple of length {}",
                 self.index, self.tuple_length
             ))
-            .with_labels(vec![Label::primary(self.index_span.file_id, self.index_span.range())
-                .with_message(format!("index {} out of bounds", self.index))])
+            .with_labels(vec![
+                Label::primary(self.index_span.file_id, self.index_span.range())
+                    .with_message(format!("index {} out of bounds", self.index)),
+            ])
             .with_notes(vec![format!(
                 "type '{}' has {} element{}",
                 self.tuple_type,
@@ -164,8 +165,10 @@ impl IntoDiagnostic for TupleIndexOnNonTupleError {
                 "cannot use tuple index on type '{}'",
                 self.base_type
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("not a tuple type")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not a tuple type"),
+            ])
             .with_notes(vec![format!(
                 "tuple indexing (e.g., '.{}') can only be used on tuple types",
                 self.index
@@ -194,11 +197,21 @@ impl IntoDiagnostic for UnconstrainedTypeParameterMemberError {
                 "cannot call '{}' on type '{}'",
                 self.member_name, self.type_param_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("cannot call '{}' on type '{}'", self.member_name, self.type_param_name))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "cannot call '{}' on type '{}'",
+                    self.member_name, self.type_param_name
+                )),
+            ])
             .with_notes(vec![
-                format!("'{}' is a type parameter with no constraints", self.type_param_name),
-                format!("help: add a constraint: `where {}: SomeProtocol`", self.type_param_name),
+                format!(
+                    "'{}' is a type parameter with no constraints",
+                    self.type_param_name
+                ),
+                format!(
+                    "help: add a constraint: `where {}: SomeProtocol`",
+                    self.type_param_name
+                ),
             ])
     }
 }
@@ -228,11 +241,19 @@ impl IntoDiagnostic for MethodNotInBoundsError {
                 "no method '{}' found for type '{}'",
                 self.method_name, self.type_param_name
             ))
-            .with_labels(vec![Label::primary(self.call_span.file_id, self.call_span.range())
-                .with_message("method not found")])
+            .with_labels(vec![
+                Label::primary(self.call_span.file_id, self.call_span.range())
+                    .with_message("method not found"),
+            ])
             .with_notes(vec![
-                format!("'{}' is constrained to: {}", self.type_param_name, bounds_str),
-                format!("none of these protocols have a method named '{}'", self.method_name),
+                format!(
+                    "'{}' is constrained to: {}",
+                    self.type_param_name, bounds_str
+                ),
+                format!(
+                    "none of these protocols have a method named '{}'",
+                    self.method_name
+                ),
             ])
     }
 }
@@ -251,8 +272,10 @@ pub struct AmbiguousConstrainedMethodError {
 
 impl IntoDiagnostic for AmbiguousConstrainedMethodError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let mut labels = vec![Label::primary(self.call_span.file_id, self.call_span.range())
-            .with_message("ambiguous method call")];
+        let mut labels = vec![
+            Label::primary(self.call_span.file_id, self.call_span.range())
+                .with_message("ambiguous method call"),
+        ];
 
         // Add secondary labels for each definition
         for (proto_name, span) in &self.definition_spans {
@@ -292,13 +315,17 @@ pub struct ConstraintNotSatisfiedError {
 
 impl IntoDiagnostic for ConstraintNotSatisfiedError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let mut labels = vec![Label::primary(self.call_span.file_id, self.call_span.range())
-            .with_message("constraint not satisfied")];
+        let mut labels = vec![
+            Label::primary(self.call_span.file_id, self.call_span.range())
+                .with_message("constraint not satisfied"),
+        ];
 
         if let Some(ref span) = self.constraint_span {
             labels.push(
-                Label::secondary(span.file_id, span.range())
-                    .with_message(format!("required by this constraint on '{}'", self.type_param_name)),
+                Label::secondary(span.file_id, span.range()).with_message(format!(
+                    "required by this constraint on '{}'",
+                    self.type_param_name
+                )),
             );
         }
 
@@ -331,8 +358,10 @@ impl IntoDiagnostic for UnsupportedGenericProtocolBoundError {
                 "generic protocol bounds are not yet supported: '{}'",
                 self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("generic protocol bound")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("generic protocol bound"),
+            ])
             .with_notes(vec![
                 "generic protocol bounds require associated types".to_string(),
                 "this feature is coming in a future version".to_string(),
@@ -367,10 +396,15 @@ impl IntoDiagnostic for NoInitInTypeParameterBoundsError {
                 "no initializer found for type parameter '{}'",
                 self.type_param_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("no matching initializer")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("no matching initializer"),
+            ])
             .with_notes(vec![
-                format!("'{}' is constrained to: {}", self.type_param_name, bounds_str),
+                format!(
+                    "'{}' is constrained to: {}",
+                    self.type_param_name, bounds_str
+                ),
                 "none of these protocols have an initializer".to_string(),
             ])
     }
@@ -394,14 +428,17 @@ impl IntoDiagnostic for NoMatchingTypeParameterInitError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let provided = super::call::format_argument_labels(&self.provided_labels);
 
-        let mut labels = vec![Label::primary(self.span.file_id, self.span.range()).with_message(format!(
-            "no matching initializer for {} argument(s) with labels {}",
-            self.provided_arity, provided
-        ))];
+        let mut labels = vec![
+            Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                "no matching initializer for {} argument(s) with labels {}",
+                self.provided_arity, provided
+            )),
+        ];
 
         // Add secondary labels for available initializers
         for init in &self.available_inits {
-            if let (Some(span), Some(def_file_id)) = (&init.definition_span, init.definition_file_id)
+            if let (Some(span), Some(def_file_id)) =
+                (&init.definition_span, init.definition_file_id)
             {
                 labels.push(
                     Label::secondary(def_file_id, span.range())
@@ -443,7 +480,8 @@ pub struct AmbiguousTypeParameterInitError {
 impl IntoDiagnostic for AmbiguousTypeParameterInitError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels = vec![
-            Label::primary(self.span.file_id, self.span.range()).with_message("ambiguous initializer call")
+            Label::primary(self.span.file_id, self.span.range())
+                .with_message("ambiguous initializer call"),
         ];
 
         // Add secondary labels for each definition

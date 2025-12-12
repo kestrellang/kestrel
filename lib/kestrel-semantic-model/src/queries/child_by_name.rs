@@ -5,9 +5,9 @@ use std::sync::Arc;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::SymbolFor;
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Find a child symbol by name (without visibility check).
 ///

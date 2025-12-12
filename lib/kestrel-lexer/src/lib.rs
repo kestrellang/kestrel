@@ -1,6 +1,6 @@
+pub use kestrel_span::{Span, Spanned};
 use logos::Logos;
 use unicode_xid::UnicodeXID;
-pub use kestrel_span::{Span, Spanned};
 
 /// Check if a string is a valid Unicode identifier
 fn is_valid_identifier(lex: &mut logos::Lexer<Token>) -> bool {
@@ -295,7 +295,10 @@ pub type SpannedToken = Spanned<Token>;
 /// Lex source code and return an iterator of tokens with their spans.
 ///
 /// The `file_id` is embedded in each token's span for use in diagnostics.
-pub fn lex(source: &str, file_id: usize) -> impl Iterator<Item = Result<SpannedToken, Spanned<()>>> + '_ {
+pub fn lex(
+    source: &str,
+    file_id: usize,
+) -> impl Iterator<Item = Result<SpannedToken, Spanned<()>>> + '_ {
     Token::lexer(source).spanned().map(move |(token, span)| {
         let span = Span::new(file_id, span);
         token
@@ -313,7 +316,12 @@ mod tests {
         tokens
             .into_iter()
             .filter_map(|t| t.ok())
-            .filter(|t| !matches!(t.value, Token::Whitespace | Token::LineComment | Token::BlockComment))
+            .filter(|t| {
+                !matches!(
+                    t.value,
+                    Token::Whitespace | Token::LineComment | Token::BlockComment
+                )
+            })
             .collect()
     }
 
@@ -335,10 +343,10 @@ mod tests {
         let tokens = filter_trivia(lex(source, 0).collect());
 
         // Verify spans don't overlap and cover the source
-        assert_eq!(tokens[0].span.range(), 0..3);   // "let"
-        assert_eq!(tokens[1].span.range(), 4..5);   // "x"
-        assert_eq!(tokens[2].span.range(), 6..7);   // "="
-        assert_eq!(tokens[3].span.range(), 8..10);  // "42"
+        assert_eq!(tokens[0].span.range(), 0..3); // "let"
+        assert_eq!(tokens[1].span.range(), 4..5); // "x"
+        assert_eq!(tokens[2].span.range(), 6..7); // "="
+        assert_eq!(tokens[3].span.range(), 8..10); // "42"
     }
 
     #[test]

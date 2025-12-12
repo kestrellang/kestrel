@@ -28,7 +28,10 @@ impl IntoDiagnostic for NotAProtocolError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let (main_msg, label_msg) = match self.context {
             NotAProtocolContext::Bound => (
-                format!("'{}' is not a protocol; bound must be a protocol", self.name),
+                format!(
+                    "'{}' is not a protocol; bound must be a protocol",
+                    self.name
+                ),
                 "cannot be used as a type bound",
             ),
             NotAProtocolContext::Conformance => (
@@ -41,12 +44,9 @@ impl IntoDiagnostic for NotAProtocolError {
             ),
         };
 
-        Diagnostic::error()
-            .with_message(main_msg)
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(label_msg)
-            ])
+        Diagnostic::error().with_message(main_msg).with_labels(vec![
+            Label::primary(self.span.file_id, self.span.range()).with_message(label_msg),
+        ])
     }
 }
 
@@ -63,14 +63,15 @@ impl IntoDiagnostic for CircularProtocolInheritanceError {
         let cycle_str = self.cycle.join(" -> ");
 
         Diagnostic::error()
-            .with_message(format!("protocol '{}' has circular inheritance", self.protocol_name))
+            .with_message(format!(
+                "protocol '{}' has circular inheritance",
+                self.protocol_name
+            ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("circular inheritance detected")
+                    .with_message("circular inheritance detected"),
             ])
-            .with_notes(vec![
-                format!("inheritance cycle: {}", cycle_str)
-            ])
+            .with_notes(vec![format!("inheritance cycle: {}", cycle_str)])
     }
 }
 
@@ -91,7 +92,7 @@ impl IntoDiagnostic for MissingProtocolMethodError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("missing method '{}'", self.method_name))
+                    .with_message(format!("missing method '{}'", self.method_name)),
             ])
     }
 }
@@ -113,7 +114,7 @@ impl IntoDiagnostic for MissingAssociatedTypeError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("missing associated type '{}'", self.type_name))
+                    .with_message(format!("missing associated type '{}'", self.type_name)),
             ])
     }
 }
@@ -135,11 +136,10 @@ impl IntoDiagnostic for WrongMethodReturnTypeError {
                 self.method_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!(
-                        "expected '{}', found '{}'",
-                        self.expected_type, self.actual_type
-                    ))
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "expected '{}', found '{}'",
+                    self.expected_type, self.actual_type
+                )),
             ])
     }
 }
@@ -160,7 +160,7 @@ impl IntoDiagnostic for ProtocolMethodHasBodyError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("body not allowed in protocol method")
+                    .with_message("body not allowed in protocol method"),
             ])
     }
 }
@@ -182,11 +182,17 @@ impl IntoDiagnostic for AmbiguousAssociatedTypeError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("ambiguous binding")
+                    .with_message("ambiguous binding"),
             ])
             .with_notes(vec![
-                format!("'{}' is declared in protocols: '{}'", self.type_name, protocols_str),
-                format!("use qualified syntax like 'type {}.{} = ...' to specify which protocol", self.protocols[0], self.type_name),
+                format!(
+                    "'{}' is declared in protocols: '{}'",
+                    self.type_name, protocols_str
+                ),
+                format!(
+                    "use qualified syntax like 'type {}.{} = ...' to specify which protocol",
+                    self.protocols[0], self.type_name
+                ),
             ])
     }
 }
@@ -206,8 +212,10 @@ impl IntoDiagnostic for QualifiedBindingNotConformingError {
                 self.struct_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("struct does not conform to '{}'", self.protocol_name))
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "struct does not conform to '{}'",
+                    self.protocol_name
+                )),
             ])
     }
 }
@@ -227,8 +235,10 @@ impl IntoDiagnostic for QualifiedBindingWrongProtocolError {
                 self.protocol_name, self.type_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("'{}' not found in '{}'", self.type_name, self.protocol_name))
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "'{}' not found in '{}'",
+                    self.type_name, self.protocol_name
+                )),
             ])
     }
 }
@@ -249,8 +259,10 @@ impl IntoDiagnostic for WhereClauseAssociatedTypeNotFoundError {
                 self.assoc_type_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("'{}.{}' does not exist", self.type_param, self.assoc_type_name))
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "'{}.{}' does not exist",
+                    self.type_param, self.assoc_type_name
+                )),
             ])
     }
 }
@@ -266,20 +278,17 @@ pub struct AssociatedTypeConstraintNotSatisfiedError {
 impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!(
-                "type '{}' does not satisfy bound",
-                self.bound_type
-            ))
+            .with_message(format!("type '{}' does not satisfy bound", self.bound_type))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!(
-                        "type '{}' does not conform to required protocol '{}'",
-                        self.bound_type, self.required_protocol
-                    ))
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "type '{}' does not conform to required protocol '{}'",
+                    self.bound_type, self.required_protocol
+                )),
             ])
-            .with_notes(vec![
-                format!("associated type '{}' requires conformance to '{}'", self.type_name, self.required_protocol)
-            ])
+            .with_notes(vec![format!(
+                "associated type '{}' requires conformance to '{}'",
+                self.type_name, self.required_protocol
+            )])
     }
 }
 
@@ -308,9 +317,10 @@ impl IntoDiagnostic for InheritedAssociatedTypeConflictError {
                 Label::secondary(self.definition_span2.file_id, self.definition_span2.range())
                     .with_message(format!("also defined in '{}'", self.protocol2)),
             ])
-            .with_notes(vec![
-                format!("protocols '{}' and '{}' both define associated type '{}'", self.protocol1, self.protocol2, self.type_name)
-            ])
+            .with_notes(vec![format!(
+                "protocols '{}' and '{}' both define associated type '{}'",
+                self.protocol1, self.protocol2, self.type_name
+            )])
     }
 }
 
@@ -331,15 +341,15 @@ impl IntoDiagnostic for ProtocolMethodReceiverMismatchError {
                 self.method_name, self.protocol_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!(
-                        "expected {} method, found {} method",
-                        self.expected_receiver, self.actual_receiver
-                    ))
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "expected {} method, found {} method",
+                    self.expected_receiver, self.actual_receiver
+                )),
             ])
-            .with_notes(vec![
-                format!("protocol '{}' requires a {} method", self.protocol_name, self.expected_receiver)
-            ])
+            .with_notes(vec![format!(
+                "protocol '{}' requires a {} method",
+                self.protocol_name, self.expected_receiver
+            )])
     }
 }
 
@@ -360,11 +370,15 @@ impl IntoDiagnostic for AmbiguousProtocolMethodError {
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message("ambiguous implementation")
+                    .with_message("ambiguous implementation"),
             ])
             .with_notes(vec![
-                format!("this method would satisfy requirements from protocols: '{}'", protocols_str),
-                "consider using a different method name or refactoring the protocol design".to_string(),
+                format!(
+                    "this method would satisfy requirements from protocols: '{}'",
+                    protocols_str
+                ),
+                "consider using a different method name or refactoring the protocol design"
+                    .to_string(),
             ])
     }
 }

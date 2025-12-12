@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use kestrel_semantic_model::{SymbolFor, ResolveTypePath, TypePathResolution};
+use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
 use kestrel_span::{Span, Spanned};
@@ -18,7 +18,8 @@ use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::syntax::{
     extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
-    get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility, resolve_conformance_list,
+    get_file_id_for_symbol, get_node_span, get_visibility_span, parse_visibility,
+    resolve_conformance_list,
 };
 
 /// Resolver for struct declarations
@@ -170,7 +171,9 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx.model.query(SymbolFor { id: context_id })
+    let file_id = ctx
+        .model
+        .query(SymbolFor { id: context_id })
         .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
         .unwrap_or(0);
 
@@ -178,7 +181,9 @@ fn resolve_where_clause(
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params, file_id) {
+            if let Some(constraint) =
+                resolve_type_bound(&child, source, context_id, ctx, type_params, file_id)
+            {
                 constraints.push(constraint);
             }
         }
@@ -205,7 +210,8 @@ fn resolve_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span = Span::from((text_range.start().into())..(text_range.end().into()));
+    let param_span: kestrel_span::Span =
+        Span::from((text_range.start().into())..(text_range.end().into()));
 
     // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
@@ -228,36 +234,37 @@ fn resolve_type_bound(
             let bound_name = segments.join(".");
 
             // Resolve the path to a type
-            match ctx.model.query(ResolveTypePath { path: segments, context: context_id }) {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    match resolved_ty.kind() {
-                        TyKind::Protocol { .. } => resolved_ty,
-                        TyKind::Struct { symbol, .. } => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
-                        TyKind::TypeAlias { symbol, .. } => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: symbol.metadata().name().value.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
-                        _ => {
-                            ctx.diagnostics.throw(NotAProtocolError {
-                                span: span.clone(),
-                                name: bound_name.clone(),
-                                context: NotAProtocolContext::Bound,
-                            });
-                            Ty::error(span)
-                        }
+            match ctx.model.query(ResolveTypePath {
+                path: segments,
+                context: context_id,
+            }) {
+                TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
+                    TyKind::Protocol { .. } => resolved_ty,
+                    TyKind::Struct { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
                     }
-                }
+                    TyKind::TypeAlias { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
+                    }
+                    _ => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: bound_name.clone(),
+                            context: NotAProtocolContext::Bound,
+                        });
+                        Ty::error(span)
+                    }
+                },
                 TypePathResolution::NotFound { .. } => {
                     ctx.diagnostics.throw(UnresolvedTypeError {
                         span: span.clone(),
@@ -282,7 +289,9 @@ fn resolve_type_bound(
     } else {
         match param_id {
             Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
-            None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
+            None => Some(Constraint::unresolved_type_bound(
+                param_name, param_span, bounds,
+            )),
         }
     }
 }

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser as KestrelParser};
+use kestrel_parser::{Parser as KestrelParser, parse_source_file};
 use kestrel_reporting::DiagnosticContext;
 use std::fs;
 use std::process::ExitCode;
@@ -85,7 +85,10 @@ fn add_file(
             let span = error.span.clone().unwrap_or(kestrel_span::Span::from(0..1));
             let diagnostic = kestrel_reporting::Diagnostic::error()
                 .with_message(&error.message)
-                .with_labels(vec![kestrel_reporting::Label::primary(span.file_id, span.range())]);
+                .with_labels(vec![kestrel_reporting::Label::primary(
+                    span.file_id,
+                    span.range(),
+                )]);
             diagnostics.add_diagnostic(diagnostic);
         }
         return false;
@@ -98,7 +101,7 @@ fn add_file(
 }
 
 fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: bool) -> ExitCode {
-    use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
+    use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
 
     if files.is_empty() {
         eprintln!("error: no input files");
@@ -169,7 +172,7 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
             }
         };
 
-        let tokens: Vec<_> = lex(&content, 0)  // Use file_id=0 for parse-only mode
+        let tokens: Vec<_> = lex(&content, 0) // Use file_id=0 for parse-only mode
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
@@ -202,11 +205,11 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
 }
 
 fn run_program(file: &str, verbose: bool) -> ExitCode {
-    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
+    use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
     use semantic_tree::symbol::Symbol;
 
     let mut builder = SemanticTreeBuilder::new();
@@ -245,9 +248,9 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             KestrelSymbolKind::Function => {
                 // Check for ExecutableBehavior
                 let behaviors = symbol.metadata().behaviors();
-                let exec = behaviors.iter().find(|b| {
-                    matches!(b.kind(), KestrelBehaviorKind::Executable)
-                });
+                let exec = behaviors
+                    .iter()
+                    .find(|b| matches!(b.kind(), KestrelBehaviorKind::Executable));
 
                 if let Some(exec_behavior) = exec {
                     if let Some(eb) = exec_behavior.as_ref().downcast_ref::<ExecutableBehavior>() {
@@ -304,13 +307,14 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                 }
             }
             KestrelSymbolKind::Field => {
-                use kestrel_semantic_tree::symbol::field::FieldSymbol;
                 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
                 if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
                     let mutability = if field.is_mutable() { "var" } else { "let" };
                     // Get the resolved type from TypedBehavior
                     let behaviors = symbol.metadata().behaviors();
-                    let ty = behaviors.iter()
+                    let ty = behaviors
+                        .iter()
                         .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
                         .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>())
                         .map(|t| format_type_simple(t.ty()))
@@ -349,11 +353,18 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             ExprKind::TupleIndex { tuple, index } => {
                 format!("{}.{}", format_expr_value(tuple), index)
             }
-            ExprKind::MethodRef { receiver, method_name, .. } => {
+            ExprKind::MethodRef {
+                receiver,
+                method_name,
+                ..
+            } => {
                 format!("{}.{}", format_expr_value(receiver), method_name)
             }
-            ExprKind::Call { callee, arguments, .. } => {
-                let args: Vec<String> = arguments.iter()
+            ExprKind::Call {
+                callee, arguments, ..
+            } => {
+                let args: Vec<String> = arguments
+                    .iter()
                     .map(|a| {
                         if let Some(ref label) = a.label {
                             format!("{}: {}", label, format_expr_value(&a.value))
@@ -364,14 +375,28 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                     .collect();
                 format!("{}({})", format_expr_value(callee), args.join(", "))
             }
-            ExprKind::PrimitiveMethodCall { receiver, method, arguments } => {
-                let args: Vec<String> = arguments.iter()
+            ExprKind::PrimitiveMethodCall {
+                receiver,
+                method,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments
+                    .iter()
                     .map(|a| format_expr_value(&a.value))
                     .collect();
-                format!("{}.{}({})", format_expr_value(receiver), method.name(), args.join(", "))
+                format!(
+                    "{}.{}({})",
+                    format_expr_value(receiver),
+                    method.name(),
+                    args.join(", ")
+                )
             }
-            ExprKind::ImplicitStructInit { struct_type, arguments } => {
-                let args: Vec<String> = arguments.iter()
+            ExprKind::ImplicitStructInit {
+                struct_type,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments
+                    .iter()
                     .map(|a| {
                         if let Some(ref label) = a.label {
                             format!("{}: {}", label, format_expr_value(&a.value))
@@ -384,21 +409,38 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             }
             ExprKind::TypeRef(id) => format!("type_{:?}", id),
             ExprKind::Assignment { target, value } => {
-                format!("{} = {}", format_expr_value(target), format_expr_value(value))
+                format!(
+                    "{} = {}",
+                    format_expr_value(target),
+                    format_expr_value(value)
+                )
             }
-            ExprKind::If { condition, then_branch: _, then_value, else_branch } => {
-                let then_str = then_value.as_ref()
+            ExprKind::If {
+                condition,
+                then_branch: _,
+                then_value,
+                else_branch,
+            } => {
+                let then_str = then_value
+                    .as_ref()
                     .map(|v| format_expr_value(v))
                     .unwrap_or_else(|| "()".to_string());
-                let else_str = if else_branch.is_some() { " else { ... }" } else { "" };
-                format!("if {} {{ {} }}{}", format_expr_value(condition), then_str, else_str)
+                let else_str = if else_branch.is_some() {
+                    " else { ... }"
+                } else {
+                    ""
+                };
+                format!(
+                    "if {} {{ {} }}{}",
+                    format_expr_value(condition),
+                    then_str,
+                    else_str
+                )
             }
             ExprKind::While { condition, .. } => {
                 format!("while {} {{ ... }}", format_expr_value(condition))
             }
-            ExprKind::Loop { .. } => {
-                "loop { ... }".to_string()
-            }
+            ExprKind::Loop { .. } => "loop { ... }".to_string(),
             ExprKind::Break { label, .. } => {
                 if let Some(l) = label {
                     format!("break {}", l.name)
@@ -426,19 +468,24 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     }
 
     fn format_statement(stmt: &kestrel_semantic_tree::stmt::Statement) -> String {
+        use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
         use kestrel_semantic_tree::stmt::StatementKind;
-        use kestrel_semantic_tree::pattern::{PatternKind, Mutability};
 
         match &stmt.kind {
             StatementKind::Binding { pattern, value } => {
                 let keyword = match &pattern.kind {
                     PatternKind::Local { mutability, .. } => {
-                        if *mutability == Mutability::Mutable { "var" } else { "let" }
+                        if *mutability == Mutability::Mutable {
+                            "var"
+                        } else {
+                            "let"
+                        }
                     }
                     PatternKind::Error => "let",
                 };
                 let name = pattern.name().unwrap_or("<error>");
-                let value_str = value.as_ref()
+                let value_str = value
+                    .as_ref()
                     .map(|v| format!(" = {}", format_expr_value(v)))
                     .unwrap_or_default();
                 format!("{} {}{};", keyword, name, value_str)
@@ -463,9 +510,16 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                 format!("({})", items.join(", "))
             }
             TyKind::Array(elem) => format!("[{}]", format_type_simple(elem)),
-            TyKind::Function { params, return_type } => {
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
                 let params_str: Vec<_> = params.iter().map(format_type_simple).collect();
-                format!("({}) -> {}", params_str.join(", "), format_type_simple(return_type))
+                format!(
+                    "({}) -> {}",
+                    params_str.join(", "),
+                    format_type_simple(return_type)
+                )
             }
             TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
             TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
@@ -499,9 +553,7 @@ fn main() -> ExitCode {
             // Use subcommand files only
             run_parse(&files, cli.tree)
         }
-        Some(Commands::Run { file }) => {
-            run_program(&file, cli.verbose)
-        }
+        Some(Commands::Run { file }) => run_program(&file, cli.verbose),
         None => {
             // No subcommand: use global files
             if cli.files.is_empty() {

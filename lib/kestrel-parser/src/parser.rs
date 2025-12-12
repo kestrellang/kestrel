@@ -86,7 +86,9 @@ impl ParseError {
     }
 
     /// Create a parse error from a Chumsky error
-    pub fn from_chumsky_error<T: fmt::Debug + std::hash::Hash + Eq>(error: chumsky::error::Simple<T>) -> Self {
+    pub fn from_chumsky_error<T: fmt::Debug + std::hash::Hash + Eq>(
+        error: chumsky::error::Simple<T>,
+    ) -> Self {
         let span = Some(Span::from(error.span()));
 
         // Determine error kind
@@ -222,8 +224,8 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer::lex;
     use crate::parse_source_file;
+    use kestrel_lexer::lex;
 
     #[test]
     fn test_parser_with_valid_source() {
@@ -236,7 +238,10 @@ mod tests {
         let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.kind(), kestrel_syntax_tree::SyntaxKind::SourceFile);
+        assert_eq!(
+            result.tree.kind(),
+            kestrel_syntax_tree::SyntaxKind::SourceFile
+        );
     }
 
     #[test]
@@ -250,8 +255,15 @@ mod tests {
         let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.kind(), kestrel_syntax_tree::SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 2, "Should have 2 declaration children");
+        assert_eq!(
+            result.tree.kind(),
+            kestrel_syntax_tree::SyntaxKind::SourceFile
+        );
+        assert_eq!(
+            result.tree.children().count(),
+            2,
+            "Should have 2 declaration children"
+        );
     }
 
     #[test]
@@ -273,7 +285,11 @@ public struct B {}
 
         let result = Parser::parse(valid_source, tokens.into_iter(), parse_source_file);
         assert_eq!(result.errors.len(), 0, "Valid code should have no errors");
-        assert_eq!(result.tree.children().count(), 3, "Should parse all declarations");
+        assert_eq!(
+            result.tree.children().count(),
+            3,
+            "Should parse all declarations"
+        );
 
         // Test case 2: Parser still creates a tree even with parse errors
         let source_with_errors = r#"module"#; // Incomplete module
@@ -284,11 +300,16 @@ public struct B {}
 
         let result = Parser::parse(source_with_errors, tokens.into_iter(), parse_source_file);
         // Parser creates a SourceFile node even when parsing fails
-        assert_eq!(result.tree.kind(), kestrel_syntax_tree::SyntaxKind::SourceFile);
+        assert_eq!(
+            result.tree.kind(),
+            kestrel_syntax_tree::SyntaxKind::SourceFile
+        );
 
-        println!("Error recovery test: {} declarations, {} errors",
-                 result.tree.children().count(),
-                 result.errors.len());
+        println!(
+            "Error recovery test: {} declarations, {} errors",
+            result.tree.children().count(),
+            result.errors.len()
+        );
     }
 
     #[test]
@@ -315,7 +336,10 @@ public struct B {}
         }
 
         // This test primarily documents that span tracking infrastructure is in place
-        assert_eq!(result.tree.kind(), kestrel_syntax_tree::SyntaxKind::SourceFile);
+        assert_eq!(
+            result.tree.kind(),
+            kestrel_syntax_tree::SyntaxKind::SourceFile
+        );
     }
 
     #[test]
@@ -329,7 +353,11 @@ public struct B {}
         let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.children().count(), 2, "Should have 2 children (module + struct)");
+        assert_eq!(
+            result.tree.children().count(),
+            2,
+            "Should have 2 children (module + struct)"
+        );
     }
 
     #[test]
@@ -343,7 +371,11 @@ public struct B {}
         let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.children().count(), 2, "Should have 2 children (module + struct)");
+        assert_eq!(
+            result.tree.children().count(),
+            2,
+            "Should have 2 children (module + struct)"
+        );
     }
 
     // TODO: Enable once assignment expressions are implemented

@@ -11,9 +11,9 @@
 //! - `framework/` - Test framework features
 
 mod declarations;
-mod types;
 mod expressions;
-mod statements;
-mod validation;
-mod instantiation;
 mod framework;
+mod instantiation;
+mod statements;
+mod types;
+mod validation;

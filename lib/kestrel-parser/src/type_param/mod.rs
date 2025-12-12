@@ -12,8 +12,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
-use crate::event::EventSink;
 use crate::common::skip_trivia;
+use crate::event::EventSink;
 
 /// Raw parsed data for a single type parameter
 /// Syntax: T or T = Default
@@ -78,15 +78,14 @@ pub struct WhereClauseData {
 
 /// Parser for a path (used in type positions): Ident or Ident.Ident.Ident
 fn path_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    skip_trivia()
-        .ignore_then(
-            filter_map(|span, token| match token {
-                Token::Identifier => Ok(Span::from(span)),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            })
-            .separated_by(just(Token::Dot))
-            .at_least(1)
-        )
+    skip_trivia().ignore_then(
+        filter_map(|span, token| match token {
+            Token::Identifier => Ok(Span::from(span)),
+            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+        })
+        .separated_by(just(Token::Dot))
+        .at_least(1),
+    )
 }
 
 /// Parser for a single type argument (recursive to handle nested generics)
@@ -98,13 +97,14 @@ fn type_argument_parser() -> impl Parser<Token, TypeArgumentData, Error = Simple
                 skip_trivia()
                     .ignore_then(just(Token::LBracket))
                     .ignore_then(
-                        type_arg.clone()
+                        type_arg
+                            .clone()
                             .separated_by(just(Token::Comma))
-                            .allow_trailing()
+                            .allow_trailing(),
                     )
                     .then_ignore(skip_trivia())
                     .then_ignore(just(Token::RBracket))
-                    .or_not()
+                    .or_not(),
             )
             .map(|(path, args)| TypeArgumentData { path, args })
     })
@@ -112,13 +112,14 @@ fn type_argument_parser() -> impl Parser<Token, TypeArgumentData, Error = Simple
 
 /// Parser for type arguments: [Type, Type, ...]
 /// Handles nested type arguments like Foo[Bar[Baz]]
-pub fn type_argument_list_parser() -> impl Parser<Token, Vec<TypeArgumentData>, Error = Simple<Token>> + Clone {
+pub fn type_argument_list_parser()
+-> impl Parser<Token, Vec<TypeArgumentData>, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket))
         .ignore_then(
             type_argument_parser()
                 .separated_by(just(Token::Comma))
-                .allow_trailing()
+                .allow_trailing(),
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBracket))
@@ -126,13 +127,14 @@ pub fn type_argument_list_parser() -> impl Parser<Token, Vec<TypeArgumentData>, 
 
 /// Parser for type arguments with bracket spans: [Type, Type, ...]
 /// Returns (lbracket, args, rbracket)
-pub fn type_argument_list_with_spans_parser() -> impl Parser<Token, (Span, Vec<TypeArgumentData>, Span), Error = Simple<Token>> + Clone {
+pub fn type_argument_list_with_spans_parser()
+-> impl Parser<Token, (Span, Vec<TypeArgumentData>, Span), Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with_span(|_, span| Span::from(span)))
         .then(
             type_argument_parser()
                 .separated_by(just(Token::Comma))
-                .allow_trailing()
+                .allow_trailing(),
         )
         .then_ignore(skip_trivia())
         .then(just(Token::RBracket).map_with_span(|_, span| Span::from(span)))
@@ -141,45 +143,43 @@ pub fn type_argument_list_with_spans_parser() -> impl Parser<Token, (Span, Vec<T
 
 /// Parser for optional type arguments after a path
 /// Returns (path, optional args)
-pub fn path_with_optional_args_parser() -> impl Parser<Token, TypeArgumentData, Error = Simple<Token>> + Clone {
+pub fn path_with_optional_args_parser()
+-> impl Parser<Token, TypeArgumentData, Error = Simple<Token>> + Clone {
     path_parser()
-        .then(
-            type_argument_list_parser().or_not()
-        )
+        .then(type_argument_list_parser().or_not())
         .map(|(path, args)| TypeArgumentData { path, args })
 }
 
 /// Parser for a single type parameter: T or T = Default
 fn type_parameter_parser() -> impl Parser<Token, TypeParameterData, Error = Simple<Token>> + Clone {
     skip_trivia()
-        .ignore_then(
-            filter_map(|span, token| match token {
-                Token::Identifier => Ok(Span::from(span)),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            })
-        )
+        .ignore_then(filter_map(|span, token| match token {
+            Token::Identifier => Ok(Span::from(span)),
+            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+        }))
         .then(
             // Optional default: = Type
             skip_trivia()
                 .ignore_then(just(Token::Equals))
                 .ignore_then(path_parser())
-                .or_not()
+                .or_not(),
         )
         .map(|(name, default)| TypeParameterData { name, default })
 }
 
 /// Parser for type parameter list: [T, U, V] or [T, U = String]
-pub fn type_parameter_list_parser() -> impl Parser<Token, (Span, Vec<TypeParameterData>, Span), Error = Simple<Token>> + Clone {
+pub fn type_parameter_list_parser()
+-> impl Parser<Token, (Span, Vec<TypeParameterData>, Span), Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with_span(|_, span| Span::from(span)))
         .then(
             type_parameter_parser()
                 .separated_by(just(Token::Comma))
-                .allow_trailing()
+                .allow_trailing(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span)))
+                .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span))),
         )
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
 }
@@ -196,9 +196,9 @@ fn type_bound_parser() -> impl Parser<Token, TypeBoundData, Error = Simple<Token
                 .separated_by(
                     skip_trivia()
                         .ignore_then(just(Token::And))
-                        .ignore_then(skip_trivia())
+                        .ignore_then(skip_trivia()),
                 )
-                .at_least(1)
+                .at_least(1),
         )
         .map(|(path, bounds)| TypeBoundData { path, bounds })
 }
@@ -211,14 +211,20 @@ fn type_equality_parser() -> impl Parser<Token, TypeEqualityData, Error = Simple
         .then(just(Token::Equals).map_with_span(|_, span| Span::from(span)))
         .then_ignore(skip_trivia())
         .then(crate::ty::ty_parser())
-        .map(|((left, equals_span), right)| TypeEqualityData { left, equals_span, right })
+        .map(|((left, equals_span), right)| TypeEqualityData {
+            left,
+            equals_span,
+            right,
+        })
 }
 
 /// Parser for a single where clause constraint (either bound or equality)
-fn where_constraint_parser() -> impl Parser<Token, WhereConstraintData, Error = Simple<Token>> + Clone {
+fn where_constraint_parser()
+-> impl Parser<Token, WhereConstraintData, Error = Simple<Token>> + Clone {
     // Try equality first (T.Item = Type), then bound (T: Proto)
     // This order matters because path_parser is greedy
-    type_equality_parser().map(WhereConstraintData::Equality)
+    type_equality_parser()
+        .map(WhereConstraintData::Equality)
         .or(type_bound_parser().map(WhereConstraintData::Bound))
 }
 
@@ -229,26 +235,35 @@ pub fn where_clause_parser() -> impl Parser<Token, WhereClauseData, Error = Simp
         .then(
             where_constraint_parser()
                 .separated_by(just(Token::Comma))
-                .at_least(1)
+                .at_least(1),
         )
-        .map(|(where_span, constraints)| WhereClauseData { where_span, constraints })
+        .map(|(where_span, constraints)| WhereClauseData {
+            where_span,
+            constraints,
+        })
 }
 
 /// Parser for conformance list: : Proto1, Proto2[T]
 /// Used after struct/protocol names to declare conformance/inheritance
-pub fn conformance_list_parser() -> impl Parser<Token, (Span, Vec<crate::ty::TyVariant>), Error = Simple<Token>> + Clone {
+pub fn conformance_list_parser()
+-> impl Parser<Token, (Span, Vec<crate::ty::TyVariant>), Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
         .then(
             crate::ty::ty_parser()
                 .separated_by(just(Token::Comma))
-                .at_least(1)
+                .at_least(1),
         )
         .map(|(colon_span, types)| (colon_span, types))
 }
 
 /// Emit events for a type parameter list
-pub fn emit_type_parameter_list(sink: &mut EventSink, lbracket: Span, params: Vec<TypeParameterData>, rbracket: Span) {
+pub fn emit_type_parameter_list(
+    sink: &mut EventSink,
+    lbracket: Span,
+    params: Vec<TypeParameterData>,
+    rbracket: Span,
+) {
     sink.start_node(SyntaxKind::TypeParameterList);
     sink.add_token(SyntaxKind::LBracket, lbracket);
 
@@ -318,7 +333,11 @@ fn emit_type_equality(sink: &mut EventSink, equality: TypeEqualityData) {
 }
 
 /// Emit events for a conformance list: : Proto1, Proto2
-pub fn emit_conformance_list(sink: &mut EventSink, colon_span: Span, conformances: &[crate::ty::TyVariant]) {
+pub fn emit_conformance_list(
+    sink: &mut EventSink,
+    colon_span: Span,
+    conformances: &[crate::ty::TyVariant],
+) {
     sink.start_node(SyntaxKind::ConformanceList);
     sink.add_token(SyntaxKind::Colon, colon_span);
 

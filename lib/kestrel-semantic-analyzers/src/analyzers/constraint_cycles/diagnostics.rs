@@ -23,8 +23,10 @@ impl IntoDiagnostic for CircularConstraintError {
             .collect();
         let cycle_display = cycle_names.join(" -> ");
 
-        let mut labels = vec![Label::primary(self.origin.span.file_id, self.origin.span.range())
-            .with_message("cycle starts here")];
+        let mut labels = vec![
+            Label::primary(self.origin.span.file_id, self.origin.span.range())
+                .with_message("cycle starts here"),
+        ];
 
         for participant in &self.cycle {
             labels.push(
@@ -34,9 +36,13 @@ impl IntoDiagnostic for CircularConstraintError {
         }
 
         Diagnostic::error()
-            .with_message(format!("circular generic constraint: {} -> {}", cycle_display, self.origin.name))
+            .with_message(format!(
+                "circular generic constraint: {} -> {}",
+                cycle_display, self.origin.name
+            ))
             .with_labels(labels)
-            .with_notes(vec!["type parameter constraints cannot reference each other cyclically".to_string()])
+            .with_notes(vec![
+                "type parameter constraints cannot reference each other cyclically".to_string(),
+            ])
     }
 }
-

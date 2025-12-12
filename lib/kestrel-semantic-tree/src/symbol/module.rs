@@ -4,8 +4,7 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::visibility::VisibilityBehavior,
-    language::KestrelLanguage,
+    behavior::visibility::VisibilityBehavior, language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
 };
 
