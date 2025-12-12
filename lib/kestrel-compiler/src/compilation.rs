@@ -5,7 +5,8 @@ use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
 use kestrel_semantic_analyzers::analyzers::DuplicateSymbolAnalyzer;
 use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
 use kestrel_semantic_model::SemanticModel;
-use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
+use kestrel_semantic_tree_binder::SemanticBinder;
+use kestrel_semantic_tree_builder::SemanticModelBuilder;
 use kestrel_span::Span;
 
 /// Represents a compiled Kestrel project.
@@ -37,8 +38,8 @@ impl Compilation {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
-        // Create the semantic tree builder
-        let mut builder = SemanticTreeBuilder::new();
+        // Create the semantic model builder (build/lowering phase)
+        let mut builder = SemanticModelBuilder::new();
 
         // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
         for (name, source) in sources {
@@ -92,11 +93,11 @@ impl Compilation {
             source_files.push(source_file);
         }
 
-        // Build the semantic tree
-        let tree = builder.build();
+        // Build the semantic model (lowering)
+        let model = builder.build();
 
-        // Run binding phase (for now still includes most validations)
-        let model = SemanticBinder::bind(tree, &mut diagnostics);
+        // Run binding phase on the built model
+        let model = SemanticBinder::bind_model(model, &mut diagnostics);
 
         // Run extracted analyzers after binding (keeps output consistent during migration)
         {

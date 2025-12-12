@@ -61,6 +61,12 @@ impl SemanticBinder {
         binder.run_binding(diagnostics)
     }
 
+    /// Bind an already-built semantic model (output of the build/lowering phase).
+    pub fn bind_model(model: SemanticModel, diagnostics: &mut DiagnosticContext) -> SemanticModel {
+        let mut binder = Self::from_model(model);
+        binder.run_binding(diagnostics)
+    }
+
     /// Create a binder from a semantic tree (internal)
     fn from_tree(tree: SemanticTree) -> Self {
         // Extract components from the tree
@@ -72,6 +78,29 @@ impl SemanticBinder {
         let extension_registry = ExtensionRegistry::new();
 
         // Create semantic model with shared registries (for resolvers)
+        let model = SemanticModel::with_registries(
+            root.clone(),
+            syntax_map.clone(),
+            sources.clone(),
+            registry.clone(),
+            extension_registry.clone(),
+        );
+
+        Self {
+            root,
+            syntax_map,
+            sources,
+            registry,
+            extension_registry,
+            model,
+            resolver_registry: ResolverRegistry::new(),
+            cycle_detector: RefCell::new(CycleDetector::new()),
+        }
+    }
+
+    fn from_model(model: SemanticModel) -> Self {
+        let (root, syntax_map, sources, registry, extension_registry) = model.into_parts();
+
         let model = SemanticModel::with_registries(
             root.clone(),
             syntax_map.clone(),

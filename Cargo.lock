@@ -291,6 +291,7 @@ dependencies = [
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
  "kestrel-semantic-tree-binder",
+ "kestrel-semantic-tree-builder",
  "kestrel-span",
  "kestrel-syntax-tree",
 ]
@@ -417,6 +418,7 @@ dependencies = [
  "kestrel-semantic-analyzers",
  "kestrel-semantic-tree",
  "kestrel-semantic-tree-binder",
+ "kestrel-semantic-tree-builder",
  "kestrel-span",
  "kestrel-syntax-tree",
  "semantic-tree",

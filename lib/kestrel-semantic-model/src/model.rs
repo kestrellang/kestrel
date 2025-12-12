@@ -75,6 +75,25 @@ impl SemanticModel {
         }
     }
 
+    /// Decompose this model into its owned components.
+    pub fn into_parts(
+        self,
+    ) -> (
+        Arc<dyn Symbol<KestrelLanguage>>,
+        HashMap<SymbolId, SyntaxNode>,
+        HashMap<String, String>,
+        SymbolRegistry,
+        ExtensionRegistry,
+    ) {
+        (
+            self.root,
+            self.syntax_map,
+            self.sources,
+            self.registry,
+            self.extension_registry,
+        )
+    }
+
     /// Execute a query against this model.
     pub fn query<Q: Query>(&self, query: Q) -> Q::Output {
         query.execute(self)

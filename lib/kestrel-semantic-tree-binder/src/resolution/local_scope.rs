@@ -181,10 +181,8 @@ mod tests {
             name,
             Span::from(0..50),
             visibility,
-            true,   // is_static
-            true,   // has_body
-            vec![], // no parameters
-            return_type,
+            true, // is_static
+            true, // has_body
             None, // no parent
         ))
     }

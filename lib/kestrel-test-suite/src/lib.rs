@@ -62,7 +62,8 @@ use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree_binder::SemanticModel;
+use kestrel_semantic_tree_binder::{SemanticBinder, SemanticModel};
+use kestrel_semantic_tree_builder::SemanticModelBuilder;
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol as SymbolTrait;
 
@@ -114,13 +115,11 @@ impl Test {
 
     /// Compile the test files and store the result
     fn compile(&mut self) {
-        use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
-
         if self.context.is_some() {
             return; // Already compiled
         }
 
-        let mut builder = SemanticTreeBuilder::new();
+        let mut builder = SemanticModelBuilder::new();
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
 
@@ -152,11 +151,11 @@ impl Test {
             builder.add_file(file_name, &result.tree, content, &mut diagnostics, file_id);
         }
 
-        // Build the semantic tree
-        let tree = builder.build();
+        // Build the semantic model (lowering)
+        let model = builder.build();
 
-        // Run binding phase
-        let model = SemanticBinder::bind(tree, &mut diagnostics);
+        // Run binding phase on the built model
+        let model = SemanticBinder::bind_model(model, &mut diagnostics);
 
         // Run analyzers (during migration we mirror builder validations here)
         {
