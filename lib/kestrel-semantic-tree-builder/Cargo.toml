@@ -4,16 +4,10 @@ version = "0.6.0"
 edition = "2024"
 
 [dependencies]
-kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
-kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
-kestrel-semantic-model = { path = "../kestrel-semantic-model" }
-kestrel-prelude = { path = "../kestrel-prelude" }
-kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-parser = { path = "../kestrel-parser" }
+kestrel-semantic-model = { path = "../kestrel-semantic-model" }
+kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 semantic-tree = { path = "../semantic-tree" }
-downcast-rs = "2.0.2"
-parking_lot = "0.12"
-
-[dev-dependencies]
-kestrel-lexer = { path = "../kestrel-lexer" }

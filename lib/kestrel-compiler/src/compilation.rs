@@ -5,7 +5,7 @@ use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
 use kestrel_semantic_analyzers::analyzers::DuplicateSymbolAnalyzer;
 use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
 use kestrel_semantic_model::SemanticModel;
-use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
+use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
 use kestrel_span::Span;
 
 /// Represents a compiled Kestrel project.

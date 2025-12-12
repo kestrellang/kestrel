@@ -52,7 +52,7 @@ enum Commands {
 /// Parse a single file and add it to the builder
 fn add_file(
     path: &str,
-    builder: &mut kestrel_semantic_tree_builder::SemanticTreeBuilder,
+    builder: &mut kestrel_semantic_tree_binder::SemanticTreeBuilder,
     diagnostics: &mut DiagnosticContext,
     verbose: bool,
 ) -> bool {
@@ -101,7 +101,7 @@ fn add_file(
 }
 
 fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: bool) -> ExitCode {
-    use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
+    use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
 
     if files.is_empty() {
         eprintln!("error: no input files");
@@ -131,13 +131,13 @@ fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: boo
     // Show results
     if show_tree {
         println!("--- Semantic Tree ---");
-        kestrel_semantic_tree_builder::print_semantic_model(&model);
+        kestrel_semantic_tree_binder::print_semantic_model(&model);
         println!();
     }
 
     if show_symbols {
         println!("--- Symbol Table ---");
-        kestrel_semantic_tree_builder::print_model_symbols(&model);
+        kestrel_semantic_tree_binder::print_model_symbols(&model);
         println!();
     }
 
@@ -209,7 +209,7 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
+    use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
     use semantic_tree::symbol::Symbol;
 
     let mut builder = SemanticTreeBuilder::new();

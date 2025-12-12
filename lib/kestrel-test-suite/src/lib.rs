@@ -62,7 +62,7 @@ use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree_builder::SemanticModel;
+use kestrel_semantic_tree_binder::SemanticModel;
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol as SymbolTrait;
 
@@ -114,7 +114,7 @@ impl Test {
 
     /// Compile the test files and store the result
     fn compile(&mut self) {
-        use kestrel_semantic_tree_builder::{SemanticBinder, SemanticTreeBuilder};
+        use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
 
         if self.context.is_some() {
             return; // Already compiled

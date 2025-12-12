@@ -42,5 +42,5 @@ pub use source_file::SourceFile;
 // Re-export commonly used types from dependencies
 pub use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label, Severity};
 pub use kestrel_semantic_model::SemanticModel;
-pub use kestrel_semantic_tree_builder::SemanticTree;
+pub use kestrel_semantic_tree_binder::SemanticTree;
 pub use kestrel_syntax_tree::SyntaxNode;

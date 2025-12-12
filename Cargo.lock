@@ -272,6 +272,7 @@ dependencies = [
  "kestrel-parser",
  "kestrel-reporting",
  "kestrel-semantic-tree",
+ "kestrel-semantic-tree-binder",
  "kestrel-semantic-tree-builder",
  "kestrel-span",
  "kestrel-syntax-tree",
@@ -289,7 +290,7 @@ dependencies = [
  "kestrel-semantic-analyzers",
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
- "kestrel-semantic-tree-builder",
+ "kestrel-semantic-tree-binder",
  "kestrel-span",
  "kestrel-syntax-tree",
 ]
@@ -360,7 +361,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-semantic-tree-builder"
+name = "kestrel-semantic-tree-binder"
 version = "0.6.0"
 dependencies = [
  "downcast-rs",
@@ -377,7 +378,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-semantic-tree-lowerer"
+name = "kestrel-semantic-tree-builder"
 version = "0.6.0"
 dependencies = [
  "kestrel-parser",
@@ -415,7 +416,7 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-semantic-analyzers",
  "kestrel-semantic-tree",
- "kestrel-semantic-tree-builder",
+ "kestrel-semantic-tree-binder",
  "kestrel-span",
  "kestrel-syntax-tree",
  "semantic-tree",
