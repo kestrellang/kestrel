@@ -96,12 +96,11 @@ impl Resolver for InitializerResolver {
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
-        // Get file_id and source for this symbol
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         // Extract and resolve parameters from syntax
         let resolved_params =
-            resolve_parameters_from_syntax(syntax, &source, symbol_id, context, file_id);
+            resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
 
         // Initializers always return Self (the struct type)
         // Get the parent struct to determine Self type
@@ -130,7 +129,6 @@ impl Resolver for InitializerResolver {
                 &body_node,
                 &resolved_params,
                 context,
-                file_id,
                 &source,
             );
         }
@@ -143,7 +141,6 @@ fn resolve_initializer_body(
     body_node: &SyntaxNode,
     params: &[Parameter],
     context: &mut BindingContext,
-    file_id: usize,
     source: &str,
 ) {
     use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
@@ -227,7 +224,6 @@ fn resolve_initializer_body(
     let mut body_ctx = BodyResolutionContext {
         model: context.model,
         diagnostics: context.diagnostics,
-        file_id,
         source,
         function_id: symbol.metadata().id(),
         local_scope,
@@ -265,7 +261,6 @@ fn resolve_parameters_from_syntax(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Vec<Parameter> {
     // Find the ParameterList node
     let param_list = match find_child(syntax, SyntaxKind::ParameterList) {
@@ -278,7 +273,7 @@ fn resolve_parameters_from_syntax(
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
         .filter_map(|param_node| {
-            resolve_single_parameter(&param_node, source, context_id, ctx, file_id)
+            resolve_single_parameter(&param_node, source, context_id, ctx)
         })
         .collect()
 }
@@ -289,7 +284,6 @@ fn resolve_single_parameter(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Option<Parameter> {
     // Collect all Name nodes
     let name_nodes: Vec<SyntaxNode> = param_node
@@ -302,10 +296,8 @@ fn resolve_single_parameter(
     }
 
     // Get span helper
-    fn get_name_span(name_node: &SyntaxNode) -> kestrel_span::Span {
-        let start = name_node.text_range().start().into();
-        let end = name_node.text_range().end().into();
-        Span::from(start..end)
+    fn get_name_span(name_node: &SyntaxNode, source: &str) -> kestrel_span::Span {
+        get_node_span(name_node, source)
     }
 
     // Determine label and bind_name based on number of Name nodes
@@ -314,17 +306,17 @@ fn resolve_single_parameter(
         let label_name = extract_identifier_from_name(&name_nodes[0]);
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[1])?,
-            get_name_span(&name_nodes[1]),
+            get_name_span(&name_nodes[1], source),
         );
         (
-            label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0]))),
+            label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0], source))),
             bind_name,
         )
     } else {
         // One name: it's both the label AND the bind_name
         // In Kestrel, `init(value: Int)` means value is the external label too
         let name = extract_identifier_from_name(&name_nodes[0])?;
-        let span = get_name_span(&name_nodes[0]);
+        let span = get_name_span(&name_nodes[0], source);
         let label = Some(Spanned::new(name.clone(), span.clone()));
         let bind_name = Spanned::new(name, span);
         (label, bind_name)
@@ -332,8 +324,7 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx =
-            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable

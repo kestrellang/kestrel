@@ -155,7 +155,7 @@ impl Test {
         let model = builder.build();
 
         // Run binding phase on the built model
-        let model = SemanticBinder::bind_model(model, &mut diagnostics);
+        let model = SemanticBinder::bind(model, &mut diagnostics);
 
         // Run analyzers (during migration we mirror builder validations here)
         {

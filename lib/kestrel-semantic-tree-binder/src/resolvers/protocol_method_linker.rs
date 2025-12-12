@@ -32,7 +32,6 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use kestrel_semantic_model::{ExtensionsFor, SemanticModel};
 
 use crate::diagnostics::{AmbiguousProtocolMethodError, ProtocolMethodReceiverMismatchError};
-use crate::syntax::helpers::get_file_id_for_symbol;
 
 /// Link struct methods to protocol methods based on signature matching
 ///
@@ -46,7 +45,6 @@ pub fn link_protocol_methods_for_struct(
     model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
 ) {
-    let file_id = get_file_id_for_symbol(struct_dyn, diagnostics);
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 

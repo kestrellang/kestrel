@@ -60,19 +60,20 @@ impl IntoDiagnostic for DuplicateSymbolDifferentKindError {
 pub struct DuplicateFunctionSignatureError {
     pub signature: String,
     pub first_span: Span,
-    pub first_file_id: usize,
-    pub duplicate_spans: Vec<(Span, usize)>, // (span, file_id)
+    pub duplicate_spans: Vec<Span>,
 }
 
 impl IntoDiagnostic for DuplicateFunctionSignatureError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         let mut labels = vec![
-            Label::secondary(self.first_file_id, self.first_span.range())
+            Label::secondary(self.first_span.file_id, self.first_span.range())
                 .with_message("first defined here"),
         ];
 
-        for (span, fid) in &self.duplicate_spans {
-            labels.push(Label::primary(*fid, span.range()).with_message("duplicate definition"));
+        for span in &self.duplicate_spans {
+            labels.push(
+                Label::primary(span.file_id, span.range()).with_message("duplicate definition"),
+            );
         }
 
         Diagnostic::error()

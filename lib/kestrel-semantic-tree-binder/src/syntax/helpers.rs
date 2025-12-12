@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -58,39 +57,20 @@ pub fn find_ancestor_of_kind(
     None
 }
 
-/// Information about a symbol's source file
-pub struct SourceFileInfo {
-    pub file_id: usize,
-    pub file_name: String,
-}
-
-/// Get source file info for a symbol by walking up to its SourceFile parent
-pub fn get_source_file_info(
+/// Get the source file name for a symbol by walking up to its SourceFile parent.
+pub fn get_source_file_name(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> Option<SourceFileInfo> {
+) -> Option<String> {
     let mut current = symbol.clone();
     loop {
         if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            let file_id = diagnostics.get_file_id(&file_name)?;
-            return Some(SourceFileInfo { file_id, file_name });
+            return Some(current.metadata().name().value.clone());
         }
         match current.metadata().parent() {
             Some(parent) => current = parent,
             None => return None,
         }
     }
-}
-
-/// Get the file_id for a symbol by walking up to its SourceFile parent
-pub fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    get_source_file_info(symbol, diagnostics)
-        .map(|info| info.file_id)
-        .unwrap_or(0)
 }
 
 /// Extract path segments from a Path syntax node
@@ -110,7 +90,6 @@ pub fn resolve_conformance_list(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     context_id: SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
     error_context: NotAProtocolContext,
 ) {
     use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
@@ -135,8 +114,7 @@ pub fn resolve_conformance_list(
         let span = get_node_span(&ty_node, source);
 
         // Use full type resolution (handles type arguments like Add[MyInt])
-        let mut type_ctx =
-            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
         let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
         // Validate that it's a protocol

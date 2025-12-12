@@ -35,7 +35,6 @@ use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
 pub struct TypeResolver<'a> {
     model: &'a SemanticModel,
     diagnostics: &'a mut DiagnosticContext,
-    file_id: usize,
     source: &'a str,
     context_id: SymbolId,
 }
@@ -45,14 +44,12 @@ impl<'a> TypeResolver<'a> {
     pub fn new(
         model: &'a SemanticModel,
         diagnostics: &'a mut DiagnosticContext,
-        file_id: usize,
         source: &'a str,
         context_id: SymbolId,
     ) -> Self {
         Self {
             model,
             diagnostics,
-            file_id,
             source,
             context_id,
         }

@@ -206,7 +206,6 @@ fn extract_type_arguments_from_callee(
             let mut resolver = TypeResolver::new(
                 ctx.model,
                 ctx.diagnostics,
-                ctx.file_id,
                 ctx.source,
                 ctx.function_id,
             );
@@ -516,7 +515,6 @@ fn resolve_single_function_call(
                 &where_clause,
                 span.clone(),
                 ctx.model,
-                ctx.file_id,
                 ctx.diagnostics,
             );
 
@@ -557,7 +555,6 @@ fn resolve_single_function_call(
                     &where_clause,
                     span.clone(),
                     ctx.model,
-                    ctx.file_id,
                     ctx.diagnostics,
                 );
 
@@ -778,7 +775,7 @@ fn resolve_explicit_init_call(
                 labels,
                 param_types,
                 definition_span: Some(init.metadata().span().clone()),
-                definition_file_id: Some(ctx.file_id),
+                definition_file_id: Some(init.metadata().span().file_id),
             })
         })
         .collect();
@@ -1119,7 +1116,7 @@ fn resolve_type_parameter_init_call(
                     labels,
                     param_types,
                     definition_span: Some(c.init.metadata().span().clone()),
-                    definition_file_id: Some(ctx.file_id),
+                    definition_file_id: Some(c.init.metadata().span().file_id),
                 }
             })
             .collect();

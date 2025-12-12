@@ -531,7 +531,6 @@ fn extract_type_arguments_from_path(
             let mut resolver = TypeResolver::new(
                 ctx.model,
                 ctx.diagnostics,
-                ctx.file_id,
                 ctx.source,
                 ctx.function_id,
             );

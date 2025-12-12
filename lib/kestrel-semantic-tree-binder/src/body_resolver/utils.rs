@@ -773,7 +773,6 @@ use crate::diagnostics::ConstraintNotSatisfiedError;
 /// * `where_clause` - The where clause containing constraints
 /// * `call_span` - Span of the call site for error reporting
 /// * `model` - Semantic model for symbol lookup
-/// * `file_id` - File ID for diagnostics
 /// * `diagnostics` - Diagnostic context for reporting errors
 ///
 /// # Returns
@@ -784,7 +783,6 @@ pub fn verify_type_argument_constraints(
     where_clause: &WhereClause,
     call_span: Span,
     model: &kestrel_semantic_model::SemanticModel,
-    file_id: usize,
     diagnostics: &mut kestrel_reporting::DiagnosticContext,
 ) -> bool {
     use semantic_tree::symbol::SymbolId;

@@ -97,7 +97,7 @@ impl Compilation {
         let model = builder.build();
 
         // Run binding phase on the built model
-        let model = SemanticBinder::bind_model(model, &mut diagnostics);
+        let model = SemanticBinder::bind(model, &mut diagnostics);
 
         // Run extracted analyzers after binding (keeps output consistent during migration)
         {

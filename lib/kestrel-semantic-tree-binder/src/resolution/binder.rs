@@ -20,8 +20,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::resolver::{BindingContext, ResolverRegistry};
-use crate::syntax::helpers::get_file_id_for_symbol;
-use crate::tree::{SemanticTree, SourceMap, SyntaxMap};
+use crate::tree::{SourceMap, SyntaxMap};
 
 /// Binder for resolving references in a semantic tree
 ///
@@ -55,47 +54,10 @@ impl SemanticBinder {
     /// Bind a semantic tree and return the semantic model
     ///
     /// This is the primary entry point for the binding phase. It consumes the
-    /// tree, runs all binding passes, and returns a SemanticModel.
-    pub fn bind(tree: SemanticTree, diagnostics: &mut DiagnosticContext) -> SemanticModel {
-        let mut binder = Self::from_tree(tree);
-        binder.run_binding(diagnostics)
-    }
-
-    /// Bind an already-built semantic model (output of the build/lowering phase).
-    pub fn bind_model(model: SemanticModel, diagnostics: &mut DiagnosticContext) -> SemanticModel {
+    /// model, runs all binding passes, and returns a SemanticModel.
+    pub fn bind(model: SemanticModel, diagnostics: &mut DiagnosticContext) -> SemanticModel {
         let mut binder = Self::from_model(model);
         binder.run_binding(diagnostics)
-    }
-
-    /// Create a binder from a semantic tree (internal)
-    fn from_tree(tree: SemanticTree) -> Self {
-        // Extract components from the tree
-        let (root, syntax_map, sources) = tree.into_parts();
-
-        // Create shared registries
-        let registry = SymbolRegistry::new();
-        registry.register_tree(&root);
-        let extension_registry = ExtensionRegistry::new();
-
-        // Create semantic model with shared registries (for resolvers)
-        let model = SemanticModel::with_registries(
-            root.clone(),
-            syntax_map.clone(),
-            sources.clone(),
-            registry.clone(),
-            extension_registry.clone(),
-        );
-
-        Self {
-            root,
-            syntax_map,
-            sources,
-            registry,
-            extension_registry,
-            model,
-            resolver_registry: ResolverRegistry::new(),
-            cycle_detector: RefCell::new(CycleDetector::new()),
-        }
     }
 
     fn from_model(model: SemanticModel) -> Self {
@@ -124,7 +86,7 @@ impl SemanticBinder {
     /// Run the binding phase and return the semantic model (internal)
     fn run_binding(&mut self, diagnostics: &mut DiagnosticContext) -> SemanticModel {
         // Walk all symbols and call bind_declaration
-        self.bind_symbol(&self.root.clone(), diagnostics, 0);
+        self.bind_symbol(&self.root.clone(), diagnostics);
 
         // Post-binding pass: detect duplicate function signatures
         self.check_duplicate_signatures(&self.root.clone(), diagnostics);
@@ -146,19 +108,8 @@ impl SemanticBinder {
         &mut self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         diagnostics: &mut DiagnosticContext,
-        current_file_id: usize,
     ) {
         let kind = symbol.metadata().kind();
-
-        // Track file_id - when we enter a SourceFile, update the file_id
-        let file_id = if kind == KestrelSymbolKind::SourceFile {
-            let file_name = symbol.metadata().name().value.clone();
-            diagnostics
-                .get_file_id(&file_name)
-                .unwrap_or(current_file_id)
-        } else {
-            current_file_id
-        };
 
         // Map symbol kind to syntax kind for resolver lookup
         let syntax_kind = Self::symbol_kind_to_syntax_kind(kind);
@@ -169,7 +120,6 @@ impl SemanticBinder {
                     let mut ctx = BindingContext {
                         model: &self.model,
                         diagnostics,
-                        file_id,
                         type_alias_cycle_detector: &self.cycle_detector,
                         sources: &self.sources,
                     };
@@ -180,7 +130,7 @@ impl SemanticBinder {
 
         // Recursively bind children
         for child in symbol.metadata().children() {
-            self.bind_symbol(&child, diagnostics, file_id);
+            self.bind_symbol(&child, diagnostics);
         }
     }
 
@@ -234,21 +184,17 @@ impl SemanticBinder {
                 if funcs.len() > 1 {
                     let first = &funcs[0];
                     let first_span = first.metadata().declaration_span().clone();
-                    let first_file_id = get_file_id_for_symbol(first, diagnostics);
 
-                    let duplicate_spans: Vec<(Span, usize)> = funcs[1..]
+                    let duplicate_spans: Vec<Span> = funcs[1..]
                         .iter()
                         .map(|f| {
-                            let span = f.metadata().declaration_span().clone();
-                            let file_id = get_file_id_for_symbol(f, diagnostics);
-                            (span, file_id)
+                            f.metadata().declaration_span().clone()
                         })
                         .collect();
 
                     diagnostics.throw(DuplicateFunctionSignatureError {
                         signature: sig.display(),
                         first_span,
-                        first_file_id,
                         duplicate_spans,
                     });
                 }

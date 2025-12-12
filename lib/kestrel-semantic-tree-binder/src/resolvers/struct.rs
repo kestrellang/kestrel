@@ -17,7 +17,7 @@ use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeE
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::syntax::helpers::{
-    get_file_id_for_symbol, resolve_conformance_list,
+    resolve_conformance_list,
 };
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
@@ -104,8 +104,7 @@ impl Resolver for StructResolver {
 
         let symbol_id = symbol.metadata().id();
 
-        // Get file_id and source for this symbol
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         // Extract type parameters and resolve where clause bounds
         let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
@@ -120,7 +119,6 @@ impl Resolver for StructResolver {
             symbol,
             symbol_id,
             context,
-            file_id,
             NotAProtocolContext::Conformance,
         );
 
@@ -174,18 +172,11 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx
-        .model
-        .query(SymbolFor { id: context_id })
-        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
-        .unwrap_or(0);
-
     let mut constraints = Vec::new();
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) =
-                resolve_type_bound(&child, source, context_id, ctx, type_params, file_id)
+            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params)
             {
                 constraints.push(constraint);
             }
@@ -202,7 +193,6 @@ fn resolve_type_bound(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
 ) -> Option<Constraint> {
     // Find the Name node and extract the type parameter name and span
     let name_node = find_child(syntax, SyntaxKind::Name)?;

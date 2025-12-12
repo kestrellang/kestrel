@@ -164,7 +164,6 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
             let mut resolver = TypeResolver::new(
                 ctx.model,
                 ctx.diagnostics,
-                ctx.file_id,
                 ctx.source,
                 ctx.function_id,
             );

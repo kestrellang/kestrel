@@ -20,7 +20,6 @@ use crate::resolver::BindingContext;
 pub fn flatten_protocol(
     protocol: &Arc<ProtocolSymbol>,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Option<FlattenedProtocolBehavior> {
     let mut methods: HashMap<String, Vec<FlattenedMethod>> = HashMap::new();
     let mut associated_types: HashMap<String, FlattenedAssociatedType> = HashMap::new();
@@ -37,7 +36,6 @@ pub fn flatten_protocol(
         0,
         &mut max_depth,
         ctx,
-        file_id,
     ) {
         Ok(_) => Some(FlattenedProtocolBehavior::new(
             methods,
@@ -77,7 +75,6 @@ fn flatten_protocol_recursive(
     depth: usize,
     max_depth: &mut usize,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Result<(), Cycle<semantic_tree::symbol::SymbolId>> {
     let protocol_id = protocol.metadata().id();
 
@@ -111,7 +108,6 @@ fn flatten_protocol_recursive(
                         depth + 1,
                         max_depth,
                         ctx,
-                        file_id,
                     ) {
                         res = Err(e);
                         break;

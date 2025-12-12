@@ -24,7 +24,6 @@ use crate::diagnostics::{
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::syntax::helpers::get_file_id_for_symbol;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_name, extract_path_segments, extract_visibility, find_child, get_node_span,
@@ -148,13 +147,12 @@ impl Resolver for TypeAliasResolver {
         let symbol_kind = symbol.metadata().kind();
         let symbol_id = symbol.metadata().id();
 
-        // Get file_id and source for this symbol
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         match symbol_kind {
             KestrelSymbolKind::AssociatedType => {
                 // Associated type in protocol: resolve bounds and optional default
-                bind_associated_type(symbol, syntax, &source, file_id, context);
+                bind_associated_type(symbol, syntax, &source, context);
             }
             KestrelSymbolKind::TypeAlias => {
                 // Regular type alias or struct binding: resolve aliased type
@@ -187,7 +185,7 @@ impl Resolver for TypeAliasResolver {
                 if alias_context == TypeAliasContext::Struct {
                     if let Some(parent) = symbol.metadata().parent() {
                         validate_struct_associated_type_binding(
-                            syntax, &source, &name, &parent, file_id, context,
+                            syntax, &source, &name, &parent, context,
                         );
                     }
                 }
@@ -198,7 +196,7 @@ impl Resolver for TypeAliasResolver {
 
                 // Extract and resolve the aliased type from syntax
                 if let Some(resolved_type) =
-                    resolve_aliased_type_from_syntax(syntax, &source, symbol_id, context, file_id)
+                    resolve_aliased_type_from_syntax(syntax, &source, symbol_id, context)
                 {
                     // Validate constraint satisfaction for struct bindings
                     if alias_context == TypeAliasContext::Struct {
@@ -208,7 +206,6 @@ impl Resolver for TypeAliasResolver {
                                 &name,
                                 &parent,
                                 span.clone(),
-                                file_id,
                                 context,
                             );
                         }
@@ -316,13 +313,12 @@ fn bind_associated_type(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     syntax: &SyntaxNode,
     source: &str,
-    file_id: usize,
     context: &mut BindingContext,
 ) {
     let symbol_id = symbol.metadata().id();
 
     // Resolve bounds if present (: Equatable, Hashable)
-    let bounds = resolve_associated_type_bounds(syntax, source, symbol_id, context, file_id);
+    let bounds = resolve_associated_type_bounds(syntax, source, symbol_id, context);
     if !bounds.is_empty() {
         let bounds_behavior = AssociatedTypeBoundsBehavior::new(bounds);
         symbol.metadata().add_behavior(bounds_behavior);
@@ -332,7 +328,7 @@ fn bind_associated_type(
     // Note: Validation of defaults against bounds happens in a separate validation pass
     // after all conformances have been resolved (see ConformanceValidator)
     if let Some(default_type) =
-        resolve_aliased_type_from_syntax(syntax, source, symbol_id, context, file_id)
+        resolve_aliased_type_from_syntax(syntax, source, symbol_id, context)
     {
         let typed_behavior = TypedBehavior::new(default_type, symbol.metadata().span().clone());
         symbol.metadata().add_behavior(typed_behavior);
@@ -345,7 +341,6 @@ fn resolve_associated_type_bounds(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Vec<Ty> {
     // Look for colon followed by type paths (bounds)
     // The syntax is: type Name: Bound1, Bound2 = Default;
@@ -370,7 +365,7 @@ fn resolve_associated_type_bounds(
             {
                 // This is a bound type
                 let mut type_ctx =
-                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
                 let bound_ty = resolve_type_from_ty_node(node, &mut type_ctx);
 
                 // Validate it's a protocol
@@ -441,18 +436,11 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx
-        .model
-        .query(SymbolFor { id: context_id })
-        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
-        .unwrap_or(0);
-
     let mut constraints = Vec::new();
 
     for child in where_clause_node.children() {
         if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) =
-                resolve_type_bound(&child, source, context_id, ctx, type_params, file_id)
+            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params)
             {
                 constraints.push(constraint);
             }
@@ -469,7 +457,6 @@ fn resolve_type_bound(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
 ) -> Option<Constraint> {
     // Find the Name node and extract the type parameter name and span
     let name_node = find_child(syntax, SyntaxKind::Name)?;
@@ -575,7 +562,6 @@ fn resolve_aliased_type_from_syntax(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Option<Ty> {
     // Find the AliasedType node - may not exist for abstract associated types
     let aliased_type_node = find_child(syntax, SyntaxKind::AliasedType)?;
@@ -586,7 +572,7 @@ fn resolve_aliased_type_from_syntax(
 
     // Use unified type resolution
     let mut type_ctx =
-        TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
     Some(resolve_type_from_ty_node(&ty_node, &mut type_ctx))
 }
 
@@ -625,7 +611,6 @@ fn validate_struct_associated_type_binding(
     source: &str,
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,
-    file_id: usize,
     ctx: &mut BindingContext,
 ) {
     use crate::diagnostics::{
@@ -789,7 +774,6 @@ fn validate_struct_binding_constraint_satisfaction(
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,
     binding_span: kestrel_span::Span,
-    file_id: usize,
     ctx: &mut BindingContext,
 ) {
     use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
@@ -849,7 +833,6 @@ fn validate_struct_binding_constraint_satisfaction(
                                 &bounds,
                                 type_name,
                                 binding_span.clone(),
-                                file_id,
                                 ctx,
                             );
                         }
@@ -866,7 +849,6 @@ fn validate_struct_binding_constraint_satisfaction(
         bound_type,
         &conformances,
         &binding_span,
-        file_id,
         ctx,
     );
 }
@@ -880,7 +862,6 @@ fn validate_type_satisfies_bounds(
     required_bounds: &[Ty],
     type_name: &str,
     span: kestrel_span::Span,
-    file_id: usize,
     ctx: &mut BindingContext,
 ) {
     use crate::diagnostics::AssociatedTypeConstraintNotSatisfiedError;
@@ -963,7 +944,6 @@ fn validate_inherited_where_clause_constraints(
     bound_type: &Ty,
     conformances: &[Ty],
     binding_span: &kestrel_span::Span,
-    file_id: usize,
     ctx: &mut BindingContext,
 ) {
     // Collect all protocols (direct and inherited) to check where clauses
@@ -1024,7 +1004,6 @@ fn validate_inherited_where_clause_constraints(
                                         bounds,
                                         type_name,
                                         binding_span.clone(),
-                                        file_id,
                                         ctx,
                                     );
                                 }
@@ -1044,7 +1023,6 @@ fn validate_inherited_where_clause_constraints(
                                         bounds,
                                         type_name,
                                         binding_span.clone(),
-                                        file_id,
                                         ctx,
                                     );
                                 }

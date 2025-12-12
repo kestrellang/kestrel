@@ -10,6 +10,7 @@ kestrel-syntax-tree = { path = "lib/kestrel-syntax-tree" }
 kestrel-semantic-tree = { path = "lib/kestrel-semantic-tree" }
 kestrel-semantic-tree-builder = { path = "lib/kestrel-semantic-tree-builder" }
 kestrel-semantic-tree-binder = { path = "lib/kestrel-semantic-tree-binder" }
+kestrel-compiler = { path = "lib/kestrel-compiler" }
 kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-span = { path = "lib/kestrel-span" }
 semantic-tree = { path = "lib/semantic-tree" }

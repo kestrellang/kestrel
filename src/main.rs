@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 use kestrel_lexer::lex;
 use kestrel_parser::{Parser as KestrelParser, parse_source_file};
-use kestrel_reporting::DiagnosticContext;
 use std::fs;
 use std::process::ExitCode;
 
@@ -49,102 +48,64 @@ enum Commands {
     },
 }
 
-/// Parse a single file and add it to the builder
-fn add_file(
-    path: &str,
-    builder: &mut kestrel_semantic_tree_binder::SemanticTreeBuilder,
-    diagnostics: &mut DiagnosticContext,
-    verbose: bool,
-) -> bool {
-    if verbose {
-        eprintln!("  Parsing {}", path);
-    }
-
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
+fn read_source(path: &str) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(c) => Some(c),
         Err(e) => {
             eprintln!("error: cannot read '{}': {}", path, e);
-            return false;
+            None
         }
-    };
-
-    // Add file to diagnostics first to get file_id for spans
-    let file_id = diagnostics.add_file(path.to_string(), content.clone());
-
-    // Lex the entire file
-    let tokens: Vec<_> = lex(&content, file_id)
-        .filter_map(|t| t.ok())
-        .map(|spanned| (spanned.value, spanned.span))
-        .collect();
-
-    // Parse the entire file
-    let result = KestrelParser::parse(&content, tokens.into_iter(), parse_source_file);
-
-    if !result.errors.is_empty() {
-        for error in &result.errors {
-            let span = error.span.clone().unwrap_or(kestrel_span::Span::from(0..1));
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(&error.message)
-                .with_labels(vec![kestrel_reporting::Label::primary(
-                    span.file_id,
-                    span.range(),
-                )]);
-            diagnostics.add_diagnostic(diagnostic);
-        }
-        return false;
     }
-
-    // Add to semantic tree
-    builder.add_file(path, &result.tree, &content, diagnostics, file_id);
-
-    true
 }
 
 fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: bool) -> ExitCode {
-    use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
+    use kestrel_compiler::Compilation;
 
     if files.is_empty() {
         eprintln!("error: no input files");
         return ExitCode::from(1);
     }
 
-    let mut builder = SemanticTreeBuilder::new();
-    let mut diagnostics = DiagnosticContext::new();
-    let mut parse_ok = true;
+    let mut builder = Compilation::builder();
+    let mut io_ok = true;
 
-    // Parse all files
     for file in files {
-        if !add_file(file, &mut builder, &mut diagnostics, verbose) {
-            parse_ok = false;
+        if verbose {
+            eprintln!("  Reading {}", file);
         }
+        let Some(content) = read_source(file) else {
+            io_ok = false;
+            continue;
+        };
+        builder = builder.add_source(file.clone(), content);
     }
 
-    // Build the semantic tree
-    let tree = builder.build();
-
-    // Run binding phase
     if verbose {
-        eprintln!("  Running semantic analysis...");
+        eprintln!("  Compiling...");
     }
-    let model = SemanticBinder::bind(tree, &mut diagnostics);
+    let compilation = builder.build();
 
     // Show results
     if show_tree {
         println!("--- Semantic Tree ---");
-        kestrel_semantic_tree_binder::print_semantic_model(&model);
-        println!();
+        if let Some(model) = compilation.semantic_model() {
+            kestrel_compiler::print_semantic_model(model);
+            println!();
+        }
     }
 
     if show_symbols {
         println!("--- Symbol Table ---");
-        kestrel_semantic_tree_binder::print_model_symbols(&model);
-        println!();
+        if let Some(model) = compilation.semantic_model() {
+            kestrel_compiler::print_model_symbols(model);
+            println!();
+        }
     }
 
     // Emit diagnostics
-    let has_errors = diagnostics.len() > 0 || !parse_ok;
+    let has_errors = !io_ok || compilation.has_errors();
     if has_errors {
-        diagnostics.emit().ok();
+        compilation.diagnostics().emit().ok();
         ExitCode::from(1)
     } else {
         if verbose {
@@ -209,29 +170,29 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use kestrel_semantic_tree_binder::{SemanticBinder, SemanticTreeBuilder};
+    use kestrel_compiler::Compilation;
     use semantic_tree::symbol::Symbol;
 
-    let mut builder = SemanticTreeBuilder::new();
-    let mut diagnostics = DiagnosticContext::new();
+    if verbose {
+        eprintln!("  Reading {}", file);
+    }
+    let Some(content) = read_source(file) else {
+        return ExitCode::from(1);
+    };
 
-    // Parse the file
-    if !add_file(file, &mut builder, &mut diagnostics, verbose) {
-        diagnostics.emit().ok();
+    let compilation = Compilation::builder()
+        .add_source(file.to_string(), content)
+        .build();
+
+    if compilation.has_errors() {
+        compilation.diagnostics().emit().ok();
         return ExitCode::from(1);
     }
 
-    // Build the semantic tree
-    let tree = builder.build();
-
-    // Run binding phase
-    let model = SemanticBinder::bind(tree, &mut diagnostics);
-
-    // Check for errors
-    if diagnostics.len() > 0 {
-        diagnostics.emit().ok();
+    let Some(model) = compilation.semantic_model() else {
+        eprintln!("error: no semantic model produced");
         return ExitCode::from(1);
-    }
+    };
 
     println!("=== Compiled {} ===\n", file);
 

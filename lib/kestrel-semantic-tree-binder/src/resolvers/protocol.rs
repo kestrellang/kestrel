@@ -20,7 +20,7 @@ use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::flatten_protocol;
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::syntax::helpers::{
-    get_file_id_for_symbol, resolve_conformance_list,
+    resolve_conformance_list,
 };
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
@@ -108,8 +108,7 @@ impl Resolver for ProtocolResolver {
 
         let symbol_id = symbol.metadata().id();
 
-        // Get file_id and source for this symbol
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         // Resolve inherited protocols FIRST, before where clause
         // This is needed so that where clause can reference associated types from inherited protocols
@@ -120,7 +119,6 @@ impl Resolver for ProtocolResolver {
             symbol,
             symbol_id,
             context,
-            file_id,
             NotAProtocolContext::Inheritance,
         );
 
@@ -133,7 +131,7 @@ impl Resolver for ProtocolResolver {
 
         // Flatten protocol inheritance hierarchy
         if let Ok(protocol_symbol) = symbol.clone().downcast_arc::<ProtocolSymbol>() {
-            if let Some(flattened) = flatten_protocol(&protocol_symbol, context, file_id) {
+            if let Some(flattened) = flatten_protocol(&protocol_symbol, context) {
                 symbol.metadata().add_behavior(flattened);
             }
         }
@@ -183,12 +181,6 @@ fn resolve_where_clause(
         None => return WhereClause::new(),
     };
 
-    let file_id = ctx
-        .model
-        .query(SymbolFor { id: context_id })
-        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
-        .unwrap_or(0);
-
     let mut constraints = Vec::new();
 
     for child in where_clause_node.children() {
@@ -199,7 +191,6 @@ fn resolve_where_clause(
                 context_id,
                 ctx,
                 type_params,
-                file_id,
                 symbol,
             ) {
                 constraints.push(constraint);
@@ -221,7 +212,6 @@ fn resolve_type_bound(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<Constraint> {
     // Check if this is an AssociatedTypeTarget (for paths like Iterator.Item)
@@ -249,7 +239,7 @@ fn resolve_type_bound(
 
                 if has_assoc_type {
                     // Resolve the bounds and create an InheritedAssociatedTypeBound constraint
-                    let bounds = resolve_bounds(syntax, source, context_id, ctx, file_id);
+                    let bounds = resolve_bounds(syntax, source, context_id, ctx);
                     let span = get_node_span(&target_node, source);
                     let full_name = segments.join(".");
 
@@ -266,7 +256,7 @@ fn resolve_type_bound(
         // If we get here, it's an unresolved associated type path
         let full_name = segments.join(".");
         let span = get_node_span(&target_node, source);
-        let bounds = resolve_bounds(syntax, source, context_id, ctx, file_id);
+        let bounds = resolve_bounds(syntax, source, context_id, ctx);
 
         if !bounds.is_empty() {
             return Some(Constraint::unresolved_type_bound(full_name, span, bounds));
@@ -293,7 +283,7 @@ fn resolve_type_bound(
         .map(|p| p.metadata().id());
 
     // Resolve the bounds
-    let bounds = resolve_bounds(syntax, source, context_id, ctx, file_id);
+    let bounds = resolve_bounds(syntax, source, context_id, ctx);
 
     if bounds.is_empty() {
         None
@@ -340,7 +330,6 @@ fn resolve_bounds(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Vec<Ty> {
     syntax
         .children()

@@ -57,8 +57,6 @@ pub struct BindingContext<'a> {
     pub model: &'a SemanticModel,
     /// Diagnostics collector
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
-    /// Current file ID for error reporting
-    pub file_id: usize,
     /// Cycle detector for type alias resolution (uses RefCell for interior mutability)
     pub type_alias_cycle_detector: &'a RefCell<CycleDetector<SymbolId>>,
     /// Source code by file name
@@ -66,24 +64,19 @@ pub struct BindingContext<'a> {
 }
 
 impl BindingContext<'_> {
-    /// Get file_id and source code for a symbol in one call.
-    ///
-    /// This is the preferred method for resolvers that need both file_id (for diagnostics)
-    /// and source code (for span calculation). It performs a single parent-chain traversal.
-    ///
-    /// Returns (file_id, source) where file_id falls back to self.file_id and source is cloned.
-    pub fn get_file_context(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (usize, String) {
-        match crate::syntax::helpers::get_source_file_info(symbol, self.diagnostics) {
-            Some(info) => {
-                let source = self
-                    .sources
-                    .get(&info.file_name)
-                    .cloned()
-                    .unwrap_or_default();
-                (info.file_id, source)
+    pub fn source_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> String {
+        let mut current = Some(symbol.clone());
+
+        while let Some(sym) = current {
+            if sym.metadata().kind() == kestrel_semantic_tree::symbol::kind::KestrelSymbolKind::SourceFile
+            {
+                let file_name = sym.metadata().name().value.clone();
+                return self.sources.get(&file_name).cloned().unwrap_or_default();
             }
-            None => (self.file_id, String::new()),
+            current = sym.metadata().parent();
         }
+
+        String::new()
     }
 }
 

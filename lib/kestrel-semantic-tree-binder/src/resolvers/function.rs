@@ -19,7 +19,6 @@ use crate::resolution::type_resolver::{
 };
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
-use crate::syntax::helpers::get_file_id_for_symbol;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 use kestrel_syntax_tree::utils::{
     extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility,
@@ -113,8 +112,7 @@ impl Resolver for FunctionResolver {
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
-        // Get file_id and source for this symbol
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that
@@ -124,11 +122,11 @@ impl Resolver for FunctionResolver {
 
         // Now extract and resolve parameters from syntax (T.Item will work)
         let resolved_params =
-            resolve_parameters_from_syntax(syntax, &source, symbol_id, context, file_id);
+            resolve_parameters_from_syntax(syntax, &source, symbol_id, context);
 
         // Extract and resolve return type from syntax (T.Item will work)
         let resolved_return =
-            resolve_return_type_from_syntax(syntax, &source, symbol_id, context, file_id);
+            resolve_return_type_from_syntax(syntax, &source, symbol_id, context);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
@@ -152,7 +150,6 @@ impl Resolver for FunctionResolver {
                 &body_node,
                 &resolved_params,
                 context,
-                file_id,
                 &source,
             );
         }
@@ -207,13 +204,6 @@ fn resolve_where_clause(
 
     let mut constraints = Vec::new();
 
-    // Get file_id for diagnostics
-    let file_id = ctx
-        .model
-        .query(SymbolFor { id: context_id })
-        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
-        .unwrap_or(0);
-
     // First pass: collect all TypeBound constraints
     // These need to be processed first so that associated type resolution works
     for child in where_clause_node.children() {
@@ -224,7 +214,6 @@ fn resolve_where_clause(
                 context_id,
                 ctx,
                 type_params,
-                file_id,
                 &constraints,
             ) {
                 constraints.push(constraint);
@@ -260,7 +249,6 @@ fn resolve_type_bound(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     type_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
     already_collected: &[Constraint],
 ) -> Option<Constraint> {
     use crate::diagnostics::WhereClauseAssociatedTypeNotFoundError;
@@ -449,11 +437,6 @@ fn resolve_type_equality(
     use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 
     let span = get_node_span(syntax, source);
-    let file_id = ctx
-        .model
-        .query(SymbolFor { id: context_id })
-        .map(|s| get_file_id_for_symbol(&s, ctx.diagnostics))
-        .unwrap_or(0);
 
     // Extract left side from AssociatedTypeTarget
     let left_target = find_child(syntax, SyntaxKind::AssociatedTypeTarget)?;
@@ -491,19 +474,16 @@ fn resolve_type_equality(
                 resolved
             } else {
                 // Fall back to regular type resolution (for concrete types like Int)
-                let mut type_ctx =
-                    TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+                let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
                 resolve_type_from_ty_node(&ty_node, &mut type_ctx)
             }
         } else {
-            let mut type_ctx =
-                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+            let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
             resolve_type_from_ty_node(&ty_node, &mut type_ctx)
         }
     } else {
         // Not a path type, resolve normally
-        let mut type_ctx =
-            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     };
 
@@ -622,7 +602,6 @@ fn resolve_function_body(
     body_node: &SyntaxNode,
     params: &[Parameter],
     context: &mut BindingContext,
-    file_id: usize,
     source: &str,
 ) {
     use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
@@ -720,7 +699,6 @@ fn resolve_function_body(
     let mut body_ctx = BodyResolutionContext {
         model: context.model,
         diagnostics: context.diagnostics,
-        file_id,
         source,
         function_id: symbol.metadata().id(),
         local_scope,
@@ -746,7 +724,6 @@ fn resolve_parameters_from_syntax(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Vec<Parameter> {
     // Find the ParameterList node
     let param_list = match find_child(syntax, SyntaxKind::ParameterList) {
@@ -759,7 +736,7 @@ fn resolve_parameters_from_syntax(
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
         .filter_map(|param_node| {
-            resolve_single_parameter(&param_node, source, context_id, ctx, file_id)
+            resolve_single_parameter(&param_node, source, context_id, ctx)
         })
         .collect()
 }
@@ -770,7 +747,6 @@ fn resolve_single_parameter(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Option<Parameter> {
     // Collect all Name nodes
     let name_nodes: Vec<SyntaxNode> = param_node
@@ -805,8 +781,7 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node using shared utility
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx =
-            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - type variable
@@ -826,13 +801,12 @@ fn resolve_return_type_from_syntax(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Ty {
     // Find the return type node: FunctionDeclaration -> ReturnType -> Ty
     if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
         if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
             let mut type_ctx =
-                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
             return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
         }
     }

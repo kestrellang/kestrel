@@ -62,10 +62,10 @@ impl Resolver for ExtensionResolver {
         }
 
         let symbol_id = symbol.metadata().id();
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         // Resolve the target type from the Ty node
-        let target_result = resolve_extension_target(syntax, &source, symbol_id, context, file_id);
+        let target_result = resolve_extension_target(syntax, &source, symbol_id, context);
 
         if let Some((target_ty, target_struct, type_arguments, referenced_params)) = target_result {
             // Get the target struct's where clause constraints (inherited)
@@ -78,7 +78,6 @@ impl Resolver for ExtensionResolver {
                 symbol_id,
                 context,
                 &referenced_params,
-                file_id,
             );
 
             // Combine inherited and extension constraints
@@ -110,7 +109,6 @@ impl Resolver for ExtensionResolver {
             symbol,
             symbol_id,
             context,
-            file_id,
             NotAProtocolContext::Conformance,
         );
     }
@@ -127,7 +125,6 @@ fn resolve_extension_target(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Option<(
     Ty,
     Arc<StructSymbol>,
@@ -189,7 +186,6 @@ fn resolve_extension_target(
         &struct_type_params,
         context_id,
         ctx,
-        file_id,
     )?;
 
     // Collect referenced type parameters from the type arguments
@@ -256,7 +252,6 @@ fn resolve_extension_type_arguments(
     struct_type_params: &[Arc<TypeParameterSymbol>],
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Option<Vec<Ty>> {
     let arg_list = match ty_path_node
         .children()
@@ -306,8 +301,7 @@ fn resolve_extension_type_arguments(
         }
 
         // Not a type parameter reference - resolve as a normal type
-        let mut type_resolver =
-            TypeResolver::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_resolver = TypeResolver::new(ctx.model, ctx.diagnostics, source, context_id);
         type_args.push(type_resolver.resolve(&ty_node));
     }
 
@@ -438,7 +432,6 @@ fn resolve_extension_where_clause(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     referenced_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
 ) -> WhereClause {
     let where_clause_node = match find_child(syntax, SyntaxKind::WhereClause) {
         Some(node) => node,
@@ -455,7 +448,6 @@ fn resolve_extension_where_clause(
                 context_id,
                 ctx,
                 referenced_params,
-                file_id,
             ) {
                 constraints.push(constraint);
             }
@@ -472,7 +464,6 @@ fn resolve_extension_type_bound(
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     referenced_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
 ) -> Option<Constraint> {
     // Find the Name node and extract the type parameter name and span
     let name_node = find_child(syntax, SyntaxKind::Name)?;

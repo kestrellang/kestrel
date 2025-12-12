@@ -103,12 +103,10 @@ impl Resolver for FieldResolver {
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
-        // Get file_id and source for this symbol
-        let (file_id, source) = context.get_file_context(symbol);
+        let source = context.source_for_symbol(symbol);
 
         // Resolve the type directly from syntax
-        let resolved_type =
-            resolve_field_type_from_syntax(syntax, &source, symbol_id, context, file_id);
+        let resolved_type = resolve_field_type_from_syntax(syntax, &source, symbol_id, context);
 
         // Add a TypedBehavior with the resolved type
         let typed_behavior = TypedBehavior::new(resolved_type.clone(), span);
@@ -137,15 +135,13 @@ fn resolve_field_type_from_syntax(
     source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-    file_id: usize,
 ) -> Ty {
     // Find the Ty node and resolve using shared utility
     if let Some(ty_node) = syntax
         .children()
         .find(|child| child.kind() == SyntaxKind::Ty)
     {
-        let mut type_ctx =
-            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, file_id, source, context_id);
+        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, context_id);
         return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 

@@ -40,8 +40,6 @@ pub struct BodyResolutionContext<'a> {
     pub model: &'a SemanticModel,
     /// Diagnostics collector
     pub diagnostics: &'a mut DiagnosticContext,
-    /// File ID for error reporting
-    pub file_id: usize,
     /// Source code for span extraction
     pub source: &'a str,
     /// The function symbol ID (for path resolution context)
@@ -59,7 +57,6 @@ impl<'a> BodyResolutionContext<'a> {
     pub fn new(
         model: &'a SemanticModel,
         diagnostics: &'a mut DiagnosticContext,
-        file_id: usize,
         source: &'a str,
         function: Arc<FunctionSymbol>,
     ) -> Self {
@@ -68,7 +65,6 @@ impl<'a> BodyResolutionContext<'a> {
         BodyResolutionContext {
             model,
             diagnostics,
-            file_id,
             source,
             function_id,
             local_scope,
@@ -206,7 +202,6 @@ pub fn resolve_and_attach_body(
     body_syntax: &SyntaxNode,
     model: &SemanticModel,
     diagnostics: &mut DiagnosticContext,
-    file_id: usize,
     source: &str,
 ) {
     use kestrel_semantic_model::SymbolFor;
@@ -236,7 +231,6 @@ pub fn resolve_and_attach_body(
     let mut ctx = BodyResolutionContext {
         model,
         diagnostics,
-        file_id,
         source,
         function_id: function_symbol.metadata().id(),
         local_scope: create_local_scope_from_dyn(func_arc.clone()),
