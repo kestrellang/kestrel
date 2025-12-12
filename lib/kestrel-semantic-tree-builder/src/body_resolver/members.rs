@@ -367,7 +367,10 @@ fn collect_protocol_method_candidates(
     _ctx: &BodyResolutionContext,
 ) {
     // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+    if let Some(flattened) = protocol
+        .metadata()
+        .get_behavior::<FlattenedProtocolBehavior>()
+    {
         if let Some(methods) = flattened.methods().get(method_name) {
             for method in methods {
                 candidates.push(ProtocolMethodCandidate {
@@ -728,7 +731,10 @@ fn collect_protocol_methods(
     ctx: &BodyResolutionContext,
 ) {
     // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+    if let Some(flattened) = protocol
+        .metadata()
+        .get_behavior::<FlattenedProtocolBehavior>()
+    {
         if let Some(methods) = flattened.methods().get(method_name) {
             for method in methods {
                 if let Some(callable) = get_callable_behavior(&method.symbol) {
@@ -936,7 +942,10 @@ fn collect_protocol_static_methods(
     candidates: &mut Vec<StaticMethodCandidate>,
 ) {
     // Use flattened behavior if available (normal case after BIND phase)
-    if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+    if let Some(flattened) = protocol
+        .metadata()
+        .get_behavior::<FlattenedProtocolBehavior>()
+    {
         if let Some(methods) = flattened.methods().get(method_name) {
             for method in methods {
                 if let Some(callable) = get_callable_behavior(&method.symbol) {

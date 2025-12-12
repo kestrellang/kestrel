@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_model::{StructFields, SymbolFor};
+use kestrel_semantic_model::CallableParamTypesForCall;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::expr::{
@@ -160,68 +160,6 @@ impl TypeCheckAnalyzer {
         })
     }
 
-    fn get_callable_params(&self, expr: &Expression, ctx: &AnalysisContext) -> Option<Vec<Ty>> {
-        match &expr.kind {
-            ExprKind::Call {
-                callee,
-                substitutions,
-                ..
-            } => match &callee.kind {
-                ExprKind::SymbolRef(symbol_id) => {
-                    let symbol = ctx.model.query(SymbolFor { id: *symbol_id })?;
-                    let callable = symbol.metadata().get_behavior::<CallableBehavior>()?;
-                    return Some(
-                        callable
-                            .parameters()
-                            .iter()
-                            .map(|p| p.ty.apply_substitutions(substitutions))
-                            .collect(),
-                    );
-                }
-                ExprKind::MethodRef {
-                    candidates,
-                    receiver,
-                    ..
-                } => {
-                    for &id in candidates {
-                        if let Some(symbol) = ctx.model.query(SymbolFor { id }) {
-                            let Some(callable) =
-                                symbol.metadata().get_behavior::<CallableBehavior>()
-                            else {
-                                continue;
-                            };
-                            return Some(
-                                callable
-                                    .parameters()
-                                    .iter()
-                                    .map(|p| {
-                                        let ty = p.ty.apply_substitutions(substitutions);
-                                        substitute_self_type(&ty, &receiver.ty)
-                                    })
-                                    .collect(),
-                            );
-                        }
-                    }
-                }
-                _ => {}
-            },
-            ExprKind::ImplicitStructInit { .. } => {
-                if let Some((struct_sym, substitutions)) = expr.ty.as_struct_with_subs() {
-                    let struct_id = struct_sym.metadata().id();
-                    let fields: Vec<Ty> = ctx
-                        .model
-                        .query(StructFields { struct_id })
-                        .into_iter()
-                        .map(|field| field.ty.apply_substitutions(substitutions))
-                        .collect();
-                    return Some(fields);
-                }
-            }
-            _ => {}
-        }
-        None
-    }
-
     fn check_return(
         &self,
         value: Option<&Expression>,
@@ -337,7 +275,7 @@ impl TypeCheckAnalyzer {
         arguments: &[CallArgument],
         ctx: &mut AnalysisContext,
     ) {
-        let Some(param_types) = self.get_callable_params(expr, ctx) else {
+        let Some(param_types) = ctx.model.query(CallableParamTypesForCall { expr }) else {
             return;
         };
         for (i, (arg, param_ty)) in arguments.iter().zip(param_types.iter()).enumerate() {
@@ -395,36 +333,6 @@ fn is_assignable_in_ctx(from: &Ty, to: &Ty, ctx: &AnalysisContext) -> bool {
         .map(|s| s.metadata().id())
         .unwrap_or_else(|| ctx.model.root().metadata().id());
     is_assignable_with_constraints(from, to, ctx.model, context_id)
-}
-
-// Utilities
-fn substitute_self_type(ty: &Ty, replacement: &Ty) -> Ty {
-    match ty.kind() {
-        TyKind::SelfType => replacement.clone(),
-        TyKind::Tuple(elements) => Ty::tuple(
-            elements
-                .iter()
-                .map(|e| substitute_self_type(e, replacement))
-                .collect(),
-            ty.span().clone(),
-        ),
-        TyKind::Array(element) => Ty::array(
-            substitute_self_type(element, replacement),
-            ty.span().clone(),
-        ),
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let new_params: Vec<Ty> = params
-                .iter()
-                .map(|p| substitute_self_type(p, replacement))
-                .collect();
-            let new_return = substitute_self_type(return_type, replacement);
-            Ty::function(new_params, new_return, ty.span().clone())
-        }
-        _ => ty.clone(),
-    }
 }
 
 fn format_type(ty: &Ty) -> String {

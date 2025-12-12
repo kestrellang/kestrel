@@ -4,10 +4,13 @@ use std::sync::Arc;
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_model::{ExtensionsFor, ResolvedAliasedType, SemanticModel, SymbolFor};
+use kestrel_semantic_model::{
+    AssociatedTypeBindingsForStruct, ConformancesForSymbol, ExtensionsFor,
+    ProtocolAssociatedTypesWithDefaults, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
+    SemanticModel, SymbolFor,
+};
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -49,7 +52,7 @@ impl Analyzer for ConformanceAnalyzer {
     fn visit_symbol(
         &mut self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        _ctx: &mut AnalysisContext,
+        ctx: &mut AnalysisContext,
     ) {
         match symbol.metadata().kind() {
             KestrelSymbolKind::Protocol => {
@@ -58,7 +61,10 @@ impl Analyzer for ConformanceAnalyzer {
                 }
             }
             KestrelSymbolKind::Struct => {
-                if !get_conformances(symbol).is_empty() {
+                let conformances = ctx.model.query(ConformancesForSymbol {
+                    symbol_id: symbol.metadata().id(),
+                });
+                if !conformances.is_empty() {
                     if let Ok(struct_sym) = symbol.clone().into_any_arc().downcast::<StructSymbol>()
                     {
                         self.structs.push((symbol.clone(), struct_sym));
@@ -79,20 +85,19 @@ impl Analyzer for ConformanceAnalyzer {
         // Also consider structs that gain conformances via extensions
         let mut extra_structs = Vec::new();
         for extension in ctx.model.extension_registry().all_extensions() {
-            if let Some(cb) = extension.metadata().get_behavior::<ConformancesBehavior>() {
-                if !cb.conformances().is_empty() {
-                    if let Some(target_ty) = extension.target_type() {
-                        if let TyKind::Struct { symbol: s, .. } = target_ty.kind() {
-                            let id = s.metadata().id();
-                            let already =
-                                self.structs.iter().any(|(_, ss)| ss.metadata().id() == id);
-                            if !already {
-                                extra_structs.push((
-                                    s.clone() as Arc<dyn Symbol<KestrelLanguage>>,
-                                    s.clone(),
-                                ));
-                            }
-                        }
+            let conformances = ctx.model.query(ConformancesForSymbol {
+                symbol_id: extension.metadata().id(),
+            });
+            if conformances.is_empty() {
+                continue;
+            }
+            if let Some(target_ty) = extension.target_type() {
+                if let TyKind::Struct { symbol: s, .. } = target_ty.kind() {
+                    let id = s.metadata().id();
+                    let already = self.structs.iter().any(|(_, ss)| ss.metadata().id() == id);
+                    if !already {
+                        extra_structs
+                            .push((s.clone() as Arc<dyn Symbol<KestrelLanguage>>, s.clone()));
                     }
                 }
             }
@@ -113,14 +118,6 @@ impl Analyzer for ConformanceAnalyzer {
 
 // Helpers adapted from builder validator/linker
 
-fn get_conformances(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec<Ty> {
-    symbol
-        .metadata()
-        .get_behavior::<ConformancesBehavior>()
-        .map(|cb| cb.conformances().to_vec())
-        .unwrap_or_default()
-}
-
 fn get_protocol_arc_from_symbol(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<Arc<ProtocolSymbol>> {
@@ -140,7 +137,7 @@ fn check_circular_inheritance(
     ctx: &mut AnalysisContext,
 ) {
     let mut detector: CycleDetector<SymbolId> = CycleDetector::new();
-    if let Some(cycle) = check_inheritance_cycle(protocol, &mut detector) {
+    if let Some(cycle) = check_inheritance_cycle(protocol, model, &mut detector) {
         let span = protocol.metadata().declaration_span().clone();
         let cycle_names: Vec<String> = cycle
             .cycle()
@@ -162,16 +159,16 @@ fn check_circular_inheritance(
 
 fn check_inheritance_cycle(
     protocol: &Arc<ProtocolSymbol>,
+    model: &SemanticModel,
     detector: &mut CycleDetector<SymbolId>,
 ) -> Option<semantic_tree::cycle::Cycle<SymbolId>> {
     let id = protocol.metadata().id();
     if let Err(cycle) = detector.enter(id) {
         return Some(cycle);
     }
-    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-    for inherited_ty in get_conformances(&protocol_dyn) {
+    for inherited_ty in model.query(ConformancesForSymbol { symbol_id: id }) {
         if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
-            if let Some(c) = check_inheritance_cycle(symbol, detector) {
+            if let Some(c) = check_inheritance_cycle(symbol, model, detector) {
                 detector.exit();
                 return Some(c);
             }
@@ -190,27 +187,23 @@ fn check_struct_conformance(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let mut conformances = get_conformances(dyn_sym);
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: dyn_sym.metadata().id(),
+    });
     let extensions = model.query(ExtensionsFor {
         target_id: struct_id,
     });
     for extension in &extensions {
-        let ext_confs = get_conformances(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        let ext_confs = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
         conformances.extend(ext_confs);
     }
     if conformances.is_empty() {
         return;
     }
 
-    let struct_arc = dyn_sym
-        .clone()
-        .into_any_arc()
-        .downcast::<StructSymbol>()
-        .ok();
-    let associated_type_bindings = struct_arc
-        .as_ref()
-        .map(|s| collect_associated_type_bindings(s, model))
-        .unwrap_or_default();
+    let associated_type_bindings = model.query(AssociatedTypeBindingsForStruct { struct_id });
 
     let mut all_methods = collect_methods_from_symbol(dyn_sym);
     let extensions = model.query(ExtensionsFor {
@@ -239,8 +232,9 @@ fn check_struct_conformance(
         };
         let protocol_name = &protocol_symbol.metadata().name().value;
 
-        let protocol_associated_types =
-            collect_protocol_associated_types_with_defaults(&protocol_symbol);
+        let protocol_associated_types = model.query(ProtocolAssociatedTypesWithDefaults {
+            protocol_id: protocol_symbol.metadata().id(),
+        });
         for (type_name, default_type) in &protocol_associated_types {
             if default_type.is_none() && !associated_type_bindings.contains_key(type_name) {
                 let span = struct_sym.metadata().declaration_span().clone();
@@ -271,7 +265,9 @@ fn check_struct_conformance(
             .unwrap_or_else(|| SignatureType::Named(vec![struct_name.clone()]));
         effective_bindings.insert("Self".to_string(), self_type);
 
-        let required_methods = collect_all_protocol_methods(&protocol_symbol, model);
+        let required_methods = model.query(ProtocolRequiredMethods {
+            protocol_id: protocol_symbol.metadata().id(),
+        });
         for (protocol_sig, method) in &required_methods {
             let method_name = &method.metadata().name().value;
             let raw_return_type = SignatureType::from_ty(&method.return_type());
@@ -340,48 +336,6 @@ fn collect_methods_from_symbol(
         .collect()
 }
 
-fn collect_protocol_associated_types_with_defaults(
-    protocol: &Arc<ProtocolSymbol>,
-) -> HashMap<String, Option<SignatureType>> {
-    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-    let mut associated_types = HashMap::new();
-    for child in protocol_dyn.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::AssociatedType {
-            if let Ok(assoc_type) = child.downcast_arc::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>() {
-                let name = assoc_type.metadata().name().value.clone();
-                let default_type = assoc_type.default_type().map(|ty| SignatureType::from_ty(&ty));
-                associated_types.insert(name, default_type);
-            }
-        }
-    }
-    associated_types
-}
-
-fn collect_associated_type_bindings(
-    struct_sym: &Arc<StructSymbol>,
-    model: &SemanticModel,
-) -> HashMap<String, SignatureType> {
-    use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
-    let struct_dyn = struct_sym.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-    let mut bindings = HashMap::new();
-    for child in struct_dyn.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::TypeAlias {
-            let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>() else {
-                continue;
-            };
-            let name = type_alias.metadata().name().value.clone();
-            let alias_id = type_alias.metadata().id();
-            let Some(resolved) = model.query(ResolvedAliasedType {
-                type_alias_id: alias_id,
-            }) else {
-                continue;
-            };
-            bindings.insert(name, SignatureType::from_ty(&resolved));
-        }
-    }
-    bindings
-}
-
 // Check protocol associated type default bounds satisfaction
 fn check_protocol_associated_type_defaults(
     protocol: &Arc<ProtocolSymbol>,
@@ -435,11 +389,9 @@ fn validate_type_satisfies_protocol_bounds(
             let required_protocol_name = required_proto_symbol.metadata().name().value.clone();
             let conforms = match bound_type.kind() {
                 TyKind::Struct { symbol, .. } => {
-                    let conformances = symbol
-                        .metadata()
-                        .get_behavior::<ConformancesBehavior>()
-                        .map(|cb| cb.conformances().to_vec())
-                        .unwrap_or_default();
+                    let conformances = ctx.model.query(ConformancesForSymbol {
+                        symbol_id: symbol.metadata().id(),
+                    });
                     conformances.iter().any(|conf| {
                         if let TyKind::Protocol {
                             symbol: proto_sym, ..
@@ -526,20 +478,16 @@ fn link_protocol_methods_for_struct(
     let struct_name = &struct_sym.metadata().name().value;
     let struct_id = struct_sym.metadata().id();
 
-    let mut conformances = struct_dyn
-        .metadata()
-        .get_behavior::<ConformancesBehavior>()
-        .map(|cb| cb.conformances().to_vec())
-        .unwrap_or_default();
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: struct_dyn.metadata().id(),
+    });
     let extensions = model.query(ExtensionsFor {
         target_id: struct_id,
     });
     for extension in &extensions {
-        let ext_confs = extension
-            .metadata()
-            .get_behavior::<ConformancesBehavior>()
-            .map(|cb| cb.conformances().to_vec())
-            .unwrap_or_default();
+        let ext_confs = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
         conformances.extend(ext_confs);
     }
     if conformances.is_empty() {
@@ -556,7 +504,9 @@ fn link_protocol_methods_for_struct(
         if let Some((conforming_protocol, bindings)) =
             resolve_protocol_type_for_link(conformance_ty, struct_dyn, struct_name, model)
         {
-            let methods = collect_all_protocol_methods_with_definer(&conforming_protocol, model);
+            let methods = model.query(ProtocolMethodsWithDefiner {
+                protocol_id: conforming_protocol.metadata().id(),
+            });
             for (defining_protocol, method) in methods {
                 let sig = method.signature();
                 let substituted_sig = substitute_signature(&sig, &bindings);
@@ -659,7 +609,9 @@ fn resolve_protocol_type_for_link(
                 .unwrap_or_else(|| SignatureType::Named(vec![struct_name.to_string()]));
             bindings.insert("Self".to_string(), self_type);
             if let Ok(struct_sym) = struct_dyn.clone().into_any_arc().downcast::<StructSymbol>() {
-                let assoc_bindings = collect_associated_type_bindings(&struct_sym, model);
+                let assoc_bindings = model.query(AssociatedTypeBindingsForStruct {
+                    struct_id: struct_sym.metadata().id(),
+                });
                 for (name, sig_type) in assoc_bindings {
                     bindings.insert(name, sig_type);
                 }
@@ -667,75 +619,6 @@ fn resolve_protocol_type_for_link(
             Some((symbol.clone(), bindings))
         }
         _ => None,
-    }
-}
-
-fn collect_all_protocol_methods(
-    protocol: &Arc<ProtocolSymbol>,
-    model: &SemanticModel,
-) -> HashMap<CallableSignature, Arc<FunctionSymbol>> {
-    let mut methods = HashMap::new();
-    let mut visited = HashSet::new();
-    collect_protocol_methods_recursive(protocol, model, &mut methods, &mut visited);
-    methods
-}
-
-fn collect_protocol_methods_recursive(
-    protocol: &Arc<ProtocolSymbol>,
-    model: &SemanticModel,
-    methods: &mut HashMap<CallableSignature, Arc<FunctionSymbol>>,
-    visited: &mut HashSet<SymbolId>,
-) {
-    let id = protocol.metadata().id();
-    if visited.contains(&id) {
-        return;
-    }
-    visited.insert(id);
-    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-    for inherited_ty in get_conformances(&protocol_dyn) {
-        if let Some((inherited_protocol, _)) = resolve_protocol_type(&inherited_ty) {
-            collect_protocol_methods_recursive(&inherited_protocol, model, methods, visited);
-        }
-    }
-    for method in collect_methods_from_symbol(&protocol_dyn) {
-        methods.insert(method.signature(), method);
-    }
-}
-
-fn collect_all_protocol_methods_with_definer(
-    protocol: &Arc<ProtocolSymbol>,
-    model: &SemanticModel,
-) -> Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>)> {
-    let mut methods = Vec::new();
-    let mut visited = HashSet::new();
-    collect_protocol_methods_recursive_with_definer(protocol, model, &mut methods, &mut visited);
-    methods
-}
-
-fn collect_protocol_methods_recursive_with_definer(
-    protocol: &Arc<ProtocolSymbol>,
-    model: &SemanticModel,
-    methods: &mut Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>)>,
-    visited: &mut HashSet<SymbolId>,
-) {
-    let id = protocol.metadata().id();
-    if visited.contains(&id) {
-        return;
-    }
-    visited.insert(id);
-    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-    if let Some(conformances_behavior) = protocol_dyn
-        .metadata()
-        .get_behavior::<ConformancesBehavior>()
-    {
-        for inherited_ty in conformances_behavior.conformances() {
-            if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
-                collect_protocol_methods_recursive_with_definer(symbol, model, methods, visited);
-            }
-        }
-    }
-    for method in collect_methods_from_symbol(&protocol_dyn) {
-        methods.push((protocol.clone(), method));
     }
 }
 

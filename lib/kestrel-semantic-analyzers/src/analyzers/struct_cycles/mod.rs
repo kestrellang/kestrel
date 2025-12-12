@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+use kestrel_semantic_model::StructFieldTypes;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -20,7 +20,6 @@ pub struct StructCycleAnalyzer {
 }
 
 struct CollectedStruct {
-    symbol: Arc<dyn Symbol<KestrelLanguage>>,
     struct_sym: Arc<StructSymbol>,
 }
 
@@ -50,10 +49,10 @@ impl Analyzer for StructCycleAnalyzer {
     ) {
         if symbol.metadata().kind() == KestrelSymbolKind::Struct {
             if let Ok(struct_sym) = symbol.clone().downcast_arc::<StructSymbol>() {
-                self.structs.lock().unwrap().push(CollectedStruct {
-                    symbol: symbol.clone(),
-                    struct_sym,
-                });
+                self.structs
+                    .lock()
+                    .unwrap()
+                    .push(CollectedStruct { struct_sym });
             }
         }
     }
@@ -61,44 +60,30 @@ impl Analyzer for StructCycleAnalyzer {
     fn finalize(&mut self, ctx: &mut AnalysisContext) {
         let model = ctx.model;
         for collected in self.structs.lock().unwrap().iter() {
-            check_struct_for_cycles(&collected.struct_sym, &collected.symbol, model, ctx);
+            check_struct_for_cycles(collected.struct_sym.as_ref(), model, ctx);
         }
     }
 }
 
 fn check_struct_for_cycles(
     struct_sym: &StructSymbol,
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     model: &kestrel_semantic_model::SemanticModel,
     ctx: &mut AnalysisContext,
 ) {
     let struct_id = struct_sym.metadata().id();
     let struct_name = struct_sym.metadata().name().value.clone();
 
-    // Iterate fields
-    for field in symbol.metadata().children() {
-        if field.metadata().kind() != KestrelSymbolKind::Field {
-            continue;
-        }
-
-        // Get the field's resolved type via TypedBehavior
-        let field_ty = field
-            .metadata()
-            .get_behavior::<TypedBehavior>()
-            .map(|tb| tb.ty().clone());
-        let Some(field_ty) = field_ty else {
-            continue;
-        };
-
-        let field_name = field.metadata().name().value.clone();
-        let field_span = field.metadata().span().clone();
+    for field in model.query(StructFieldTypes { struct_id }) {
+        let field_ty = field.ty;
+        let field_name = field.name;
+        let field_span = field.span;
 
         let mut detector: CycleDetector<SymbolId> = CycleDetector::new();
         if detector.enter(struct_id).is_err() {
             continue;
         }
 
-        if let Some(cycle) = check_type_for_struct_cycle(&field_ty, &mut detector) {
+        if let Some(cycle) = check_type_for_struct_cycle(&field_ty, &mut detector, model) {
             if cycle.is_self_cycle() {
                 ctx.report(SelfContainingStructError {
                     struct_name: struct_name.clone(),
@@ -139,6 +124,7 @@ fn check_struct_for_cycles(
 fn check_type_for_struct_cycle(
     ty: &Ty,
     detector: &mut CycleDetector<SymbolId>,
+    model: &kestrel_semantic_model::SemanticModel,
 ) -> Option<Cycle<SymbolId>> {
     match ty.kind() {
         TyKind::Struct { symbol, .. } => {
@@ -146,20 +132,10 @@ fn check_type_for_struct_cycle(
             if let Err(cycle) = detector.enter(struct_id) {
                 return Some(cycle);
             }
-            let struct_dyn = symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-            for field in struct_dyn.metadata().children() {
-                if field.metadata().kind() != KestrelSymbolKind::Field {
-                    continue;
-                }
-                let field_ty = field
-                    .metadata()
-                    .get_behavior::<TypedBehavior>()
-                    .map(|tb| tb.ty().clone());
-                if let Some(ft) = field_ty {
-                    if let Some(c) = check_type_for_struct_cycle(&ft, detector) {
-                        detector.exit();
-                        return Some(c);
-                    }
+            for field in model.query(StructFieldTypes { struct_id }) {
+                if let Some(c) = check_type_for_struct_cycle(&field.ty, detector, model) {
+                    detector.exit();
+                    return Some(c);
                 }
             }
             detector.exit();
@@ -167,7 +143,7 @@ fn check_type_for_struct_cycle(
         }
         TyKind::Tuple(elements) => {
             for e in elements {
-                if let Some(c) = check_type_for_struct_cycle(e, detector) {
+                if let Some(c) = check_type_for_struct_cycle(e, detector, model) {
                     return Some(c);
                 }
             }

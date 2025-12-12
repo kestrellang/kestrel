@@ -581,7 +581,10 @@ fn resolve_path_in_where_clause(
             }
 
             // Also check inherited associated types (flattened behavior)
-            if let Some(flattened) = symbol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+            if let Some(flattened) = symbol
+                .metadata()
+                .get_behavior::<FlattenedProtocolBehavior>()
+            {
                 if let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name) {
                     let container = Ty::type_parameter(type_param.clone(), span.clone());
                     return Ty::qualified_associated_type(

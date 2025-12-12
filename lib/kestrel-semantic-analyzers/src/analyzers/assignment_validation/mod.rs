@@ -5,11 +5,8 @@ use diagnostics::{
     CannotAssignToExpressionError, CannotAssignToImmutableError, CannotAssignToImmutableFieldError,
 };
 
+use kestrel_semantic_model::LocalName;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
-use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
-use kestrel_semantic_tree::symbol::local::LocalId;
-use std::sync::Arc;
 
 pub struct AssignmentValidationAnalyzer;
 
@@ -34,9 +31,16 @@ impl Analyzer for AssignmentValidationAnalyzer {
             return;
         };
 
-        let (func, init) = current_container(ctx);
+        let container_id = ctx.current_symbol().map(|s| s.metadata().id());
+        let is_initializer = ctx
+            .current_symbol()
+            .map(|s| {
+                s.metadata().kind()
+                    == kestrel_semantic_tree::symbol::kind::KestrelSymbolKind::Initializer
+            })
+            .unwrap_or(false);
 
-        let errors = validate_assignment_target(target, func.as_deref(), init.as_deref());
+        let errors = validate_assignment_target(target, container_id, is_initializer, ctx);
         for e in errors {
             match e {
                 AssignmentError::ImmutableVar(err) => ctx.report(err),
@@ -47,27 +51,23 @@ impl Analyzer for AssignmentValidationAnalyzer {
     }
 }
 
-fn current_container(
-    ctx: &AnalysisContext,
-) -> (Option<Arc<FunctionSymbol>>, Option<Arc<InitializerSymbol>>) {
-    let Some(symbol) = ctx.current_symbol() else {
-        return (None, None);
-    };
-    let func = symbol.clone().downcast_arc::<FunctionSymbol>().ok();
-    let init = symbol.clone().downcast_arc::<InitializerSymbol>().ok();
-    (func, init)
-}
-
 fn validate_assignment_target(
     target: &Expression,
-    func: Option<&FunctionSymbol>,
-    init: Option<&InitializerSymbol>,
+    container_id: Option<semantic_tree::symbol::SymbolId>,
+    is_initializer: bool,
+    ctx: &AnalysisContext,
 ) -> Vec<AssignmentError> {
     let mut out = Vec::new();
     match &target.kind {
         ExprKind::LocalRef(local_id) => {
             if !target.is_mutable() {
-                let name = get_local_name(*local_id, func, init)
+                let name = container_id
+                    .and_then(|container_id| {
+                        ctx.model.query(LocalName {
+                            container_id,
+                            local_id: *local_id,
+                        })
+                    })
                     .unwrap_or_else(|| "<unknown>".to_string());
                 out.push(AssignmentError::ImmutableVar(
                     CannotAssignToImmutableError {
@@ -78,7 +78,7 @@ fn validate_assignment_target(
             }
         }
         ExprKind::FieldAccess { object, field } => {
-            let is_self_in_init = init.is_some() && is_self_expr(object);
+            let is_self_in_init = is_initializer && is_self_expr(object);
             if !is_self_in_init && !target.is_mutable() {
                 out.push(AssignmentError::ImmutableField(
                     CannotAssignToImmutableFieldError {
@@ -127,20 +127,6 @@ fn validate_assignment_target(
         }
     }
     out
-}
-
-fn get_local_name(
-    id: LocalId,
-    func: Option<&FunctionSymbol>,
-    init: Option<&InitializerSymbol>,
-) -> Option<String> {
-    if let Some(func) = func {
-        func.get_local(id).map(|l| l.name().to_string())
-    } else if let Some(init) = init {
-        init.get_local(id).map(|l| l.name().to_string())
-    } else {
-        None
-    }
 }
 
 fn is_self_expr(expr: &Expression) -> bool {

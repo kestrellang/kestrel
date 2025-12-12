@@ -17,11 +17,14 @@ mod scope;
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
-    AncestorOfKind, ChildByName, DeclaredName, DeclaredNamesInScope, ExecutableBodyFor,
-    ExtensionMethods, ExtensionsFor, FunctionsInSymbol, GenericsData, GenericsDataFor, HasBody,
-    ImportsInScope, InheritedProtocolMember, IsInsideAny, IsVisibleFrom, ResolveModulePath,
-    ResolveName, ResolveTypePath, ResolveValuePath, ResolvedAliasedType, ScopeFor, StructFieldInfo,
-    StructFields, StructMethods, SymbolFor, VisibleChildren, VisibleChildrenByName,
+    AncestorOfKind, AssociatedTypeBindingsForStruct, CallableParamTypesForCall, ChildByName,
+    ConformancesForSymbol, DeclaredName, DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods,
+    ExtensionsFor, FunctionsInSymbol, GenericsData, GenericsDataFor, HasBody, ImportsInScope,
+    InheritedProtocolMember, IsInsideAny, IsVisibleFrom, LocalName,
+    ProtocolAssociatedTypesWithDefaults, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
+    ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath, ResolvedAliasedType,
+    ScopeFor, StructFieldInfo, StructFieldTypeInfo, StructFieldTypes, StructFields, StructMethods,
+    SymbolFor, VisibleChildren, VisibleChildrenByName,
 };
 pub use query::Query;
 pub use registry::SymbolRegistry;
