@@ -5,13 +5,14 @@ The `SemanticModel` is the central interface for querying semantic information a
 ## Overview
 
 ```
-Source Files → BUILD → SemanticTree → BIND → SemanticModel
-                                                   ↓
-                                            model.query(...)
+Source Files → BUILD → SemanticModel (unbound) → BIND → SemanticModel
+                                                         ↓
+                                                  model.query(...)
 ```
 
 - **BUILD phase**: Constructs symbol tree from syntax (parent-child, names, spans)
-- **BIND phase**: Resolves references, registers extensions, validates
+- **BIND phase**: Resolves references, registers extensions
+- **VALIDATE phase**: Runs analyzers over the bound model
 - **SemanticModel**: Owns the bound tree, answers queries
 
 ## What It Owns
@@ -47,7 +48,9 @@ kestrel-semantic-tree          # Symbol/Behavior definitions
         ↑
 kestrel-semantic-model         # SemanticModel + Query trait + queries
         ↑
-kestrel-semantic-tree-builder  # BUILD + BIND phases
+kestrel-semantic-tree-builder  # BUILD/lowering phase
+        ↑
+kestrel-semantic-tree-binder   # BIND phase
         ↑
 kestrel-compiler               # High-level Compilation API
 ```

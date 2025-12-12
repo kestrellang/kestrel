@@ -69,12 +69,11 @@ Move logic from `SemanticDatabase` impl (L2-L4):
 
 ## Step 5: Update Binder
 
-Change `SemanticBinder` to create and return `SemanticModel`:
+Change `SemanticBinder` to take and return `SemanticModel`:
 
 ```rust
 impl SemanticBinder {
-    pub fn bind(tree: SemanticTree, diagnostics: &mut DiagnosticContext) -> SemanticModel {
-        let mut model = SemanticModel::from_tree(tree);
+    pub fn bind(model: SemanticModel, diagnostics: &mut DiagnosticContext) -> SemanticModel {
         // ... run binding using model.query(...) ...
         model
     }
@@ -132,4 +131,4 @@ Delete from builder:
 - `database/queries.rs` (just the `Db` trait remains, then delete)
 - Re-exports of moved types
 
-Remove `SemanticTree` if no longer needed, or keep as internal builder type.
+Remove any remaining legacy semantic-tree types/APIs once nothing depends on them.

@@ -17,7 +17,6 @@ pub struct BuildFile<'a> {
     pub file_name: &'a str,
     pub syntax: &'a SyntaxNode,
     pub source: &'a str,
-    pub file_id: usize,
 }
 
 /// Builds a `SemanticModel` from syntax trees (build/lowering phase only).
@@ -42,7 +41,6 @@ impl SemanticModelBuilder {
         syntax: &SyntaxNode,
         source: &str,
         _diagnostics: &mut DiagnosticContext,
-        _file_id: usize,
     ) {
         let root = self.root.clone();
 
@@ -119,13 +117,7 @@ where
     let mut builder = SemanticModelBuilder::new();
 
     for file in files {
-        builder.add_file(
-            file.file_name,
-            file.syntax,
-            file.source,
-            diagnostics,
-            file.file_id,
-        );
+        builder.add_file(file.file_name, file.syntax, file.source, diagnostics);
     }
 
     builder.build()

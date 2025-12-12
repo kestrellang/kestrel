@@ -16,7 +16,9 @@ Based on git history analysis of features like `self` parameter and member acces
 | Parser | 3-5 files | ~100-300 |
 | Syntax Tree | 1 file | ~20-50 |
 | Semantic Tree | 2-4 files | ~50-200 |
-| Semantic Builder | 2-5 files | ~100-500 |
+| Semantic Build (lowering) | 1-3 files | ~50-250 |
+| Semantic Bind | 1-5 files | ~100-500 |
+| Semantic Analyze | 0-3 files | ~0-200 |
 | Tests | 1-2 files | ~50-200 |
 
 ### Step-by-Step
@@ -111,25 +113,35 @@ mod newfeature;
 pub use newfeature::NewFeatureSymbol;
 ```
 
-#### 7. Create Resolver
-**File**: `lib/kestrel-semantic-tree-builder/src/resolvers/newfeature.rs` (new file)
+#### 7. Create Builder (BUILD)
+**File**: `lib/kestrel-semantic-tree-builder/src/builders/newfeature.rs` (new file)
 
-Implement the `Resolver` trait.
+Implement the `Builder` trait (creates symbols + stores syntax map entries).
 
-Update `lib/kestrel-semantic-tree-builder/src/resolvers/mod.rs`:
+Update `lib/kestrel-semantic-tree-builder/src/builders/mod.rs`:
 ```rust
 mod newfeature;
-pub use newfeature::NewFeatureResolver;
+pub use newfeature::NewFeatureBuilder;
 ```
 
-#### 8. Register Resolver
-**File**: `lib/kestrel-semantic-tree-builder/src/resolver.rs`
+Register it in `lib/kestrel-semantic-tree-builder/src/lowerer.rs` by:
+- adding a `static NEWFEATURE: NewFeatureBuilder = NewFeatureBuilder;`
+- extending `builder_for(...)` to return `Some(&NEWFEATURE)` for your `SyntaxKind`
 
+#### 8. Create Binder (BIND)
+**File**: `lib/kestrel-semantic-tree-binder/src/binders/newfeature.rs` (new file)
+
+Implement `DeclarationBinder::bind_declaration(...)` for the new symbol kind.
+
+Update `lib/kestrel-semantic-tree-binder/src/binders/mod.rs`:
 ```rust
-resolvers.insert(
-    SyntaxKind::NewFeatureDeclaration,
-    Box::new(NewFeatureResolver),
-);
+mod newfeature;
+pub use newfeature::NewFeatureBinder;
+```
+
+Register it in `lib/kestrel-semantic-tree-binder/src/declaration_binder.rs` in `DeclarationBinderRegistry::new()`:
+```rust
+binders.insert(SyntaxKind::NewFeatureDeclaration, Box::new(NewFeatureBinder));
 ```
 
 #### 9. Add Tests
@@ -151,6 +163,8 @@ fn basic_newfeature() {
 cargo test -p kestrel-lexer
 cargo test -p kestrel-parser
 cargo test -p kestrel-semantic-tree-builder
+cargo test -p kestrel-semantic-tree-binder
+cargo test -p kestrel-semantic-analyzers
 cargo test -p kestrel-test-suite
 cargo test
 ```
@@ -166,7 +180,7 @@ When adding new expression or statement types (e.g., binary operators, if expres
 - `lib/kestrel-parser/src/stmt/mod.rs` - Statement parsing
 - `lib/kestrel-semantic-tree/src/expr.rs` - Expression semantics
 - `lib/kestrel-semantic-tree/src/stmt.rs` - Statement semantics
-- `lib/kestrel-semantic-tree-builder/src/body_resolver.rs` - **Main file**
+- `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs` - **Main file**
 
 ### Step-by-Step
 
@@ -189,7 +203,7 @@ pub enum Expr {
 ```
 
 #### 4. Update Body Resolver
-**File**: `lib/kestrel-semantic-tree-builder/src/body_resolver.rs`
+**File**: `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs`
 
 This is where most of the work happens. Add a match arm to handle the new syntax:
 
@@ -209,7 +223,7 @@ fn resolve_binary_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
 ```
 
 #### 5. Add Diagnostics (if needed)
-**File**: `lib/kestrel-semantic-tree-builder/src/diagnostics/{name}.rs`
+**File**: `lib/kestrel-semantic-tree-binder/src/diagnostics/{name}.rs`
 
 Create a new diagnostics module for feature-specific errors.
 
@@ -233,8 +247,9 @@ mod binary_ops {
 When adding semantic checks that run after binding (e.g., checking for invalid modifiers).
 
 ### Key Files
-- `lib/kestrel-semantic-tree-builder/src/validation/{name}.rs` (new)
-- `lib/kestrel-semantic-tree-builder/src/validation/mod.rs`
+- `lib/kestrel-semantic-analyzers/src/analyzers/{name}/mod.rs` (new)
+- `lib/kestrel-semantic-analyzers/src/analyzers/mod.rs`
+- `lib/kestrel-semantic-analyzers/src/lib.rs` (register in `default_analyzers()`)
 - `lib/kestrel-test-suite/tests/validation.rs`
 
 ### Step-by-Step
@@ -246,53 +261,31 @@ Document what errors the pass will detect:
 |-----------|---------------|
 | When X | "error: X happened" |
 
-#### 2. Create Pass File
-**File**: `lib/kestrel-semantic-tree-builder/src/validation/mycheck.rs`
+#### 2. Create Analyzer File
+**File**: `lib/kestrel-semantic-analyzers/src/analyzers/mycheck/mod.rs`
 
 ```rust
-pub struct MyCheckPass;
+pub struct MyCheckAnalyzer;
 
-impl MyCheckPass {
-    const NAME: &'static str = "my_check";
-}
-
-impl ValidationPass for MyCheckPass {
-    fn name(&self) -> &'static str {
-        Self::NAME
-    }
-
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics, config);
-    }
-}
-
-fn validate_symbol(/* ... */) {
-    // Check symbol
-    // Recurse into children
+impl Analyzer for MyCheckAnalyzer {
+    fn name(&self) -> &'static str { "my_check" }
 }
 ```
 
-#### 3. Register Pass
-**File**: `lib/kestrel-semantic-tree-builder/src/validation/mod.rs`
+#### 3. Register Analyzer
+Add it to `default_analyzers()` in `lib/kestrel-semantic-analyzers/src/lib.rs` (in the right order).
 
 ```rust
-mod mycheck;
-pub use mycheck::MyCheckPass;
+// lib/kestrel-semantic-analyzers/src/analyzers/mod.rs
+pub mod mycheck;
+pub use mycheck::MyCheckAnalyzer;
 
-impl ValidationRunner {
-    pub fn new() -> Self {
-        let passes: Vec<Box<dyn ValidationPass>> = vec![
-            // ... existing passes
-            Box::new(MyCheckPass),
-        ];
-        Self { passes }
-    }
+// lib/kestrel-semantic-analyzers/src/lib.rs
+pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
+    vec![
+        // ... existing analyzers
+        Box::new(MyCheckAnalyzer),
+    ]
 }
 ```
 
@@ -322,13 +315,13 @@ mod my_check {
 When adding error messages for semantic analysis.
 
 ### Key Files
-- `lib/kestrel-semantic-tree-builder/src/diagnostics/{name}.rs` (new)
-- `lib/kestrel-semantic-tree-builder/src/diagnostics/mod.rs`
+- BIND-time diagnostics: `lib/kestrel-semantic-tree-binder/src/diagnostics/{name}.rs` (new)
+- Analyzer diagnostics: `lib/kestrel-semantic-analyzers/src/analyzers/{name}/diagnostics.rs` (new)
 
 ### Step-by-Step
 
 #### 1. Create Diagnostic Module
-**File**: `lib/kestrel-semantic-tree-builder/src/diagnostics/myerror.rs`
+**File**: `lib/kestrel-semantic-tree-binder/src/diagnostics/myerror.rs`
 
 ```rust
 use kestrel_reporting::{Diagnostic, DiagnosticContext, Label};
@@ -336,14 +329,13 @@ use kestrel_span::Span;
 
 pub fn report_my_error(
     diagnostics: &mut DiagnosticContext,
-    file_id: usize,
     span: Span,
     name: &str,
 ) {
     let diagnostic = Diagnostic::error()
         .with_message(format!("my error: '{}'", name))
         .with_labels(vec![
-            Label::primary(file_id, span)
+            Label::primary(span.file_id, span.range())
                 .with_message("error occurred here")
         ]);
 
@@ -352,19 +344,19 @@ pub fn report_my_error(
 ```
 
 #### 2. Export
-**File**: `lib/kestrel-semantic-tree-builder/src/diagnostics/mod.rs`
+**File**: `lib/kestrel-semantic-tree-binder/src/diagnostics/mod.rs`
 
 ```rust
 mod myerror;
 pub use myerror::report_my_error;
 ```
 
-#### 3. Use in Body Resolver or Validation
+#### 3. Use in Binder or Body Resolver
 ```rust
 use crate::diagnostics::report_my_error;
 
 // When error condition is detected:
-report_my_error(diagnostics, file_id, span, name);
+report_my_error(diagnostics, span, name);
 ```
 
 ---
@@ -383,18 +375,18 @@ let tree = TreeBuilder::new(source, sink.into_events()).build();
 println!("{:#?}", tree);
 ```
 
-#### 2. Check Resolver Registration
-Verify the resolver is registered in `resolver.rs`:
+#### 2. Check Registration
+Verify the builder/binder is registered:
 ```rust
-// Should see your SyntaxKind mapped to your Resolver
-resolvers.insert(SyntaxKind::YourDeclaration, Box::new(YourResolver));
+// BUILD: SyntaxKind -> Builder (in builder_for(...) in lowerer.rs)
+// BIND: SyntaxKind -> DeclarationBinder (DeclarationBinderRegistry::new)
 ```
 
 #### 3. Check Symbol Creation
-Add debug output in your resolver:
+Add debug output in your builder:
 ```rust
 fn build_declaration(&self, syntax: &SyntaxNode, ...) -> Option<...> {
-    println!("Resolving: {:?}", syntax.kind());
+    println!("Building: {:?}", syntax.kind());
     // ...
     println!("Created symbol: {:?}", symbol.metadata().name());
 }

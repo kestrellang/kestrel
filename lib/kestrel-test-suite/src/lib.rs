@@ -148,7 +148,7 @@ impl Test {
                 }
             }
 
-            builder.add_file(file_name, &result.tree, content, &mut diagnostics, file_id);
+            builder.add_file(file_name, &result.tree, content, &mut diagnostics);
         }
 
         // Build the semantic model (lowering)

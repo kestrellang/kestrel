@@ -74,10 +74,9 @@ if let Some(file) = compilation.get_source_file("main.ks") {
     let syntax_tree = file.syntax_tree();
 }
 
-// Access the unified semantic tree (for entire compilation)
-if let Some(semantic_tree) = compilation.semantic_tree() {
-    let root = semantic_tree.root();
-    let symbol_table = semantic_tree.symbol_table();
+// Access the unified semantic model (for entire compilation)
+if let Some(model) = compilation.semantic_model() {
+    let root = model.root();
 }
 
 // Work with diagnostics
@@ -90,7 +89,7 @@ diagnostics.emit().unwrap();
 
 The `Compilation` struct contains:
 - **`source_files: Vec<SourceFile>`** - All compiled files
-- **`semantic_tree: Option<SemanticTree>`** - Unified semantic tree for all files
+- **`semantic_model: Option<SemanticModel>`** - Unified semantic model for all files
 - **`diagnostics: DiagnosticContext`** - All collected diagnostics
 
 Each `SourceFile` contains:
@@ -98,7 +97,7 @@ Each `SourceFile` contains:
 - **`source: String`** - Original source code
 - **`syntax_tree: SyntaxNode`** - Parsed syntax tree
 
-The semantic tree is stored at the compilation level to enable cross-file symbol resolution.
+The semantic model is stored at the compilation level to enable cross-file symbol resolution.
 
 ## Example
 

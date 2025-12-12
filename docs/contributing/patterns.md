@@ -79,10 +79,16 @@ ModuleSymbol, StructSymbol, FunctionSymbol, FieldSymbol, LocalSymbol
 VisibilityBehavior, CallableBehavior, TypedBehavior, ExecutableBehavior
 ```
 
-### Resolvers (`kestrel-semantic-tree-builder`)
+### Builders (`kestrel-semantic-tree-builder`)
 ```rust
-// Resolvers: {Feature}Resolver
-ModuleResolver, StructResolver, FunctionResolver, FieldResolver
+// Builders: {Feature}Builder
+ModuleBuilder, StructBuilder, FunctionBuilder, FieldBuilder
+```
+
+### Binders (`kestrel-semantic-tree-binder`)
+```rust
+// Binders: {Feature}Binder
+ModuleBinder, StructBinder, FunctionBinder, FieldBinder
 ```
 
 ## Event-Driven Parser Pattern
@@ -198,7 +204,7 @@ pub fn extract_visibility(syntax: &SyntaxNode) -> Option<String> {
 ## Symbol Creation Pattern
 
 ```rust
-impl Resolver for FooResolver {
+impl Builder for FooBuilder {
     fn build_declaration(
         &self,
         syntax: &SyntaxNode,
@@ -266,7 +272,6 @@ fn report_error(
 ) {
     let name = &symbol.metadata().name().value;
     let span = symbol.metadata().declaration_span().clone();
-    let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
     let message = if config.debug_mode {
         format!("[{}] error message: '{}'", Self::NAME, name)
@@ -277,76 +282,28 @@ fn report_error(
     let diagnostic = kestrel_reporting::Diagnostic::error()
         .with_message(message)
         .with_labels(vec![
-            kestrel_reporting::Label::primary(file_id, span)
+            kestrel_reporting::Label::primary(span.file_id, span.range())
                 .with_message("additional context")
         ]);
 
     diagnostics.add_diagnostic(diagnostic);
 }
-
-// Helper: find file ID by walking up to SourceFile
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
-}
 ```
 
-## Validation Pass Pattern
+## Analyzer Pattern
 
 ```rust
-pub struct MyValidationPass;
+pub struct MyAnalyzer;
 
-impl MyValidationPass {
-    const NAME: &'static str = "my_validation";
-}
-
-impl ValidationPass for MyValidationPass {
+impl Analyzer for MyAnalyzer {
     fn name(&self) -> &'static str {
-        Self::NAME
+        "my_analyzer"
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics, config, false);
-    }
-}
-
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-    context: bool,  // Pass context down
-) {
-    let kind = symbol.metadata().kind();
-
-    // Update context based on current symbol
-    let new_context = context || kind == KestrelSymbolKind::SomeType;
-
-    // Check this symbol
-    if should_report_error(symbol, context) {
-        report_error(symbol, diagnostics, config);
-    }
-
-    // Recurse into children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics, config, new_context);
+    fn analyze(&mut self, model: &SemanticModel, ctx: &mut AnalysisContext) {
+        // Walk `model.root()` and inspect symbols/behaviors.
+        // Report diagnostics via `ctx.diagnostics`.
+        let _ = (model, ctx);
     }
 }
 ```
@@ -407,15 +364,26 @@ lib/kestrel-parser/src/{feature}/
 └── ...
 ```
 
-Each resolver gets its own file:
+Each build-phase builder gets its own file:
 ```
-lib/kestrel-semantic-tree-builder/src/resolvers/{feature}.rs
+lib/kestrel-semantic-tree-builder/src/builders/{feature}.rs
 ```
 
 Update mod.rs to export:
 ```rust
 mod feature;
-pub use feature::FeatureResolver;
+pub use feature::FeatureBuilder;
+```
+
+Each bind-phase binder gets its own file:
+```
+lib/kestrel-semantic-tree-binder/src/binders/{feature}.rs
+```
+
+Update `binders/mod.rs` to export:
+```rust
+mod feature;
+pub use feature::FeatureBinder;
 ```
 
 ## Common Pitfalls
@@ -423,7 +391,8 @@ pub use feature::FeatureResolver;
 1. **Missing wrapper node** - Always emit `Name` and `Visibility` nodes
 2. **Empty visibility not emitted** - Visibility node must exist even when empty
 3. **Forgot to update kind_from_raw** - After adding SyntaxKind, update the match
-4. **Forgot to register resolver** - Add to ResolverRegistry::new()
-5. **Forgot to add to declaration_item parser** - Features won't parse in files
-6. **Wrong event order** - start_node/finish_node must be balanced
-7. **Storing data instead of syntax** - AST structs should wrap SyntaxNode
+4. **Forgot to register builder** - Update `builder_for(...)` in `lib/kestrel-semantic-tree-builder/src/lowerer.rs`
+5. **Forgot to register binder** - Add to `DeclarationBinderRegistry::new()` in `lib/kestrel-semantic-tree-binder/src/declaration_binder.rs`
+6. **Forgot to add to declaration_item parser** - Features won't parse in files
+7. **Wrong event order** - start_node/finish_node must be balanced
+8. **Storing data instead of syntax** - AST structs should wrap SyntaxNode

@@ -56,14 +56,14 @@ Source Code ("module Main\nstruct Point { ... }")
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │  4a. BUILD                           [kestrel-semantic-tree-builder]│    │
 │  │  ─────────                                                          │    │
-│  │  Resolvers extract symbols from syntax nodes                        │    │
+│  │  Builders extract symbols from syntax nodes                         │    │
 │  │  Creates: ModuleSymbol, StructSymbol, FunctionSymbol, etc.          │    │
 │  │  Attaches: Behaviors (Visibility, Callable, Typed)                  │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                              │                                              │
 │                              ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  4b. BIND                            [kestrel-semantic-tree-builder]│    │
+│  │  4b. BIND                             [kestrel-semantic-tree-binder]│    │
 │  │  ────────                                                           │    │
 │  │  Resolves type references to concrete types                         │    │
 │  │  Validates imports, detects cycles                                  │    │
@@ -72,7 +72,7 @@ Source Code ("module Main\nstruct Point { ... }")
 │                              │                                              │
 │                              ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  4c. VALIDATE                        [kestrel-semantic-tree-builder]│    │
+│  │  4c. VALIDATE                      [kestrel-semantic-analyzers]     │    │
 │  │  ───────────                                                        │    │
 │  │  Validation passes check semantic constraints:                      │    │
 │  │  - FunctionBodyPass: functions need bodies (except protocols)       │    │
@@ -88,7 +88,7 @@ Source Code ("module Main\nstruct Point { ... }")
 │  OUTPUT                                             [kestrel-compiler]      │
 │  ──────                                                                     │
 │  Compilation {                                                              │
-│      semantic_tree: SemanticTree,   // Symbol hierarchy                     │
+│      semantic_model: SemanticModel, // Bound semantic model                 │
 │      diagnostics: Vec<Diagnostic>,  // Errors and warnings                  │
 │  }                                                                          │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -97,31 +97,13 @@ Source Code ("module Main\nstruct Point { ... }")
 ## Crate Dependencies
 
 ```
-                    ┌──────────────────┐
-                    │ kestrel-compiler │  ← High-level API
-                    └────────┬─────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-┌───────────────┐  ┌─────────────────────┐  ┌─────────────────┐
-│kestrel-parser │  │kestrel-semantic-tree│  │kestrel-reporting│
-└───────┬───────┘  │      -builder       │  └─────────────────┘
-        │          └──────────┬──────────┘
-        │                     │
-        │          ┌──────────┴──────────┐
-        │          │                     │
-        ▼          ▼                     ▼
-┌───────────────┐  ┌────────────────┐  ┌──────────────┐
-│kestrel-syntax │  │kestrel-semantic│  │kestrel-prelude│
-│    -tree      │  │    -tree       │  └──────────────┘
-└───────┬───────┘  └───────┬────────┘
-        │                  │
-        │          ┌───────┴───────┐
-        ▼          ▼               ▼
-┌───────────────┐  ┌──────────────┐  ┌─────────────┐
-│ kestrel-lexer │  │semantic-tree │  │kestrel-span │
-└───────────────┘  └──────────────┘  └─────────────┘
+kestrel-compiler
+  ├─ kestrel-semantic-tree-builder   (BUILD/lowering)
+  ├─ kestrel-semantic-tree-binder    (BIND)
+  ├─ kestrel-semantic-analyzers      (VALIDATE)
+  ├─ kestrel-parser / kestrel-lexer / kestrel-syntax-tree
+  ├─ kestrel-semantic-model / kestrel-semantic-tree / semantic-tree
+  └─ kestrel-reporting / kestrel-span
 ```
 
 ## Key Types by Phase
@@ -184,11 +166,15 @@ CallableBehavior            // Function signatures
 TypedBehavior               // Type information
 ExecutableBehavior          // Code bodies
 
-// kestrel-semantic-tree-builder
-Resolver                    // Trait: builds symbol from syntax
-ResolverRegistry            // Maps SyntaxKind → Resolver
+// kestrel-semantic-tree-builder (BUILD)
+Builder                     // Trait: builds symbol from syntax
+SemanticModelBuilder         // Lowers syntax trees to a SemanticModel
+
+// kestrel-semantic-tree-binder (BIND)
+DeclarationBinder           // Trait: binds a symbol using its syntax node
+DeclarationBinderRegistry   // Maps SyntaxKind → DeclarationBinder
+TypeResolver                // Resolves types (during binding/body resolution)
 BodyResolver                // Resolves expressions/statements
-ValidationPass              // Trait: checks semantic constraints
 ```
 
 ## File Organization
@@ -243,28 +229,27 @@ lib/kestrel-semantic-tree/
 
 lib/kestrel-semantic-tree-builder/
 └── src/
-    ├── lib.rs              # Public API: add_file_to_tree, bind_tree, run_validation
-    ├── resolver.rs         # ResolverRegistry
-    ├── resolvers/
+    ├── lib.rs              # Public API: build(...), SemanticModelBuilder
+    ├── lowerer.rs          # SyntaxTree -> SemanticModel lowering driver
+    ├── builder.rs          # Builder trait
+    ├── builders/
     │   ├── mod.rs
     │   ├── module.rs
     │   ├── struct.rs
     │   ├── function.rs
     │   └── ...
-    ├── body_resolver.rs    # Expression/statement resolution
-    ├── type_resolver.rs    # Type path resolution
-    ├── path_resolver.rs    # Name path resolution
-    ├── local_scope.rs      # Scope management
-    ├── validation/
-    │   ├── mod.rs          # ValidationRunner
-    │   ├── function_body.rs
-    │   ├── protocol_method.rs
-    │   └── ...
-    └── diagnostics/
-        ├── mod.rs
-        ├── call.rs         # Function call errors
-        ├── member_access.rs
-        └── ...
+
+lib/kestrel-semantic-tree-binder/
+└── src/
+    ├── lib.rs              # Public API: SemanticBinder
+    ├── declaration_binder.rs# DeclarationBinder + registry
+    ├── binders/            # Per-declaration binding
+    ├── resolution/         # Binder orchestration + type resolution
+    ├── body_resolver/      # Expression/statement resolution
+    └── diagnostics/        # Bind-time diagnostics
+
+lib/kestrel-semantic-analyzers/
+└── src/                    # Post-bind analyzers (VALIDATE)
 
 lib/kestrel-test-suite/
 └── src/lib.rs              # Test fluent API

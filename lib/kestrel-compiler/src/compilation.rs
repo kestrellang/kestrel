@@ -84,7 +84,6 @@ impl Compilation {
                 &parse_result.tree,
                 &source,
                 &mut diagnostics,
-                file_id,
             );
 
             // Create source file

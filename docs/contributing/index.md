@@ -32,7 +32,10 @@ kestrel/
 │   ├── kestrel-parser/         # Event-driven parsing (Chumsky)
 │   ├── kestrel-syntax-tree/    # Lossless CST (Rowan)
 │   ├── kestrel-semantic-tree/  # Symbols, types, behaviors
-│   ├── kestrel-semantic-tree-builder/  # Resolution & validation
+│   ├── kestrel-semantic-model/ # SemanticModel + query system
+│   ├── kestrel-semantic-tree-builder/  # BUILD/lowering (SyntaxNode -> SemanticModel)
+│   ├── kestrel-semantic-tree-binder/   # BIND (resolve + body resolution)
+│   ├── kestrel-semantic-analyzers/     # VALIDATE (post-bind analyzers)
 │   ├── kestrel-compiler/       # High-level orchestration
 │   ├── kestrel-test-suite/     # Integration tests
 │   ├── kestrel-span/           # Source locations

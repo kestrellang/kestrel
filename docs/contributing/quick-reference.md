@@ -14,12 +14,14 @@
 | Add semantic symbol | `lib/kestrel-semantic-tree/src/symbol/{name}.rs` |
 | Add symbol kind | `lib/kestrel-semantic-tree/src/symbol/kind.rs` |
 | Add behavior | `lib/kestrel-semantic-tree/src/behavior/{name}.rs` |
-| Add resolver | `lib/kestrel-semantic-tree-builder/src/resolvers/{name}.rs` |
-| Register resolver | `lib/kestrel-semantic-tree-builder/src/resolver.rs` |
-| Body resolution | `lib/kestrel-semantic-tree-builder/src/body_resolver.rs` |
-| Type resolution | `lib/kestrel-semantic-tree-builder/src/type_resolver.rs` |
-| Add validation pass | `lib/kestrel-semantic-tree-builder/src/validation/{name}.rs` |
-| Add diagnostic module | `lib/kestrel-semantic-tree-builder/src/diagnostics/{name}.rs` |
+| Add builder (BUILD) | `lib/kestrel-semantic-tree-builder/src/builders/{name}.rs` |
+| Register builder (BUILD) | `lib/kestrel-semantic-tree-builder/src/lowerer.rs` |
+| Add binder (BIND) | `lib/kestrel-semantic-tree-binder/src/binders/{name}.rs` |
+| Register binder (BIND) | `lib/kestrel-semantic-tree-binder/src/declaration_binder.rs` |
+| Body resolution (BIND) | `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs` |
+| Type resolution (BIND) | `lib/kestrel-semantic-tree-binder/src/resolution/type_resolver.rs` |
+| Add analyzer (VALIDATE) | `lib/kestrel-semantic-analyzers/src/analyzers/{name}/mod.rs` |
+| Register analyzer (VALIDATE) | `lib/kestrel-semantic-analyzers/src/lib.rs` |
 | Primitive types | `lib/kestrel-prelude/src/lib.rs` |
 | Add integration test | `lib/kestrel-test-suite/tests/{name}.rs` |
 | Test utilities | `lib/kestrel-test-suite/src/lib.rs` |
@@ -56,14 +58,23 @@ use crate::language::KestrelLanguage;
 use crate::symbol::kind::KestrelSymbolKind;
 ```
 
-### Semantic Tree Builder (`kestrel-semantic-tree-builder`)
+### Semantic Tree Builder (BUILD) (`kestrel-semantic-tree-builder`)
 ```rust
-use std::sync::Arc;
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use semantic_tree::symbol::Symbol;
+use kestrel_semantic_tree_builder::builder::Builder;
+use kestrel_syntax_tree::SyntaxNode;
+```
+
+### Semantic Tree Binder (BIND) (`kestrel-semantic-tree-binder`)
+```rust
+use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_tree_binder::SemanticBinder;
+```
+
+### Semantic Analyzers (VALIDATE) (`kestrel-semantic-analyzers`)
+```rust
+use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, default_analyzers, run_all};
 ```
 
 ### Tests (`kestrel-test-suite`)
@@ -187,6 +198,8 @@ cargo test -p kestrel-parser
 cargo test -p kestrel-syntax-tree
 cargo test -p kestrel-semantic-tree
 cargo test -p kestrel-semantic-tree-builder
+cargo test -p kestrel-semantic-tree-binder
+cargo test -p kestrel-semantic-analyzers
 cargo test -p kestrel-test-suite
 
 # Run specific test file
