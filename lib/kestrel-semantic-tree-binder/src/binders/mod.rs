@@ -9,6 +9,7 @@ mod protocol_flattener;
 mod r#struct;
 mod terminal;
 mod type_alias;
+mod utils;
 
 pub use extension::ExtensionBinder;
 pub use field::FieldBinder;

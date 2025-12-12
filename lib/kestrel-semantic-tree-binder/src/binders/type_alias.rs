@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -10,21 +9,17 @@ use kestrel_semantic_tree::symbol::associated_type::{
 };
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
-use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
-use kestrel_span::Span;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
-    TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError, UnresolvedTypeError,
+    TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError,
 };
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
-use kestrel_syntax_tree::utils::{
-    extract_path_segments, find_child, get_node_span,
-};
+use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Determines the context in which a type alias declaration appears
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +90,8 @@ impl DeclarationBinder for TypeAliasBinder {
                 }
 
                 // Extract type parameters and resolve where clause bounds
-                let generics_behavior = resolve_generics(syntax, &source, file_id, symbol_id, context);
+                let generics_behavior =
+                    crate::binders::utils::generics::resolve_generics(syntax, &source, file_id, symbol_id, context);
                 symbol.metadata().add_behavior(generics_behavior);
 
                 // Extract and resolve the aliased type from syntax
@@ -262,173 +258,6 @@ fn resolve_associated_type_bounds(
     bounds
 }
 
-/// Extract type parameters and resolve where clause bounds, creating a GenericsBehavior.
-fn resolve_generics(
-    syntax: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-) -> GenericsBehavior {
-    // Get type parameters from the symbol's children (they were added during BUILD)
-    let symbol = match ctx.model.query(SymbolFor { id: context_id }) {
-        Some(s) => s,
-        None => return GenericsBehavior::empty(),
-    };
-
-    let type_parameters: Vec<Arc<TypeParameterSymbol>> = symbol
-        .metadata()
-        .children()
-        .into_iter()
-        .filter_map(|child| {
-            if child.metadata().kind() == KestrelSymbolKind::TypeParameter {
-                child.downcast_arc::<TypeParameterSymbol>().ok()
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Now resolve the where clause with fully resolved protocol types
-    let where_clause =
-        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
-
-    GenericsBehavior::new(type_parameters, where_clause)
-}
-
-/// Resolve where clause from syntax, returning a WhereClause with resolved protocol types.
-fn resolve_where_clause(
-    syntax: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    type_params: &[Arc<TypeParameterSymbol>],
-) -> WhereClause {
-    let where_clause_node = match find_child(syntax, SyntaxKind::WhereClause) {
-        Some(node) => node,
-        None => return WhereClause::new(),
-    };
-
-    let mut constraints = Vec::new();
-
-    for child in where_clause_node.children() {
-        if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) =
-                resolve_type_bound(&child, source, file_id, context_id, ctx, type_params)
-            {
-                constraints.push(constraint);
-            }
-        }
-    }
-
-    WhereClause::with_constraints(constraints)
-}
-
-/// Resolve a single TypeBound, resolving protocol paths to actual types.
-fn resolve_type_bound(
-    syntax: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    type_params: &[Arc<TypeParameterSymbol>],
-) -> Option<Constraint> {
-    // Find the Name node and extract the type parameter name and span
-    let name_node = find_child(syntax, SyntaxKind::Name)?;
-    let name_token = name_node
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?;
-
-    let param_name = name_token.text().to_string();
-    let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span =
-        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
-
-    // Look up the type parameter (may be None if undeclared)
-    let param_id = type_params
-        .iter()
-        .find(|p| p.metadata().name().value == param_name)
-        .map(|p| p.metadata().id());
-
-    // Resolve each Path to a protocol type
-    let bounds: Vec<Ty> = syntax
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::Path)
-        .map(|path_node| {
-            let span = get_node_span(&path_node, file_id);
-            let segments = extract_path_segments(&path_node);
-
-            if segments.is_empty() {
-                return Ty::error(span);
-            }
-
-            let bound_name = segments.join(".");
-
-            // Resolve the path to a type
-            match ctx.model.query(ResolveTypePath {
-                path: segments,
-                context: context_id,
-            }) {
-                TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
-                    TyKind::Protocol { .. } => resolved_ty,
-                    TyKind::Struct { symbol, .. } => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: NotAProtocolContext::Bound,
-                        });
-                        Ty::error(span)
-                    }
-                    TyKind::TypeAlias { symbol, .. } => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: NotAProtocolContext::Bound,
-                        });
-                        Ty::error(span)
-                    }
-                    _ => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: bound_name.clone(),
-                            context: NotAProtocolContext::Bound,
-                        });
-                        Ty::error(span)
-                    }
-                },
-                TypePathResolution::NotFound { .. } => {
-                    ctx.diagnostics.throw(UnresolvedTypeError {
-                        span: span.clone(),
-                        type_name: bound_name.clone(),
-                    });
-                    Ty::error(span)
-                }
-                TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                    ctx.diagnostics.throw(NotAProtocolError {
-                        span: span.clone(),
-                        name: bound_name.clone(),
-                        context: NotAProtocolContext::Bound,
-                    });
-                    Ty::error(span)
-                }
-            }
-        })
-        .collect();
-
-    if bounds.is_empty() {
-        None
-    } else {
-        match param_id {
-            Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
-            None => Some(Constraint::unresolved_type_bound(
-                param_name, param_span, bounds,
-            )),
-        }
-    }
-}
-
 /// Resolve the aliased type from a TypeAliasDeclaration syntax node during bind phase.
 ///
 /// Returns None if no aliased type is present (e.g., for abstract associated types in protocols).
@@ -485,7 +314,7 @@ fn get_type_display_name(ty: &Ty) -> String {
 /// 3. Qualified bindings reference an associated type that exists in the protocol
 fn validate_struct_associated_type_binding(
     syntax: &SyntaxNode,
-    source: &str,
+    _source: &str,
     file_id: usize,
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,

@@ -12,13 +12,12 @@ use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
-use kestrel_span::Span;
+use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
+use crate::diagnostics::{NotAProtocolContext, UnresolvedTypeError};
 use crate::resolution::TypeResolver;
 use crate::syntax::helpers::resolve_conformance_list;
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
@@ -50,7 +49,7 @@ impl DeclarationBinder for ExtensionBinder {
             let inherited_where_clause = target_struct.where_clause();
 
             // Resolve extension's own where clause
-            let extension_where_clause = resolve_extension_where_clause(
+            let extension_where_clause = crate::binders::utils::generics::resolve_where_clause(
                 syntax,
                 &source,
                 file_id,
@@ -404,142 +403,6 @@ impl kestrel_reporting::IntoDiagnostic for WrongTypeParameterCountError {
                 kestrel_reporting::Label::primary(self.span.file_id, self.span.range())
                     .with_message(format!("expected {} type parameter(s)", self.expected)),
             ])
-    }
-}
-
-/// Resolve where clause from extension syntax.
-///
-/// Extensions can only reference type parameters that appear in their target type.
-fn resolve_extension_where_clause(
-    syntax: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    referenced_params: &[Arc<TypeParameterSymbol>],
-) -> WhereClause {
-    let where_clause_node = match find_child(syntax, SyntaxKind::WhereClause) {
-        Some(node) => node,
-        None => return WhereClause::new(),
-    };
-
-    let mut constraints = Vec::new();
-
-    for child in where_clause_node.children() {
-        if child.kind() == SyntaxKind::TypeBound {
-            if let Some(constraint) =
-                resolve_extension_type_bound(&child, source, file_id, context_id, ctx, referenced_params)
-            {
-                constraints.push(constraint);
-            }
-        }
-    }
-
-    WhereClause::with_constraints(constraints)
-}
-
-/// Resolve a single TypeBound in an extension's where clause.
-fn resolve_extension_type_bound(
-    syntax: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    referenced_params: &[Arc<TypeParameterSymbol>],
-) -> Option<Constraint> {
-    // Find the Name node and extract the type parameter name and span
-    let name_node = find_child(syntax, SyntaxKind::Name)?;
-    let name_token = name_node
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?;
-
-    let param_name = name_token.text().to_string();
-    let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span =
-        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
-
-    // Look up the type parameter in the referenced params (not all struct params)
-    let param = referenced_params
-        .iter()
-        .find(|p| p.metadata().name().value == param_name);
-
-    let param_id = param.map(|p| p.metadata().id());
-
-    // Resolve each Path to a protocol type
-    let bounds: Vec<Ty> = syntax
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::Path)
-        .map(|path_node| {
-            let span = get_node_span(&path_node, file_id);
-            let segments = extract_path_segments(&path_node);
-
-            if segments.is_empty() {
-                return Ty::error(span);
-            }
-
-            let bound_name = segments.join(".");
-
-            // Resolve the path to a type
-            match ctx.model.query(ResolveTypePath {
-                path: segments,
-                context: context_id,
-            }) {
-                TypePathResolution::Resolved(resolved_ty) => match resolved_ty.kind() {
-                    TyKind::Protocol { .. } => resolved_ty,
-                    TyKind::Struct { symbol, .. } => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: NotAProtocolContext::Bound,
-                        });
-                        Ty::error(span)
-                    }
-                    TyKind::TypeAlias { symbol, .. } => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: NotAProtocolContext::Bound,
-                        });
-                        Ty::error(span)
-                    }
-                    _ => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: bound_name.clone(),
-                            context: NotAProtocolContext::Bound,
-                        });
-                        Ty::error(span)
-                    }
-                },
-                TypePathResolution::NotFound { .. } => {
-                    ctx.diagnostics.throw(UnresolvedTypeError {
-                        span: span.clone(),
-                        type_name: bound_name.clone(),
-                    });
-                    Ty::error(span)
-                }
-                TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                    ctx.diagnostics.throw(NotAProtocolError {
-                        span: span.clone(),
-                        name: bound_name.clone(),
-                        context: NotAProtocolContext::Bound,
-                    });
-                    Ty::error(span)
-                }
-            }
-        })
-        .collect();
-
-    if bounds.is_empty() {
-        None
-    } else {
-        match param_id {
-            Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
-            None => Some(Constraint::unresolved_type_bound(
-                param_name, param_span, bounds,
-            )),
-        }
     }
 }
 
