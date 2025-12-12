@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-semantic-analyzers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kestrel-semantic-model = { path = "../kestrel-semantic-model" }
+kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-span = { path = "../kestrel-span" }
+semantic-tree = { path = "../semantic-tree" }
+

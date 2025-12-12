@@ -325,6 +325,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-semantic-analyzers"
+version = "0.1.0"
+dependencies = [
+ "kestrel-reporting",
+ "kestrel-semantic-model",
+ "kestrel-semantic-tree",
+ "kestrel-span",
+ "semantic-tree",
+]
+
+[[package]]
 name = "kestrel-semantic-model"
 version = "0.6.0"
 dependencies = [

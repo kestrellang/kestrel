@@ -35,7 +35,6 @@
 
 // Core modules
 pub mod builder;
-pub mod database;
 mod debug;
 pub mod resolution;
 mod resolver;
@@ -50,8 +49,9 @@ pub mod validation;
 
 // Re-exports for convenient access
 pub use builder::SemanticTreeBuilder;
-pub use database::SymbolRegistry;
-pub use debug::{format_type, print_semantic_tree, print_symbol_table, print_semantic_model, print_model_symbols};
+pub use debug::{
+    format_type, print_model_symbols, print_semantic_model, print_semantic_tree, print_symbol_table,
+};
 pub use kestrel_semantic_model::SemanticModel;
 pub use resolution::{LocalScope, SemanticBinder, TypeResolver};
 pub use resolver::{BindingContext, Resolver, ResolverRegistry};
