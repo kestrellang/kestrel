@@ -31,7 +31,6 @@ use crate::diagnostics::{
     UnconstrainedTypeParameterMemberError,
 };
 use crate::resolution::visibility::is_visible_from;
-use crate::database::Db;
 use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;

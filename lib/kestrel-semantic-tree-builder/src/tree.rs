@@ -55,10 +55,10 @@ impl SemanticTree {
     /// # Deprecated
     /// This method exposes the internal symbol table which uses global name lookup.
     /// For context-aware symbol resolution that considers imports and scope,
-    /// use `SemanticDatabase` and `queries::Db::resolve_type_path()` instead.
+    /// use `SemanticModel` queries instead.
     #[deprecated(
         since = "0.1.0",
-        note = "Use SemanticDatabase for context-aware symbol resolution"
+        note = "Use SemanticModel queries for context-aware symbol resolution"
     )]
     pub fn symbol_table(&self) -> &SymbolTable<KestrelLanguage> {
         &self.symbol_table

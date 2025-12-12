@@ -18,13 +18,12 @@ use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{ExtensionRegistry, SemanticDatabase, SymbolRegistry};
+use crate::database::{ExtensionRegistry, SymbolRegistry};
 use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::resolver::{BindingContext, ResolverRegistry};
 use crate::syntax::get_file_id_for_symbol;
 use crate::tree::{SemanticTree, SourceMap, SyntaxMap};
 use crate::validation::{ValidationConfig, ValidationRunner};
-use crate::database::Db;
 
 /// Binder for resolving references in a semantic tree
 ///
@@ -44,12 +43,10 @@ pub struct SemanticBinder {
     syntax_map: SyntaxMap,
     /// Source map from the tree
     sources: SourceMap,
-    /// Shared symbol registry used by both SemanticDatabase and SemanticModel
+    /// Shared symbol registry
     registry: SymbolRegistry,
-    /// Shared extension registry used by both SemanticDatabase and SemanticModel
+    /// Shared extension registry
     extension_registry: ExtensionRegistry,
-    /// Database used during binding for validation
-    db: SemanticDatabase,
     /// Semantic model used during binding for resolvers
     model: SemanticModel,
     resolver_registry: ResolverRegistry,
@@ -85,9 +82,6 @@ impl SemanticBinder {
         registry.register_tree(&root);
         let extension_registry = ExtensionRegistry::new();
 
-        // Create database with cloned (Arc-shared) registries (for validation)
-        let db = SemanticDatabase::with_registries(registry.clone(), extension_registry.clone());
-
         // Create semantic model with shared registries (for resolvers)
         let model = SemanticModel::with_registries(
             root.clone(),
@@ -103,7 +97,6 @@ impl SemanticBinder {
             sources,
             registry,
             extension_registry,
-            db,
             model,
             resolver_registry: ResolverRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),

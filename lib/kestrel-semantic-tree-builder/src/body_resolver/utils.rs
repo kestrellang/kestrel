@@ -689,7 +689,6 @@ fn infer_from_type(
 
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use crate::diagnostics::ConstraintNotSatisfiedError;
-use crate::database::Db;
 
 /// Verify that type arguments satisfy the constraints of a generic callable.
 ///

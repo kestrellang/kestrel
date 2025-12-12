@@ -11,7 +11,7 @@
 //! The crate is organized into several modules:
 //!
 //! - `builder`: Tree construction from syntax (`SemanticTreeBuilder`)
-//! - `database`: Query system for semantic analysis (`SemanticDatabase`, `Db` trait)
+//! - `database`: Re-exports from `kestrel-semantic-model` for convenience
 //! - `resolution`: Binding and type resolution (`SemanticBinder`, `TypeResolver`, `VisibilityChecker`)
 //! - `syntax`: Syntax tree utilities
 //! - `diagnostics`: Error types for semantic analysis
@@ -50,7 +50,7 @@ pub mod validation;
 
 // Re-exports for convenient access
 pub use builder::SemanticTreeBuilder;
-pub use database::{Db, SemanticDatabase, SymbolRegistry};
+pub use database::SymbolRegistry;
 pub use debug::{format_type, print_semantic_tree, print_symbol_table, print_semantic_model, print_model_symbols};
 pub use kestrel_semantic_model::SemanticModel;
 pub use resolution::{LocalScope, SemanticBinder, TypeResolver, VisibilityChecker};

@@ -24,7 +24,7 @@ use crate::diagnostics::{
     TypeMismatchError,
 };
 use crate::validation::{BodyContext, Validator};
-use super::type_assignability::is_assignable_with_model;
+use super::type_assignability::is_assignable_with_constraints;
 
 /// Validator for type checking
 pub struct TypeCheckValidator;
@@ -39,7 +39,7 @@ impl TypeCheckValidator {
     /// Check if a type is assignable to another, considering where clause constraints
     fn is_assignable(&self, from: &Ty, to: &Ty, ctx: &BodyContext<'_>) -> bool {
         let context_id = ctx.container.metadata().id();
-        is_assignable_with_model(from, to, ctx.model, context_id)
+        is_assignable_with_constraints(from, to, ctx.model, context_id)
     }
 
     /// Get the return type of the containing function/initializer
@@ -409,7 +409,7 @@ impl Validator for TypeCheckValidator {
             // Unit functions can have any expression (result discarded)
             // Non-unit functions must return the correct type
             let context_id = ctx.symbol.metadata().id();
-            if !expected_ty.is_unit() && !is_assignable_with_model(&yield_expr.ty, &expected_ty, ctx.model, context_id) {
+            if !expected_ty.is_unit() && !is_assignable_with_constraints(&yield_expr.ty, &expected_ty, ctx.model, context_id) {
                 ctx.diagnostics().get().throw(
                     TypeMismatchError {
                         span: yield_expr.span.clone(),
