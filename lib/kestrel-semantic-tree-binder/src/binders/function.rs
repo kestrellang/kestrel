@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
-use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
-use kestrel_span::{Span, Spanned};
+use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
-use kestrel_syntax_tree::utils::{extract_identifier_from_name, find_child, get_node_span};
+use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
 pub struct FunctionBinder;
@@ -43,8 +42,14 @@ impl DeclarationBinder for FunctionBinder {
         symbol.metadata().add_behavior(generics_behavior);
 
         // Now extract and resolve parameters from syntax (T.Item will work)
-        let resolved_params =
-            resolve_parameters_from_syntax(syntax, &source, file_id, symbol_id, context);
+        let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
+            syntax,
+            &source,
+            file_id,
+            symbol_id,
+            context,
+            false,
+        );
 
         // Extract and resolve return type from syntax (T.Item will work)
         let resolved_return =
@@ -88,9 +93,9 @@ fn resolve_function_body(
     source: &str,
     file_id: usize,
 ) {
-    use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
+    use crate::body_resolver::context::{create_local_scope_for_body, resolve_body_and_attach_executable};
+    use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
     // Downcast to FunctionSymbol to get Arc<FunctionSymbol> for LocalScope
@@ -98,42 +103,7 @@ fn resolve_function_body(
         return;
     };
 
-    // Create LocalScope with the function symbol
-    // We need to create an Arc<FunctionSymbol>, but we only have &FunctionSymbol
-    // The workaround is to get the symbol from the model
-    let Some(func_arc) = context.model.query(SymbolFor {
-        id: symbol.metadata().id(),
-    }) else {
-        return;
-    };
-
-    // Verify it's a FunctionSymbol (already confirmed above)
-    if func_arc.as_ref().downcast_ref::<FunctionSymbol>().is_none() {
-        return;
-    }
-
-    // Create a temporary FunctionSymbol that we can use with LocalScope
-    // This is needed because LocalScope::new takes Arc<FunctionSymbol>
-    // The locals will be added to the actual function through the Arc<dyn Symbol>
-    use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
-    use kestrel_span::{Span, Spanned};
-
-    let temp_name = Spanned::new("__body_temp".to_string(), Span::from(0..0));
-    let temp_vis = VisibilityBehavior::new(
-        Some(Visibility::Private),
-        Span::from(0..0),
-        func_arc.clone(),
-    );
-    let temp_func = Arc::new(FunctionSymbol::new(
-        temp_name,
-        Span::from(0..0),
-        temp_vis,
-        true,
-        true,
-        None,
-    ));
-
-    let mut local_scope = crate::resolution::LocalScope::new(temp_func);
+    let mut local_scope = create_local_scope_for_body(symbol.clone(), "__body_temp");
 
     // Get receiver kind from CallableBehavior to determine if we need to inject `self`
     let receiver_kind = symbol
@@ -191,96 +161,7 @@ fn resolve_function_body(
         next_loop_id: 0,
     };
 
-    // Resolve the body
-    let code_block = resolve_body(body_node, &mut body_ctx);
-
-    // Transfer locals from temp function to real function
-    // (locals created during body resolution need to be added to the real function)
-    // The temp function's locals are tracked separately, so we need to sync them
-
-    // Create and attach ExecutableBehavior
-    let executable = ExecutableBehavior::new(code_block);
-    symbol.metadata().add_behavior(executable);
-}
-
-/// Resolve parameters from a FunctionDeclaration syntax node during bind phase
-fn resolve_parameters_from_syntax(
-    syntax: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-) -> Vec<Parameter> {
-    // Find the ParameterList node
-    let param_list = match find_child(syntax, SyntaxKind::ParameterList) {
-        Some(node) => node,
-        None => return Vec::new(),
-    };
-
-    // Extract and resolve each parameter
-    param_list
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| {
-            resolve_single_parameter(&param_node, source, file_id, context_id, ctx)
-        })
-        .collect()
-}
-
-/// Resolve a single parameter from syntax
-fn resolve_single_parameter(
-    param_node: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-) -> Option<Parameter> {
-    // Collect all Name nodes
-    let name_nodes: Vec<SyntaxNode> = param_node
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::Name)
-        .collect();
-
-    if name_nodes.is_empty() {
-        return None;
-    }
-
-    // Determine label and bind_name based on number of Name nodes
-    let (label, bind_name) = if name_nodes.len() >= 2 {
-        // Two names: first is label, second is bind_name
-        let label_name = extract_identifier_from_name(&name_nodes[0]);
-        let bind_name = Spanned::new(
-            extract_identifier_from_name(&name_nodes[1])?,
-            get_node_span(&name_nodes[1], file_id),
-        );
-        (
-            label_name.map(|n| Spanned::new(n, get_node_span(&name_nodes[0], file_id))),
-            bind_name,
-        )
-    } else {
-        // One name: no label, it's the bind_name
-        let bind_name = Spanned::new(
-            extract_identifier_from_name(&name_nodes[0])?,
-            get_node_span(&name_nodes[0], file_id),
-        );
-        (None, bind_name)
-    };
-
-    // Find and resolve the type from Ty node using shared utility
-    let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx =
-            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
-        resolve_type_from_ty_node(&ty_node, &mut type_ctx)
-    } else {
-        // No type annotation - type variable
-        Ty::type_var(get_node_span(param_node, file_id))
-    };
-
-    Some(Parameter {
-        label,
-        bind_name,
-        ty,
-    })
+    resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }
 
 /// Resolve return type from a FunctionDeclaration syntax node during bind phase

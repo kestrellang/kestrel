@@ -209,27 +209,7 @@ pub fn resolve_and_attach_body(
     source: &str,
     file_id: usize,
 ) {
-    use kestrel_semantic_model::SymbolFor;
-
-    // Verify it can be downcast to FunctionSymbol
-    if function_symbol
-        .as_ref()
-        .downcast_ref::<FunctionSymbol>()
-        .is_none()
-    {
-        return;
-    }
-
-    // Create a new Arc for the function (we need to create LocalScope)
-    // Since we already have a FunctionSymbol reference, we need to work around this
-    // by getting it from the model
-    let Some(func_arc) = model.query(SymbolFor {
-        id: function_symbol.metadata().id(),
-    }) else {
-        return;
-    };
-
-    let Some(func_sym_arc) = func_arc.as_ref().downcast_ref::<FunctionSymbol>() else {
+    let Some(func_sym) = function_symbol.as_ref().downcast_ref::<FunctionSymbol>() else {
         return;
     };
 
@@ -239,13 +219,13 @@ pub fn resolve_and_attach_body(
         source,
         file_id,
         function_id: function_symbol.metadata().id(),
-        local_scope: create_local_scope_from_dyn(func_arc.clone()),
+        local_scope: create_local_scope_for_body(function_symbol.clone(), "__body_resolver_temp"),
         loop_stack: Vec::new(),
         next_loop_id: 0,
     };
 
     // Add parameters to local scope first
-    for param in func_sym_arc.parameters() {
+    for param in func_sym.parameters() {
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
@@ -253,30 +233,31 @@ pub fn resolve_and_attach_body(
             .bind(param_name, param_ty, false, param_span);
     }
 
-    // Resolve the body
-    let code_block = resolve_function_body(body_syntax, &mut ctx);
+    resolve_body_and_attach_executable(function_symbol, body_syntax, &mut ctx);
+}
 
-    // Create and attach ExecutableBehavior
+pub(crate) fn resolve_body_and_attach_executable(
+    function_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    body_syntax: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) {
+    let code_block = resolve_function_body(body_syntax, ctx);
     let executable = ExecutableBehavior::new(code_block);
     function_symbol.metadata().add_behavior(executable);
 }
 
-/// Helper to create LocalScope from Arc<dyn Symbol>
-fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> LocalScope {
+/// Helper to create a LocalScope for body resolution without requiring `Arc<FunctionSymbol>`.
+pub(crate) fn create_local_scope_for_body(
+    symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    temp_name: &str,
+) -> LocalScope {
     use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
     use kestrel_span::Spanned;
 
-    // Try to downcast - if it fails, create a dummy
-    if let Some(_) = symbol.as_ref().downcast_ref::<FunctionSymbol>() {
-        // We verified it's a FunctionSymbol, but we can't easily get Arc<FunctionSymbol>
-        // from Arc<dyn Symbol>. The proper solution would be to use type_id and unsafe,
-        // but for now let's create a new wrapper.
-    }
-
-    // Fallback: create a dummy function for the LocalScope
+    // Create a dummy function for the LocalScope.
     // The actual local binding will go to this dummy, but that's okay
     // because we're attaching ExecutableBehavior to the real function
-    let name = Spanned::new("__body_resolver_temp".to_string(), Span::from(0..0));
+    let name = Spanned::new(temp_name.to_string(), Span::from(0..0));
     let visibility =
         VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
     let dummy_func = Arc::new(FunctionSymbol::new(
@@ -289,4 +270,9 @@ fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> Loca
     ));
 
     LocalScope::new(dummy_func)
+}
+
+/// Backwards-compatible wrapper for older call sites.
+fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> LocalScope {
+    create_local_scope_for_body(symbol, "__body_resolver_temp")
 }

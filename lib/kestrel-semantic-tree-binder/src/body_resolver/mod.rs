@@ -16,7 +16,7 @@
 //! - [`utils`]: Shared utilities (type formatting, signature matching)
 
 mod calls;
-mod context;
+pub(crate) mod context;
 mod expressions;
 mod members;
 mod operators;
