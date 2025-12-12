@@ -5,6 +5,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::queries::SymbolFor;
 use crate::query::Query;
 use crate::SemanticModel;
 
@@ -21,7 +22,7 @@ impl Query for ChildByName {
     type Output = Option<Arc<dyn Symbol<KestrelLanguage>>>;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
-        let parent_symbol = model.registry().get(self.parent)?;
+        let parent_symbol = model.query(SymbolFor { id: self.parent })?;
 
         parent_symbol
             .metadata()

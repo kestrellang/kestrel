@@ -7,10 +7,9 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::queries::{ExtensionsFor, ResolveName};
+use crate::queries::{ExtensionsFor, IsVisibleFrom, ResolveName, SymbolFor, VisibleChildrenByName};
 use crate::query::Query;
 use crate::resolution::{SymbolResolution, ValuePathResolution};
-use crate::visibility;
 use crate::SemanticModel;
 
 /// Resolve a value path to a value.
@@ -36,16 +35,6 @@ impl Query for ResolveValuePath {
             };
         }
 
-        let context_symbol = match model.registry().get(self.context) {
-            Some(s) => s,
-            None => {
-                return ValuePathResolution::NotFound {
-                    segment: self.path[0].clone(),
-                    index: 0,
-                };
-            }
-        };
-
         // First segment: use scope-aware name resolution
         let first = &self.path[0];
         let first_resolution = model.query(ResolveName {
@@ -56,12 +45,12 @@ impl Query for ResolveValuePath {
         let first_symbols: Vec<_> = match first_resolution {
             SymbolResolution::Found(ids) => ids
                 .iter()
-                .filter_map(|id| model.registry().get(*id))
+                .filter_map(|id| model.query(SymbolFor { id: *id }))
                 .collect(),
             SymbolResolution::Ambiguous(ids) => {
                 let symbols: Vec<_> = ids
                     .iter()
-                    .filter_map(|id| model.registry().get(*id))
+                    .filter_map(|id| model.query(SymbolFor { id: *id }))
                     .collect();
 
                 let all_functions = symbols
@@ -119,11 +108,11 @@ impl Query for ResolveValuePath {
         let mut current_symbol = current_symbol;
 
         for (index, segment) in self.path.iter().enumerate().skip(1) {
-            let mut matches = visibility::find_visible_children_by_name(
-                &current_symbol,
-                segment,
-                &context_symbol,
-            );
+            let mut matches = model.query(VisibleChildrenByName {
+                parent: current_symbol.metadata().id(),
+                name: segment.clone(),
+                context: self.context,
+            });
 
             // If no direct children match, search extensions for static methods
             // This handles cases like Point.origin() where origin is a static method in an extension
@@ -138,7 +127,10 @@ impl Query for ResolveValuePath {
                     for child in extension.metadata().children() {
                         if child.metadata().name().value == *segment
                             && child.metadata().kind() == KestrelSymbolKind::Function
-                            && visibility::is_visible_from(&child, &context_symbol)
+                            && model.query(IsVisibleFrom {
+                                target: child.metadata().id(),
+                                context: self.context,
+                            })
                         {
                             // Check if it's a static method (no receiver)
                             if let Some(callable) = child.callable_behavior() {

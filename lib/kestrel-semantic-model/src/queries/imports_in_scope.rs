@@ -6,6 +6,7 @@ use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::SymbolId;
 
+use crate::queries::SymbolFor;
 use crate::query::Query;
 use crate::scope::{Import, ImportItem};
 use crate::SemanticModel;
@@ -23,8 +24,7 @@ impl Query for ImportsInScope {
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
         let symbol = model
-            .registry()
-            .get(self.symbol_id)
+            .query(SymbolFor { id: self.symbol_id })
             .expect("symbol must exist");
 
         symbol

@@ -25,9 +25,9 @@
 //!     println!("Compiled: {}", file.name());
 //! }
 //!
-//! // Access the unified semantic tree
-//! if let Some(semantic_tree) = compilation.semantic_tree() {
-//!     println!("Symbols: {}", semantic_tree.symbol_table().len());
+//! // Access the semantic model
+//! if let Some(model) = compilation.semantic_model() {
+//!     println!("Root: {:?}", model.root().metadata().name());
 //! }
 //! ```
 
@@ -41,5 +41,6 @@ pub use compilation::Compilation;
 
 // Re-export commonly used types from dependencies
 pub use kestrel_reporting::{DiagnosticContext, IntoDiagnostic, Diagnostic, Label, Severity};
+pub use kestrel_semantic_model::SemanticModel;
 pub use kestrel_semantic_tree_builder::SemanticTree;
 pub use kestrel_syntax_tree::SyntaxNode;

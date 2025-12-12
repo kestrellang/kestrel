@@ -1,4 +1,4 @@
-//! VisibleChildren query - get visible children of a symbol from a context
+//! VisibleChildrenByName query - find visible children by name
 
 use std::sync::Arc;
 
@@ -9,16 +9,16 @@ use crate::queries::{IsVisibleFrom, SymbolFor};
 use crate::query::Query;
 use crate::SemanticModel;
 
-/// Get visible children of a symbol from a given context.
+/// Find children of parent that are visible from context and match name.
 ///
-/// Returns all children of `parent` that are visible when accessed
-/// from `context`, applying visibility rules.
-pub struct VisibleChildren {
+/// Combines symbol lookup with visibility checking and name filtering.
+pub struct VisibleChildrenByName {
     pub parent: SymbolId,
+    pub name: String,
     pub context: SymbolId,
 }
 
-impl Query for VisibleChildren {
+impl Query for VisibleChildrenByName {
     type Output = Vec<Arc<dyn Symbol<KestrelLanguage>>>;
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
@@ -31,10 +31,10 @@ impl Query for VisibleChildren {
             .metadata()
             .visible_children()
             .into_iter()
+            .filter(|child| child.metadata().name().value == self.name)
             .filter(|child| {
-                let child_id = child.metadata().id();
                 model.query(IsVisibleFrom {
-                    target: child_id,
+                    target: child.metadata().id(),
                     context: self.context,
                 })
             })

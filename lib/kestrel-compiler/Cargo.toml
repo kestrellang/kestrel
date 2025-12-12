@@ -9,5 +9,6 @@ kestrel-parser = { path = "../kestrel-parser" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
 kestrel-semantic-tree-builder = { path = "../kestrel-semantic-tree-builder" }
+kestrel-semantic-model = { path = "../kestrel-semantic-model" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-span = { path = "../kestrel-span" }

@@ -5,10 +5,9 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::queries::ScopeFor;
+use crate::queries::{InheritedProtocolMember, ScopeFor, SymbolFor};
 use crate::query::Query;
 use crate::resolution::SymbolResolution;
 use crate::SemanticModel;
@@ -52,7 +51,7 @@ impl Query for ResolveName {
 
             // Check type parameters for extensions
             // Extensions reference type parameters from their target type
-            if let Some(symbol) = model.registry().get(id) {
+            if let Some(symbol) = model.query(SymbolFor { id }) {
                 if symbol.metadata().kind() == KestrelSymbolKind::Extension {
                     if let Some(result) = find_in_extension_type_params(&symbol, &self.name) {
                         return result;
@@ -62,8 +61,11 @@ impl Query for ResolveName {
                 // Check inherited associated types from parent protocols
                 // (conformances are resolved after scope computation, so we check at lookup time)
                 if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
-                    if let Some(result) = find_in_inherited_protocols(&symbol, &self.name) {
-                        return result;
+                    if let Some(member_id) = model.query(InheritedProtocolMember {
+                        protocol_id: id,
+                        name: self.name.clone(),
+                    }) {
+                        return SymbolResolution::Found(vec![member_id]);
                     }
                 }
             }
@@ -94,35 +96,3 @@ fn find_in_extension_type_params(
     None
 }
 
-/// Search for a name in inherited protocols (for associated type inheritance).
-fn find_in_inherited_protocols(
-    protocol: &Arc<dyn Symbol<KestrelLanguage>>,
-    name: &str,
-) -> Option<SymbolResolution> {
-    let conformances_beh = protocol.conformances_behavior()?;
-
-    for parent_ty in conformances_beh.conformances() {
-        if let TyKind::Protocol {
-            symbol: parent_proto,
-            ..
-        } = parent_ty.kind()
-        {
-            // Check direct children of parent protocol
-            let parent_dyn = parent_proto.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-            for child in parent_dyn.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::AssociatedType
-                    && child.metadata().name().value == name
-                {
-                    return Some(SymbolResolution::Found(vec![child.metadata().id()]));
-                }
-            }
-
-            // Recursively check grandparent protocols
-            if let Some(result) = find_in_inherited_protocols(&parent_dyn, name) {
-                return Some(result);
-            }
-        }
-    }
-
-    None
-}

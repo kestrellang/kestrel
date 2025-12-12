@@ -286,6 +286,7 @@ dependencies = [
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",
+ "kestrel-semantic-model",
  "kestrel-semantic-tree",
  "kestrel-semantic-tree-builder",
  "kestrel-span",

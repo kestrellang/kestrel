@@ -61,7 +61,7 @@ use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibilit
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree_builder::SemanticTree;
+use kestrel_semantic_tree_builder::SemanticModel;
 use semantic_tree::symbol::Symbol as SymbolTrait;
 
 // Re-export commonly used types
@@ -79,7 +79,7 @@ pub enum Visibility {
 
 /// Test context containing compilation results
 pub struct TestContext {
-    pub semantic_tree: SemanticTree,
+    pub semantic_model: SemanticModel,
     pub diagnostics: DiagnosticContext,
     pub has_errors: bool,
 }
@@ -148,16 +148,15 @@ impl Test {
         }
 
         // Build the semantic tree
-        let semantic_tree = builder.build();
+        let tree = builder.build();
 
         // Run binding phase (includes validation)
-        let mut binder = SemanticBinder::new(&semantic_tree);
-        binder.bind(&mut diagnostics);
+        let model = SemanticBinder::bind(tree, &mut diagnostics);
 
         let has_errors = has_parse_errors || diagnostics.has_errors();
 
         self.context = Some(TestContext {
-            semantic_tree,
+            semantic_model: model,
             diagnostics,
             has_errors,
         });
@@ -467,7 +466,7 @@ impl Symbol {
 
 impl Expectable for Symbol {
     fn check(&self, ctx: &TestContext) -> Result<(), String> {
-        let root = ctx.semantic_tree.root();
+        let root = ctx.semantic_model.root();
         let symbol = self
             .find_symbol(root)
             .ok_or_else(|| format!("Symbol '{}' not found", self.path))?;

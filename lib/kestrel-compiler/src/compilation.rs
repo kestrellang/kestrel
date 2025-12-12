@@ -2,16 +2,17 @@ use crate::source_file::SourceFile;
 use kestrel_lexer::lex;
 use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_tree_builder::{SemanticTree, SemanticTreeBuilder, SemanticBinder};
+use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
 use kestrel_span::Span;
 
 /// Represents a compiled Kestrel project.
 ///
-/// Contains all compiled source files, a unified semantic tree, and collected diagnostics.
+/// Contains all compiled source files, a semantic model, and collected diagnostics.
 /// Created via `Compilation::builder()`.
 pub struct Compilation {
     source_files: Vec<SourceFile>,
-    semantic_tree: Option<SemanticTree>,
+    semantic_model: Option<SemanticModel>,
     diagnostics: DiagnosticContext,
 }
 
@@ -88,15 +89,14 @@ impl Compilation {
         }
 
         // Build the semantic tree
-        let semantic_tree = builder.build();
+        let tree = builder.build();
 
         // Run binding phase (includes validation)
-        let mut binder = SemanticBinder::new(&semantic_tree);
-        binder.bind(&mut diagnostics);
+        let model = SemanticBinder::bind(tree, &mut diagnostics);
 
         Self {
             source_files,
-            semantic_tree: Some(semantic_tree),
+            semantic_model: Some(model),
             diagnostics,
         }
     }
@@ -106,12 +106,12 @@ impl Compilation {
         &self.source_files
     }
 
-    /// Get the unified semantic tree for the entire compilation.
+    /// Get the semantic model for the entire compilation.
     ///
     /// This contains symbols from all source files in the compilation.
     /// Returns `None` if the compilation has no source files.
-    pub fn semantic_tree(&self) -> Option<&SemanticTree> {
-        self.semantic_tree.as_ref()
+    pub fn semantic_model(&self) -> Option<&SemanticModel> {
+        self.semantic_model.as_ref()
     }
 
     /// Get the diagnostic context.

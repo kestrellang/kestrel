@@ -69,8 +69,8 @@ impl SemanticTree {
         &mut self.symbol_table
     }
 
-    /// Get the syntax map (for bind phase)
-    pub(crate) fn syntax_map(&self) -> &SyntaxMap {
+    /// Get the syntax map (maps symbol IDs to their syntax nodes)
+    pub fn syntax_map(&self) -> &SyntaxMap {
         &self.syntax_map
     }
 
@@ -79,14 +79,22 @@ impl SemanticTree {
         &mut self.syntax_map
     }
 
-    /// Get the source map (for bind phase)
-    pub(crate) fn sources(&self) -> &SourceMap {
+    /// Get the source map (maps file names to source code)
+    pub fn sources(&self) -> &SourceMap {
         &self.sources
     }
 
     /// Get a mutable reference to the source map (for build phase)
     pub(crate) fn sources_mut(&mut self) -> &mut SourceMap {
         &mut self.sources
+    }
+
+    /// Consume the tree and return its parts
+    ///
+    /// This is used by the binder to take ownership of the tree's components
+    /// when creating the SemanticModel.
+    pub fn into_parts(self) -> (Arc<dyn Symbol<KestrelLanguage>>, SyntaxMap, SourceMap) {
+        (self.root, self.syntax_map, self.sources)
     }
 }
 

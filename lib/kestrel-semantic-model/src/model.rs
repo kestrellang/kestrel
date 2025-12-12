@@ -55,6 +55,26 @@ impl SemanticModel {
         }
     }
 
+    /// Create a new SemanticModel with pre-existing registries.
+    ///
+    /// Used by SemanticBinder to share registries with SemanticDatabase during binding.
+    /// The registries are cloned (Arc-cloned) so both can access the same data.
+    pub fn with_registries(
+        root: Arc<dyn Symbol<KestrelLanguage>>,
+        syntax_map: HashMap<SymbolId, SyntaxNode>,
+        sources: HashMap<String, String>,
+        registry: SymbolRegistry,
+        extension_registry: ExtensionRegistry,
+    ) -> Self {
+        Self {
+            root,
+            syntax_map,
+            sources,
+            registry,
+            extension_registry,
+        }
+    }
+
     /// Execute a query against this model.
     pub fn query<Q: Query>(&self, query: Q) -> Q::Output {
         query.execute(self)

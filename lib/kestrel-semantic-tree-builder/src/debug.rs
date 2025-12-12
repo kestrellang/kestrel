@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use kestrel_prelude::primitives;
+use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
@@ -47,6 +48,52 @@ pub fn print_symbol_table(tree: &SemanticTree) {
             symbols.push((name.clone(), kind));
         }
     }
+
+    symbols.sort_by(|a, b| a.0.cmp(&b.0));
+
+    println!("  {:<30} {:<15}", "Name", "Kind");
+    println!("  {}", "-".repeat(45));
+
+    for (name, kind) in symbols {
+        println!("  {:<30} {:<15}", name, kind);
+    }
+}
+
+/// Print the semantic model (shows symbol hierarchy)
+pub fn print_semantic_model(model: &SemanticModel) {
+    let root = model.root();
+    let children = root.metadata().children();
+
+    println!("{} top-level symbols\n", children.len());
+
+    for child in children {
+        print_symbol(&child, 0);
+    }
+}
+
+/// Print symbols from a semantic model
+pub fn print_model_symbols(model: &SemanticModel) {
+    // Walk the tree and collect all symbols
+    fn collect_symbols(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        symbols: &mut Vec<(String, String)>,
+    ) {
+        let name = symbol.metadata().name().value.clone();
+        let kind = format!("{:?}", symbol.metadata().kind());
+        symbols.push((name, kind));
+
+        for child in symbol.metadata().children() {
+            collect_symbols(&child, symbols);
+        }
+    }
+
+    let mut symbols = Vec::new();
+    for child in model.root().metadata().children() {
+        collect_symbols(&child, &mut symbols);
+    }
+
+    println!("Symbols:");
+    println!("  {} symbols\n", symbols.len());
 
     symbols.sort_by(|a, b| a.0.cmp(&b.0));
 

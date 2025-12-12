@@ -117,25 +117,24 @@ fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: boo
     }
 
     // Build the semantic tree
-    let semantic_tree = builder.build();
+    let tree = builder.build();
 
     // Run binding phase
     if verbose {
         eprintln!("  Running semantic analysis...");
     }
-    let mut binder = SemanticBinder::new(&semantic_tree);
-    binder.bind(&mut diagnostics);
+    let model = SemanticBinder::bind(tree, &mut diagnostics);
 
     // Show results
     if show_tree {
         println!("--- Semantic Tree ---");
-        kestrel_semantic_tree_builder::print_semantic_tree(&semantic_tree);
+        kestrel_semantic_tree_builder::print_semantic_model(&model);
         println!();
     }
 
     if show_symbols {
         println!("--- Symbol Table ---");
-        kestrel_semantic_tree_builder::print_symbol_table(&semantic_tree);
+        kestrel_semantic_tree_builder::print_model_symbols(&model);
         println!();
     }
 
@@ -220,11 +219,10 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     }
 
     // Build the semantic tree
-    let semantic_tree = builder.build();
+    let tree = builder.build();
 
     // Run binding phase
-    let mut binder = SemanticBinder::new(&semantic_tree);
-    binder.bind(&mut diagnostics);
+    let model = SemanticBinder::bind(tree, &mut diagnostics);
 
     // Check for errors
     if diagnostics.len() > 0 {
@@ -481,7 +479,7 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     }
 
     // Visit from root
-    for child in semantic_tree.root().metadata().children() {
+    for child in model.root().metadata().children() {
         visit_symbol(&child, 0);
     }
 

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::callable::CallableSignature;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -17,11 +18,11 @@ use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::database::{SemanticDatabase, SymbolRegistry};
+use crate::database::{ExtensionRegistry, SemanticDatabase, SymbolRegistry};
 use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::resolver::{BindingContext, ResolverRegistry};
 use crate::syntax::get_file_id_for_symbol;
-use crate::tree::SemanticTree;
+use crate::tree::{SemanticTree, SourceMap, SyntaxMap};
 use crate::validation::{ValidationConfig, ValidationRunner};
 
 /// Binder for resolving references in a semantic tree
@@ -32,75 +33,95 @@ use crate::validation::{ValidationConfig, ValidationRunner};
 /// # Example
 ///
 /// ```ignore
-/// let mut binder = SemanticBinder::new(&tree);
-/// binder.bind(&mut diagnostics);
-/// let db = binder.into_database();
+/// let tree = builder.build();
+/// let model = SemanticBinder::bind(tree, &mut diagnostics);
 /// ```
-pub struct SemanticBinder<'a> {
-    tree: &'a SemanticTree,
+pub struct SemanticBinder {
+    /// Root symbol from the tree
+    root: Arc<dyn Symbol<KestrelLanguage>>,
+    /// Syntax map from the tree
+    syntax_map: SyntaxMap,
+    /// Source map from the tree
+    sources: SourceMap,
+    /// Shared symbol registry used by both SemanticDatabase and SemanticModel
+    registry: SymbolRegistry,
+    /// Shared extension registry used by both SemanticDatabase and SemanticModel
+    extension_registry: ExtensionRegistry,
+    /// Database used during binding for resolvers
     db: SemanticDatabase,
     resolver_registry: ResolverRegistry,
     cycle_detector: RefCell<CycleDetector<SymbolId>>,
 }
 
-impl<'a> SemanticBinder<'a> {
-    /// Create a new binder for the given tree
-    pub fn new(tree: &'a SemanticTree) -> Self {
+impl SemanticBinder {
+    /// Bind a semantic tree and return the semantic model
+    ///
+    /// This is the primary entry point for the binding phase. It consumes the
+    /// tree, runs all binding passes, and returns a SemanticModel.
+    pub fn bind(tree: SemanticTree, diagnostics: &mut DiagnosticContext) -> SemanticModel {
+        Self::bind_with_config(tree, diagnostics, None)
+    }
+
+    /// Bind a semantic tree with explicit validation configuration
+    pub fn bind_with_config(
+        tree: SemanticTree,
+        diagnostics: &mut DiagnosticContext,
+        config: Option<&ValidationConfig>,
+    ) -> SemanticModel {
+        let mut binder = Self::from_tree(tree);
+        binder.run_binding(diagnostics, config)
+    }
+
+    /// Create a binder from a semantic tree (internal)
+    fn from_tree(tree: SemanticTree) -> Self {
+        // Extract components from the tree
+        let (root, syntax_map, sources) = tree.into_parts();
+
+        // Create shared registries
         let registry = SymbolRegistry::new();
-        registry.register_tree(tree.root());
+        registry.register_tree(&root);
+        let extension_registry = ExtensionRegistry::new();
+
+        // Create database with cloned (Arc-shared) registries
+        let db = SemanticDatabase::with_registries(registry.clone(), extension_registry.clone());
 
         Self {
-            tree,
-            db: SemanticDatabase::new(registry),
+            root,
+            syntax_map,
+            sources,
+            registry,
+            extension_registry,
+            db,
             resolver_registry: ResolverRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),
         }
     }
 
-    /// Run the binding phase
-    ///
-    /// This walks all symbols and resolves their references.
-    pub fn bind(&mut self, diagnostics: &mut DiagnosticContext) {
-        self.bind_with_config(diagnostics, None);
-    }
-
-    /// Run the binding phase with explicit validation configuration
-    pub fn bind_with_config(
+    /// Run the binding phase and return the semantic model (internal)
+    fn run_binding(
         &mut self,
         diagnostics: &mut DiagnosticContext,
         config: Option<&ValidationConfig>,
-    ) {
+    ) -> SemanticModel {
         // Walk all symbols and call bind_declaration
-        self.bind_symbol(self.tree.root(), diagnostics, 0);
+        self.bind_symbol(&self.root.clone(), diagnostics, 0);
 
         // Post-binding pass: detect duplicate function signatures
-        self.check_duplicate_signatures(self.tree.root(), diagnostics);
+        self.check_duplicate_signatures(&self.root.clone(), diagnostics);
 
         // Run validation passes
         let validation_config = config.cloned().unwrap_or_default();
         let runner = ValidationRunner::new();
-        runner.run(self.tree.root(), &self.db, diagnostics, &validation_config);
-    }
+        runner.run(&self.root, &self.db, diagnostics, &validation_config);
 
-    /// Run only validation passes (without binding)
-    pub fn run_validation(
-        &self,
-        diagnostics: &mut DiagnosticContext,
-        config: Option<&ValidationConfig>,
-    ) {
-        let validation_config = config.cloned().unwrap_or_default();
-        let runner = ValidationRunner::new();
-        runner.run(self.tree.root(), &self.db, diagnostics, &validation_config);
-    }
-
-    /// Get a reference to the database
-    pub fn database(&self) -> &SemanticDatabase {
-        &self.db
-    }
-
-    /// Consume the binder and return the database
-    pub fn into_database(self) -> SemanticDatabase {
-        self.db
+        // Create SemanticModel with the shared registries
+        SemanticModel::with_registries(
+            self.root.clone(),
+            self.syntax_map.clone(),
+            self.sources.clone(),
+            self.registry.clone(),
+            self.extension_registry.clone(),
+        )
     }
 
     /// Recursively bind a symbol and its children
@@ -125,13 +146,13 @@ impl<'a> SemanticBinder<'a> {
 
         if let Some(sk) = syntax_kind {
             if let Some(resolver) = self.resolver_registry.get(sk) {
-                if let Some(syntax_node) = self.tree.syntax_map().get(&symbol.metadata().id()) {
+                if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
                     let mut ctx = BindingContext {
                         db: &self.db,
                         diagnostics,
                         file_id,
                         type_alias_cycle_detector: &self.cycle_detector,
-                        sources: self.tree.sources(),
+                        sources: &self.sources,
                     };
                     resolver.bind_declaration(symbol, syntax_node, &mut ctx);
                 }

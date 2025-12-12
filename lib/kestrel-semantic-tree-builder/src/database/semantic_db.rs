@@ -66,6 +66,15 @@ impl SemanticDatabase {
         }
     }
 
+    /// Create a new database with existing registries (shared with SemanticModel)
+    pub fn with_registries(registry: SymbolRegistry, extension_registry: ExtensionRegistry) -> Self {
+        Self {
+            registry,
+            extension_registry,
+            scope_cache: RwLock::new(HashMap::new()),
+        }
+    }
+
     /// Get the symbol registry
     pub fn registry(&self) -> &SymbolRegistry {
         &self.registry

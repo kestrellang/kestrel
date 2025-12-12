@@ -6,9 +6,10 @@ use std::sync::Arc;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::SymbolId;
 
-use crate::SemanticModel;
+use crate::queries::SymbolFor;
 use crate::query::Query;
 use crate::scope::Scope;
+use crate::SemanticModel;
 
 /// Get the scope for a symbol.
 ///
@@ -26,8 +27,7 @@ impl Query for ScopeFor {
 
     fn execute(self, model: &SemanticModel) -> Self::Output {
         let symbol = model
-            .registry()
-            .get(self.symbol_id)
+            .query(SymbolFor { id: self.symbol_id })
             .expect("symbol must exist");
 
         // Get declarations (children that aren't imports)
