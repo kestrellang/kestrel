@@ -1,6 +1,4 @@
-//! Debug and printing utilities for semantic trees
-//!
-//! This module provides functions for printing and debugging semantic trees.
+//! Debug and printing utilities for semantic models.
 
 use std::sync::Arc;
 
@@ -18,46 +16,6 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::Symbol;
-
-use crate::tree::SemanticTree;
-
-/// Print the semantic tree (shows symbol hierarchy)
-pub fn print_semantic_tree(tree: &SemanticTree) {
-    let root = tree.root();
-    let children = root.metadata().children();
-
-    println!("{} top-level symbols\n", children.len());
-
-    for child in children {
-        print_symbol(&child, 0);
-    }
-}
-
-/// Print the symbol table (shows symbols by name and kind)
-#[allow(deprecated)]
-pub fn print_symbol_table(tree: &SemanticTree) {
-    let table = tree.symbol_table();
-
-    println!("Symbol Table:");
-    println!("  {} symbols\n", table.len());
-
-    let mut symbols: Vec<(String, String)> = Vec::new();
-    for (name, collection) in table.iter() {
-        for symbol in collection.multiple() {
-            let kind = format!("{:?}", symbol.metadata().kind());
-            symbols.push((name.clone(), kind));
-        }
-    }
-
-    symbols.sort_by(|a, b| a.0.cmp(&b.0));
-
-    println!("  {:<30} {:<15}", "Name", "Kind");
-    println!("  {}", "-".repeat(45));
-
-    for (name, kind) in symbols {
-        println!("  {:<30} {:<15}", name, kind);
-    }
-}
 
 /// Print the semantic model (shows symbol hierarchy)
 pub fn print_semantic_model(model: &SemanticModel) {

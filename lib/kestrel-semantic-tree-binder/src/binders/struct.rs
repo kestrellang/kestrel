@@ -29,68 +29,6 @@ use kestrel_syntax_tree::utils::{
 pub struct StructBinder;
 
 impl DeclarationBinder for StructBinder {
-    fn build_declaration(
-        &self,
-        syntax: &SyntaxNode,
-        source: &str,
-        parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        // Extract name
-        let name_str = extract_name(syntax)?;
-        let name_node = find_child(syntax, SyntaxKind::Name)?;
-        let name_span = get_node_span(&name_node, source);
-
-        // Get full span
-        let full_span = get_node_span(syntax, source);
-
-        // Extract visibility
-        let visibility_str = extract_visibility(syntax);
-        let visibility_enum = visibility_str.as_deref().and_then(Visibility::from_keyword);
-
-        let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span.clone());
-
-        // Determine visibility scope
-        let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), parent, root);
-
-        // Create visibility behavior
-        let visibility_behavior =
-            VisibilityBehavior::new(visibility_enum, visibility_span, visibility_scope);
-
-        // Create the name object
-        let name = Spanned::new(name_str, name_span);
-
-        // Create the struct symbol (GenericsBehavior is added during BIND)
-        let struct_symbol = StructSymbol::new(
-            name,
-            full_span.clone(),
-            visibility_behavior,
-            parent.cloned(),
-        );
-        let struct_arc = Arc::new(struct_symbol);
-
-        let struct_type = Ty::r#struct(struct_arc.clone(), full_span.clone());
-        let typed_behavior = TypedBehavior::new(struct_type, full_span.clone());
-
-        struct_arc.metadata().add_behavior(typed_behavior);
-
-        let struct_arc_dyn = struct_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-
-        // Extract type parameters with correct parent (the struct, not the module)
-        let type_parameters = extract_type_parameters(syntax, source, Some(struct_arc_dyn.clone()));
-
-        // Add type parameters as children of the struct
-        // This ensures type parameters are in scope during type resolution
-        add_type_params_as_children(&type_parameters, &struct_arc_dyn);
-
-        // Add to parent if exists
-        if let Some(parent) = parent {
-            parent.metadata().add_child(&struct_arc_dyn);
-        }
-
-        Some(struct_arc)
-    }
-
     fn bind_declaration(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,

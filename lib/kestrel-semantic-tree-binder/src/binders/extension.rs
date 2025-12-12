@@ -27,29 +27,6 @@ use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_spa
 pub struct ExtensionBinder;
 
 impl DeclarationBinder for ExtensionBinder {
-    fn build_declaration(
-        &self,
-        syntax: &SyntaxNode,
-        source: &str,
-        parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-        _root: &Arc<dyn Symbol<KestrelLanguage>>,
-    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        // Get full span
-        let full_span = get_node_span(syntax, source);
-
-        // Create the extension symbol (target resolution happens during BIND)
-        let extension_symbol = ExtensionSymbol::new(full_span.clone(), parent.cloned());
-        let extension_arc = Arc::new(extension_symbol);
-        let extension_arc_dyn = extension_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-
-        // Add to parent if exists
-        if let Some(parent) = parent {
-            parent.metadata().add_child(&extension_arc_dyn);
-        }
-
-        Some(extension_arc)
-    }
-
     fn bind_declaration(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,

@@ -15,63 +15,6 @@ use kestrel_syntax_tree::utils::get_node_span;
 pub struct ImportBinder;
 
 impl DeclarationBinder for ImportBinder {
-    fn build_declaration(
-        &self,
-        syntax: &SyntaxNode,
-        source: &str,
-        parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-        _root: &Arc<dyn Symbol<KestrelLanguage>>,
-    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        let parent = parent?;
-
-        // Wrap syntax node in ImportDeclaration helper
-        let import_decl = ImportDeclaration {
-            syntax: syntax.clone(),
-            span: get_node_span(syntax, source),
-        };
-
-        // Extract module path with spans
-        let module_path_node = import_decl.path();
-        let module_path_segments = module_path_node.segments_with_spans();
-        let module_path_span = module_path_node.span();
-
-        // Extract alias
-        let alias = import_decl.alias();
-
-        // Extract import items
-        let items = extract_import_items(&import_decl, source);
-
-        // Create import symbol name
-        let import_name = if let Some(ref alias) = alias {
-            alias.clone()
-        } else {
-            module_path_segments
-                .iter()
-                .map(|(s, _)| s.as_str())
-                .collect::<Vec<_>>()
-                .join(".")
-        };
-
-        // NOTE: Span may be incorrect due to rowan position calculation issue
-        // when lexer skips whitespace/comments. See utils::get_node_span for details.
-        let span = get_node_span(syntax, source);
-        let name = Spanned::new(import_name, span.clone());
-
-        // Create import symbol
-        let import_symbol = ImportSymbol::new(name, parent.clone(), span);
-        let import_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(import_symbol);
-
-        // Store import data in behavior for bind phase
-        let import_data =
-            ImportDataBehavior::new(module_path_segments, module_path_span, alias, items);
-        import_arc.metadata().add_behavior(import_data);
-
-        // Add to parent
-        parent.metadata().add_child(&import_arc);
-
-        Some(import_arc)
-    }
-
     fn bind_declaration(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,

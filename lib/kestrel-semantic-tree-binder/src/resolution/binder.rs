@@ -18,21 +18,15 @@ use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::declaration_binder::{BindingContext, DeclarationBinderRegistry};
-use crate::tree::{SourceMap, SyntaxMap};
+use crate::diagnostics::DuplicateFunctionSignatureError;
+use crate::maps::{SourceMap, SyntaxMap};
 
 /// Binder for resolving references in a semantic tree
 ///
 /// The binder orchestrates the bind phase, walking all symbols and calling
 /// their resolvers to resolve references and establish relationships.
 ///
-/// # Example
-///
-/// ```ignore
-/// let tree = builder.build();
-/// let model = SemanticBinder::bind(tree, &mut diagnostics);
-/// ```
 pub struct SemanticBinder {
     /// Root symbol from the tree
     root: Arc<dyn Symbol<KestrelLanguage>>,

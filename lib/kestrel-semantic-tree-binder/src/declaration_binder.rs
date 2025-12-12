@@ -17,25 +17,18 @@ use crate::binders::{
     ExtensionBinder, FieldBinder, FunctionBinder, ImportBinder, InitializerBinder, ModuleBinder,
     ProtocolBinder, StructBinder, TerminalBinder, TypeAliasBinder,
 };
-use crate::tree::SourceMap;
+use crate::maps::SourceMap;
 
-/// Trait for resolving syntax nodes into semantic symbols
+/// Trait for binding declarations.
+///
+/// During the bind phase, we re-walk the symbol hierarchy and (when available)
+/// use the stored syntax node for each symbol to resolve types, conformances,
+/// bodies, and other relationships.
 pub trait DeclarationBinder {
-    /// Build phase: create symbol from syntax node and add to parent
-    /// Returns the created symbol for tree walker recursion
-    fn build_declaration(
-        &self,
-        syntax: &SyntaxNode,
-        source: &str,
-        parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;
-
     /// Binding phase: resolve references and establish relationships
     ///
-    /// The syntax node is the same node that was passed to build_declaration,
-    /// allowing resolvers to extract type information directly from syntax
-    /// during binding rather than storing intermediate Path representations.
+    /// The syntax node is the node stored in the `SemanticModel` for this symbol,
+    /// allowing binders to extract type information directly from syntax during binding.
     fn bind_declaration(
         &self,
         _symbol: &Arc<dyn Symbol<KestrelLanguage>>,

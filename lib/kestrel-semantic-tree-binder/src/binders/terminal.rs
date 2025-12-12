@@ -1,9 +1,3 @@
-use std::sync::Arc;
-
-use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_syntax_tree::SyntaxNode;
-use semantic_tree::symbol::Symbol;
-
 use crate::declaration_binder::DeclarationBinder;
 
 /// Terminal binder for wrapper nodes that don't produce symbols
@@ -11,17 +5,6 @@ use crate::declaration_binder::DeclarationBinder;
 pub struct TerminalBinder;
 
 impl DeclarationBinder for TerminalBinder {
-    fn build_declaration(
-        &self,
-        _syntax: &SyntaxNode,
-        _source: &str,
-        _parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-        _root: &Arc<dyn Symbol<KestrelLanguage>>,
-    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        // Terminal nodes don't produce symbols
-        None
-    }
-
     fn is_terminal(&self) -> bool {
         true
     }
