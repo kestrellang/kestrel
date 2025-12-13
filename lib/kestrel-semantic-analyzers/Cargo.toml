@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 kestrel-semantic-model = { path = "../kestrel-semantic-model" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-semantic-tree-binder = { path = "../kestrel-semantic-tree-binder" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-span = { path = "../kestrel-span" }
 semantic-tree = { path = "../semantic-tree" }

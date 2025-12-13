@@ -1,12 +1,26 @@
+//! Type checking errors.
+//!
+//! Errors related to type mismatches across the language.
+
 use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
 use kestrel_span::Span;
 
-// Type checking errors (mirrors builder diagnostics for parity)
-
+/// Error when a value's type doesn't match the expected type.
+///
+/// This is a general type mismatch error used for:
+/// - Return type mismatches
+/// - Assignment type mismatches
+/// - Variable binding type mismatches
+/// - Function argument type mismatches
+/// - Array element type mismatches
 pub struct TypeMismatchError {
+    /// The span where the type mismatch occurred
     pub span: Span,
+    /// Human-readable description of the expected type
     pub expected: String,
+    /// Human-readable description of the actual type found
     pub found: String,
+    /// Context describing where the mismatch occurred (e.g., "return type", "argument 1")
     pub context: String,
 }
 
@@ -28,9 +42,15 @@ impl IntoDiagnostic for TypeMismatchError {
     }
 }
 
+/// Error when a condition expression is not a Bool.
+///
+/// Used for if conditions and while conditions.
 pub struct ConditionNotBoolError {
+    /// The span of the condition expression
     pub span: Span,
+    /// Human-readable description of the actual type found
     pub found: String,
+    /// The kind of condition (e.g., "if", "while")
     pub condition_kind: &'static str,
 }
 
@@ -48,12 +68,17 @@ impl IntoDiagnostic for ConditionNotBoolError {
     }
 }
 
+/// Error when if/else branches have incompatible types.
 pub struct BranchTypeMismatchError {
-    #[allow(dead_code)]
+    /// The span of the if expression
     pub if_span: Span,
+    /// The span of the then branch value
     pub then_span: Span,
+    /// The span of the else branch value
     pub else_span: Span,
+    /// Human-readable description of the then branch type
     pub then_type: String,
+    /// Human-readable description of the else branch type
     pub else_type: String,
 }
 
@@ -76,13 +101,19 @@ impl IntoDiagnostic for BranchTypeMismatchError {
     }
 }
 
+/// Error when array elements have inconsistent types.
 pub struct ArrayElementTypeMismatchError {
-    #[allow(dead_code)]
+    /// The span of the array literal
     pub array_span: Span,
+    /// The span of the first element (which determines expected type)
     pub first_element_span: Span,
+    /// The span of the mismatched element
     pub element_span: Span,
+    /// The index of the mismatched element
     pub element_index: usize,
+    /// Human-readable description of the expected type (from first element)
     pub expected: String,
+    /// Human-readable description of the actual type
     pub found: String,
 }
 

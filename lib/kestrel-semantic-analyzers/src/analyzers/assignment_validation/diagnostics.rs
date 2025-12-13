@@ -1,6 +1,11 @@
+//! Assignment errors.
+//!
+//! Errors related to invalid assignment targets.
+
 use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
 use kestrel_span::Span;
 
+/// Error when assigning to an immutable variable (let binding)
 pub struct CannotAssignToImmutableError {
     pub span: Span,
     pub variable_name: String,
@@ -23,6 +28,7 @@ impl IntoDiagnostic for CannotAssignToImmutableError {
     }
 }
 
+/// Error when assigning to something that isn't an lvalue
 pub struct CannotAssignToExpressionError {
     pub span: Span,
 }
@@ -41,6 +47,7 @@ impl IntoDiagnostic for CannotAssignToExpressionError {
     }
 }
 
+/// Error when assigning to an immutable field
 pub struct CannotAssignToImmutableFieldError {
     pub span: Span,
     pub field_name: String,

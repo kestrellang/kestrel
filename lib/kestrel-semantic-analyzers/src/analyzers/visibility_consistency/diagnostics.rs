@@ -1,3 +1,7 @@
+//! Visibility consistency errors.
+//!
+//! Errors when a public item exposes a less-visible type.
+
 use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
 use kestrel_span::Span;
 

@@ -3,27 +3,7 @@ use kestrel_span::Span;
 
 // Diagnostics for protocol conformance and inheritance
 
-pub struct CircularProtocolInheritanceError {
-    pub span: Span,
-    pub protocol_name: String,
-    pub cycle: Vec<String>,
-}
-
-impl IntoDiagnostic for CircularProtocolInheritanceError {
-    fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let cycle_str = self.cycle.join(" -> ");
-        Diagnostic::error()
-            .with_message(format!(
-                "protocol '{}' has circular inheritance",
-                self.protocol_name
-            ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("circular inheritance detected"),
-            ])
-            .with_notes(vec![format!("inheritance cycle: {}", cycle_str)])
-    }
-}
+pub use kestrel_semantic_tree_binder::diagnostics::CircularProtocolInheritanceError;
 
 pub struct MissingProtocolMethodError {
     pub span: Span,
@@ -91,29 +71,7 @@ impl IntoDiagnostic for WrongMethodReturnTypeError {
     }
 }
 
-pub struct AssociatedTypeConstraintNotSatisfiedError {
-    pub span: Span,
-    pub type_name: String,
-    pub bound_type: String,
-    pub required_protocol: String,
-}
-
-impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
-    fn into_diagnostic(&self) -> Diagnostic<usize> {
-        Diagnostic::error()
-            .with_message(format!("type '{}' does not satisfy bound", self.bound_type))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
-                    "type '{}' does not conform to required protocol '{}'",
-                    self.bound_type, self.required_protocol
-                )),
-            ])
-            .with_notes(vec![format!(
-                "associated type '{}' requires conformance to '{}'",
-                self.type_name, self.required_protocol
-            )])
-    }
-}
+pub use kestrel_semantic_tree_binder::diagnostics::AssociatedTypeConstraintNotSatisfiedError;
 
 pub struct ProtocolMethodReceiverMismatchError {
     pub span: Span,

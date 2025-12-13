@@ -9,7 +9,7 @@
 //!
 //! - `resolution`: Binding and type resolution (`SemanticBinder`, `TypeResolver`)
 //! - `syntax`: Syntax tree utilities
-//! - `diagnostics`: Error types for semantic analysis
+//! - `diagnostics`: Error types emitted during binding and body resolution
 //! - `binders`: Per-declaration binders
 //! - `body_resolver`: Function body resolution
 //!

@@ -300,6 +300,7 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
+ "kestrel-semantic-tree-binder",
  "kestrel-span",
  "semantic-tree",
 ]
