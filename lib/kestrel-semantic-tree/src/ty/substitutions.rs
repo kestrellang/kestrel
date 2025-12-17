@@ -162,7 +162,8 @@ impl Substitutions {
             | TyKind::String
             | TyKind::Error
             | TyKind::SelfType
-            | TyKind::TypeVar(_) => ty.clone(),
+            | TyKind::TypeVar(_)
+            | TyKind::Infer => ty.clone(),
         }
     }
 

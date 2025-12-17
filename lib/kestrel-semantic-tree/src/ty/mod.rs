@@ -9,6 +9,31 @@ pub use where_clause::{Constraint, WhereClause};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fmt, fmt::Write as _};
 
+/// Globally unique type identifier.
+/// Every `Ty` instance has a unique `TyId` assigned at construction.
+/// Used by the type inference system to track and resolve types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TyId(u64);
+
+impl TyId {
+    /// Create a new unique type ID
+    pub fn new() -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        TyId(COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Get the raw ID value (useful for debugging)
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for TyId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Globally unique type variable identifier.
 /// Used to identify placeholder types during type inference.
 /// Each `_` in source code becomes a distinct type variable.
@@ -44,9 +69,12 @@ use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 
-/// Represents a semantic type with its kind and source location
+/// Represents a semantic type with its kind and source location.
+/// Every type has a unique `TyId` assigned at construction for use
+/// in type inference constraint solving.
 #[derive(Debug, Clone)]
 pub struct Ty {
+    id: TyId,
     kind: TyKind,
     span: Span,
 }
@@ -155,6 +183,7 @@ impl fmt::Display for Ty {
             }
             TyKind::SelfType => f.write_str("Self"),
             TyKind::TypeVar(_) => f.write_str("_"),
+            TyKind::Infer => f.write_str("_"),
             TyKind::Error => f.write_str("<error>"),
         }
     }
@@ -185,9 +214,19 @@ macro_rules! is_type {
 }
 
 impl Ty {
-    /// Create a new type with the given kind and span
+    /// Create a new type with the given kind and span.
+    /// A fresh `TyId` is automatically assigned.
     pub fn new(kind: TyKind, span: Span) -> Self {
-        Self { kind, span }
+        Self {
+            id: TyId::new(),
+            kind,
+            span,
+        }
+    }
+
+    /// Get the unique identifier of this type
+    pub fn id(&self) -> TyId {
+        self.id
     }
 
     /// Get the kind of this type
@@ -214,6 +253,8 @@ impl Ty {
         error => TyKind::Error,
         /// Create a Self type reference
         self_type => TyKind::SelfType,
+        /// Create an inference placeholder type
+        infer => TyKind::Infer,
     }
 
     /// Create a new type variable with a fresh ID
@@ -483,8 +524,8 @@ impl Ty {
             return true;
         }
 
-        // Type variables are compatible with anything (not yet resolved)
-        if from.is_type_var() || to.is_type_var() {
+        // Type variables and inference placeholders are compatible with anything (not yet resolved)
+        if from.is_type_var() || to.is_type_var() || from.is_infer() || to.is_infer() {
             return true;
         }
 
@@ -624,8 +665,10 @@ impl Ty {
         is_error => TyKind::Error,
         /// Check if this is a Self type reference
         is_self_type => TyKind::SelfType,
-        /// Check if this is a type variable (inference placeholder)
+        /// Check if this is a type variable (inference placeholder) - deprecated
         is_type_var => TyKind::TypeVar(_),
+        /// Check if this is an inference placeholder type
+        is_infer => TyKind::Infer,
         /// Check if this is a type parameter type
         is_type_parameter => TyKind::TypeParameter(_),
         /// Check if this is a protocol type (resolved)

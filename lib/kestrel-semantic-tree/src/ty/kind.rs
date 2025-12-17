@@ -68,7 +68,14 @@ pub enum TyKind {
     /// Type variable (placeholder for type inference)
     /// Each type variable has a unique ID to distinguish between different
     /// unknown types during inference. The `_` syntax creates a fresh type var.
+    ///
+    /// Note: This is being deprecated in favor of `Infer`. New code should use `Infer`.
     TypeVar(TypeVarId),
+
+    /// Inference placeholder (to be determined by type inference).
+    /// Unlike TypeVar which carries an ID, Infer types are identified by their
+    /// containing Ty's TyId. This simplifies the inference system.
+    Infer,
 
     /// Type parameter reference (resolved)
     /// This represents a reference to a type parameter within a generic context

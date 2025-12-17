@@ -4,12 +4,39 @@
 //! resolved expressions in function bodies. They are created during
 //! the bind phase after path resolution.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
 use crate::stmt::{Statement, StatementKind};
 use crate::symbol::local::LocalId;
 use crate::ty::{Substitutions, Ty};
+
+/// Globally unique expression identifier.
+/// Every `Expression` instance has a unique `ExprId` assigned at construction.
+/// Used by the type inference system to track value resolutions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExprId(u64);
+
+impl ExprId {
+    /// Create a new unique expression ID
+    pub fn new() -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        ExprId(COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Get the raw ID value (useful for debugging)
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for ExprId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Compute the type of a block (statements + optional trailing value).
 ///
@@ -517,8 +544,11 @@ impl ElseBranch {
 ///
 /// Unlike symbols, expressions are plain data structures without SymbolId.
 /// They are created during the bind phase after path resolution.
+/// Every expression has a unique `ExprId` for use in type inference.
 #[derive(Debug, Clone)]
 pub struct Expression {
+    /// Unique identifier for this expression
+    pub id: ExprId,
     /// The kind of expression
     pub kind: ExprKind,
     /// The resolved type of this expression
@@ -542,8 +572,10 @@ pub struct Expression {
 
 impl Expression {
     /// Create a new expression with explicit mutability.
+    /// A fresh `ExprId` is automatically assigned.
     pub fn new(kind: ExprKind, ty: Ty, span: Span, mutable: bool) -> Self {
         Expression {
+            id: ExprId::new(),
             kind,
             ty,
             span,
@@ -552,13 +584,20 @@ impl Expression {
     }
 
     /// Create a new immutable expression (convenience for most cases).
+    /// A fresh `ExprId` is automatically assigned.
     pub fn new_immutable(kind: ExprKind, ty: Ty, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind,
             ty,
             span,
             mutable: false,
         }
+    }
+
+    /// Get the unique identifier of this expression
+    pub fn id(&self) -> ExprId {
+        self.id
     }
 
     /// Return a compact debug representation of this expression.
@@ -700,6 +739,7 @@ impl Expression {
     /// Create a unit literal expression.
     pub fn unit(span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::Unit),
             ty: Ty::unit(span.clone()),
             span,
@@ -710,6 +750,7 @@ impl Expression {
     /// Create an integer literal expression.
     pub fn integer(value: i64, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::Integer(value)),
             ty: Ty::int(crate::ty::IntBits::I64, span.clone()),
             span,
@@ -720,6 +761,7 @@ impl Expression {
     /// Create a float literal expression.
     pub fn float(value: f64, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::Float(value)),
             ty: Ty::float(crate::ty::FloatBits::F64, span.clone()),
             span,
@@ -730,6 +772,7 @@ impl Expression {
     /// Create a string literal expression.
     pub fn string(value: String, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::String(value)),
             ty: Ty::string(span.clone()),
             span,
@@ -740,6 +783,7 @@ impl Expression {
     /// Create a boolean literal expression.
     pub fn bool(value: bool, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::Bool(value)),
             ty: Ty::bool(span.clone()),
             span,
@@ -751,6 +795,7 @@ impl Expression {
     pub fn array(elements: Vec<Expression>, element_ty: Ty, span: Span) -> Self {
         let ty = Ty::array(element_ty, span.clone());
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Array(elements),
             ty,
             span,
@@ -763,6 +808,7 @@ impl Expression {
         let element_types: Vec<Ty> = elements.iter().map(|e| e.ty.clone()).collect();
         let ty = Ty::tuple(element_types, span.clone());
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Tuple(elements),
             ty,
             span,
@@ -776,6 +822,7 @@ impl Expression {
         let ty = inner.ty.clone();
         let mutable = inner.mutable;
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Grouping(Box::new(inner)),
             ty,
             span,
@@ -787,6 +834,7 @@ impl Expression {
     /// Mutability must be provided by the caller (from the Local's is_mutable()).
     pub fn local_ref(local_id: LocalId, ty: Ty, mutable: bool, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::LocalRef(local_id),
             ty,
             span,
@@ -798,6 +846,7 @@ impl Expression {
     /// Mutability must be provided by the caller (from the symbol's declaration).
     pub fn symbol_ref(symbol_id: SymbolId, ty: Ty, mutable: bool, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::SymbolRef(symbol_id),
             ty,
             span,
@@ -810,6 +859,7 @@ impl Expression {
     /// Functions are not mutable lvalues.
     pub fn overloaded_ref(candidates: Vec<SymbolId>, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::OverloadedRef(candidates),
             ty: Ty::type_var(span.clone()),
             span,
@@ -822,6 +872,7 @@ impl Expression {
     /// Types are not mutable lvalues.
     pub fn type_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::TypeRef(symbol_id),
             ty,
             span,
@@ -837,6 +888,7 @@ impl Expression {
     /// so that Self substitution works correctly.
     pub fn type_parameter_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::TypeParameterRef(symbol_id),
             ty,
             span,
@@ -855,6 +907,7 @@ impl Expression {
     ) -> Self {
         let mutable = field_mutable && object.mutable;
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::FieldAccess {
                 object: Box::new(object),
                 field,
@@ -870,6 +923,7 @@ impl Expression {
     pub fn tuple_index(tuple: Expression, index: usize, element_ty: Ty, span: Span) -> Self {
         let mutable = tuple.mutable;
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::TupleIndex {
                 tuple: Box::new(tuple),
                 index,
@@ -890,6 +944,7 @@ impl Expression {
         span: Span,
     ) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::MethodRef {
                 receiver: Box::new(receiver),
                 candidates,
@@ -910,6 +965,7 @@ impl Expression {
         span: Span,
     ) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Call {
                 callee: Box::new(callee),
                 arguments,
@@ -931,6 +987,7 @@ impl Expression {
         span: Span,
     ) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Call {
                 callee: Box::new(callee),
                 arguments,
@@ -952,6 +1009,7 @@ impl Expression {
     ) -> Self {
         let return_ty = method.return_type(&receiver.ty, span.clone());
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::PrimitiveMethodCall {
                 receiver: Box::new(receiver),
                 method,
@@ -966,6 +1024,7 @@ impl Expression {
     /// Create an error expression (poison value).
     pub fn error(span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Error,
             ty: Ty::error(span.clone()),
             span,
@@ -979,6 +1038,7 @@ impl Expression {
     /// Struct initialization results are not mutable lvalues.
     pub fn implicit_struct_init(struct_type: Ty, arguments: Vec<CallArgument>, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::ImplicitStructInit {
                 struct_type: struct_type.clone(),
                 arguments,
@@ -996,6 +1056,7 @@ impl Expression {
     /// Assignments are not mutable lvalues.
     pub fn assignment(target: Expression, value: Expression, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Assignment {
                 target: Box::new(target),
                 value: Box::new(value),
@@ -1038,6 +1099,7 @@ impl Expression {
         };
 
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::If {
                 condition: Box::new(condition),
                 then_branch,
@@ -1061,6 +1123,7 @@ impl Expression {
         span: Span,
     ) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::While {
                 loop_id,
                 label,
@@ -1083,6 +1146,7 @@ impl Expression {
         span: Span,
     ) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Loop {
                 loop_id,
                 label,
@@ -1099,6 +1163,7 @@ impl Expression {
     /// Type is `Never` - control transfers out of the loop.
     pub fn break_expr(loop_id: LoopId, label: Option<LabelInfo>, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Break { loop_id, label },
             ty: Ty::never(span.clone()),
             span,
@@ -1111,6 +1176,7 @@ impl Expression {
     /// Type is `Never` - control transfers to the loop condition.
     pub fn continue_expr(loop_id: LoopId, label: Option<LabelInfo>, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Continue { loop_id, label },
             ty: Ty::never(span.clone()),
             span,
@@ -1123,6 +1189,7 @@ impl Expression {
     /// Type is `Never` - control transfers out of the function.
     pub fn return_expr(value: Option<Expression>, span: Span) -> Self {
         Expression {
+            id: ExprId::new(),
             kind: ExprKind::Return {
                 value: value.map(Box::new),
             },
