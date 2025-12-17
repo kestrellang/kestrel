@@ -34,31 +34,6 @@ impl Default for TyId {
     }
 }
 
-/// Globally unique type variable identifier.
-/// Used to identify placeholder types during type inference.
-/// Each `_` in source code becomes a distinct type variable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TypeVarId(u64);
-
-impl TypeVarId {
-    /// Create a new unique type variable ID
-    pub fn new() -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(1);
-        TypeVarId(COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-
-    /// Get the raw ID value (useful for debugging)
-    pub fn raw(&self) -> u64 {
-        self.0
-    }
-}
-
-impl Default for TypeVarId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 use crate::language::KestrelLanguage;
 use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
@@ -182,7 +157,6 @@ impl fmt::Display for Ty {
                 f.write_str(&symbol.metadata().name().value)
             }
             TyKind::SelfType => f.write_str("Self"),
-            TyKind::TypeVar(_) => f.write_str("_"),
             TyKind::Infer => f.write_str("_"),
             TyKind::Error => f.write_str("<error>"),
         }
@@ -255,16 +229,6 @@ impl Ty {
         self_type => TyKind::SelfType,
         /// Create an inference placeholder type
         infer => TyKind::Infer,
-    }
-
-    /// Create a new type variable with a fresh ID
-    pub fn type_var(span: Span) -> Self {
-        Self::new(TyKind::TypeVar(TypeVarId::new()), span)
-    }
-
-    /// Create a type variable with a specific ID (for testing or explicit use)
-    pub fn type_var_with_id(id: TypeVarId, span: Span) -> Self {
-        Self::new(TyKind::TypeVar(id), span)
     }
 
     // === Parameterized constructors ===
@@ -524,8 +488,8 @@ impl Ty {
             return true;
         }
 
-        // Type variables and inference placeholders are compatible with anything (not yet resolved)
-        if from.is_type_var() || to.is_type_var() || from.is_infer() || to.is_infer() {
+        // Inference placeholders are compatible with anything (not yet resolved)
+        if from.is_infer() || to.is_infer() {
             return true;
         }
 
@@ -665,8 +629,6 @@ impl Ty {
         is_error => TyKind::Error,
         /// Check if this is a Self type reference
         is_self_type => TyKind::SelfType,
-        /// Check if this is a type variable (inference placeholder) - deprecated
-        is_type_var => TyKind::TypeVar(_),
         /// Check if this is an inference placeholder type
         is_infer => TyKind::Infer,
         /// Check if this is a type parameter type
@@ -722,14 +684,6 @@ impl Ty {
                 params,
                 return_type,
             } => Some((params, return_type)),
-            _ => None,
-        }
-    }
-
-    /// Get the type variable ID if this is a type variable
-    pub fn as_type_var(&self) -> Option<TypeVarId> {
-        match &self.kind {
-            TyKind::TypeVar(id) => Some(*id),
             _ => None,
         }
     }
@@ -885,17 +839,6 @@ mod tests {
         let ty = Ty::self_type(Span::from(0..4));
         assert!(ty.is_self_type());
         assert!(!ty.is_unit());
-    }
-
-    #[test]
-    fn test_type_var() {
-        let ty = Ty::type_var(Span::from(0..1));
-        assert!(ty.is_type_var());
-        assert!(!ty.is_unit());
-
-        // Each type_var call should produce a unique ID
-        let ty2 = Ty::type_var(Span::from(0..1));
-        assert_ne!(ty.as_type_var(), ty2.as_type_var());
     }
 
     #[test]

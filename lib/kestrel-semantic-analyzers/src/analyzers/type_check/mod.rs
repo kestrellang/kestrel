@@ -125,7 +125,7 @@ impl Analyzer for TypeCheckAnalyzer {
         } = &stmt.kind
         {
             let declared_ty = &pattern.ty;
-            if declared_ty.is_type_var() || declared_ty.is_error() {
+            if declared_ty.is_infer() || declared_ty.is_error() {
                 return;
             }
             if !is_assignable_in_ctx(&value.ty, declared_ty, ctx) {

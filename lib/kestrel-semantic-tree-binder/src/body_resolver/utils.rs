@@ -191,7 +191,7 @@ pub fn create_struct_type_with_type_args(
             for param in type_params {
                 let param_id = param.metadata().id();
                 if !substitutions.contains(param_id) {
-                    substitutions.insert(param_id, Ty::type_var(span.clone()));
+                    substitutions.insert(param_id, Ty::infer(span.clone()));
                 }
             }
 
@@ -249,7 +249,7 @@ pub fn create_generic_struct_type(
             for param in type_params {
                 let param_id = param.metadata().id();
                 if !substitutions.contains(param_id) {
-                    substitutions.insert(param_id, Ty::type_var(span.clone()));
+                    substitutions.insert(param_id, Ty::infer(span.clone()));
                 }
             }
 

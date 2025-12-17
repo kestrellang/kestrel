@@ -170,7 +170,6 @@ impl SignatureType {
             },
             TyKind::Error => SignatureType::Named(vec!["<error>".to_string()]),
             TyKind::SelfType => SignatureType::Named(vec!["Self".to_string()]),
-            TyKind::TypeVar(_) => SignatureType::Named(vec!["_".to_string()]),
             TyKind::Infer => SignatureType::Named(vec!["_".to_string()]),
             TyKind::TypeParameter(param) => {
                 SignatureType::Named(vec![param.metadata().name().value.clone()])

@@ -182,7 +182,6 @@ fn find_less_visible_type(
         | TyKind::String
         | TyKind::Error
         | TyKind::SelfType
-        | TyKind::TypeVar(_)
         | TyKind::Infer => None,
     }
 }

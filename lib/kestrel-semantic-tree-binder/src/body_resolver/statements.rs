@@ -105,7 +105,7 @@ pub fn resolve_variable_declaration(
         value
             .as_ref()
             .map(|e| e.ty.clone())
-            .unwrap_or_else(|| Ty::type_var(span.clone()))
+            .unwrap_or_else(|| Ty::infer(span.clone()))
     });
 
     // Bind the local variable

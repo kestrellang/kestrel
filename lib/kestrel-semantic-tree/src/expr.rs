@@ -861,7 +861,7 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::OverloadedRef(candidates),
-            ty: Ty::type_var(span.clone()),
+            ty: Ty::infer(span.clone()),
             span,
             mutable: false,
         }
@@ -950,7 +950,7 @@ impl Expression {
                 candidates,
                 method_name,
             },
-            ty: Ty::type_var(span.clone()),
+            ty: Ty::infer(span.clone()),
             span,
             mutable: false,
         }

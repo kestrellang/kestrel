@@ -172,11 +172,11 @@ fn resolve_array_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
         .map(|c| resolve_expression(&c, ctx))
         .collect();
 
-    // Infer element type from first element, or use type_var if empty
+    // Infer element type from first element, or use infer if empty
     let element_ty = elements
         .first()
         .map(|e| e.ty.clone())
-        .unwrap_or_else(|| Ty::type_var(span.clone()));
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
     Expression::array(elements, element_ty, span)
 }

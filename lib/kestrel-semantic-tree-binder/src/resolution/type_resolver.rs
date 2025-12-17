@@ -144,7 +144,7 @@ impl<'a> TypeResolver<'a> {
             .children()
             .any(|child| child.kind() == SyntaxKind::TyInferred)
         {
-            return Ty::type_var(ty_span);
+            return Ty::infer(ty_span);
         }
 
         // Fallback: error type
@@ -442,7 +442,7 @@ pub fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
         .children()
         .any(|child| child.kind() == SyntaxKind::TyInferred)
     {
-        return Ty::type_var(ty_span);
+        return Ty::infer(ty_span);
     }
 
     // Fallback: error type

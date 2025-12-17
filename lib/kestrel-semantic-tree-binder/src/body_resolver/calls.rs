@@ -539,7 +539,7 @@ fn resolve_single_function_call(
                         substitutions
                             .get(tp.metadata().id())
                             .cloned()
-                            .unwrap_or_else(|| Ty::type_var(span.clone()))
+                            .unwrap_or_else(|| Ty::infer(span.clone()))
                     })
                     .collect();
 
@@ -739,7 +739,7 @@ fn resolve_explicit_init_call(
                 let init_id = init_sym.metadata().id();
                 let init_ref = Expression::symbol_ref(
                     init_id,
-                    Ty::type_var(span.clone()),
+                    Ty::infer(span.clone()),
                     false,
                     span.clone(),
                 );
@@ -1162,7 +1162,7 @@ fn resolve_type_parameter_init_call(
 
     // Create a call expression referencing the protocol's init
     let init_id = winner.init.metadata().id();
-    let init_ref = Expression::symbol_ref(init_id, Ty::type_var(span.clone()), false, span.clone());
+    let init_ref = Expression::symbol_ref(init_id, Ty::infer(span.clone()), false, span.clone());
 
     Expression::call(init_ref, arguments, return_ty, span)
 }

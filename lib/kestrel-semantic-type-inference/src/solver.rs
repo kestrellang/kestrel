@@ -131,16 +131,6 @@ fn unify(
             Ok(SolveResult::Solved)
         }
 
-        // TypeVar (legacy) - treat similarly to Infer
-        (TyKind::TypeVar(_), _) => {
-            ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
-            Ok(SolveResult::Solved)
-        }
-        (_, TyKind::TypeVar(_)) => {
-            ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
-            Ok(SolveResult::Solved)
-        }
-
         // Error types unify with anything (suppress cascading errors)
         (TyKind::Error, _) | (_, TyKind::Error) => Ok(SolveResult::Solved),
 
@@ -324,7 +314,7 @@ fn check_conforms(
     let resolved = resolve_type(ctx, ty);
 
     // If the type is still an inference placeholder, defer
-    if matches!(resolved.kind(), TyKind::Infer | TyKind::TypeVar(_)) {
+    if matches!(resolved.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
     }
 
@@ -352,7 +342,7 @@ fn normalize(
     let base_ty = resolve_type(ctx, base);
 
     // If the base type is still an inference placeholder, defer
-    if matches!(base_ty.kind(), TyKind::Infer | TyKind::TypeVar(_)) {
+    if matches!(base_ty.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
     }
 
@@ -385,7 +375,7 @@ fn resolve_member(
     let receiver_ty = resolve_type(ctx, receiver);
 
     // If the receiver type is still an inference placeholder, defer
-    if matches!(receiver_ty.kind(), TyKind::Infer | TyKind::TypeVar(_)) {
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
         return Ok(SolveResult::Deferred);
     }
 

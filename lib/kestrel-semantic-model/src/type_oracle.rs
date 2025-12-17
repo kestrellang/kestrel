@@ -28,7 +28,7 @@ impl TypeOracle for SemanticModel {
         is_static: bool,
     ) -> Result<MemberResolution, MemberError> {
         // Handle inference placeholders
-        if matches!(receiver_ty.kind(), TyKind::Infer | TyKind::TypeVar(_)) {
+        if matches!(receiver_ty.kind(), TyKind::Infer) {
             return Err(MemberError::UnknownType);
         }
 
@@ -155,7 +155,7 @@ impl TypeOracle for SemanticModel {
 
     fn conforms_to(&self, ty: &Ty, protocol_id: SymbolId) -> bool {
         // Handle inference placeholders - can't check conformance yet
-        if matches!(ty.kind(), TyKind::Infer | TyKind::TypeVar(_)) {
+        if matches!(ty.kind(), TyKind::Infer) {
             return false;
         }
 
@@ -208,7 +208,7 @@ impl TypeOracle for SemanticModel {
 
     fn resolve_associated_type(&self, container: &Ty, assoc_name: &str) -> Option<Ty> {
         // Handle inference placeholders
-        if matches!(container.kind(), TyKind::Infer | TyKind::TypeVar(_)) {
+        if matches!(container.kind(), TyKind::Infer) {
             return None;
         }
 

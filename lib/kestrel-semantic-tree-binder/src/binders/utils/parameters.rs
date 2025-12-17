@@ -68,7 +68,7 @@ fn resolve_single_parameter(
         let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
-        Ty::type_var(get_node_span(param_node, file_id))
+        Ty::infer(get_node_span(param_node, file_id))
     };
 
     Some(Parameter { label, bind_name, ty })
