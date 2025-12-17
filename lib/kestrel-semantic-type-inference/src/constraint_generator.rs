@@ -33,11 +33,12 @@ pub fn generate_constraints(
     if let Some(yield_expr) = block.yield_expr() {
         generate_expression_constraints(ctx, yield_expr);
 
-        // If we have an expected return type, equate yield type with it
+        // Equate yield expression type with return type
+        // ret_ty is expected, yield_expr.ty is found
         if let Some(ret_ty) = return_type {
             ctx.register_type(ret_ty);
             ctx.register_type(&yield_expr.ty);
-            ctx.equate(yield_expr.ty.id(), ret_ty.id(), yield_expr.span.clone());
+            ctx.equate(ret_ty.id(), yield_expr.ty.id(), yield_expr.span.clone());
         }
     }
 }

@@ -7,7 +7,7 @@ mod integers {
     fn integer_decimal() {
         Test::new(
             r#"module Test
-            func test() { 42 }
+            func test() -> Int { 42 }
         "#,
         )
         .expect(Compiles)
@@ -23,13 +23,13 @@ mod integers {
         // Test that various integer literal formats all work
         Test::new(
             r#"module Test
-            func decimal() { 42 }
-            func hex_lower() { 0xff }
-            func hex_upper() { 0XAB }
-            func binary() { 0b1010 }
-            func octal() { 0o755 }
-            func zero() { 0 }
-            func large() { 9223372036854775807 }
+            func decimal() -> Int { 42 }
+            func hex_lower() -> Int { 0xff }
+            func hex_upper() -> Int { 0XAB }
+            func binary() -> Int { 0b1010 }
+            func octal() -> Int { 0o755 }
+            func zero() -> Int { 0 }
+            func large() -> Int { 9223372036854775807 }
         "#,
         )
         .expect(Compiles)
@@ -50,8 +50,8 @@ mod floats {
     fn float_basic_forms() {
         Test::new(
             r#"module Test
-            func simple() { 3.14 }
-            func zero() { 0.0 }
+            func simple() -> Float { 3.14 }
+            func zero() -> Float { 0.0 }
         "#,
         )
         .expect(Compiles)
@@ -64,9 +64,9 @@ mod floats {
         // Test scientific notation with various exponent formats
         Test::new(
             r#"module Test
-            func lowercase_positive() { 1.0e10 }
-            func uppercase_negative() { 2.5E-3 }
-            func explicit_positive() { 1.0e+5 }
+            func lowercase_positive() -> Float { 1.0e10 }
+            func uppercase_negative() -> Float { 2.5E-3 }
+            func explicit_positive() -> Float { 1.0e+5 }
         "#,
         )
         .expect(Compiles)
@@ -83,9 +83,9 @@ mod strings {
     fn string_basic_forms() {
         Test::new(
             r#"module Test
-            func simple() { "hello" }
-            func empty() { "" }
-            func with_spaces() { "hello world" }
+            func simple() -> String { "hello" }
+            func empty() -> String { "" }
+            func with_spaces() -> String { "hello world" }
         "#,
         )
         .expect(Compiles)
@@ -99,10 +99,10 @@ mod strings {
         // Test common escape sequences
         Test::new(
             r#"module Test
-            func newline() { "hello\nworld" }
-            func tab() { "hello\tworld" }
-            func quote() { "say \"hello\"" }
-            func backslash() { "path\\to\\file" }
+            func newline() -> String { "hello\nworld" }
+            func tab() -> String { "hello\tworld" }
+            func quote() -> String { "say \"hello\"" }
+            func backslash() -> String { "path\\to\\file" }
         "#,
         )
         .expect(Compiles)
@@ -120,8 +120,8 @@ mod booleans {
     fn boolean_literals() {
         Test::new(
             r#"module Test
-            func true_value() { true }
-            func false_value() { false }
+            func true_value() -> Bool { true }
+            func false_value() -> Bool { false }
         "#,
         )
         .expect(Compiles)
@@ -137,9 +137,9 @@ mod arrays {
     fn array_basic_forms() {
         Test::new(
             r#"module Test
-            func empty() { [] }
-            func single() { [1] }
-            func multiple() { [1, 2, 3] }
+            func empty() -> [Int] { [] }
+            func single() -> [Int] { [1] }
+            func multiple() -> [Int] { [1, 2, 3] }
         "#,
         )
         .expect(Compiles)
@@ -152,8 +152,8 @@ mod arrays {
     fn array_trailing_comma_and_nesting() {
         Test::new(
             r#"module Test
-            func trailing() { [1, 2, 3,] }
-            func nested() { [[1, 2], [3, 4]] }
+            func trailing() -> [Int] { [1, 2, 3,] }
+            func nested() -> [[Int]] { [[1, 2], [3, 4]] }
         "#,
         )
         .expect(Compiles)
@@ -166,8 +166,8 @@ mod arrays {
         // Test arrays containing strings and booleans
         Test::new(
             r#"module Test
-            func of_strings() { ["hello", "world"] }
-            func of_booleans() { [true, false, true] }
+            func of_strings() -> [String] { ["hello", "world"] }
+            func of_booleans() -> [Bool] { [true, false, true] }
         "#,
         )
         .expect(Compiles)
@@ -195,9 +195,9 @@ mod tuples {
         // Test single element (with trailing comma) and multi-element tuples
         Test::new(
             r#"module Test
-            func single() { (1,) }
-            func two_elements() { (1, 2) }
-            func multiple() { (1, 2, 3) }
+            func single() -> (Int,) { (1,) }
+            func two_elements() -> (Int, Int) { (1, 2) }
+            func multiple() -> (Int, Int, Int) { (1, 2, 3) }
         "#,
         )
         .expect(Compiles)
@@ -210,8 +210,8 @@ mod tuples {
     fn tuple_trailing_comma_and_nesting() {
         Test::new(
             r#"module Test
-            func trailing() { (1, 2, 3,) }
-            func nested() { ((1, 2), (3, 4)) }
+            func trailing() -> (Int, Int, Int) { (1, 2, 3,) }
+            func nested() -> ((Int, Int), (Int, Int)) { ((1, 2), (3, 4)) }
         "#,
         )
         .expect(Compiles)
@@ -223,8 +223,8 @@ mod tuples {
     fn tuple_complex_content() {
         Test::new(
             r#"module Test
-            func mixed_types() { (1, "hello", true) }
-            func of_arrays() { ([1, 2], [3, 4]) }
+            func mixed_types() -> (Int, String, Bool) { (1, "hello", true) }
+            func of_arrays() -> ([Int], [Int]) { ([1, 2], [3, 4]) }
         "#,
         )
         .expect(Compiles)
@@ -241,9 +241,9 @@ mod grouping {
         // Single element without trailing comma is grouping (not a tuple)
         Test::new(
             r#"module Test
-            func integer() { (42) }
-            func string() { ("hello") }
-            func array() { ([1, 2, 3]) }
+            func integer() -> Int { (42) }
+            func string() -> String { ("hello") }
+            func array() -> [Int] { ([1, 2, 3]) }
         "#,
         )
         .expect(Compiles)
@@ -256,7 +256,7 @@ mod grouping {
     fn grouping_nested() {
         Test::new(
             r#"module Test
-            func nested() { ((42)) }
+            func nested() -> Int { ((42)) }
         "#,
         )
         .expect(Compiles)
@@ -287,8 +287,8 @@ mod complex {
         // Test deeply nested and complex combinations of containers
         Test::new(
             r#"module Test
-            func array_of_tuples() { [(1, 2), (3, 4)] }
-            func deeply_nested() { [[(1,)]] }
+            func array_of_tuples() -> [(Int, Int)] { [(1, 2), (3, 4)] }
+            func deeply_nested() -> [[(Int,)]] { [[(1,)]] }
         "#,
         )
         .expect(Compiles)
@@ -301,12 +301,12 @@ mod complex {
         // Comprehensive test that functions can contain all literal types
         Test::new(
             r#"module Test
-            func integer() { 42 }
-            func floating() { 3.14 }
-            func text() { "hello" }
-            func boolean() { true }
-            func sequence() { [1, 2, 3] }
-            func pair() { (1, 2) }
+            func integer() -> Int { 42 }
+            func floating() -> Float { 3.14 }
+            func text() -> String { "hello" }
+            func boolean() -> Bool { true }
+            func sequence() -> [Int] { [1, 2, 3] }
+            func pair() -> (Int, Int) { (1, 2) }
         "#,
         )
         .expect(Compiles)

@@ -34,12 +34,12 @@ mod path_expressions {
     use super::*;
 
     // Note: Path expressions require defined names, so we use parameters
-    compiles_fn!(path_single_segment, "(foo: Int)", "foo");
+    compiles_fn!(path_single_segment, "(foo: Int) -> Int", "foo");
 
     #[test]
     fn paths_in_containers() {
         Test::new(
-            "module Test\nfunc test(foo: Int, bar: Int) {\n[foo, bar];\n(foo, bar);\n(foo)\n}",
+            "module Test\nfunc test(foo: Int, bar: Int) -> Int {\n[foo, bar];\n(foo, bar);\n(foo)\n}",
         )
         .expect(Compiles)
         .expect(
@@ -100,7 +100,7 @@ mod variable_shadowing {
 mod parameter_usage {
     use super::*;
 
-    compiles_fn!(use_single_parameter, "(x: Int)", "x");
+    compiles_fn!(use_single_parameter, "(x: Int) -> Int", "x");
 
     #[test]
     fn multiple_parameters_usage() {
@@ -218,7 +218,7 @@ mod edge_cases {
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
-    compiles!(very_large_integer, "999_999_999_999_999_999");
+    compiles!(very_large_integer, "999_999_999_999_999_999;");
 
     #[test]
     fn special_string_content() {
@@ -277,7 +277,7 @@ mod edge_cases {
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
-    compiles_fn!(parameter_with_same_name_as_type, "(Int: Int)", "Int");
+    compiles_fn!(parameter_with_same_name_as_type, "(Int: Int) -> Int", "Int");
 
     #[test]
     fn null_literals() {
@@ -302,14 +302,14 @@ mod edge_cases {
 
     #[test]
     fn function_with_many_parameters() {
-        Test::new("module Test\nfunc test(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) {\na;\nb;\nc;\nd;\ne;\nf;\ng;\nh\n}")
+        Test::new("module Test\nfunc test(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int {\na;\nb;\nc;\nd;\ne;\nf;\ng;\nh\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(8)));
     }
 
     #[test]
     fn labeled_parameters() {
-        Test::new("module Test\nfunc test(label1 a: Int, b: Int, label2 c: Int, d: Int) {\n(a, b, c, d)\n}")
+        Test::new("module Test\nfunc test(label1 a: Int, b: Int, label2 c: Int, d: Int) -> (Int, Int, Int, Int) {\n(a, b, c, d)\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(4)));
     }
@@ -322,14 +322,14 @@ mod edge_cases {
 
     #[test]
     fn mixed_statements_and_expressions() {
-        Test::new("module Test\nfunc test() {\nlet x: Int = 1;\n42;\nlet a: Int = 1;\n42;\nlet b: Int = 2;\n\"hello\";\nlet c: Int = 3;\nc\n}")
+        Test::new("module Test\nfunc test() -> Int {\nlet x: Int = 1;\n42;\nlet a: Int = 1;\n42;\nlet b: Int = 2;\n\"hello\";\nlet c: Int = 3;\nc\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
     #[test]
     fn comments_in_code() {
-        Test::new("module Test\nfunc test() {\n// This is a comment\n42;\n[1, /* comment */ 2, 3];\n/* outer /* inner */ still outer */\n42\n}")
+        Test::new("module Test\nfunc test() -> Int {\n// This is a comment\n42;\n[1, /* comment */ 2, 3];\n/* outer /* inner */ still outer */\n42\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }

@@ -181,10 +181,9 @@ fn resolve_return_type_from_syntax(
         }
     }
 
-    // No explicit return type - use inference placeholder
-    // The type inference system will determine the actual return type
+    // No explicit return type - default to Unit
     let fn_span = get_node_span(syntax, file_id);
-    Ty::infer(Span::new(fn_span.file_id, fn_span.end..fn_span.end))
+    Ty::unit(Span::new(fn_span.file_id, fn_span.end..fn_span.end))
 }
 
 /// Get the type of `self` for an instance method

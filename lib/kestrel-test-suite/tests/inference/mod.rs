@@ -478,3 +478,160 @@ func test() {
         .expect(Compiles);
     }
 }
+
+mod static_method_type_substitution {
+    use super::*;
+
+    #[test]
+    fn static_method_in_extension_substitutes_type_param() {
+        // When calling Box[Int].wrap(42), T should be substituted with Int
+        Test::new(
+            r#"
+module Main
+
+struct Box[T] {
+    var value: T
+}
+
+extend Box[T] {
+    static func wrap(v: T) -> Box[T] {
+        Box[T](value: v)
+    }
+}
+
+func test() -> Box[Int] {
+    let b = Box[Int].wrap(42);
+    b
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn static_method_in_extension_field_access() {
+        Test::new(
+            r#"
+module Main
+
+struct Box[T] {
+    var value: T
+}
+
+extend Box[T] {
+    static func wrap(v: T) -> Box[T] {
+        Box[T](value: v)
+    }
+}
+
+func test() -> Int {
+    let b = Box[Int].wrap(42);
+    b.value
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn static_method_on_struct_substitutes_type_param() {
+        // Static methods directly on struct should also substitute
+        Test::new(
+            r#"
+module Main
+
+struct Factory[T] {
+    var product: T
+
+    static func make(value: T) -> Factory[T] {
+        Factory[T](product: value)
+    }
+}
+
+func test() -> Factory[Int] {
+    Factory[Int].make(42)
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn static_method_on_struct_field_access() {
+        Test::new(
+            r#"
+module Main
+
+struct Factory[T] {
+    var product: T
+
+    static func make(value: T) -> Factory[T] {
+        Factory[T](product: value)
+    }
+}
+
+func test() -> Int {
+    let f = Factory[Int].make(42);
+    f.product
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod generic_method_type_substitution {
+    use super::*;
+
+    #[test]
+    fn generic_method_in_extension_infers_type_param() {
+        // When calling wrapper.rewrap("hello"), U should be inferred as String
+        Test::new(
+            r#"
+module Main
+
+struct Wrapper[T] {
+    var inner: T
+}
+
+extend Wrapper[T] {
+    func rewrap[U](newValue: U) -> Wrapper[U] {
+        Wrapper[U](inner: newValue)
+    }
+}
+
+func test() -> Wrapper[String] {
+    let w = Wrapper[Int](inner: 42);
+    w.rewrap("hello")
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_method_chained_calls() {
+        Test::new(
+            r#"
+module Main
+
+struct Wrapper[T] {
+    var inner: T
+}
+
+extend Wrapper[T] {
+    func rewrap[U](newValue: U) -> Wrapper[U] {
+        Wrapper[U](inner: newValue)
+    }
+}
+
+func test() -> Wrapper[Bool] {
+    let w = Wrapper[Int](inner: 42);
+    let w2 = w.rewrap("hello");
+    w2.rewrap(true)
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}

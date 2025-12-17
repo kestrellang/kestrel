@@ -70,9 +70,10 @@ impl Analyzer for TypeInferenceAnalyzer {
             return;
         };
 
-        // TODO: For now, don't report inference errors - the constraint generator
-        // needs refinement to handle implicit return types correctly.
-        // The existing TypeCheckAnalyzer handles type checking.
+        // Report any inference errors
+        for error in solution.errors() {
+            ctx.report(InferenceErrorDiagnostic::from(error.clone()));
+        }
 
         // Apply solution to create resolved body (even if there are errors)
         let resolved_body = apply_solution(executable.body(), &solution);

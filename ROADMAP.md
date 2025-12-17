@@ -309,15 +309,24 @@
 
 ## Phase 7: Type Inference
 
-- [ ] Local Type Inference
-  - [ ] `let x = 42` infers `Int`
-  - [ ] `let p = Point(x: 1, y: 2)` infers `Point`
+- [x] Local Type Inference
+  - [x] `let x = 42` infers `Int`
+  - [x] `let p = Point(x: 1, y: 2)` infers `Point`
 - [ ] Generic Type Argument Inference
   - [ ] Infer type arguments from call arguments
   - [ ] `identity(42)` infers `identity[Int](42)`
-- [ ] Bidirectional Type Checking
-  - [ ] Expected type propagation into expressions
-  - [ ] Foundation for closure parameter inference
+- [x] Bidirectional Type Checking
+  - [x] Expected type propagation into expressions
+  - [x] Foundation for closure parameter inference
+- [ ] Static Method Type Parameter Substitution
+  - [ ] `Box[Int].wrap(42)` substitutes `T` with `Int` in static methods
+  - [ ] Applies to static methods in both structs and extensions
+- [ ] Generic Method Type Parameter Substitution
+  - [ ] `wrapper.rewrap[U]("hello")` infers `U` from argument
+  - [ ] Extension methods with their own type parameters
+- [ ] Extension Specialization Overlap Detection
+  - [ ] Allow non-overlapping specialized extensions (`Box[Int]` vs `Box[String]`)
+  - [ ] Only reject truly ambiguous cases
 
 ## Phase 8: Closures & First-Class Functions
 

@@ -134,7 +134,7 @@ struct Point {
         self.y
     }
 
-    mutating func setZ() -> () {
+    mutating func getZ() -> Int {
         self.z
     }
 }
@@ -148,7 +148,7 @@ struct Point {
         )
         .expect(Symbol::new("Point.getX").is(SymbolKind::Function))
         .expect(Symbol::new("Point.getY").is(SymbolKind::Function))
-        .expect(Symbol::new("Point.setZ").is(SymbolKind::Function));
+        .expect(Symbol::new("Point.getZ").is(SymbolKind::Function));
     }
 
     #[test]

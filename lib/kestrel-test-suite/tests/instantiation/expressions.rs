@@ -763,9 +763,9 @@ mod integration {
     fn functions_with_aggregate_expressions() {
         Test::new(
             r#"module Test
-            func pair() { (1, 2) }
-            func numbers() { [1, 2, 3] }
-            func complex() { [(1, 2), (3, 4)] }
+            func pair() -> (Int, Int) { (1, 2) }
+            func numbers() -> [Int] { [1, 2, 3] }
+            func complex() -> [(Int, Int)] { [(1, 2), (3, 4)] }
         "#,
         )
         .expect(Compiles)
@@ -779,7 +779,7 @@ mod integration {
         Test::new(
             r#"module Test
             struct Point {
-                func origin() { (0, 0) }
+                func origin() -> (Int, Int) { (0, 0) }
             }
         "#,
         )
