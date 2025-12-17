@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-semantic-type-inference = { path = "../kestrel-semantic-type-inference" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 semantic-tree = { path = "../semantic-tree" }

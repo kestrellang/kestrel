@@ -13,6 +13,7 @@ mod query;
 mod registry;
 mod resolution;
 mod scope;
+mod type_oracle;
 
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
@@ -20,7 +21,7 @@ pub use queries::{
     AncestorOfKind, AssociatedTypeBindingsForStruct, CallableParamTypesForCall, ChildByName,
     ConformancesForSymbol, DeclaredName, DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods,
     ExtensionsFor, FunctionsInSymbol, GenericsData, GenericsDataFor, HasBody, ImportsInScope,
-    InheritedProtocolMember, IsInsideAny, IsVisibleFrom, LocalName,
+    InferenceResultFor, InheritedProtocolMember, IsInsideAny, IsVisibleFrom, LocalName,
     ProtocolAssociatedTypesWithDefaults, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
     ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath, ResolvedAliasedType,
     ScopeFor, StructFieldInfo, StructFieldTypeInfo, StructFieldTypes, StructFields, StructMethods,

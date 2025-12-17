@@ -25,6 +25,7 @@ pub enum KestrelBehaviorKind {
     Implements,
     ImportData,
     MemberAccess,
+    ResolvedExecutable,
     Typed,
     TypeAliasTyped,
     Valued,

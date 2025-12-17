@@ -1,0 +1,480 @@
+//! Type inference tests
+//!
+//! These tests verify that the type inference system correctly infers types
+//! when they are not explicitly annotated.
+
+use kestrel_test_suite::*;
+
+mod basic_inference {
+    use super::*;
+
+    #[test]
+    fn infer_int_from_literal() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let x = 42;
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_string_from_literal() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> String {
+    let x = "hello";
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_bool_from_literal() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Bool {
+    let x = true;
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_from_another_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let x: Int = 42;
+    let y = x;
+    y
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_chain_of_variables() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let a = 1;
+    let b = a;
+    let c = b;
+    c
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod inference_from_expressions {
+    use super::*;
+
+    #[test]
+    fn infer_from_binary_op() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let x = 1 + 2;
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_from_comparison() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Bool {
+    let x = 1 == 2;
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_from_function_call() {
+        Test::new(
+            r#"
+module Main
+
+func getInt() -> Int { 42 }
+
+func test() -> Int {
+    let x = getInt();
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_from_method_call() {
+        Test::new(
+            r#"
+module Main
+
+struct Foo {
+    func bar() -> Int { 42 }
+}
+
+func test() -> Int {
+    let f = Foo();
+    let x = f.bar();
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_struct_from_constructor() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    var x: Int
+    var y: Int
+}
+
+func test() {
+    let p = Point(x: 1, y: 2);
+    let x: Int = p.x;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod inference_with_generics {
+    use super::*;
+
+    #[test]
+    fn infer_generic_struct_type_param() {
+        Test::new(
+            r#"
+module Main
+
+struct Box[T] {
+    var value: T
+}
+
+func test() -> Int {
+    let b = Box(value: 42);
+    b.value
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_generic_from_context() {
+        Test::new(
+            r#"
+module Main
+
+struct Box[T] {
+    var value: T
+}
+
+func test() {
+    let b = Box(value: 42);
+    let x: Int = b.value;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_generic_method_return() {
+        Test::new(
+            r#"
+module Main
+
+struct Box[T] {
+    var value: T
+
+    func get() -> T { self.value }
+}
+
+func test() -> Int {
+    let b = Box(value: 42);
+    b.get()
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod inference_in_control_flow {
+    use super::*;
+
+    #[test]
+    fn infer_from_if_else() {
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    let x = if cond { 1 } else { 2 };
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_in_while_body() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var count = 0;
+    while count < 10 {
+        let doubled = count * 2;
+        count = count + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_in_loop_body() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    var sum = 0;
+    var i = 0;
+    loop {
+        if i >= 10 {
+            break
+        }
+        let x = i * i;
+        sum = sum + x;
+        i = i + 1;
+    }
+    sum
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod inference_errors {
+    use super::*;
+
+    // TODO: Add test for uninitialized variables once that validation is implemented
+    // fn ambiguous_inference_needs_annotation() { ... }
+
+    #[test]
+    fn inferred_type_mismatch_with_usage() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x = 42;
+    let y: String = x;
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn inferred_type_mismatch_in_return() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> String {
+    let x = 42;
+    x
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn inferred_type_mismatch_in_assignment() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x = "hello";
+    x = 42
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn inferred_type_mismatch_in_function_arg() {
+        Test::new(
+            r#"
+module Main
+
+func takeString(s: String) {}
+
+func test() {
+    let x = 42;
+    takeString(x)
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
+
+mod tuple_inference {
+    use super::*;
+
+    #[test]
+    fn infer_tuple_type() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = (1, "hello", true);
+    let x: Int = t.0;
+    let y: String = t.1;
+    let z: Bool = t.2;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_nested_tuple() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = ((1, 2), (3, 4));
+    let inner = t.0;
+    let x: Int = inner.0;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod array_inference {
+    use super::*;
+
+    #[test]
+    fn infer_array_from_elements() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr = [1, 2, 3];
+    let x: [Int] = arr;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_array_element_type_mismatch() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr = [1, 2, 3];
+    let x: [String] = arr;
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
+
+mod bidirectional_inference {
+    use super::*;
+
+    #[test]
+    fn infer_from_expected_return_type() {
+        // The return type provides context for inference
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let x = 42;
+    x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn infer_from_variable_annotation() {
+        // The variable annotation provides context
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = 42;
+    let y = x + 1;
+    let z: Int = y;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}

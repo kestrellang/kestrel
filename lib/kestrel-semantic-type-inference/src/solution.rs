@@ -1,13 +1,15 @@
 //! Solution types for type inference results.
 //!
 //! After solving constraints, the inference context produces a [`Solution`]
-//! containing resolved types and value resolutions.
+//! containing resolved types, value resolutions, and any errors encountered.
 
 use std::collections::HashMap;
 
 use kestrel_semantic_tree::expr::ExprId;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyId};
 use semantic_tree::symbol::SymbolId;
+
+use crate::error::InferenceError;
 
 /// A resolved value from type-directed member access.
 ///
@@ -45,6 +47,7 @@ impl ValueResolution {
 /// Contains:
 /// - Resolved types for all inference placeholders
 /// - Resolved symbols for type-directed member accesses
+/// - Any errors encountered during inference
 #[derive(Debug, Clone, Default)]
 pub struct Solution {
     /// Resolved types indexed by their TyId.
@@ -58,6 +61,12 @@ pub struct Solution {
     /// Member accesses that depended on type inference get entries here
     /// with their resolved symbol and substitutions.
     pub values: HashMap<ExprId, ValueResolution>,
+
+    /// Errors encountered during type inference.
+    ///
+    /// The solver accumulates errors rather than failing fast, allowing
+    /// multiple type errors to be reported in a single pass.
+    pub errors: Vec<InferenceError>,
 }
 
 impl Solution {
@@ -66,6 +75,7 @@ impl Solution {
         Self {
             types: HashMap::new(),
             values: HashMap::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -74,7 +84,24 @@ impl Solution {
         types: HashMap<TyId, Ty>,
         values: HashMap<ExprId, ValueResolution>,
     ) -> Self {
-        Self { types, values }
+        Self {
+            types,
+            values,
+            errors: Vec::new(),
+        }
+    }
+
+    /// Create a solution with the given type mappings, value mappings, and errors.
+    pub fn with_errors(
+        types: HashMap<TyId, Ty>,
+        values: HashMap<ExprId, ValueResolution>,
+        errors: Vec<InferenceError>,
+    ) -> Self {
+        Self {
+            types,
+            values,
+            errors,
+        }
     }
 
     /// Get the resolved type for a TyId.
@@ -105,5 +132,25 @@ impl Solution {
     /// Get the number of resolved values.
     pub fn value_count(&self) -> usize {
         self.values.len()
+    }
+
+    /// Check if there are any errors.
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    /// Get the errors from inference.
+    pub fn errors(&self) -> &[InferenceError] {
+        &self.errors
+    }
+
+    /// Get mutable access to errors.
+    pub fn errors_mut(&mut self) -> &mut Vec<InferenceError> {
+        &mut self.errors
+    }
+
+    /// Add an error to the solution.
+    pub fn add_error(&mut self, error: InferenceError) {
+        self.errors.push(error);
     }
 }

@@ -46,6 +46,8 @@ pub struct InferenceContext<'a> {
     values: HashMap<ExprId, ValueResolution>,
     /// Map from TyId to its original Ty (for looking up spans and kinds)
     type_registry: HashMap<TyId, Ty>,
+    /// Accumulated errors during solving
+    errors: Vec<InferenceError>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -57,6 +59,7 @@ impl<'a> InferenceContext<'a> {
             substitutions: HashMap::new(),
             values: HashMap::new(),
             type_registry: HashMap::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -122,10 +125,10 @@ impl<'a> InferenceContext<'a> {
 
     /// Solve all collected constraints and return a solution.
     ///
-    /// This consumes the context and returns either a [`Solution`] containing
-    /// all resolved types and values, or an [`InferenceError`] if the constraints
-    /// cannot be satisfied.
-    pub fn solve(self) -> Result<Solution, InferenceError> {
+    /// This consumes the context and returns a [`Solution`] containing
+    /// all resolved types, values, and any errors encountered during
+    /// inference. Errors are accumulated rather than failing fast.
+    pub fn solve(self) -> Solution {
         crate::solver::solve(self)
     }
 
@@ -160,11 +163,19 @@ impl<'a> InferenceContext<'a> {
     }
 
     pub(crate) fn into_solution(self) -> Solution {
-        Solution::with_mappings(self.substitutions, self.values)
+        Solution::with_errors(self.substitutions, self.values, self.errors)
     }
 
     pub(crate) fn type_registry(&self) -> &HashMap<TyId, Ty> {
         &self.type_registry
+    }
+
+    pub(crate) fn add_error(&mut self, error: InferenceError) {
+        self.errors.push(error);
+    }
+
+    pub(crate) fn errors(&self) -> &[InferenceError] {
+        &self.errors
     }
 }
 

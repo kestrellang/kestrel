@@ -301,6 +301,7 @@ dependencies = [
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
  "kestrel-semantic-tree-binder",
+ "kestrel-semantic-type-inference",
  "kestrel-span",
  "semantic-tree",
 ]
@@ -311,6 +312,7 @@ version = "0.7.0"
 dependencies = [
  "kestrel-prelude",
  "kestrel-semantic-tree",
+ "kestrel-semantic-type-inference",
  "kestrel-span",
  "kestrel-syntax-tree",
  "parking_lot",

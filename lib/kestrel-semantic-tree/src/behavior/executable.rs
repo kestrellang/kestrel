@@ -83,6 +83,34 @@ impl ExecutableBehavior {
     }
 }
 
+/// Behavior indicating that a symbol has a type-resolved executable body.
+///
+/// This is attached to functions after type inference has completed.
+/// The body has all `TyKind::Infer` placeholders resolved to concrete types.
+#[derive(Debug, Clone)]
+pub struct ResolvedExecutableBehavior {
+    /// The type-resolved code block
+    body: CodeBlock,
+}
+
+impl Behavior<KestrelLanguage> for ResolvedExecutableBehavior {
+    fn kind(&self) -> KestrelBehaviorKind {
+        KestrelBehaviorKind::ResolvedExecutable
+    }
+}
+
+impl ResolvedExecutableBehavior {
+    /// Create a new ResolvedExecutableBehavior with the given body.
+    pub fn new(body: CodeBlock) -> Self {
+        ResolvedExecutableBehavior { body }
+    }
+
+    /// Get the code block body.
+    pub fn body(&self) -> &CodeBlock {
+        &self.body
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

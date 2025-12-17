@@ -24,37 +24,45 @@ enum SolveResult {
 }
 
 /// Solve all constraints in the context and return a solution.
-pub fn solve(mut ctx: InferenceContext<'_>) -> Result<Solution, InferenceError> {
+///
+/// Errors are accumulated in the solution rather than failing fast,
+/// allowing multiple type errors to be reported in a single pass.
+pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
     // Iterate until fixpoint (no progress)
     loop {
-        let progress = solve_round(&mut ctx)?;
+        let progress = solve_round(&mut ctx);
         if !progress {
             break;
         }
     }
 
-    // Check that everything was resolved
-    check_fully_resolved(&ctx)?;
+    // Check that everything was resolved, add error if not
+    check_fully_resolved(&mut ctx);
 
-    Ok(ctx.into_solution())
+    ctx.into_solution()
 }
 
 /// Run one round of constraint solving.
 ///
 /// Returns true if any progress was made (i.e., at least one constraint was solved
 /// or a new substitution was added).
-fn solve_round(ctx: &mut InferenceContext<'_>) -> Result<bool, InferenceError> {
+fn solve_round(ctx: &mut InferenceContext<'_>) -> bool {
     let mut progress = false;
     let constraints = ctx.take_constraints();
 
     for constraint in constraints {
-        match try_solve(ctx, &constraint)? {
-            SolveResult::Solved => progress = true,
-            SolveResult::Deferred => ctx.push_constraint(constraint),
+        match try_solve(ctx, &constraint) {
+            Ok(SolveResult::Solved) => progress = true,
+            Ok(SolveResult::Deferred) => ctx.push_constraint(constraint),
+            Err(error) => {
+                // Accumulate error and mark as progress (constraint was processed)
+                ctx.add_error(error);
+                progress = true;
+            }
         }
     }
 
-    Ok(progress)
+    progress
 }
 
 /// Attempt to solve a single constraint.
@@ -501,7 +509,8 @@ fn occurs_check_inner(
 }
 
 /// Check that all inference placeholders have been resolved.
-fn check_fully_resolved(ctx: &InferenceContext<'_>) -> Result<(), InferenceError> {
+/// If any remain unresolved, adds an Ambiguous error to the context.
+fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     let mut unresolved = Vec::new();
 
     // Check all registered types
@@ -534,13 +543,11 @@ fn check_fully_resolved(ctx: &InferenceContext<'_>) -> Result<(), InferenceError
         }
     }
 
-    if unresolved.is_empty() {
-        Ok(())
-    } else {
+    if !unresolved.is_empty() {
         // Deduplicate
         unresolved.sort_by_key(|id| id.raw());
         unresolved.dedup();
-        Err(InferenceError::ambiguous(unresolved))
+        ctx.add_error(InferenceError::ambiguous(unresolved));
     }
 }
 
@@ -594,8 +601,8 @@ mod tests {
         ctx.register_type(&ty2);
         ctx.equate(ty1.id(), ty2.id(), Span::from(0..7));
 
-        let result = ctx.solve();
-        assert!(result.is_ok());
+        let solution = ctx.solve();
+        assert!(!solution.has_errors());
     }
 
     #[test]
@@ -610,10 +617,9 @@ mod tests {
         ctx.register_type(&concrete_ty);
         ctx.equate(infer_ty.id(), concrete_ty.id(), Span::from(0..5));
 
-        let result = ctx.solve();
-        assert!(result.is_ok());
+        let solution = ctx.solve();
+        assert!(!solution.has_errors());
 
-        let solution = result.unwrap();
         let resolved = solution.get_type(infer_ty.id());
         assert!(resolved.is_some());
         assert!(resolved.unwrap().is_int());
@@ -631,10 +637,10 @@ mod tests {
         ctx.register_type(&string_ty);
         ctx.equate(int_ty.id(), string_ty.id(), Span::from(0..10));
 
-        let result = ctx.solve();
-        assert!(result.is_err());
+        let solution = ctx.solve();
+        assert!(solution.has_errors());
         assert!(matches!(
-            result.unwrap_err(),
+            &solution.errors()[0],
             InferenceError::TypeMismatch { .. }
         ));
     }

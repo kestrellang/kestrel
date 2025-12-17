@@ -8,11 +8,13 @@
 //! - `statements/` - Statement resolution (variables, assignments)
 //! - `validation/` - Semantic validation (mutability, cycles, visibility, duplicates, conformance)
 //! - `instantiation/` - Creating instances of types
+//! - `inference/` - Type inference
 //! - `framework/` - Test framework features
 
 mod declarations;
 mod expressions;
 mod framework;
+mod inference;
 mod instantiation;
 mod statements;
 mod types;

@@ -15,6 +15,7 @@ pub mod struct_cycles;
 pub mod type_alias_cycles;
 pub mod type_assignability;
 pub mod type_check;
+pub mod type_inference;
 pub mod visibility_consistency;
 
 pub use assignment_validation::AssignmentValidationAnalyzer;
@@ -33,4 +34,5 @@ pub use static_context::StaticContextAnalyzer;
 pub use struct_cycles::StructCycleAnalyzer;
 pub use type_alias_cycles::TypeAliasCycleAnalyzer;
 pub use type_check::TypeCheckAnalyzer;
+pub use type_inference::TypeInferenceAnalyzer;
 pub use visibility_consistency::VisibilityConsistencyAnalyzer;

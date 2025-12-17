@@ -31,14 +31,18 @@
 //! let resolved_ty = solution.types.get(&ty.id());
 //! ```
 
+mod apply;
 mod constraint;
+mod constraint_generator;
 mod context;
 mod error;
 mod oracle;
 mod solution;
 mod solver;
 
+pub use apply::apply_solution;
 pub use constraint::{Constraint, ProtocolRef};
+pub use constraint_generator::generate_constraints;
 pub use context::InferenceContext;
 pub use error::InferenceError;
 pub use oracle::{MemberError, MemberResolution, TypeOracle};
