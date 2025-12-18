@@ -309,21 +309,24 @@
 
 ## Phase 7: Type Inference
 
-- [x] Local Type Inference
+- [x] Local Type Inference ✓
   - [x] `let x = 42` infers `Int`
   - [x] `let p = Point(x: 1, y: 2)` infers `Point`
-- [ ] Generic Type Argument Inference
-  - [ ] Infer type arguments from call arguments
-  - [ ] `identity(42)` infers `identity[Int](42)`
-- [x] Bidirectional Type Checking
+- [x] Generic Type Argument Inference ✓
+  - [x] Infer type arguments from call arguments
+  - [x] `identity(42)` infers `identity[Int](42)`
+- [x] Bidirectional Type Checking ✓
   - [x] Expected type propagation into expressions
   - [x] Foundation for closure parameter inference
-- [ ] Static Method Type Parameter Substitution
-  - [ ] `Box[Int].wrap(42)` substitutes `T` with `Int` in static methods
-  - [ ] Applies to static methods in both structs and extensions
-- [ ] Generic Method Type Parameter Substitution
-  - [ ] `wrapper.rewrap[U]("hello")` infers `U` from argument
-  - [ ] Extension methods with their own type parameters
+- [x] Static Method Type Parameter Substitution ✓
+  - [x] `Box[Int].wrap(42)` substitutes `T` with `Int` in static methods
+  - [x] Applies to static methods in both structs and extensions
+- [x] Generic Method Type Parameter Substitution ✓
+  - [x] `wrapper.rewrap[U]("hello")` infers `U` from argument
+  - [x] Extension methods with their own type parameters
+- [x] Constraint-based Type Inference ✓
+  - [x] Hindley-Milner style solver in `kestrel-semantic-type-inference`
+  - [x] Type-directed member resolution and associated type resolution
 - [ ] Extension Specialization Overlap Detection
   - [ ] Allow non-overlapping specialized extensions (`Box[Int]` vs `Box[String]`)
   - [ ] Only reject truly ambiguous cases
@@ -391,21 +394,19 @@
 
 ## Current Status
 
-**Phase**: Phase 6 (Generics & Protocols) - ✅ COMPLETE
-**Progress**: Phases 1-6 complete.
+**Phase**: Phase 7 (Type Inference) - ✅ COMPLETE
+**Progress**: Phases 1-7 complete.
 
-**Phase 6 Completed Features**:
+**Phase 7 Completed Features**:
 
-- ✅ Generic Constraint Enforcement
-- ✅ Static Methods on Type Parameters
-- ✅ GenericsBehavior Refactor
-- ✅ Associated Types
-- ✅ Protocol Method Linking
-- ✅ Extensions with Conformances (38/38 tests passing - 100%)
-- ✅ Tighter Type Parameter Assignability
-- ✅ Where Clause Equality Constraints
+- ✅ Local Type Inference
+- ✅ Generic Type Argument Inference
+- ✅ Bidirectional Type Checking
+- ✅ Static Method Type Parameter Substitution
+- ✅ Generic Method Type Parameter Substitution
+- ✅ Constraint-based Type Inference (Hindley-Milner system)
 
-**Ready for Phase 7**: Type Inference
+**Ready for Phase 8**: Closures & First-Class Functions
 
 ## Notes
 

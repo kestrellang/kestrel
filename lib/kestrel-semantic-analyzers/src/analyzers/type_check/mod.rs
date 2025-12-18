@@ -10,7 +10,7 @@ use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, compute_block_type,
 };
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
 mod diagnostics;

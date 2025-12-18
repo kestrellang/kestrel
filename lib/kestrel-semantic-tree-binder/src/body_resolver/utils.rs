@@ -469,64 +469,13 @@ pub fn get_type_parameter_bounds_by_id(
     bounds
 }
 
-/// Recursively apply a transformation function to a type.
-///
-/// For composite types (Array, Tuple, Function), recursively applies the transformation
-/// to nested types. For base types, returns the type unchanged.
-///
-/// The transformation function should return Some(new_type) to replace a type,
-/// or None to use default traversal.
-fn apply_type_transformation<F>(ty: &Ty, transform: &F) -> Ty
-where
-    F: Fn(&Ty) -> Option<Ty>,
-{
-    // Check if transform handles this type directly
-    if let Some(transformed) = transform(ty) {
-        return transformed;
-    }
-
-    // Otherwise, recursively traverse composite types
-    match ty.kind() {
-        TyKind::Array(element) => Ty::array(
-            apply_type_transformation(element, transform),
-            ty.span().clone(),
-        ),
-        TyKind::Tuple(elements) => {
-            let new_elements: Vec<Ty> = elements
-                .iter()
-                .map(|e| apply_type_transformation(e, transform))
-                .collect();
-            Ty::tuple(new_elements, ty.span().clone())
-        }
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let new_params: Vec<Ty> = params
-                .iter()
-                .map(|p| apply_type_transformation(p, transform))
-                .collect();
-            let new_return = apply_type_transformation(return_type, transform);
-            Ty::function(new_params, new_return, ty.span().clone())
-        }
-        // Base types - return as-is
-        _ => ty.clone(),
-    }
-}
-
 /// Substitute Self type with a replacement type recursively.
 ///
 /// This is used when looking up methods on constrained type parameters.
 /// Protocol methods use `Self` to refer to the conforming type, which
 /// needs to be replaced with the actual receiver type (e.g., `T`).
 pub fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
-    apply_type_transformation(ty, &|t| {
-        if matches!(t.kind(), TyKind::SelfType) {
-            Some(replacement.clone())
-        } else {
-            None
-        }
-    })
+    ty.substitute_self(replacement)
 }
 
 /// Substitute type parameters in a type with their concrete types.

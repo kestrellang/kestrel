@@ -67,38 +67,149 @@ pub fn is_assignable_with_constraints(
 }
 
 fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
-    for (left, right) in equalities {
-        if types_match(ty, left) {
-            return (*right).clone();
+    let mut current = ty.clone();
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(current.to_string());
+
+    let mut changed = true;
+    let mut iterations = 0;
+    const MAX_ITERATIONS: usize = 10; // Safety cap
+
+    while changed && iterations < MAX_ITERATIONS {
+        changed = false;
+        iterations += 1;
+
+        // Try to apply equality constraints to the whole type
+        for (left, right) in equalities {
+            let matches_left = types_match(&current, left);
+            let matches_right = types_match(&current, right);
+
+            if matches_left || matches_right {
+                // We have a match. We want to pick a canonical representative.
+                // Rule: prefer the one that is "more concrete" or smaller by string.
+                let next = if is_more_concrete(left, right) {
+                    (*left).clone()
+                } else {
+                    (*right).clone()
+                };
+
+                let next_str = next.to_string();
+                if next_str != current.to_string() && !seen.contains(&next_str) {
+                    current = next;
+                    seen.insert(next_str);
+                    changed = true;
+                    break;
+                }
+            }
         }
-        if types_match(ty, right) {
-            return (*left).clone();
+
+        if changed {
+            continue;
+        }
+
+        // Try to normalize components
+        match current.kind().clone() {
+            TyKind::Tuple(elements) => {
+                let mut new_elements = Vec::new();
+                let mut inner_changed = false;
+                for e in elements {
+                    let normalized = normalize_type(&e, equalities);
+                    if normalized.to_string() != e.to_string() {
+                        inner_changed = true;
+                    }
+                    new_elements.push(normalized);
+                }
+                if inner_changed {
+                    current = Ty::tuple(new_elements, current.span().clone());
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
+                    }
+                }
+            }
+            TyKind::Array(element) => {
+                let normalized = normalize_type(&element, equalities);
+                if normalized.to_string() != element.to_string() {
+                    current = Ty::array(normalized, current.span().clone());
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
+                    }
+                }
+            }
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
+                let mut new_params = Vec::new();
+                let mut inner_changed = false;
+                for p in params {
+                    let normalized = normalize_type(&p, equalities);
+                    if normalized.to_string() != p.to_string() {
+                        inner_changed = true;
+                    }
+                    new_params.push(normalized);
+                }
+                let normalized_return = normalize_type(&return_type, equalities);
+                if normalized_return.to_string() != return_type.to_string() {
+                    inner_changed = true;
+                }
+                if inner_changed {
+                    current = Ty::function(new_params, normalized_return, current.span().clone());
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
+                    }
+                }
+            }
+            TyKind::AssociatedType { symbol, container } => {
+                if let Some(cont) = container {
+                    let normalized_container = normalize_type(&cont, equalities);
+                    if normalized_container.to_string() != cont.to_string() {
+                        current = Ty::qualified_associated_type(
+                            symbol.clone(),
+                            normalized_container,
+                            current.span().clone(),
+                        );
+                        let current_str = current.to_string();
+                        if !seen.contains(&current_str) {
+                            seen.insert(current_str);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
+
+    current
+}
+
+fn is_more_concrete(a: &Ty, b: &Ty) -> bool {
+    let a_score = type_score(a);
+    let b_score = type_score(b);
+    if a_score != b_score {
+        a_score > b_score
+    } else {
+        // Tie-breaker: use Display string
+        a.to_string() < b.to_string()
+    }
+}
+
+fn type_score(ty: &Ty) -> i32 {
     match ty.kind() {
-        TyKind::Tuple(elements) => {
-            let normalized: Vec<Ty> = elements
-                .iter()
-                .map(|e| normalize_type(e, equalities))
-                .collect();
-            Ty::tuple(normalized, ty.span().clone())
-        }
-        TyKind::Array(element) => {
-            let normalized = normalize_type(element, equalities);
-            Ty::array(normalized, ty.span().clone())
-        }
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let normalized_params: Vec<Ty> = params
-                .iter()
-                .map(|p| normalize_type(p, equalities))
-                .collect();
-            let normalized_return = normalize_type(return_type, equalities);
-            Ty::function(normalized_params, normalized_return, ty.span().clone())
-        }
-        _ => ty.clone(),
+        TyKind::TypeParameter(_) => 0,
+        TyKind::AssociatedType { .. } => 1,
+        TyKind::SelfType => 2,
+        TyKind::Protocol { .. } => 3,
+        TyKind::Struct { .. } => 4,
+        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String | TyKind::Unit => 5,
+        TyKind::Tuple(_) | TyKind::Array(_) | TyKind::Function { .. } => 4, // Complex but concrete-ish
+        _ => -1,
     }
 }
 

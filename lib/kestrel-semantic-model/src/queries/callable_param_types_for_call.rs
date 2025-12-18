@@ -2,7 +2,7 @@
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
 use crate::SemanticModel;
@@ -58,7 +58,7 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
                                 .iter()
                                 .map(|p| {
                                     let ty = p.ty.apply_substitutions(substitutions);
-                                    substitute_self_type(&ty, &receiver.ty)
+                                    ty.substitute_self(&receiver.ty)
                                 })
                                 .collect(),
                         );
@@ -80,34 +80,5 @@ impl<'a> Query for CallableParamTypesForCall<'a> {
             }
             _ => None,
         }
-    }
-}
-
-fn substitute_self_type(ty: &Ty, replacement: &Ty) -> Ty {
-    match ty.kind() {
-        TyKind::SelfType => replacement.clone(),
-        TyKind::Tuple(elements) => Ty::tuple(
-            elements
-                .iter()
-                .map(|e| substitute_self_type(e, replacement))
-                .collect(),
-            ty.span().clone(),
-        ),
-        TyKind::Array(element) => Ty::array(
-            substitute_self_type(element, replacement),
-            ty.span().clone(),
-        ),
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            let new_params: Vec<Ty> = params
-                .iter()
-                .map(|p| substitute_self_type(p, replacement))
-                .collect();
-            let new_return = substitute_self_type(return_type, replacement);
-            Ty::function(new_params, new_return, ty.span().clone())
-        }
-        _ => ty.clone(),
     }
 }
