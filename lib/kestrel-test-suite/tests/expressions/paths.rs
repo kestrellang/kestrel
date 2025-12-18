@@ -140,7 +140,12 @@ mod complex_expressions {
 
     compiles!(deeply_nested_grouping, "((((42))));");
     compiles!(mixed_literals, r#"(42, 3.14, "hello", true, false);"#);
-    compiles!(empty_array, "[];");
+    #[test]
+    fn empty_array_requires_type_annotation() {
+        // Empty array without context cannot infer element type
+        Test::new("module Test\nfunc test() {\n[];\n}")
+            .expect(HasError("could not infer type"));
+    }
     compiles!(empty_tuple_is_unit, "();");
     compiles!(single_element_tuple, "(42,);");
 

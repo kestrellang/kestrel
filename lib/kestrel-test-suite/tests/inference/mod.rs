@@ -578,6 +578,32 @@ func test() -> Int {
         )
         .expect(Compiles);
     }
+
+    #[test]
+    fn static_method_infers_type_from_args() {
+        // When calling Box.wrap(42) without explicit type args, T should be inferred from 42
+        Test::new(
+            r#"
+module Main
+
+struct Box[T] {
+    var value: T
+}
+
+extend Box[T] {
+    static func wrap(v: T) -> Box[T] {
+        Box[T](value: v)
+    }
+}
+
+func test() -> Int {
+    let b = Box.wrap(42);
+    b.value
+}
+"#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod generic_method_type_substitution {

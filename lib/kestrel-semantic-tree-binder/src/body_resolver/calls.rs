@@ -8,7 +8,7 @@ use std::sync::Arc;
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -737,12 +737,16 @@ fn resolve_explicit_init_call(
                 // For explicit init, create a Call expression
                 // Initializers are not mutable lvalues
                 let init_id = init_sym.metadata().id();
-                let init_ref = Expression::symbol_ref(
-                    init_id,
-                    Ty::infer(span.clone()),
-                    false,
-                    span.clone(),
-                );
+
+                // Build the function type for the initializer
+                let param_tys: Vec<Ty> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| p.ty.clone())
+                    .collect();
+                let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
+
+                let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
                 return Expression::call(init_ref, arguments, struct_ty, span);
             }
         }
@@ -913,8 +917,13 @@ pub fn resolve_method_call(
 
                     // Build substitutions from the receiver type
                     // e.g., for Box[Int], we get {T -> Int}
+                    // For static methods (TypeRef receiver), use receiver.ty directly since it has the qualified type
+                    // For instance methods, resolve Self to concrete type
                     use super::members::resolve_self_type_to_concrete;
-                    let resolved_receiver_ty = resolve_self_type_to_concrete(&receiver.ty, ctx);
+                    let resolved_receiver_ty = match &receiver.kind {
+                        ExprKind::TypeRef(_) => receiver.ty.clone(), // Static method: receiver type has substitutions
+                        _ => resolve_self_type_to_concrete(&receiver.ty, ctx), // Instance method
+                    };
                     let mut call_substitutions = Substitutions::new();
                     if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Add receiver's substitutions to call_substitutions
@@ -922,6 +931,29 @@ pub fn resolve_method_call(
                             call_substitutions.insert(*param_id, ty.clone());
                         }
                         return_ty = return_ty.apply_substitutions(substitutions);
+                    }
+
+                    // Infer type parameters from argument types if method parameters contain type parameters
+                    // This handles the case like Box.wrap(42) where T needs to be inferred from the argument
+                    // Also handles Box[Int].wrap(42) where substitutions are already available
+                    if explicit_type_args.is_none() {
+                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let mut inferred_any = false;
+                        for (param, arg_ty) in callable.parameters().iter().zip(arg_types.iter()) {
+                            if let TyKind::TypeParameter(type_param) = param.ty.kind() {
+                                let param_id = type_param.metadata().id();
+                                // Only infer if not already in substitutions
+                                if !call_substitutions.get(param_id).is_some() {
+                                    call_substitutions.insert(param_id, arg_ty.clone());
+                                    inferred_any = true;
+                                }
+                            }
+                        }
+                        // Reapply substitutions to return type with inferred types
+                        if inferred_any {
+                            return_ty = callable.return_type().clone();
+                            return_ty = return_ty.apply_substitutions(&call_substitutions);
+                        }
                     }
 
                     // Add explicit type arguments to substitutions and apply to return type
@@ -935,13 +967,29 @@ pub fn resolve_method_call(
                         }
                     }
 
-                    // Create method ref and then call
-                    let method_ref = Expression::method_ref(
-                        receiver.clone(),
-                        vec![candidate_id],
-                        method_name.to_string(),
-                        span.clone(),
-                    );
+                    // Compute the function type with substitutions applied
+                    let method_fn_ty = {
+                        let param_tys: Vec<Ty> = callable
+                            .parameters()
+                            .iter()
+                            .map(|p| substitute_type(&p.ty, &call_substitutions))
+                            .collect();
+                        let ret_ty = substitute_type(&return_ty, &call_substitutions);
+                        Ty::function(param_tys, ret_ty, span.clone())
+                    };
+
+                    // Create method ref with the correct function type
+                    let method_ref = Expression {
+                        id: ExprId::new(),
+                        kind: ExprKind::MethodRef {
+                            receiver: Box::new(receiver.clone()),
+                            candidates: vec![candidate_id],
+                            method_name: method_name.to_string(),
+                        },
+                        ty: method_fn_ty,
+                        span: span.clone(),
+                        mutable: false,
+                    };
 
                     return Expression::generic_call(
                         method_ref,
@@ -1162,7 +1210,17 @@ fn resolve_type_parameter_init_call(
 
     // Create a call expression referencing the protocol's init
     let init_id = winner.init.metadata().id();
-    let init_ref = Expression::symbol_ref(init_id, Ty::infer(span.clone()), false, span.clone());
+
+    // Build the function type for the initializer
+    let param_tys: Vec<Ty> = winner
+        .callable
+        .parameters()
+        .iter()
+        .map(|p| p.ty.clone())
+        .collect();
+    let init_fn_ty = Ty::function(param_tys, return_ty.clone(), span.clone());
+
+    let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
 
     Expression::call(init_ref, arguments, return_ty, span)
 }

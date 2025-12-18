@@ -89,7 +89,7 @@ pub(crate) fn resolve_where_clause(
 
 fn resolve_type_bound(
     syntax: &SyntaxNode,
-    _source: &str,
+    source: &str,
     file_id: usize,
     context_id: SymbolId,
     ctx: &mut BindingContext,
@@ -115,7 +115,7 @@ fn resolve_type_bound(
             );
         }
 
-        let bounds = resolve_protocol_bounds_from_type_bound(syntax, file_id, context_id, ctx);
+        let bounds = resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
         if bounds.is_empty() {
             return None;
         }
@@ -144,7 +144,7 @@ fn resolve_type_bound(
         .find(|p| p.metadata().name().value == param_name)
         .map(|p| p.metadata().id());
 
-    let bounds = resolve_protocol_bounds_from_type_bound(syntax, file_id, context_id, ctx);
+    let bounds = resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
     if bounds.is_empty() {
         return None;
     }
@@ -366,6 +366,7 @@ fn validate_type_param_associated_type_target(
 
 fn resolve_protocol_bounds_from_type_bound(
     syntax: &SyntaxNode,
+    source: &str,
     file_id: usize,
     context_id: SymbolId,
     ctx: &mut BindingContext,
@@ -390,16 +391,44 @@ fn resolve_protocol_bounds_from_type_bound(
             continue;
         }
 
-        // If the next sibling is TypeArgumentList, accept syntax but emit the existing diagnostic
-        // and treat the bound as error for now.
+        // If the next sibling is TypeArgumentList, parse the type arguments and apply them
         if i + 1 < children.len() && children[i + 1].kind() == SyntaxKind::TypeArgumentList {
-            use crate::diagnostics::UnsupportedGenericProtocolBoundError;
-            let protocol_name = segments.join("::");
-            ctx.diagnostics.throw(UnsupportedGenericProtocolBoundError {
-                span: span.clone(),
-                protocol_name,
-            });
-            bounds.push(Ty::error(span));
+            let type_arg_list = &children[i + 1];
+
+            // First resolve the base protocol
+            let base_ty = resolve_protocol_bound_path(&segments, span.clone(), context_id, ctx);
+
+            // If it's a valid protocol, apply type arguments
+            if let TyKind::Protocol { symbol, .. } = base_ty.kind() {
+                // Resolve type arguments
+                let mut type_args: Vec<Ty> = Vec::new();
+                for ty_node in type_arg_list.children().filter(|c| c.kind() == SyntaxKind::Ty) {
+                    let mut type_ctx = TypeSyntaxContext::new(
+                        ctx.model,
+                        ctx.diagnostics,
+                        source,
+                        file_id,
+                        context_id,
+                    );
+                    let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
+                    type_args.push(resolved_ty);
+                }
+
+                // Build substitutions from type parameters to type arguments
+                let type_params = symbol.type_parameters();
+                let mut substitutions = kestrel_semantic_tree::ty::Substitutions::new();
+                for (i, param) in type_params.iter().enumerate() {
+                    if i < type_args.len() {
+                        substitutions.insert(param.metadata().id(), type_args[i].clone());
+                    }
+                }
+
+                // Create protocol type with substitutions
+                let protocol_ty = Ty::generic_protocol(symbol.clone(), substitutions, span);
+                bounds.push(protocol_ty);
+            } else {
+                bounds.push(base_ty);
+            }
             i += 2;
             continue;
         }

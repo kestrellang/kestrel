@@ -4,12 +4,12 @@
 //! references, qualified names) including local variable lookup and module path resolution.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{ResolveValuePath, SymbolFor, ValuePathResolution};
+use kestrel_semantic_model::{ResolveTypePath, ResolveValuePath, SymbolFor, TypePathResolution, ValuePathResolution};
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Substitutions, Ty};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -105,11 +105,43 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     let explicit_type_args = extract_type_arguments_from_path(node, ctx);
 
     // Not a local - resolve as a value path (module path)
-    match ctx.model.query(ResolveValuePath {
+    let resolution = ctx.model.query(ResolveValuePath {
         path: path.clone(),
         context: ctx.function_id,
-    }) {
+    });
+    // Debug: print what we're resolving
+    // eprintln!("ResolveValuePath({:?}) = {:?}", path, resolution);
+    match resolution {
         ValuePathResolution::Symbol { symbol_id, ty } => {
+            // Check if this is a static method accessed via a qualified type path
+            // e.g., Box[Int].wrap where wrap is a static method
+            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
+                if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                    if let Some(callable) = get_callable_behavior(&symbol) {
+                        if callable.is_static() {
+                            // Get struct symbol from qualified type
+                            if let Some((struct_sym, _)) = qualified_ty.as_struct_with_subs() {
+                                // Create TypeRef receiver with qualified type
+                                let type_ref = Expression::type_ref(
+                                    struct_sym.metadata().id(),
+                                    qualified_ty,
+                                    span.clone(),
+                                );
+                                // Return MethodRef for resolve_method_call to handle
+                                let method_name = symbol.metadata().name().value.clone();
+                                return Expression::method_ref(
+                                    type_ref,
+                                    vec![symbol_id],
+                                    method_name,
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Original handling for non-static-method cases
             // Check if type arguments were provided
             let final_ty = if let Some(ref type_args) = explicit_type_args {
                 if !type_args.is_empty() {
@@ -152,6 +184,35 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             Expression::error(span)
         }
         ValuePathResolution::NotAValue { symbol_id } => {
+            // Check if this is a field that needs implicit self access
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                if symbol.metadata().kind() == KestrelSymbolKind::Field {
+                    // This is a field reference like `x` that should become `self.x`
+                    // Look for 'self' in local scope
+                    if let Some(self_local_id) = ctx.local_scope.lookup("self") {
+                        let self_local = ctx.local_scope.function().get_local(self_local_id);
+                        let self_ty = self_local
+                            .as_ref()
+                            .map(|l| l.ty().clone())
+                            .unwrap_or_else(|| Ty::error(span.clone()));
+                        let self_mutable = self_local.as_ref().map(|l| l.is_mutable()).unwrap_or(false);
+
+                        // Create self reference
+                        let self_expr = Expression::local_ref(self_local_id, self_ty, self_mutable, span.clone());
+
+                        // Get field type and mutability from FieldSymbol
+                        use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                        let (field_ty, field_mutable) = symbol
+                            .downcast_ref::<FieldSymbol>()
+                            .map(|f| (f.field_type().clone(), f.is_mutable()))
+                            .unwrap_or_else(|| (Ty::error(span.clone()), false));
+
+                        let field_name = symbol.metadata().name().value.clone();
+                        return Expression::field_access(self_expr, field_name, field_mutable, field_ty, span);
+                    }
+                    // If no self, fall through to create type_ref
+                }
+            }
             // This is a type reference (e.g., struct name) - may be used for initialization
             // The actual type resolution happens during call resolution
             Expression::type_ref(symbol_id, Ty::infer(span.clone()), span)
@@ -618,4 +679,101 @@ fn apply_type_args_to_function(
     let return_type = substitute_type(callable.return_type(), &substitutions);
 
     Some(Ty::function(params, return_type, span.clone()))
+}
+
+/// Extract the qualified type from an intermediate path segment.
+///
+/// For `Box[Int].wrap`, this extracts the `Box[Int]` type from the first segment.
+/// For `Box.wrap`, this returns `Box` with infer type parameters.
+/// For single-segment paths like `wrap`, returns None.
+///
+/// This is used to capture type arguments on intermediate path segments
+/// (before the final segment) so they can be used for type parameter substitution
+/// when calling static methods.
+fn extract_qualified_type_from_path(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Ty> {
+    // Find the ExprPath node
+    let expr_path = if node.kind() == SyntaxKind::ExprPath {
+        node.clone()
+    } else {
+        node.children().find(|c| c.kind() == SyntaxKind::ExprPath)?
+    };
+
+    let children: Vec<_> = expr_path.children_with_tokens().collect();
+
+    // Find if there's a dot (multi-segment path)
+    let first_dot_pos = children.iter().position(|c| {
+        c.as_token()
+            .map(|t| t.kind() == SyntaxKind::Dot)
+            .unwrap_or(false)
+    });
+
+    // If no dot, this is a single-segment path - return None
+    let first_dot_pos = first_dot_pos?;
+
+    // Get the first identifier (type name)
+    let first_ident = children
+        .iter()
+        .filter_map(|c| c.as_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)?;
+    let type_name = first_ident.text().to_string();
+
+    // Look for TypeArgumentList before the first dot
+    let type_arg_list = children[..first_dot_pos]
+        .iter()
+        .filter_map(|c| c.as_node())
+        .find(|n| n.kind() == SyntaxKind::TypeArgumentList);
+
+    // Resolve the type name to get the base type
+    let span = get_node_span(node, ctx.file_id);
+    let base_ty = match ctx.model.query(ResolveTypePath {
+        path: vec![type_name.clone()],
+        context: ctx.function_id,
+    }) {
+        TypePathResolution::Resolved(ty) => ty,
+        _ => return None, // Type not found - let normal error handling deal with it
+    };
+
+    // Apply type arguments if present
+    if let Some(type_arg_list) = type_arg_list {
+        // Resolve each type in the TypeArgumentList
+        let mut type_args = Vec::new();
+        for child in type_arg_list.children() {
+            if child.kind() == SyntaxKind::Ty {
+                let mut resolver = TypeResolver::new(
+                    ctx.model,
+                    ctx.diagnostics,
+                    ctx.source,
+                    ctx.file_id,
+                    ctx.function_id,
+                );
+                type_args.push(resolver.resolve(&child));
+            }
+        }
+
+        if !type_args.is_empty() {
+            let mut resolver = TypeResolver::new(
+                ctx.model,
+                ctx.diagnostics,
+                ctx.source,
+                ctx.file_id,
+                ctx.function_id,
+            );
+            return Some(resolver.apply_type_arguments(&base_ty, type_args, span));
+        }
+    }
+
+    // No explicit type arguments - only return Some for generic types that need inference
+    // For non-generic types like Point, return None to use the original SymbolRef path
+    if let TyKind::Struct { symbol, .. } = base_ty.kind() {
+        if !symbol.type_parameters().is_empty() {
+            // Generic type without explicit args - return base type for inference
+            return Some(base_ty);
+        }
+    }
+
+    // Non-generic type without type args - return None to use original path
+    None
 }

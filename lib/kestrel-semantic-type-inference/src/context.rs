@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use kestrel_semantic_tree::expr::ExprId;
-use kestrel_semantic_tree::ty::{Ty, TyId};
+use kestrel_semantic_tree::ty::{Ty, TyId, TyKind};
 use kestrel_span::Span;
 
 use crate::constraint::{Constraint, ProtocolRef};
@@ -68,8 +68,61 @@ impl<'a> InferenceContext<'a> {
     /// This should be called for any type that might be unified or
     /// referenced in constraints. It allows looking up the original
     /// type from its ID.
+    ///
+    /// This recursively registers nested types (e.g., element types of arrays,
+    /// tuple elements, function params/returns) so they can be found during
+    /// constraint solving.
     pub fn register_type(&mut self, ty: &Ty) {
+        // Avoid duplicate registration
+        if self.type_registry.contains_key(&ty.id()) {
+            return;
+        }
+
         self.type_registry.insert(ty.id(), ty.clone());
+
+        // Recursively register nested types
+        match ty.kind() {
+            TyKind::Array(elem_ty) => {
+                self.register_type(elem_ty);
+            }
+            TyKind::Tuple(elem_tys) => {
+                for elem_ty in elem_tys {
+                    self.register_type(elem_ty);
+                }
+            }
+            TyKind::Function {
+                params,
+                return_type,
+            } => {
+                for param_ty in params {
+                    self.register_type(param_ty);
+                }
+                self.register_type(return_type);
+            }
+            TyKind::Struct { substitutions, .. }
+            | TyKind::Protocol { substitutions, .. }
+            | TyKind::TypeAlias { substitutions, .. } => {
+                for (_, sub_ty) in substitutions.iter() {
+                    self.register_type(sub_ty);
+                }
+            }
+            TyKind::AssociatedType { container, .. } => {
+                if let Some(container_ty) = container {
+                    self.register_type(container_ty);
+                }
+            }
+            // Leaf types - no nested types to register
+            TyKind::Int(_)
+            | TyKind::Float(_)
+            | TyKind::Bool
+            | TyKind::String
+            | TyKind::Unit
+            | TyKind::Never
+            | TyKind::Infer
+            | TyKind::Error
+            | TyKind::SelfType
+            | TyKind::TypeParameter(_) => {}
+        }
     }
 
     /// Get a registered type by ID.
