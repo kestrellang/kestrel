@@ -377,21 +377,4 @@ public struct B {}
             "Should have 2 children (module + struct)"
         );
     }
-
-    // TODO: Enable once assignment expressions are implemented
-    // #[test]
-    // fn test_init_with_assignment() {
-    //     let source = r#"module Test
-    // struct Point { init() { self.x = 1 } }
-    // func test() {}
-    //         "#;
-    //     let tokens: Vec<_> = lex(source, 0)
-    //         .filter_map(|t| t.ok())
-    //         .map(|spanned| (spanned.value, spanned.span))
-    //         .collect();
-    //
-    //     let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
-    //
-    //     assert!(result.tree.children().count() >= 3, "Should have 3 children: module, struct, func");
-    // }
 }

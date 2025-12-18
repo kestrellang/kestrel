@@ -717,6 +717,37 @@ func test() -> Int {
     }
 
     #[test]
+    fn call_non_callable_int() {
+        // TODO: Report error: trying to call non-callable
+        Test::new(
+            r#"
+module Main
+func test() {
+    let x = 42;
+    x()
+}
+"#,
+        )
+        .expect(HasError("is not callable"));
+    }
+
+    #[test]
+    fn call_non_callable_struct() {
+        // TODO: Report error: expression is not callable
+        Test::new(
+            r#"
+module Main
+struct S { }
+func test() {
+    let s = S();
+    s()
+}
+"#,
+        )
+        .expect(HasError("is not callable"));
+    }
+
+    #[test]
     fn method_call_with_wrong_arg() {
         Test::new(
             r#"

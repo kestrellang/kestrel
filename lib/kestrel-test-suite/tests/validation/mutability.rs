@@ -421,3 +421,43 @@ mod invalid_targets {
         .expect(HasError("cannot assign to this expression"));
     }
 }
+
+mod assignment_validation {
+    use super::*;
+
+    #[test]
+    fn assign_to_immutable_field() {
+        // TODO: Validate that target is assignable (var, not let)
+        Test::new(
+            r#"
+module Main
+struct S {
+    let x: Int
+}
+func test() {
+    var s = S(x: 1);
+    s.x = 2
+}
+"#,
+        )
+        .expect(HasError("cannot assign to immutable field 'x'"));
+    }
+
+    #[test]
+    fn assign_to_field_on_immutable_receiver() {
+        // TODO: Validate that target is assignable (field on mutable receiver)
+        Test::new(
+            r#"
+module Main
+struct S {
+    var x: Int
+}
+func test() {
+    let s = S(x: 1);
+    s.x = 2
+}
+"#,
+        )
+        .expect(HasError("cannot assign to immutable field 'x'"));
+    }
+}

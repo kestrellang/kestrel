@@ -355,3 +355,21 @@ mod module_resolution {
         .expect(Symbol::new("DeepType").has(Behavior::FieldCount(0)));
     }
 }
+
+mod name_resolution {
+    use super::*;
+
+    #[test]
+    fn ambiguous_name_diagnostic() {
+        // TODO: Report ambiguous name diagnostic
+        Test::with_files(&[
+            ("module_a.ks", "module A\npublic struct S { }"),
+            ("module_b.ks", "module B\npublic struct S { }"),
+            (
+                "main.ks",
+                "module Main\nimport A\nimport B\nfunc test() {\n    let s = S(); // Ambiguous: A.S or B.S\n}",
+            ),
+        ])
+        .expect(HasError("ambiguous name 'S'"));
+    }
+}

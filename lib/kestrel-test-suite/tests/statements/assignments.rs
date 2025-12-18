@@ -181,4 +181,19 @@ func test() -> Int {
                 .has(Behavior::HasBody(true)),
         );
     }
+
+    #[test]
+    fn assignment_expression_result() {
+        // TODO: Enable once assignment expressions are implemented
+        Test::new(
+            r#"
+module Main
+func test() {
+    var x = 0;
+    let y = (x = 42);
+}
+"#,
+        )
+        .expect(Compiles);
+    }
 }

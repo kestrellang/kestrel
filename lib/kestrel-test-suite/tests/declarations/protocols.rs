@@ -459,6 +459,37 @@ mod validation {
     }
 
     #[test]
+    fn protocol_conformance_with_inherited_protocols() {
+        // TODO: Check inherited protocols
+        Test::new(
+            r#"module Test
+            protocol A { func a() }
+            protocol B: A { func b() }
+            struct S: B {
+                func a() { }
+                func b() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_missing_method_from_inherited_protocol() {
+        // TODO: Check inherited protocols
+        Test::new(
+            r#"module Test
+            protocol A { func a() }
+            protocol B: A { func b() }
+            struct S: B {
+                func b() { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement method 'a'"));
+    }
+
+    #[test]
     fn empty_protocol_conformance_requires_no_methods() {
         Test::new(
             r#"module Test

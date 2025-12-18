@@ -331,6 +331,25 @@ struct Value {
     }
 }
 
+mod uninitialized_variables {
+    use super::*;
+
+    #[test]
+    fn uninitialized_variable_access() {
+        // TODO: Add test for uninitialized variables once that validation is implemented
+        Test::new(
+            r#"
+module Main
+func test() {
+    var x: Int;
+    let y = x;
+}
+"#,
+        )
+        .expect(HasError("access to uninitialized variable 'x'"));
+    }
+}
+
 mod let_fields_in_branches {
     use super::*;
 

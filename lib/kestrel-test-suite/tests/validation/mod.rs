@@ -17,3 +17,4 @@ mod initializers;
 mod misc;
 mod mutability;
 mod type_checking;
+mod visibility;
