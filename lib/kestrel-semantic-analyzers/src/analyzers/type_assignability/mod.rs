@@ -4,6 +4,7 @@
 //! equality constraints in scope.
 
 use kestrel_semantic_model::{SemanticModel, SymbolFor};
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
 use semantic_tree::symbol::Symbol;
@@ -21,6 +22,13 @@ pub fn collect_where_clauses(model: &SemanticModel, context_id: SymbolId) -> Vec
 
         if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
             let wc = generics_beh.where_clause();
+            if !wc.is_empty() {
+                clauses.push(wc.clone());
+            }
+        }
+
+        if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
+            let wc = target_beh.where_clause();
             if !wc.is_empty() {
                 clauses.push(wc.clone());
             }
@@ -118,6 +126,10 @@ fn types_match(a: &Ty, b: &Ty) -> bool {
                 _ => false,
             }
         }
+        // If one is a type param/associated type and other isn't, they don't match
+        (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => false,
+        (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => false,
+
         _ => a.is_assignable_to(b) && b.is_assignable_to(a),
     }
 }

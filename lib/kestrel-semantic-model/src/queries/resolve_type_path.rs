@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use kestrel_prelude::primitives;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -234,23 +235,35 @@ fn resolve_associated_type_from_type_param_with_context(
     _index: usize,
     context_id: SymbolId,
 ) -> Option<TypePathResolution> {
-    // Get the context symbol (the function/struct where this type is being resolved)
-    let context = model.query(SymbolFor { id: context_id })?;
-
-    // Get the where clause from the context's GenericsBehavior
-    let generics_beh = context.metadata().get_behavior::<GenericsBehavior>()?;
-    let where_clause = generics_beh.where_clause();
-
-    // Get protocol bounds for this type parameter
+    let mut current_id = Some(context_id);
     let param_id = type_param.metadata().id();
-    let bounds = where_clause.bounds_for(param_id);
+    let mut all_bounds = Vec::new();
 
-    if bounds.is_empty() {
+    // Walk up the symbol hierarchy to collect all protocol bounds for this type parameter
+    while let Some(id) = current_id {
+        if let Some(symbol) = model.query(SymbolFor { id }) {
+            // Check GenericsBehavior
+            if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+                all_bounds.extend(generics_beh.where_clause().bounds_for(param_id).into_iter().cloned());
+            }
+
+            // Check ExtensionTargetBehavior
+            if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                all_bounds.extend(target_beh.where_clause().bounds_for(param_id).into_iter().cloned());
+            }
+
+            current_id = symbol.metadata().parent().map(|p| p.metadata().id());
+        } else {
+            break;
+        }
+    }
+
+    if all_bounds.is_empty() {
         return None;
     }
 
     // Search protocol bounds for the associated type
-    for bound in bounds {
+    for bound in all_bounds {
         if let TyKind::Protocol {
             symbol: protocol, ..
         } = bound.kind()

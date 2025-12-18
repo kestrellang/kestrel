@@ -598,7 +598,7 @@ impl Ty {
 
             // Associated type can be assigned to anything (and vice versa) for now
             // This allows generic code to compile before constraint checking
-            (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => true,
+            // (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => true,
 
             // Everything else is not assignable
             _ => false,

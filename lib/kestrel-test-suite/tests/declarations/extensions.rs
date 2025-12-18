@@ -659,3 +659,46 @@ mod static_methods {
         .expect(Compiles);
     }
 }
+
+mod constraint_inference {
+    use super::*;
+
+    #[test]
+    fn extension_associated_type_resolution() {
+        Test::new(
+            r#"module Test
+            protocol Mapper {
+                type Source;
+                func map(s: Source)
+            }
+            struct Box[T] { var value: T }
+            extend Box[T] where T: Mapper {
+                func doMap(s: T.Source) {
+                    self.value.map(s)
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn extension_equality_constraint_enforcement() {
+        Test::new(
+            r#"module Test
+            protocol Mapper {
+                type Source;
+                func map(s: Source)
+            }
+            struct Box[T] { var value: T }
+            extend Box[T] where T: Mapper, T.Source = Int {
+                func mapString(s: String) {
+                    // Should fail: T.Source is Int, but s is String
+                    self.value.map(s)
+                }
+            }
+        "#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
