@@ -7,9 +7,11 @@
 //! - Function and method calls
 //! - Field access on structs
 //! - Control flow (if/else, while/loop, break/continue, return)
+//! - Closures and anonymous functions
 
 mod body_literals;
 mod calls;
+mod closures;
 mod control_flow;
 mod field_access;
 mod loops;
