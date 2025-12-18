@@ -13,6 +13,7 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -1208,9 +1209,18 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
                                 }
                             }
                         }
-                        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
-                            // For struct/protocol methods, SelfType is correct as-is
-                            // It will be substituted during method calls
+                        KestrelSymbolKind::Struct => {
+                            // For struct methods, resolve Self to the concrete struct type
+                            if let Some(typed) = parent.metadata().get_behavior::<TypedBehavior>() {
+                                let struct_ty = typed.ty();
+                                if !matches!(struct_ty.kind(), TyKind::SelfType) {
+                                    return struct_ty.clone();
+                                }
+                            }
+                        }
+                        KestrelSymbolKind::Protocol => {
+                            // For protocol methods, Self remains abstract
+                            // (needed for future default impl support)
                         }
                         _ => {}
                     }

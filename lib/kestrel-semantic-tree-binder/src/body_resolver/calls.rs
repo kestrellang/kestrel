@@ -450,6 +450,13 @@ fn resolve_single_function_call(
         return Expression::error(span);
     }
 
+    // For static methods, get the parent type for Self substitution
+    use super::utils::substitute_self;
+    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+    let self_replacement: Option<Ty> = symbol.metadata().parent().and_then(|parent| {
+        parent.metadata().get_behavior::<TypedBehavior>().map(|typed| typed.ty().clone())
+    });
+
     // Get return type and substitutions, applying explicit type arguments if provided
     // or inferring them from argument types
     let (return_ty, call_substitutions) = if let Some(ref type_args) = explicit_type_args {
@@ -563,6 +570,13 @@ fn resolve_single_function_call(
         } else {
             (callable.return_type().clone(), Substitutions::new())
         }
+    };
+
+    // Substitute Self with the parent type if this is a static method
+    let return_ty = if let Some(ref replacement) = self_replacement {
+        substitute_self(&return_ty, replacement)
+    } else {
+        return_ty
     };
 
     Expression::generic_call(callee, arguments, call_substitutions, return_ty, span)
@@ -912,18 +926,30 @@ pub fn resolve_method_call(
                         continue;
                     }
 
-                    // Get return type, substituting Self with receiver type if needed
-                    let mut return_ty = substitute_self(callable.return_type(), &receiver.ty);
-
                     // Build substitutions from the receiver type
                     // e.g., for Box[Int], we get {T -> Int}
-                    // For static methods (TypeRef receiver), use receiver.ty directly since it has the qualified type
+                    // For static methods (TypeRef receiver), get the struct type from the symbol
                     // For instance methods, resolve Self to concrete type
                     use super::members::resolve_self_type_to_concrete;
+                    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
                     let resolved_receiver_ty = match &receiver.kind {
-                        ExprKind::TypeRef(_) => receiver.ty.clone(), // Static method: receiver type has substitutions
+                        ExprKind::TypeRef(type_symbol_id) => {
+                            // For static methods, get the actual struct type from the symbol
+                            if let Some(type_sym) = ctx.model.query(SymbolFor { id: *type_symbol_id }) {
+                                if let Some(typed) = type_sym.metadata().get_behavior::<TypedBehavior>() {
+                                    typed.ty().clone()
+                                } else {
+                                    receiver.ty.clone()
+                                }
+                            } else {
+                                receiver.ty.clone()
+                            }
+                        }
                         _ => resolve_self_type_to_concrete(&receiver.ty, ctx), // Instance method
                     };
+
+                    // Get return type, substituting Self with the resolved receiver type
+                    let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
                     let mut call_substitutions = Substitutions::new();
                     if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Add receiver's substitutions to call_substitutions

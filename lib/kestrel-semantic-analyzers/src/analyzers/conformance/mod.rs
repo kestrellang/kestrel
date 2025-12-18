@@ -205,6 +205,13 @@ fn check_struct_conformance(
 
     let associated_type_bindings = model.query(AssociatedTypeBindingsForStruct { struct_id });
 
+    // Compute self_type first - this is used for Self substitution in struct method signatures
+    let self_type = dyn_sym
+        .metadata()
+        .get_behavior::<TypedBehavior>()
+        .map(|tb| SignatureType::from_ty(tb.ty()))
+        .unwrap_or_else(|| SignatureType::Named(vec![struct_name.clone()]));
+
     let mut all_methods = collect_methods_from_symbol(dyn_sym);
     let extensions = model.query(ExtensionsFor {
         target_id: struct_id,
@@ -214,13 +221,22 @@ fn check_struct_conformance(
             collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
         all_methods.extend(methods);
     }
+
+    // Build struct method map with Self substituted to the concrete type
+    let mut self_bindings = HashMap::new();
+    self_bindings.insert("Self".to_string(), self_type.clone());
+
     let struct_method_map: HashMap<MethodLookupKey, (Arc<FunctionSymbol>, SignatureType)> =
         all_methods
             .iter()
             .map(|f| {
+                // Substitute Self in the signature and return type
+                let substituted_sig = substitute_signature(&f.signature(), &self_bindings);
+                let raw_return = SignatureType::from_ty(&f.return_type());
+                let substituted_return = substitute_associated_types(&raw_return, &self_bindings);
                 (
-                    f.signature().lookup_key(),
-                    (f.clone(), SignatureType::from_ty(&f.return_type())),
+                    substituted_sig.lookup_key(),
+                    (f.clone(), substituted_return),
                 )
             })
             .collect();
@@ -258,12 +274,8 @@ fn check_struct_conformance(
                 }
             }
         }
-        let self_type = dyn_sym
-            .metadata()
-            .get_behavior::<TypedBehavior>()
-            .map(|tb| SignatureType::from_ty(tb.ty()))
-            .unwrap_or_else(|| SignatureType::Named(vec![struct_name.clone()]));
-        effective_bindings.insert("Self".to_string(), self_type);
+        // Use the already-computed self_type
+        effective_bindings.insert("Self".to_string(), self_type.clone());
 
         let required_methods = model.query(ProtocolRequiredMethods {
             protocol_id: protocol_symbol.metadata().id(),
