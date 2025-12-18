@@ -10,6 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::resolution::LocalScope;
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
@@ -103,7 +104,11 @@ fn resolve_function_body(
         return;
     };
 
-    let mut local_scope = create_local_scope_for_body(symbol.clone(), "__body_temp");
+    let mut local_scope = if let Ok(func) = symbol.clone().downcast_arc::<FunctionSymbol>() {
+        LocalScope::new(func)
+    } else {
+        create_local_scope_for_body(symbol.clone(), "__body_temp")
+    };
 
     // Get receiver kind from CallableBehavior to determine if we need to inject `self`
     let receiver_kind = symbol
@@ -128,8 +133,6 @@ fn resolve_function_body(
                 is_mutable,
                 self_span.clone(),
             );
-            // Add to the actual function symbol
-            func_sym.add_local("self".to_string(), self_type, is_mutable, self_span);
         }
     }
 
@@ -138,15 +141,13 @@ fn resolve_function_body(
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
-        // Add to local scope and also to the actual function
+        // Add to local scope (this also adds it to the FunctionSymbol's locals)
         local_scope.bind(
-            param_name.clone(),
-            param_ty.clone(),
+            param_name,
+            param_ty,
             false,
-            param_span.clone(),
+            param_span,
         );
-        // Add to the actual function symbol
-        func_sym.add_local(param_name, param_ty, false, param_span);
     }
 
     // Create body resolution context

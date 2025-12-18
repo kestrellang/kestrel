@@ -340,3 +340,52 @@ impl IntoDiagnostic for TypeArgsOnNonGenericError {
             ])
     }
 }
+
+/// Error when an expression is not callable.
+pub struct NonCallableError {
+    /// Span of the call expression
+    pub span: Span,
+    /// String representation of the type that is not callable
+    pub ty: String,
+}
+
+impl IntoDiagnostic for NonCallableError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("type `{}` is not callable", self.ty))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("this has type `{}`", self.ty)),
+            ])
+            .with_notes(vec![format!(
+                "only functions and types can be called, but this expression has type `{}`",
+                self.ty
+            )])
+    }
+}
+
+/// Error when a name is ambiguous (multiple candidates in scope).
+pub struct AmbiguousNameError {
+    /// Span of the ambiguous name
+    pub span: Span,
+    /// The name that was found to be ambiguous
+    pub name: String,
+    /// Number of candidates found
+    pub candidate_count: usize,
+}
+
+impl IntoDiagnostic for AmbiguousNameError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("ambiguous name '{}'", self.name))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
+                    "{} symbols with this name in scope",
+                    self.candidate_count
+                )),
+            ])
+            .with_notes(vec![
+                "Use a fully qualified path to disambiguate.".to_string(),
+            ])
+    }
+}

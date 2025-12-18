@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
@@ -16,13 +18,18 @@ impl Symbol<KestrelLanguage> for SourceFileSymbol {
 
 impl SourceFileSymbol {
     /// Create a new SourceFileSymbol with a file name and span
-    pub fn new(name: Name, span: Span) -> Self {
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::SourceFile)
+    pub fn new(name: Name, span: Span, parent: Option<Arc<dyn Symbol<KestrelLanguage>>>) -> Self {
+        let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::SourceFile)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
-            .with_span(span)
-            .build();
+            .with_span(span);
 
-        SourceFileSymbol { metadata }
+        if let Some(p) = parent {
+            builder = builder.with_parent(Arc::downgrade(&p));
+        }
+
+        SourceFileSymbol {
+            metadata: builder.build(),
+        }
     }
 }

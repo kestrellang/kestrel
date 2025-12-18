@@ -58,6 +58,7 @@ impl SemanticModelBuilder {
         let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(SourceFileSymbol::new(
             file_name_spanned,
             Span::new(file_id, 0..source.len()),
+            Some(parent_module.clone()),
         ));
 
         parent_module.metadata().add_child(&source_file_symbol);
@@ -213,7 +214,7 @@ fn build_module_hierarchy(
                 root.clone(),
             );
 
-            let module = ModuleSymbol::new(name, span, visibility);
+            let module = ModuleSymbol::new(name, span, visibility, Some(current_parent.clone()));
             let module_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(module);
 
             current_parent.metadata().add_child(&module_arc);

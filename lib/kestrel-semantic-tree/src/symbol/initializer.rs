@@ -8,7 +8,7 @@ use crate::{
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
-    symbol::local::{Local, LocalId},
+    symbol::local::{Local, LocalContainer, LocalId},
     ty::Ty,
 };
 
@@ -49,7 +49,32 @@ impl Symbol<KestrelLanguage> for InitializerSymbol {
     }
 }
 
+impl LocalContainer for InitializerSymbol {
+    fn add_local(&self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        let mut locals = self.locals.write().unwrap();
+        let id = LocalId::new(locals.len());
+        locals.push(Local::new(id, name, ty, mutable, span));
+        id
+    }
+
+    fn get_local(&self, id: LocalId) -> Option<Local> {
+        self.read_locals().get(id.index()).cloned()
+    }
+
+    fn locals(&self) -> Vec<Local> {
+        self.read_locals().clone()
+    }
+
+    fn local_count(&self) -> usize {
+        self.read_locals().len()
+    }
+}
+
 impl InitializerSymbol {
+    fn read_locals(&self) -> std::sync::RwLockReadGuard<'_, Vec<Local>> {
+        self.locals.read().unwrap()
+    }
+
     /// Create a new InitializerSymbol
     ///
     /// NOTE: CallableBehavior is NOT added here. It will be added during the bind phase

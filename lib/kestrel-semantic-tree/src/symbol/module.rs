@@ -21,14 +21,24 @@ impl Symbol<KestrelLanguage> for ModuleSymbol {
 
 impl ModuleSymbol {
     /// Create a new ModuleSymbol with a name, span, and visibility
-    pub fn new(name: Name, span: Span, visibility: VisibilityBehavior) -> Self {
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
+    pub fn new(
+        name: Name,
+        span: Span,
+        visibility: VisibilityBehavior,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
-            .with_behavior(Arc::new(visibility))
-            .build();
+            .with_behavior(Arc::new(visibility));
 
-        ModuleSymbol { metadata }
+        if let Some(p) = parent {
+            builder = builder.with_parent(Arc::downgrade(&p));
+        }
+
+        ModuleSymbol {
+            metadata: builder.build(),
+        }
     }
 }

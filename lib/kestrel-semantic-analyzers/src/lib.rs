@@ -15,7 +15,7 @@ pub use runner::{run, run_all};
 pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
     use analyzers::{
         AssignmentValidationAnalyzer, ConformanceAnalyzer, ConstraintCycleAnalyzer,
-        DeadCodeAnalyzer, DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer,
+        DeadCodeAnalyzer, DefiniteAssignmentAnalyzer, DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer,
         ExtensionConflictAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer, ImportAnalyzer,
         InitializerVerificationAnalyzer, ProtocolMethodAnalyzer, StaticContextAnalyzer,
         StructCycleAnalyzer, TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
@@ -31,6 +31,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(ExtensionConflictAnalyzer::new()),
         Box::new(InitializerVerificationAnalyzer::new()),
         Box::new(AssignmentValidationAnalyzer::new()),
+        Box::new(DefiniteAssignmentAnalyzer::new()),
         Box::new(DeadCodeAnalyzer::new()),
         Box::new(ExhaustiveReturnAnalyzer::new()),
         // Type inference runs before type checking to resolve inference placeholders

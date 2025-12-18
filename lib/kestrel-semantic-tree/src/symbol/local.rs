@@ -92,6 +92,18 @@ impl Local {
     }
 }
 
+/// Trait for symbols that can contain local variables (Functions, Initializers).
+pub trait LocalContainer: Send + Sync + std::fmt::Debug {
+    /// Add a new local variable.
+    fn add_local(&self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId;
+    /// Get a local by ID.
+    fn get_local(&self, id: LocalId) -> Option<Local>;
+    /// Get all locals.
+    fn locals(&self) -> Vec<Local>;
+    /// Get number of locals.
+    fn local_count(&self) -> usize;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

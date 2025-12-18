@@ -7,8 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::symbol::local::{LocalContainer, LocalId};
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 
@@ -48,8 +47,8 @@ impl ScopeLevel {
 /// ```
 #[derive(Debug)]
 pub struct LocalScope {
-    /// The function symbol we're building locals for
-    function: Arc<FunctionSymbol>,
+    /// The container we're building locals for
+    container: Arc<dyn LocalContainer>,
     /// Stack of scope levels (innermost at the end)
     scopes: Vec<ScopeLevel>,
     /// Cached lookup: name -> current LocalId (for O(1) access)
@@ -59,10 +58,10 @@ pub struct LocalScope {
 }
 
 impl LocalScope {
-    /// Create a new LocalScope for the given function
-    pub fn new(function: Arc<FunctionSymbol>) -> Self {
+    /// Create a new LocalScope for the given container
+    pub fn new(container: Arc<dyn LocalContainer>) -> Self {
         let mut scope = LocalScope {
-            function,
+            container,
             scopes: Vec::new(),
             current_bindings: HashMap::new(),
             shadow_stack: Vec::new(),
@@ -106,8 +105,8 @@ impl LocalScope {
             shadows.push((name.clone(), prev));
         }
 
-        // Create a new local in the function
-        let local_id = self.function.add_local(name.clone(), ty, mutable, span);
+        // Create a new local in the container
+        let local_id = self.container.add_local(name.clone(), ty, mutable, span);
 
         // Update current bindings
         self.current_bindings.insert(name.clone(), local_id);
@@ -126,9 +125,14 @@ impl LocalScope {
         self.current_bindings.get(name).copied()
     }
 
-    /// Get the function symbol this scope is for
-    pub fn function(&self) -> &Arc<FunctionSymbol> {
-        &self.function
+    /// Get the container this scope is for
+    pub fn container(&self) -> &Arc<dyn LocalContainer> {
+        &self.container
+    }
+
+    /// Get a local by ID from the container
+    pub fn get_local(&self, id: LocalId) -> Option<kestrel_semantic_tree::symbol::local::Local> {
+        self.container.get_local(id)
     }
 
     /// Get the current scope depth (for debugging)

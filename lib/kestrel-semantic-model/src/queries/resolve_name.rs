@@ -49,6 +49,39 @@ impl Query for ResolveName {
                 };
             }
 
+            // Check whole-module imports (wildcard imports)
+            let mut wildcard_candidates = Vec::new();
+            let imports = model.query(crate::queries::ImportsInScope { symbol_id: id });
+            for import in imports {
+                // Only consider whole-module imports (no items, no alias)
+                if import.items.is_empty() && import.alias.is_none() {
+                    if let Ok(module_id) = model.query(crate::queries::ResolveModulePath {
+                        path: import.module_path.clone(),
+                        context: id,
+                    }) {
+                        // Check if the name exists in the module's visible children
+                        if let Some(child) = model.query(crate::queries::VisibleChildrenByName {
+                            parent: module_id,
+                            name: self.name.clone(),
+                            context: self.context,
+                        })
+                        .into_iter()
+                        .next()
+                        {
+                            wildcard_candidates.push(child.metadata().id());
+                        }
+                    }
+                }
+            }
+
+            if !wildcard_candidates.is_empty() {
+                return if wildcard_candidates.len() == 1 {
+                    SymbolResolution::Found(wildcard_candidates)
+                } else {
+                    SymbolResolution::Ambiguous(wildcard_candidates)
+                };
+            }
+
             // Check type parameters for extensions
             // Extensions reference type parameters from their target type
             if let Some(symbol) = model.query(SymbolFor { id }) {

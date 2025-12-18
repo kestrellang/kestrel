@@ -10,6 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::find_child;
 
 /// Binder for initializer declarations
@@ -91,11 +92,15 @@ fn resolve_initializer_body(
     use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 
     // Downcast to InitializerSymbol
-    let Some(init_sym) = symbol.as_ref().downcast_ref::<InitializerSymbol>() else {
+    let Some(_) = symbol.as_ref().downcast_ref::<InitializerSymbol>() else {
         return;
     };
 
-    let mut local_scope = create_local_scope_for_body(symbol.clone(), "__init_body_temp");
+    let mut local_scope = if let Ok(init) = symbol.clone().downcast_arc::<InitializerSymbol>() {
+        LocalScope::new(init)
+    } else {
+        create_local_scope_for_body(symbol.clone(), "__init_body_temp")
+    };
 
     // Inject `self` as the first local (with initializing semantics)
     // In initializers, self is mutable so we can assign to fields
@@ -110,8 +115,6 @@ fn resolve_initializer_body(
             true,
             self_span.clone(),
         );
-        // Add to the actual initializer symbol
-        init_sym.add_local("self".to_string(), self_type, true, self_span);
     }
 
     // Add parameters to local scope
@@ -126,8 +129,6 @@ fn resolve_initializer_body(
             false,
             param_span.clone(),
         );
-        // Add to the actual initializer symbol
-        init_sym.add_local(param_name, param_ty, false, param_span);
     }
 
     // Create body resolution context

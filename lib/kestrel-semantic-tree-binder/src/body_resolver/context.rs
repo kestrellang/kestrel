@@ -12,6 +12,7 @@ use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -213,13 +214,19 @@ pub fn resolve_and_attach_body(
         return;
     };
 
+    let local_scope = if let Ok(func) = function_symbol.clone().downcast_arc::<FunctionSymbol>() {
+        LocalScope::new(func)
+    } else {
+        create_local_scope_for_body(function_symbol.clone(), "__body_resolver_temp")
+    };
+
     let mut ctx = BodyResolutionContext {
         model,
         diagnostics,
         source,
         file_id,
         function_id: function_symbol.metadata().id(),
-        local_scope: create_local_scope_for_body(function_symbol.clone(), "__body_resolver_temp"),
+        local_scope,
         loop_stack: Vec::new(),
         next_loop_id: 0,
     };

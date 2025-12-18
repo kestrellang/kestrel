@@ -10,7 +10,7 @@ use crate::{
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
-    symbol::local::{Local, LocalId},
+    symbol::local::{Local, LocalContainer, LocalId},
     symbol::type_parameter::TypeParameterSymbol,
     ty::{Ty, WhereClause},
 };
@@ -55,6 +55,28 @@ pub struct FunctionSymbol {
 impl Symbol<KestrelLanguage> for FunctionSymbol {
     fn metadata(&self) -> &SymbolMetadata<KestrelLanguage> {
         &self.metadata
+    }
+}
+
+impl LocalContainer for FunctionSymbol {
+    fn add_local(&self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        let mut locals = self.locals.write().unwrap();
+        let id = LocalId::new(locals.len());
+        locals.push(Local::new(id, name, ty, mutable, span));
+        id
+    }
+
+    fn get_local(&self, id: LocalId) -> Option<Local> {
+        let locals = self.locals.read().unwrap();
+        locals.get(id.index()).cloned()
+    }
+
+    fn locals(&self) -> Vec<Local> {
+        self.locals.read().unwrap().clone()
+    }
+
+    fn local_count(&self) -> usize {
+        self.locals.read().unwrap().len()
     }
 }
 

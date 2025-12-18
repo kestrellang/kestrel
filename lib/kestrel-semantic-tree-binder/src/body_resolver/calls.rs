@@ -24,11 +24,11 @@ use crate::resolution::type_resolver::TypeResolver;
 
 use crate::diagnostics::{
     AmbiguousTypeParameterInitError, FieldNotVisibleForInitError, ImplicitInitArityError,
-    ImplicitInitLabelError, InstanceMethodOnTypeError, NoInitInTypeParameterBoundsError,
-    NoMatchingInitializerError, NoMatchingMethodError, NoMatchingOverloadError,
-    NoMatchingTypeParameterInitError, NotGenericError, OverloadDescription,
-    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
-    UnconstrainedTypeParameterMemberError,
+    ImplicitInitLabelError, InstanceMethodOnTypeError, MemberNotVisibleError,
+    NoInitInTypeParameterBoundsError, NoMatchingInitializerError, NoMatchingMethodError,
+    NoMatchingOverloadError, NoMatchingTypeParameterInitError, NonCallableError, NotGenericError,
+    OverloadDescription, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
+    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -361,7 +361,13 @@ pub fn resolve_call(
             if let TyKind::Function { return_type, .. } = callee_ty.kind() {
                 Expression::call(callee, arguments, (**return_type).clone(), span)
             } else {
-                // TODO: Report error: trying to call non-callable
+                ctx.diagnostics.add_diagnostic(
+                    NonCallableError {
+                        span: span.clone(),
+                        ty: format!("{}", callee_ty),
+                    }
+                    .into_diagnostic(),
+                );
                 Expression::error(span)
             }
         }
@@ -385,7 +391,13 @@ pub fn resolve_call(
             if let TyKind::Function { return_type, .. } = callee_ty.kind() {
                 Expression::call(callee, arguments, (**return_type).clone(), span)
             } else {
-                // TODO: Report error: expression is not callable
+                ctx.diagnostics.add_diagnostic(
+                    NonCallableError {
+                        span: span.clone(),
+                        ty: format!("{}", callee_ty),
+                    }
+                    .into_diagnostic(),
+                );
                 Expression::error(span)
             }
         }
@@ -913,6 +925,8 @@ pub fn resolve_method_call(
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
     // Find matching overload
+    let mut invisible_matches = Vec::new();
+
     for &candidate_id in candidates {
         if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id }) {
             if let Some(callable) = get_callable_behavior(&symbol) {
@@ -922,7 +936,7 @@ pub fn resolve_method_call(
                         target: candidate_id,
                         context: ctx.function_id,
                     }) {
-                        // TODO: Report error: method not visible
+                        invisible_matches.push(symbol);
                         continue;
                     }
 
@@ -1029,7 +1043,27 @@ pub fn resolve_method_call(
         }
     }
 
-    // No matching method found - collect overload info for error message
+    // No matching visible method found
+    if !invisible_matches.is_empty() {
+        let first_invisible = &invisible_matches[0];
+        let visibility = first_invisible
+            .metadata()
+            .get_behavior::<kestrel_semantic_tree::behavior::visibility::VisibilityBehavior>()
+            .and_then(|v| v.visibility().map(|vis| vis.to_string()))
+            .unwrap_or_else(|| "internal".to_string());
+
+        let error = MemberNotVisibleError {
+            member_span: span.clone(), // Could be more precise if we had the member name span
+            member_name: method_name.to_string(),
+            base_span: receiver.span.clone(),
+            base_type: receiver.ty.to_string(),
+            visibility,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(span);
+    }
+
+    // No matching method found at all - collect overload info for error message
     let receiver_type = receiver.ty.to_string();
     let available_overloads = collect_overload_descriptions(candidates, ctx.model);
 

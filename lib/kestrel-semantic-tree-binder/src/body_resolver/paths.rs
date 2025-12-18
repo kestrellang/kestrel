@@ -16,8 +16,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{
-    NotGenericError, SelfOutsideInstanceMethodError, TooFewTypeArgumentsError,
-    TooManyTypeArgumentsError, TypeArgsOnNonGenericError, UndefinedNameError,
+    AmbiguousNameError, NotGenericError, SelfOutsideInstanceMethodError,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
+    UndefinedNameError,
 };
 use crate::resolution::type_resolver::TypeResolver;
 use kestrel_syntax_tree::utils::get_node_span;
@@ -73,12 +74,12 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         }
 
         // Get the type and mutability from the local
-        let local = ctx.local_scope.function().get_local(local_id);
+        let local = ctx.local_scope.get_local(local_id);
         let local_ty = local
             .as_ref()
-            .map(|l| l.ty().clone())
+            .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.ty().clone())
             .unwrap_or_else(|| Ty::error(span.clone()));
-        let is_mutable = local.as_ref().map(|l| l.is_mutable()).unwrap_or(false);
+        let is_mutable = local.as_ref().map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable()).unwrap_or(false);
 
         let base_expr = Expression::local_ref(local_id, local_ty, is_mutable, first_span);
 
@@ -180,8 +181,18 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             index,
             candidates,
         } => {
-            // TODO: Report ambiguous name diagnostic
-            let _ = (segment, index, candidates);
+            // Report ambiguous name error
+            let error_span = if index < path_with_spans.len() {
+                path_with_spans[index].1.clone()
+            } else {
+                first_span.clone()
+            };
+            let error = AmbiguousNameError {
+                span: error_span,
+                name: segment,
+                candidate_count: candidates.len(),
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             Expression::error(span)
         }
         ValuePathResolution::NotAValue { symbol_id } => {
@@ -191,12 +202,12 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     // This is a field reference like `x` that should become `self.x`
                     // Look for 'self' in local scope
                     if let Some(self_local_id) = ctx.local_scope.lookup("self") {
-                        let self_local = ctx.local_scope.function().get_local(self_local_id);
+                        let self_local = ctx.local_scope.get_local(self_local_id);
                         let self_ty = self_local
                             .as_ref()
-                            .map(|l| l.ty().clone())
+                            .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.ty().clone())
                             .unwrap_or_else(|| Ty::error(span.clone()));
-                        let self_mutable = self_local.as_ref().map(|l| l.is_mutable()).unwrap_or(false);
+                        let self_mutable = self_local.as_ref().map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable()).unwrap_or(false);
 
                         // Create self reference
                         let self_expr = Expression::local_ref(self_local_id, self_ty, self_mutable, span.clone());

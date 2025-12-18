@@ -89,6 +89,7 @@ pub enum SyntaxKind {
     TyFunction,
     TyPath,
     TyArray, // [T] - array/list type
+    TyOptional, // T? - optional type
     TyList,
     TyInferred, // _ - inferred type placeholder
 
@@ -186,6 +187,7 @@ pub enum SyntaxKind {
     Comma,
     Dot,
     Colon,
+    Question,
     Bang,
     Underscore,
 
@@ -286,6 +288,7 @@ impl From<Token> for SyntaxKind {
             Token::Comma => SyntaxKind::Comma,
             Token::Dot => SyntaxKind::Dot,
             Token::Colon => SyntaxKind::Colon,
+            Token::Question => SyntaxKind::Question,
             Token::Bang => SyntaxKind::Bang,
             Token::Underscore => SyntaxKind::Underscore,
             // Operators
@@ -446,6 +449,7 @@ impl Language for KestrelLanguage {
         const COMMA: u16 = SyntaxKind::Comma as u16;
         const DOT: u16 = SyntaxKind::Dot as u16;
         const COLON: u16 = SyntaxKind::Colon as u16;
+        const QUESTION: u16 = SyntaxKind::Question as u16;
         const BANG: u16 = SyntaxKind::Bang as u16;
         const UNDERSCORE: u16 = SyntaxKind::Underscore as u16;
         // Operators
@@ -599,6 +603,7 @@ impl Language for KestrelLanguage {
             COMMA => SyntaxKind::Comma,
             DOT => SyntaxKind::Dot,
             COLON => SyntaxKind::Colon,
+            QUESTION => SyntaxKind::Question,
             BANG => SyntaxKind::Bang,
             UNDERSCORE => SyntaxKind::Underscore,
             // Operators

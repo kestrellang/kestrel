@@ -213,7 +213,22 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
             });
 
         // Try never first, then inferred, then paren types, then array, then path
-        never.or(inferred).or(paren_types).or(array).or(path)
+        let base_ty = never.or(inferred).or(paren_types).or(array).or(path);
+
+        // Optional modifier: T?
+        base_ty
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Question).map_with_span(|_, span| Span::from(span)))
+                    .or_not(),
+            )
+            .map(|(base, opt_span)| {
+                if let Some(question_span) = opt_span {
+                    TyVariant::Optional(Box::new(base), question_span)
+                } else {
+                    base
+                }
+            })
     })
 }
 
@@ -271,6 +286,9 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Array(lbracket, element_ty, rbracket) => {
             emit_array_type(sink, lbracket.clone(), element_ty, rbracket.clone());
         }
+        TyVariant::Optional(base_ty, question_span) => {
+            emit_optional_type(sink, base_ty, question_span.clone());
+        }
     }
 }
 
@@ -289,6 +307,8 @@ pub enum TyVariant {
     },
     /// Array type: [T]
     Array(Span, Box<TyVariant>, Span), // (lbracket, element_type, rbracket)
+    /// Optional type: T?
+    Optional(Box<TyVariant>, Span), // (base_type, question_span)
 }
 
 /// Emit events for an inferred type: _
@@ -435,6 +455,18 @@ pub(crate) fn emit_array_type(
     sink.add_token(SyntaxKind::RBracket, rbracket);
 
     sink.finish_node(); // Finish TyArray
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for an optional type: T?
+pub(crate) fn emit_optional_type(sink: &mut EventSink, base_ty: &TyVariant, question_span: Span) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyOptional);
+
+    emit_ty_variant(sink, base_ty);
+    sink.add_token(SyntaxKind::Question, question_span);
+
+    sink.finish_node(); // Finish TyOptional
     sink.finish_node(); // Finish Ty
 }
 

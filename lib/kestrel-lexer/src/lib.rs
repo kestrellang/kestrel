@@ -218,6 +218,9 @@ pub enum Token {
     #[token(":")]
     Colon,
 
+    #[token("?")]
+    Question,
+
     #[token("!")]
     Bang,
 

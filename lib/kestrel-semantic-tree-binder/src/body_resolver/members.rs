@@ -511,6 +511,8 @@ pub fn resolve_member_call(
     }
 
     // Find matching overload
+    let mut invisible_matches = Vec::new();
+
     for method in &methods {
         if let Some(callable) = get_callable_behavior(method) {
             if matches_signature(&callable, arguments.len(), arg_labels) {
@@ -520,7 +522,7 @@ pub fn resolve_member_call(
                     target: method_id,
                     context: ctx.function_id,
                 }) {
-                    // TODO: Report error: method not visible
+                    invisible_matches.push(method.clone());
                     continue;
                 }
 
@@ -545,6 +547,26 @@ pub fn resolve_member_call(
                 return Expression::call(method_ref, arguments, return_ty, span);
             }
         }
+    }
+
+    // No matching visible method found
+    if !invisible_matches.is_empty() {
+        let first_invisible = &invisible_matches[0];
+        let visibility = first_invisible
+            .metadata()
+            .get_behavior::<VisibilityBehavior>()
+            .and_then(|v| v.visibility().map(|vis| vis.to_string()))
+            .unwrap_or_else(|| "internal".to_string());
+
+        let error = MemberNotVisibleError {
+            member_span: span.clone(),
+            member_name: member_name.to_string(),
+            base_span: object.span.clone(),
+            base_type: base_ty.to_string(),
+            visibility,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(span);
     }
 
     // No matching method found - collect overload info for error message
