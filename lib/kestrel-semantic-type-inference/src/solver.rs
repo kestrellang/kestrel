@@ -206,9 +206,29 @@ fn unify(
                 ));
             }
 
-            // Unify substitutions
-            for ((_, sub_a), (_, sub_b)) in subs_a.iter().zip(subs_b.iter()) {
-                ctx.equate(sub_a.id(), sub_b.id(), span.clone());
+            // Unify substitutions by matching keys (type parameter IDs)
+            // HashMap iteration order is non-deterministic, so we must match by key
+            for (key, sub_a) in subs_a.iter() {
+                if let Some(sub_b) = subs_b.get(*key) {
+                    ctx.equate(sub_a.id(), sub_b.id(), span.clone());
+                } else {
+                    // Substitution key missing in other type - structural mismatch
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+            }
+            // Check for keys in b that aren't in a
+            for (key, _) in subs_b.iter() {
+                if !subs_a.contains(*key) {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
             }
             Ok(SolveResult::Solved)
         }
@@ -237,8 +257,26 @@ fn unify(
                 ));
             }
 
-            for ((_, sub_a), (_, sub_b)) in subs_a.iter().zip(subs_b.iter()) {
-                ctx.equate(sub_a.id(), sub_b.id(), span.clone());
+            // Unify substitutions by matching keys (type parameter IDs)
+            for (key, sub_a) in subs_a.iter() {
+                if let Some(sub_b) = subs_b.get(*key) {
+                    ctx.equate(sub_a.id(), sub_b.id(), span.clone());
+                } else {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+            }
+            for (key, _) in subs_b.iter() {
+                if !subs_a.contains(*key) {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
             }
             Ok(SolveResult::Solved)
         }

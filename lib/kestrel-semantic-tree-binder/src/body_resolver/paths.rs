@@ -8,6 +8,7 @@ use kestrel_semantic_model::{ResolveTypePath, ResolveValuePath, SymbolFor, TypeP
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
@@ -214,8 +215,22 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 }
             }
             // This is a type reference (e.g., struct name) - may be used for initialization
-            // The actual type resolution happens during call resolution
-            Expression::type_ref(symbol_id, Ty::infer(span.clone()), span)
+            // For generic types, create struct type with inference variables for each type param
+            // This enables proper type inference when the struct is used without explicit type args
+            use super::utils::create_struct_type_with_type_args;
+            let ty = ctx.model.query(SymbolFor { id: symbol_id })
+                .and_then(|symbol| {
+                    symbol.clone().downcast_arc::<StructSymbol>().ok().map(|struct_sym| {
+                        create_struct_type_with_type_args(
+                            &(struct_sym as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+                            &[],
+                            span.clone(),
+                            ctx
+                        )
+                    })
+                })
+                .unwrap_or_else(|| Ty::infer(span.clone()));
+            Expression::type_ref(symbol_id, ty, span)
         }
         ValuePathResolution::TypeParameter { symbol_id } => {
             // This is a type parameter reference (e.g., T in `T()` or `T.create()`)
