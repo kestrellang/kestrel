@@ -2,9 +2,9 @@
 
 ## Phase 7: Type Inference
 
-- [ ] Extension Specialization Overlap Detection
-  - [ ] Allow non-overlapping specialized extensions (`Box[Int]` vs `Box[String]`)
-  - [ ] Only reject truly ambiguous cases
+- [x] Extension Specialization Overlap Detection ✓
+  - [x] Allow non-overlapping specialized extensions (`Box[Int]` vs `Box[String]`)
+  - [x] Only reject truly ambiguous cases
 
 ## Phase 8: Closures & First-Class Functions
 

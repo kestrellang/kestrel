@@ -166,6 +166,53 @@ impl Substitutions {
         }
     }
 
+    /// Check if this substitution map is a specialization of another.
+    ///
+    /// This substitution map is a specialization of the pattern if for every
+    /// type parameter, the type in this map is a specialization of the type
+    /// in the pattern map.
+    pub fn is_specialization_of(&self, pattern: &Substitutions) -> bool {
+        if self.len() != pattern.len() {
+            return false;
+        }
+
+        for (id, pattern_ty) in pattern.iter() {
+            let self_ty = match self.get(*id) {
+                Some(ty) => ty,
+                None => return false,
+            };
+
+            if !self_ty.is_specialization_of(pattern_ty) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if this substitution map overlaps with another.
+    ///
+    /// Two substitution maps overlap if there exists a substitution map
+    /// that is a specialization of both.
+    pub fn overlaps_with(&self, other: &Substitutions) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for (id, ty1) in self.iter() {
+            let ty2 = match other.get(*id) {
+                Some(ty) => ty,
+                None => return false,
+            };
+
+            if !ty1.overlaps_with(ty2) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Internal helper for apply_to_substitutions that tracks visited type parameters
     fn apply_to_substitutions_with_visited(
         &self,

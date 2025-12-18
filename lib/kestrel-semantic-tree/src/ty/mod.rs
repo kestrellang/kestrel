@@ -545,6 +545,184 @@ impl Ty {
         }
     }
 
+    /// Check if this type is a specialization of the given pattern type.
+    ///
+    /// A type is a specialization of a pattern if it's identical to the pattern,
+    /// or if the pattern is a type parameter, or if they're the same generic
+    /// type and this type's arguments are specializations of the pattern's.
+    pub fn is_specialization_of(&self, pattern: &Ty) -> bool {
+        // pattern: Box[T]
+        // self: Box[Int]
+        // result: true
+
+        match (self.kind(), pattern.kind()) {
+            // Pattern has wildcard - matches anything
+            (_, TyKind::TypeParameter(_)) => true,
+
+            // Primitives - exact match
+            (TyKind::Unit, TyKind::Unit) => true,
+            (TyKind::Never, TyKind::Never) => true,
+            (TyKind::Bool, TyKind::Bool) => true,
+            (TyKind::String, TyKind::String) => true,
+            (TyKind::Int(a), TyKind::Int(b)) => a == b,
+            (TyKind::Float(a), TyKind::Float(b)) => a == b,
+
+            // Tuples - element-wise
+            (TyKind::Tuple(a_elems), TyKind::Tuple(b_elems)) => {
+                a_elems.len() == b_elems.len()
+                    && a_elems
+                        .iter()
+                        .zip(b_elems.iter())
+                        .all(|(a, b)| a.is_specialization_of(b))
+            }
+
+            // Arrays
+            (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_specialization_of(b_elem),
+
+            // Functions
+            (
+                TyKind::Function {
+                    params: a_params,
+                    return_type: a_ret,
+                },
+                TyKind::Function {
+                    params: b_params,
+                    return_type: b_ret,
+                },
+            ) => {
+                a_params.len() == b_params.len()
+                    && a_params
+                        .iter()
+                        .zip(b_params.iter())
+                        .all(|(a, b)| a.is_specialization_of(b))
+                    && a_ret.is_specialization_of(b_ret)
+            }
+
+            // Structs
+            (
+                TyKind::Struct {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Struct {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && a_subs.is_specialization_of(b_subs)
+            }
+
+            // Protocols
+            (
+                TyKind::Protocol {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Protocol {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && a_subs.is_specialization_of(b_subs)
+            }
+
+            // Error types match anything
+            (TyKind::Error, _) | (_, TyKind::Error) => true,
+
+            _ => false,
+        }
+    }
+
+    /// Check if this type overlaps with another type.
+    ///
+    /// Two types overlap if there exists a common specialization.
+    pub fn overlaps_with(&self, other: &Ty) -> bool {
+        match (self.kind(), other.kind()) {
+            // Either side is a wildcard - matches anything
+            (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => true,
+
+            // Primitives - exact match
+            (TyKind::Unit, TyKind::Unit) => true,
+            (TyKind::Never, TyKind::Never) => true,
+            (TyKind::Bool, TyKind::Bool) => true,
+            (TyKind::String, TyKind::String) => true,
+            (TyKind::Int(a), TyKind::Int(b)) => a == b,
+            (TyKind::Float(a), TyKind::Float(b)) => a == b,
+
+            // Tuples
+            (TyKind::Tuple(a_elems), TyKind::Tuple(b_elems)) => {
+                a_elems.len() == b_elems.len()
+                    && a_elems
+                        .iter()
+                        .zip(b_elems.iter())
+                        .all(|(a, b)| a.overlaps_with(b))
+            }
+
+            // Arrays
+            (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.overlaps_with(b_elem),
+
+            // Functions
+            (
+                TyKind::Function {
+                    params: a_params,
+                    return_type: a_ret,
+                },
+                TyKind::Function {
+                    params: b_params,
+                    return_type: b_ret,
+                },
+            ) => {
+                a_params.len() == b_params.len()
+                    && a_params
+                        .iter()
+                        .zip(b_params.iter())
+                        .all(|(a, b)| a.overlaps_with(b))
+                    && a_ret.overlaps_with(b_ret)
+            }
+
+            // Structs
+            (
+                TyKind::Struct {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Struct {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && a_subs.overlaps_with(b_subs)
+            }
+
+            // Protocols
+            (
+                TyKind::Protocol {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Protocol {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && a_subs.overlaps_with(b_subs)
+            }
+
+            // Error types overlap anything
+            (TyKind::Error, _) | (_, TyKind::Error) => true,
+
+            _ => false,
+        }
+    }
+
     /// Check if this type is assignable to the target type.
     ///
     /// This handles:

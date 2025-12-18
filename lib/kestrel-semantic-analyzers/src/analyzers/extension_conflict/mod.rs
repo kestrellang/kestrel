@@ -11,13 +11,14 @@ use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::{Substitutions, WhereClause};
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use diagnostics::{DuplicateExtensionMethodError, StructExtensionMethodConflictError};
 
 pub struct ExtensionConflictAnalyzer {
-    extensions_by_target: Mutex<HashMap<(SymbolId, usize), Vec<CollectedExtension>>>,
+    extensions_by_target: Mutex<HashMap<SymbolId, Vec<CollectedExtension>>>,
     struct_methods: Mutex<HashMap<SymbolId, Vec<(String, Span)>>>,
 }
 
@@ -26,6 +27,9 @@ struct CollectedExtension {
     #[allow(dead_code)]
     extension_span: Span,
     methods: Vec<(String, Span)>,
+    substitutions: Substitutions,
+    #[allow(dead_code)]
+    where_clause: WhereClause,
 }
 
 impl ExtensionConflictAnalyzer {
@@ -74,11 +78,6 @@ impl Analyzer for ExtensionConflictAnalyzer {
             _ => return,
         };
 
-        let specificity = substitutions
-            .types()
-            .filter(|ty| !ty.is_type_parameter())
-            .count();
-
         let extension_id = extension.metadata().id();
         let methods = ctx.model.query(ExtensionMethods { extension_id });
 
@@ -98,11 +97,13 @@ impl Analyzer for ExtensionConflictAnalyzer {
             extension_id,
             extension_span: extension.metadata().span().clone(),
             methods,
+            substitutions: substitutions.clone(),
+            where_clause: target_beh.where_clause().clone(),
         };
         self.extensions_by_target
             .lock()
             .unwrap()
-            .entry((target_id, specificity))
+            .entry(target_id)
             .or_default()
             .push(collected);
     }
@@ -111,7 +112,7 @@ impl Analyzer for ExtensionConflictAnalyzer {
         let extensions_by_target = self.extensions_by_target.lock().unwrap();
         let struct_methods = self.struct_methods.lock().unwrap();
 
-        for ((target_id, _specificity), extensions) in extensions_by_target.iter() {
+        for (target_id, extensions) in extensions_by_target.iter() {
             if let Some(struct_method_list) = struct_methods.get(target_id) {
                 let struct_method_names: HashMap<&str, &Span> = struct_method_list
                     .iter()
@@ -137,23 +138,54 @@ impl Analyzer for ExtensionConflictAnalyzer {
                 continue;
             }
 
-            let mut method_locations: HashMap<String, Vec<(SymbolId, Span)>> = HashMap::new();
-            for ext in extensions {
-                for (method_name, method_span) in &ext.methods {
-                    method_locations
-                        .entry(method_name.clone())
-                        .or_default()
-                        .push((ext.extension_id, method_span.clone()));
-                }
-            }
+            // Check for conflicts between extensions
+            for i in 0..extensions.len() {
+                for j in i + 1..extensions.len() {
+                    let ext1 = &extensions[i];
+                    let ext2 = &extensions[j];
 
-            for (method_name, locations) in method_locations {
-                if locations.len() > 1 {
-                    let error = DuplicateExtensionMethodError {
-                        method_name,
-                        locations: locations.into_iter().map(|(_, span)| span).collect(),
-                    };
-                    ctx.report(error);
+                    // Find common methods
+                    let mut common_methods = Vec::new();
+                    for (name1, span1) in &ext1.methods {
+                        for (name2, span2) in &ext2.methods {
+                            if name1 == name2 {
+                                common_methods.push((name1.clone(), span1.clone(), span2.clone()));
+                            }
+                        }
+                    }
+
+                    if common_methods.is_empty() {
+                        continue;
+                    }
+
+                    // They share methods - check if they overlap ambiguously
+                    if ext1.substitutions.overlaps_with(&ext2.substitutions) {
+                        let ext1_spec_of_ext2 =
+                            ext1.substitutions.is_specialization_of(&ext2.substitutions);
+                        let ext2_spec_of_ext1 =
+                            ext2.substitutions.is_specialization_of(&ext1.substitutions);
+
+                        let ambiguous = if ext1_spec_of_ext2 && ext2_spec_of_ext1 {
+                            // Identical - definitely ambiguous
+                            true
+                        } else if ext1_spec_of_ext2 || ext2_spec_of_ext1 {
+                            // One is strictly more specific - allowed
+                            false
+                        } else {
+                            // Overlap but no clear winner
+                            true
+                        };
+
+                        if ambiguous {
+                            for (method_name, span1, span2) in common_methods {
+                                let error = DuplicateExtensionMethodError {
+                                    method_name,
+                                    locations: vec![span1, span2],
+                                };
+                                ctx.report(error);
+                            }
+                        }
+                    }
                 }
             }
         }

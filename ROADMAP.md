@@ -327,9 +327,9 @@
 - [x] Constraint-based Type Inference ✓
   - [x] Hindley-Milner style solver in `kestrel-semantic-type-inference`
   - [x] Type-directed member resolution and associated type resolution
-- [ ] Extension Specialization Overlap Detection
-  - [ ] Allow non-overlapping specialized extensions (`Box[Int]` vs `Box[String]`)
-  - [ ] Only reject truly ambiguous cases
+- [x] Extension Specialization Overlap Detection ✓
+  - [x] Allow non-overlapping specialized extensions (`Box[Int]` vs `Box[String]`)
+  - [x] Only reject truly ambiguous cases
 
 ## Phase 8: Closures & First-Class Functions
 

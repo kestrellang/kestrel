@@ -30,13 +30,13 @@ impl IntoDiagnostic for DuplicateExtensionMethodError {
 
         Diagnostic::error()
             .with_message(format!(
-                "duplicate method '{}' in extensions with the same specificity",
+                "duplicate method '{}' in overlapping extensions",
                 self.method_name
             ))
             .with_labels(labels)
             .with_notes(vec![
-                "Extensions at the same specificity level cannot define methods with the same name".to_string(),
-                "Extensions with different specificity (e.g., Box[T] vs Box[Int]) can have methods with the same name - the more specific one will be preferred".to_string(),
+                "Extensions that overlap must not define methods with the same name unless one is strictly more specific than the other".to_string(),
+                "For example, Box[Int] can override Box[T], but Box[Int, T] and Box[T, Int] conflict for Box[Int, Int]".to_string(),
             ])
     }
 }
