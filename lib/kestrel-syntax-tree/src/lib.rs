@@ -43,6 +43,12 @@ pub enum SyntaxKind {
     ProtocolBody,
     StructDeclaration,
     StructBody,
+    EnumDeclaration,
+    EnumBody,
+    EnumCaseDeclaration,
+    EnumCaseParameter,
+    EnumCaseParameterList,
+    IndirectModifier,
     ExtensionDeclaration,
     ExtensionBody,
     ImportDeclaration,
@@ -173,6 +179,10 @@ pub enum SyntaxKind {
     While,
     In,
 
+    // Enum keywords
+    Enum,
+    Case,
+
     // Logical keywords
     And,
     Not,
@@ -277,6 +287,9 @@ impl From<Token> for SyntaxKind {
             Token::Where => SyntaxKind::Where,
             Token::While => SyntaxKind::While,
             Token::In => SyntaxKind::In,
+            // Enum keywords
+            Token::Enum => SyntaxKind::Enum,
+            Token::Case => SyntaxKind::Case,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -337,6 +350,12 @@ impl Language for KestrelLanguage {
         const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
         const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
         const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
+        const ENUM_DECLARATION: u16 = SyntaxKind::EnumDeclaration as u16;
+        const ENUM_BODY: u16 = SyntaxKind::EnumBody as u16;
+        const ENUM_CASE_DECLARATION: u16 = SyntaxKind::EnumCaseDeclaration as u16;
+        const ENUM_CASE_PARAMETER: u16 = SyntaxKind::EnumCaseParameter as u16;
+        const ENUM_CASE_PARAMETER_LIST: u16 = SyntaxKind::EnumCaseParameterList as u16;
+        const INDIRECT_MODIFIER: u16 = SyntaxKind::IndirectModifier as u16;
         const EXTENSION_DECLARATION: u16 = SyntaxKind::ExtensionDeclaration as u16;
         const EXTENSION_BODY: u16 = SyntaxKind::ExtensionBody as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
@@ -444,6 +463,8 @@ impl Language for KestrelLanguage {
         const WHERE: u16 = SyntaxKind::Where as u16;
         const WHILE: u16 = SyntaxKind::While as u16;
         const IN: u16 = SyntaxKind::In as u16;
+        const ENUM: u16 = SyntaxKind::Enum as u16;
+        const CASE: u16 = SyntaxKind::Case as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -495,6 +516,12 @@ impl Language for KestrelLanguage {
             PROTOCOL_BODY => SyntaxKind::ProtocolBody,
             STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
             STRUCT_BODY => SyntaxKind::StructBody,
+            ENUM_DECLARATION => SyntaxKind::EnumDeclaration,
+            ENUM_BODY => SyntaxKind::EnumBody,
+            ENUM_CASE_DECLARATION => SyntaxKind::EnumCaseDeclaration,
+            ENUM_CASE_PARAMETER => SyntaxKind::EnumCaseParameter,
+            ENUM_CASE_PARAMETER_LIST => SyntaxKind::EnumCaseParameterList,
+            INDIRECT_MODIFIER => SyntaxKind::IndirectModifier,
             EXTENSION_DECLARATION => SyntaxKind::ExtensionDeclaration,
             EXTENSION_BODY => SyntaxKind::ExtensionBody,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
@@ -602,6 +629,8 @@ impl Language for KestrelLanguage {
             WHERE => SyntaxKind::Where,
             WHILE => SyntaxKind::While,
             IN => SyntaxKind::In,
+            ENUM => SyntaxKind::Enum,
+            CASE => SyntaxKind::Case,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,

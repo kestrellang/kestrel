@@ -148,6 +148,13 @@ pub enum Token {
     #[token("where")]
     Where,
 
+    // ===== Enum Keywords =====
+    #[token("enum")]
+    Enum,
+
+    #[token("case")]
+    Case,
+
     // ===== Logical Keywords =====
     #[token("and")]
     And,

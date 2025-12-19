@@ -1,4 +1,6 @@
 pub mod associated_type;
+pub mod enum_case;
+pub mod enum_symbol;
 pub mod extension;
 pub mod field;
 pub mod function;
@@ -12,3 +14,6 @@ pub mod source_file;
 pub mod r#struct;
 pub mod type_alias;
 pub mod type_parameter;
+
+pub use enum_case::EnumCaseSymbol;
+pub use enum_symbol::EnumSymbol;

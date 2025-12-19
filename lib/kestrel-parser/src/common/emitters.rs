@@ -503,3 +503,79 @@ fn emit_extension_body_item(sink: &mut EventSink, item: ExtensionBodyItem) {
         ExtensionBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
     }
 }
+
+// =============================================================================
+// Enum Emitters
+// =============================================================================
+
+/// Emit events for an enum case parameter (associated value)
+fn emit_enum_case_parameter(
+    sink: &mut EventSink,
+    param: super::data::EnumCaseParameterData,
+) {
+    sink.start_node(SyntaxKind::EnumCaseParameter);
+    emit_name(sink, param.label);
+    sink.add_token(SyntaxKind::Colon, param.colon);
+    emit_ty_variant(sink, &param.ty);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case declaration
+fn emit_enum_case(sink: &mut EventSink, case: super::data::EnumCaseData) {
+    sink.start_node(SyntaxKind::EnumCaseDeclaration);
+    sink.add_token(SyntaxKind::Case, case.case_span);
+    emit_name(sink, case.name_span);
+
+    if let Some((lparen, params, rparen)) = case.parameters {
+        sink.start_node(SyntaxKind::EnumCaseParameterList);
+        sink.add_token(SyntaxKind::LParen, lparen);
+
+        for param in params {
+            emit_enum_case_parameter(sink, param);
+        }
+
+        sink.add_token(SyntaxKind::RParen, rparen);
+        sink.finish_node(); // EnumCaseParameterList
+    }
+
+    sink.finish_node(); // EnumCaseDeclaration
+}
+
+/// Emit events for an enum declaration
+///
+/// This is the single source of truth for enum declaration emission.
+pub fn emit_enum_declaration(sink: &mut EventSink, data: super::data::EnumDeclarationData) {
+    sink.start_node(SyntaxKind::EnumDeclaration);
+
+    emit_visibility(sink, data.visibility);
+
+    // Emit indirect modifier if present
+    if let Some(indirect_span) = data.is_indirect {
+        sink.start_node(SyntaxKind::IndirectModifier);
+        sink.add_token(SyntaxKind::Identifier, indirect_span);
+        sink.finish_node();
+    }
+
+    sink.add_token(SyntaxKind::Enum, data.enum_span);
+    emit_name(sink, data.name_span);
+
+    if let Some((lbracket, params, rbracket)) = data.type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::EnumBody);
+    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+
+    for case in data.cases {
+        emit_enum_case(sink, case);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.finish_node(); // EnumBody
+
+    sink.finish_node(); // EnumDeclaration
+}

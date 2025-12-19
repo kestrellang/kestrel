@@ -123,6 +123,7 @@ impl<'a> InferenceContext<'a> {
                 self.register_type(return_type);
             }
             TyKind::Struct { substitutions, .. }
+            | TyKind::Enum { substitutions, .. }
             | TyKind::Protocol { substitutions, .. }
             | TyKind::TypeAlias { substitutions, .. } => {
                 for (_, sub_ty) in substitutions.iter() {

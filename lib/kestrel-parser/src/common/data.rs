@@ -215,3 +215,33 @@ pub enum ExtensionBodyItem {
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
 }
+
+/// Raw parsed data for enum case parameter (associated value)
+#[derive(Debug, Clone)]
+pub struct EnumCaseParameterData {
+    pub label: Span,
+    pub colon: Span,
+    pub ty: TyVariant,
+}
+
+/// Raw parsed data for enum case declaration
+#[derive(Debug, Clone)]
+pub struct EnumCaseData {
+    pub case_span: Span,
+    pub name_span: Span,
+    pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>,
+}
+
+/// Raw parsed data for enum declaration
+#[derive(Debug, Clone)]
+pub struct EnumDeclarationData {
+    pub visibility: Option<(Token, Span)>,
+    pub is_indirect: Option<Span>,
+    pub enum_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub cases: Vec<EnumCaseData>,
+    pub rbrace_span: Span,
+}

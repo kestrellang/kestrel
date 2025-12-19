@@ -61,6 +61,7 @@
 pub mod block;
 pub mod common;
 pub mod declaration_item;
+pub mod enum_decl;
 pub mod event;
 pub mod expr;
 pub mod extension;
@@ -83,6 +84,7 @@ use kestrel_span::Span;
 // Re-export commonly used types
 pub use block::CodeBlock;
 pub use declaration_item::DeclarationItem;
+pub use enum_decl::EnumDeclaration;
 pub use expr::Expression;
 pub use extension::ExtensionDeclaration;
 pub use field::FieldDeclaration;
@@ -98,6 +100,7 @@ pub use type_alias::TypeAliasDeclaration;
 // Re-export event-driven parse functions
 pub use block::parse_code_block;
 pub use declaration_item::{parse_declaration_item, parse_source_file};
+pub use enum_decl::parse_enum_declaration;
 pub use expr::parse_expr;
 pub use extension::parse_extension_declaration;
 pub use field::parse_field_declaration;
@@ -165,6 +168,21 @@ where
     r#struct::parse_struct_declaration(source, tokens, &mut sink);
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     StructDeclaration {
+        syntax: tree,
+        span: Span::from(0..source.len()),
+    }
+}
+
+/// Convenience function to parse an enum declaration from source and tokens
+/// Returns a fully built EnumDeclaration with its syntax tree
+pub fn parse_enum_declaration_from_source<I>(source: &str, tokens: I) -> EnumDeclaration
+where
+    I: Iterator<Item = (Token, Span)> + Clone,
+{
+    let mut sink = EventSink::new();
+    enum_decl::parse_enum_declaration(source, tokens, &mut sink);
+    let tree = TreeBuilder::new(source, sink.into_events()).build();
+    EnumDeclaration {
         syntax: tree,
         span: Span::from(0..source.len()),
     }

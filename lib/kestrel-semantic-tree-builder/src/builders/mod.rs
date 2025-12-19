@@ -1,3 +1,5 @@
+pub mod r#enum;
+pub mod enum_case;
 pub mod extension;
 pub mod field;
 pub mod function;
@@ -10,6 +12,7 @@ pub mod terminal;
 pub mod type_alias;
 pub mod type_parameter;
 
+pub use enum_case::EnumCaseBuilder;
 pub use extension::ExtensionBuilder;
 pub use field::FieldBuilder;
 pub use function::FunctionBuilder;
@@ -17,6 +20,7 @@ pub use import::ImportBuilder;
 pub use initializer::InitializerBuilder;
 pub use module::ModuleBuilder;
 pub use protocol::ProtocolBuilder;
+pub use r#enum::EnumBuilder;
 pub use r#struct::StructBuilder;
 pub use terminal::TerminalBuilder;
 pub use type_alias::TypeAliasBuilder;

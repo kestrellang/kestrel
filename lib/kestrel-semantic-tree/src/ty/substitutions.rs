@@ -128,6 +128,14 @@ impl Substitutions {
                 Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
             }
 
+            TyKind::Enum {
+                symbol,
+                substitutions,
+            } => {
+                let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
+                Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+            }
+
             TyKind::Protocol {
                 symbol,
                 substitutions,

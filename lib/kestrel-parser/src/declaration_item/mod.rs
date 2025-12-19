@@ -13,6 +13,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
+    EnumDeclarationData,
     ExtensionDeclarationData,
     FieldDeclarationData,
     FunctionDeclarationData,
@@ -20,6 +21,7 @@ use crate::common::{
     // Shared data types
     StructDeclarationData,
     TypeAliasDeclarationData,
+    emit_enum_declaration,
     emit_extension_declaration,
     emit_field_declaration,
     emit_function_declaration,
@@ -34,6 +36,9 @@ use crate::common::{
     import_declaration_parser_internal,
     module_declaration_parser_internal,
     skip_trivia,
+};
+use crate::enum_decl::{
+    EnumDeclaration, enum_declaration_parser_internal, parse_enum_declaration,
 };
 use crate::event::EventSink;
 use crate::extension::{
@@ -60,6 +65,7 @@ pub enum DeclarationItem {
     Import(ImportDeclaration),
     Protocol(ProtocolDeclaration),
     Struct(StructDeclaration),
+    Enum(EnumDeclaration),
     Extension(ExtensionDeclaration),
     Field(FieldDeclaration),
     Function(FunctionDeclaration),
@@ -74,6 +80,7 @@ impl DeclarationItem {
             DeclarationItem::Import(decl) => &decl.span,
             DeclarationItem::Protocol(decl) => &decl.span,
             DeclarationItem::Struct(decl) => &decl.span,
+            DeclarationItem::Enum(decl) => &decl.span,
             DeclarationItem::Extension(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
             DeclarationItem::Function(decl) => &decl.span,
@@ -88,6 +95,7 @@ impl DeclarationItem {
             DeclarationItem::Import(decl) => &decl.syntax,
             DeclarationItem::Protocol(decl) => &decl.syntax,
             DeclarationItem::Struct(decl) => &decl.syntax,
+            DeclarationItem::Enum(decl) => &decl.syntax,
             DeclarationItem::Extension(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
             DeclarationItem::Function(decl) => &decl.syntax,
@@ -108,6 +116,7 @@ enum DeclarationItemData {
     ),
     Protocol(ProtocolDeclarationData),
     Struct(StructDeclarationData),
+    Enum(EnumDeclarationData),
     Extension(ExtensionDeclarationData),
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
@@ -166,6 +175,8 @@ fn declaration_item_parser_internal()
 
     let struct_parser = struct_declaration_parser_internal().map(DeclarationItemData::Struct);
 
+    let enum_parser = enum_declaration_parser_internal().map(DeclarationItemData::Enum);
+
     let extension_parser =
         extension_declaration_parser_internal().map(DeclarationItemData::Extension);
 
@@ -181,6 +192,7 @@ fn declaration_item_parser_internal()
         .or(import_parser)
         .or(protocol_parser)
         .or(struct_parser)
+        .or(enum_parser)
         .or(extension_parser)
         .or(function_parser)
         .or(field_parser)
@@ -212,6 +224,9 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         }
         DeclarationItemData::Struct(data) => {
             emit_struct_declaration(sink, data);
+        }
+        DeclarationItemData::Enum(data) => {
+            emit_enum_declaration(sink, data);
         }
         DeclarationItemData::Extension(data) => {
             emit_extension_declaration(sink, data);
@@ -249,6 +264,9 @@ where
     if try_parse(source, tokens.clone(), sink, parse_struct_declaration) {
         return;
     }
+    if try_parse(source, tokens.clone(), sink, parse_enum_declaration) {
+        return;
+    }
     if try_parse(source, tokens.clone(), sink, parse_extension_declaration) {
         return;
     }
@@ -263,7 +281,7 @@ where
     }
 
     // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, extension, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
