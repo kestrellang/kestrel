@@ -4,106 +4,38 @@
 
 This document catalogs failing closure tests in the Kestrel language test suite. The failures fall into several categories related to features that have not yet been fully implemented or are still being developed.
 
-**Total Failing Tests:** 5
-**Total Passing Tests:** 61
+**Total Failing Tests:** 2
+**Total Passing Tests:** 64
 **Document Updated:** 2025-12-18
 
 ### Failure Categories
 
 | Category | Count | Phase | Status |
 |----------|-------|-------|--------|
-| Trailing Closure Syntax | 3 | Phase 9 | Not Implemented |
+| ~~Trailing Closure Syntax~~ | ~~3~~ | ~~Phase 9~~ | **COMPLETED** |
 | Captures | 2 | Phase 10 | Not Implemented |
 
 ---
 
 ## Table of Contents
 
-1. [Trailing Closure Syntax (Phase 9)](#trailing-closure-syntax-phase-9)
+1. ~~[Trailing Closure Syntax (Phase 9)](#trailing-closure-syntax-phase-9)~~ - **COMPLETED**
 2. [Captures (Phase 10)](#captures-phase-10)
 3. [Recently Fixed Tests](#recently-fixed-tests)
 
 ---
 
-## Trailing Closure Syntax (Phase 9)
+## ~~Trailing Closure Syntax (Phase 9)~~ - COMPLETED
 
-These tests cover trailing closure syntax where a closure can be passed as the last argument to a function without parentheses.
+**Status: All tests now pass as of 2025-12-18**
 
-### trailing_closure::trailing_closure_only_argument
+These tests are now passing after implementing trailing closure syntax in the parser. See `docs/trailing-closures-plan.md` for implementation details.
 
-**Status:** FAILED
-**Expected:** Compiles
-**Actual:** 1 error
-
-#### Kestrel Source Code
-```kestrel
-module Main
-
-func apply(f: () -> Int) -> Int {
-    f()
-}
-
-func test() -> Int {
-    apply { 42 }
-}
-```
-
-#### Error Message
-```
-error: function 'test' requires a body
-  ┌─ test.ks:8:6
-  │
-8 │ func test() -> Int {
-  │      ^^^^ function declared without body
-```
-
-**Analysis:** The parser is not recognizing the trailing closure syntax `apply { 42 }` as a valid function call with a closure argument.
-
----
-
-### trailing_closure::trailing_closure_with_multiple_args
-
-**Status:** FAILED
-**Expected:** Compiles
-**Actual:** 1 error
-
-#### Kestrel Source Code
-```kestrel
-module Main
-
-func combine(a: Int, b: Int, f: (Int) -> Int) -> Int {
-    f(a + b)
-}
-
-func test() -> Int {
-    combine(1, 2) { it * 2 }
-}
-```
-
-**Analysis:** The parser fails to recognize `combine(1, 2) { it * 2 }` as a valid call syntax where the closure is the trailing argument.
-
----
-
-### trailing_closure::trailing_closure_with_other_args
-
-**Status:** FAILED
-**Expected:** Compiles
-**Actual:** 1 error
-
-#### Kestrel Source Code
-```kestrel
-module Main
-
-func fold(initial: Int, f: (Int, Int) -> Int) -> Int {
-    f(initial, 10)
-}
-
-func test() -> Int {
-    fold(0) { (acc, n) in acc + n }
-}
-```
-
-**Analysis:** The parser fails when a non-final argument is in parentheses followed by a trailing closure.
+The implementation added:
+1. Optional `lparen`/`rparen` fields on `ExprVariant::Call`
+2. A `trailing_closure_arg` parser that matches `{ closure }` or `label: { closure }`
+3. An `attach_trailing_closures` helper that converts `expr { closure }` into a `Call`
+4. Updates to the emitter to handle optional parentheses
 
 ---
 
@@ -235,6 +167,41 @@ func test() -> Int {
 #### type_inference::cannot_infer_it_type_without_context
 
 **Fix:** Same as above - updated test expectation to match actual error message wording.
+
+---
+
+### Session 2025-12-18: Trailing Closure Implementation
+
+The following tests were fixed by implementing trailing closure syntax in the parser (`lib/kestrel-parser/src/expr/mod.rs`):
+
+#### trailing_closure::trailing_closure_only_argument
+
+**Fix:** Parser now recognizes `apply { 42 }` as a call with a trailing closure argument.
+
+```kestrel
+func apply(f: () -> Int) -> Int { f() }
+func test() -> Int { apply { 42 } }
+```
+
+#### trailing_closure::trailing_closure_with_other_args
+
+**Fix:** Parser now recognizes `fold(0) { ... }` as a call with both parenthesized and trailing closure arguments.
+
+```kestrel
+func fold(initial: Int, f: (Int, Int) -> Int) -> Int { f(initial, 10) }
+func test() -> Int { fold(0) { (acc, n) in acc + n } }
+```
+
+#### trailing_closure::trailing_closure_with_multiple_args
+
+**Fix:** Parser now recognizes `combine(1, 2) { it * 2 }` as a call with multiple parenthesized arguments followed by a trailing closure.
+
+```kestrel
+func combine(a: Int, b: Int, f: (Int) -> Int) -> Int { f(a + b) }
+func test() -> Int { combine(1, 2) { it * 2 } }
+```
+
+**Implementation:** Added optional `lparen`/`rparen` to `Call` variant, a `trailing_closure_arg` parser, and an `attach_trailing_closures` helper function.
 
 ---
 

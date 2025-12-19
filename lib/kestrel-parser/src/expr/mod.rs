@@ -246,13 +246,15 @@ pub enum ExprVariant {
         operator_span: Span,
         rhs: Box<ExprVariant>,
     },
-    /// Call expression: callee(args)
+    /// Call expression: callee(args) or callee { closure }
     Call {
         callee: Box<ExprVariant>,
-        lparen: Span,
+        /// Left paren (None for trailing-closure-only calls)
+        lparen: Option<Span>,
         arguments: Vec<CallArg>,
         commas: Vec<Span>,
-        rparen: Span,
+        /// Right paren (None for trailing-closure-only calls)
+        rparen: Option<Span>,
     },
     /// Assignment expression: lhs = rhs
     Assignment {
@@ -642,10 +644,10 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                     ),
             )
             .map(|(lparen, (arguments, commas, rparen))| PostfixOp::Call {
-                lparen,
+                lparen: Some(lparen),
                 arguments,
                 commas,
-                rparen,
+                rparen: Some(rparen),
             });
 
         // Member access: .identifier or .identifier[T] or tuple index: .0, .1
@@ -1151,6 +1153,37 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 })
         };
 
+        // Trailing closure argument parser: { closure } or label: { closure }
+        // Returns a CallArg with the closure as value
+        let trailing_closure_arg = {
+            let closure_for_trailing = closure_expr.clone();
+            skip_trivia()
+                .ignore_then(
+                    // Optional label: identifier followed by colon
+                    filter_map(|span, token| match token {
+                        Token::Identifier => Ok(Span::from(span)),
+                        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                    })
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span))),
+                    )
+                    .or_not(),
+                )
+                .then(closure_for_trailing)
+                .map(|(label_opt, closure)| {
+                    let (label, colon) = match label_opt {
+                        Some((l, c)) => (Some(l), Some(c)),
+                        None => (None, None),
+                    };
+                    CallArg {
+                        label,
+                        colon,
+                        value: closure,
+                    }
+                })
+        };
+
         // Full primary expressions (includes arrays, tuples, paren, if, while, loop, break, continue, return, closures)
         let primary = float
             .or(integer)
@@ -1168,12 +1201,14 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .or(closure_expr)
             .or(path);
 
-        // Postfix expression: primary followed by zero or more postfix operations
+        // Postfix expression: primary followed by zero or more postfix operations,
+        // then zero or more trailing closures
         let postfix = primary
             .clone()
             .then(postfix_op.repeated())
-            .map(|(base, ops)| {
-                ops.into_iter().fold(base, |acc, op| match op {
+            .then(trailing_closure_arg.repeated())
+            .map(|((base, ops), trailing_closures)| {
+                let result = ops.into_iter().fold(base, |acc, op| match op {
                     PostfixOp::Call {
                         lparen,
                         arguments,
@@ -1209,7 +1244,13 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         operator,
                         operator_span,
                     },
-                })
+                });
+
+                if trailing_closures.is_empty() {
+                    result
+                } else {
+                    attach_trailing_closures(result, trailing_closures)
+                }
             });
 
         let unary = unary_op
@@ -1278,12 +1319,12 @@ enum ElseClauseVariant {
 /// Helper enum for postfix operations (calls, member access, and postfix operators)
 #[derive(Debug, Clone)]
 enum PostfixOp {
-    /// Function call: (args)
+    /// Function call: (args) - always has parens since this is parsed from `(args)` syntax
     Call {
-        lparen: Span,
+        lparen: Option<Span>,
         arguments: Vec<CallArg>,
         commas: Vec<Span>,
-        rparen: Span,
+        rparen: Option<Span>,
     },
     /// Member access: .identifier or .identifier[T]
     MemberAccess {
@@ -1306,10 +1347,10 @@ enum PostfixOp {
 enum ConditionPostfixOp {
     /// Function call: (args)
     Call {
-        lparen: Span,
+        lparen: Option<Span>,
         arguments: Vec<CallArg>,
         commas: Vec<Span>,
-        rparen: Span,
+        rparen: Option<Span>,
     },
     /// Member access: .identifier or .identifier[T]
     MemberAccess {
@@ -1332,6 +1373,51 @@ fn is_inline_statement_like(expr: &ExprVariant) -> bool {
             | ExprVariant::Loop { .. }
             | ExprVariant::Return { .. }
     )
+}
+
+/// Attach trailing closures to an expression
+/// This converts `expr { closure }` into a Call expression
+fn attach_trailing_closures(expr: ExprVariant, trailing: Vec<CallArg>) -> ExprVariant {
+    match expr {
+        // Existing call: append trailing closures to arguments
+        ExprVariant::Call {
+            callee,
+            lparen,
+            mut arguments,
+            commas,
+            rparen,
+        } => {
+            arguments.extend(trailing);
+            ExprVariant::Call {
+                callee,
+                lparen,
+                arguments,
+                commas,
+                rparen,
+            }
+        }
+
+        // Path becomes a call with no parens
+        path @ ExprVariant::Path { .. } => ExprVariant::Call {
+            callee: Box::new(path),
+            lparen: None,
+            arguments: trailing,
+            commas: vec![],
+            rparen: None,
+        },
+
+        // MemberAccess becomes a call with no parens
+        member @ ExprVariant::MemberAccess { .. } => ExprVariant::Call {
+            callee: Box::new(member),
+            lparen: None,
+            arguments: trailing,
+            commas: vec![],
+            rparen: None,
+        },
+
+        // Other expressions can't have trailing closures attached
+        other => other,
+    }
 }
 
 /// Check if a token is a binary operator
@@ -1419,10 +1505,10 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             emit_call_expr(
                 sink,
                 callee,
-                lparen.clone(),
+                lparen.as_ref(),
                 arguments,
                 commas,
-                rparen.clone(),
+                rparen.as_ref(),
             );
         }
         ExprVariant::Assignment { lhs, equals, rhs } => {
@@ -1739,10 +1825,10 @@ fn emit_unary_expr(sink: &mut EventSink, tok: Token, span: Span, operand: &ExprV
 fn emit_call_expr(
     sink: &mut EventSink,
     callee: &ExprVariant,
-    lparen: Span,
+    lparen: Option<&Span>,
     arguments: &[CallArg],
     commas: &[Span],
-    rparen: Span,
+    rparen: Option<&Span>,
 ) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprCall);
@@ -1752,7 +1838,10 @@ fn emit_call_expr(
 
     // Emit the argument list
     sink.start_node(SyntaxKind::ArgumentList);
-    sink.add_token(SyntaxKind::LParen, lparen);
+
+    if let Some(lp) = lparen {
+        sink.add_token(SyntaxKind::LParen, lp.clone());
+    }
 
     for (i, arg) in arguments.iter().enumerate() {
         sink.start_node(SyntaxKind::Argument);
@@ -1774,7 +1863,10 @@ fn emit_call_expr(
         }
     }
 
-    sink.add_token(SyntaxKind::RParen, rparen);
+    if let Some(rp) = rparen {
+        sink.add_token(SyntaxKind::RParen, rp.clone());
+    }
+
     sink.finish_node(); // ArgumentList
 
     sink.finish_node(); // ExprCall
@@ -2814,6 +2906,80 @@ mod tests {
     #[test]
     fn test_path_type_args_then_method() {
         let source = "List[Int].new().push(1)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    // ===== Trailing Closure Tests =====
+
+    #[test]
+    fn test_trailing_closure_simple() {
+        // apply { 42 }
+        let source = "apply { 42 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_with_params() {
+        // apply { (x) in x * 2 }
+        let source = "apply { (x) in x * 2 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_after_parens() {
+        // fold(0) { (acc, n) in acc + n }
+        let source = "fold(0) { (acc, n) in acc + n }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_multiple_args() {
+        // combine(1, 2) { it * 2 }
+        let source = "combine(1, 2) { it * 2 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_with_label() {
+        // apply f: { 42 }
+        let source = "apply f: { 42 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_on_method() {
+        // obj.method { 42 }
+        let source = "obj.method { 42 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_chained() {
+        // foo().bar { 42 }
+        let source = "foo().bar { 42 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_multiple_trailing_closures() {
+        // configure onTap: { 1 } onLongPress: { 2 }
+        let source = "configure onTap: { 1 } onLongPress: { 2 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_trailing_closure_after_args_with_label() {
+        // Button(title: "OK") onTap: { save() }
+        let source = r#"Button(title: "OK") onTap: { save() }"#;
         let expr = parse_expr_from_source(source);
         assert!(expr.is_call());
     }
