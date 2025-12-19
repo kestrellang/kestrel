@@ -8,8 +8,10 @@
 //! - Associated types
 //! - Import statements
 //! - Extensions with conformances
+//! - Enums and cases
 
 mod associated_types;
+mod enums;
 mod extensions;
 mod functions;
 mod imports;
