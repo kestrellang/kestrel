@@ -28,6 +28,9 @@ pub fn generate_constraints(
     block: &CodeBlock,
     return_type: Option<&Ty>,
 ) {
+    // Store return type in context for use by nested return statements
+    ctx.set_return_type(return_type.cloned());
+
     // Process all statements
     for stmt in &block.statements {
         generate_statement_constraints(ctx, stmt);
@@ -267,8 +270,22 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         ExprKind::Return { value } => {
             if let Some(val) = value {
                 generate_expression_constraints(ctx, val);
+
+                // Equate return value type with function return type
+                if let Some(ret_ty) = ctx.return_type().cloned() {
+                    ctx.register_type(&ret_ty);
+                    ctx.register_type(&val.ty);
+                    ctx.equate(ret_ty.id(), val.ty.id(), val.span.clone());
+                }
+            } else {
+                // Return with no value - equate Unit with return type
+                if let Some(ret_ty) = ctx.return_type().cloned() {
+                    let unit_ty = Ty::unit(expr.span.clone());
+                    ctx.register_type(&unit_ty);
+                    ctx.register_type(&ret_ty);
+                    ctx.equate(unit_ty.id(), ret_ty.id(), expr.span.clone());
+                }
             }
-            // TODO: Equate return value type with function return type
         }
 
         ExprKind::Closure { body, tail_expr, params, uses_it, implicit_param, .. } => {

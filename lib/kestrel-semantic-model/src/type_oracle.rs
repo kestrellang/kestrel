@@ -302,6 +302,12 @@ impl TypeOracle for SemanticModel {
     fn expand_type_alias(&self, ty: &Ty) -> Ty {
         ty.expand_aliases()
     }
+
+    fn symbol_name(&self, symbol_id: SymbolId) -> Option<String> {
+        use crate::queries::SymbolFor;
+        let symbol = self.query(SymbolFor { id: symbol_id })?;
+        Some(symbol.metadata().name().value.clone())
+    }
 }
 
 /// Get the container symbol and substitutions from a type.

@@ -98,4 +98,18 @@ pub trait TypeOracle {
         // Default implementation uses Ty::expand_aliases
         ty.expand_aliases()
     }
+
+    /// Get the name of a symbol by its ID.
+    ///
+    /// Used for error messages when reporting conformance failures
+    /// or other diagnostics that need to display symbol names.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol_id` - The symbol ID to look up
+    ///
+    /// # Returns
+    ///
+    /// The symbol's name, or None if not found.
+    fn symbol_name(&self, symbol_id: SymbolId) -> Option<String>;
 }

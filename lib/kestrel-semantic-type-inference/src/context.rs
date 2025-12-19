@@ -67,6 +67,8 @@ pub struct InferenceContext<'a> {
     errors: Vec<InferenceError>,
     /// Closure metadata for error reporting (TyId -> ClosureMetadata)
     closure_metadata: HashMap<TyId, ClosureMetadata>,
+    /// The expected return type for the current function/method body
+    return_type: Option<Ty>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -80,6 +82,7 @@ impl<'a> InferenceContext<'a> {
             type_registry: HashMap::new(),
             errors: Vec::new(),
             closure_metadata: HashMap::new(),
+            return_type: None,
         }
     }
 
@@ -219,6 +222,18 @@ impl<'a> InferenceContext<'a> {
         self.closure_metadata.insert(metadata.ty_id, metadata);
     }
 
+    /// Set the expected return type for the current function body.
+    ///
+    /// This is used to check that `return` statements have the correct type.
+    pub fn set_return_type(&mut self, ty: Option<Ty>) {
+        self.return_type = ty;
+    }
+
+    /// Get the expected return type, if set.
+    pub fn return_type(&self) -> Option<&Ty> {
+        self.return_type.as_ref()
+    }
+
     // === Solving ===
 
     /// Solve all collected constraints and return a solution.
@@ -309,6 +324,10 @@ mod tests {
         }
 
         fn resolve_associated_type(&self, _container: &Ty, _assoc_name: &str) -> Option<Ty> {
+            None
+        }
+
+        fn symbol_name(&self, _symbol_id: SymbolId) -> Option<String> {
             None
         }
     }

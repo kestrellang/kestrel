@@ -591,10 +591,13 @@ fn check_conforms(
     if ctx.oracle().conforms_to(&resolved, protocol.symbol_id) {
         Ok(SolveResult::Solved)
     } else {
-        // TODO: Get protocol name from oracle
+        let protocol_name = ctx
+            .oracle()
+            .symbol_name(protocol.symbol_id)
+            .unwrap_or_else(|| format!("{:?}", protocol.symbol_id));
         Err(InferenceError::conformance_failure(
             resolved.clone(),
-            format!("{:?}", protocol.symbol_id),
+            protocol_name,
             protocol.span.clone(),
         ))
     }
@@ -861,6 +864,10 @@ mod tests {
         }
 
         fn resolve_associated_type(&self, _container: &Ty, _assoc_name: &str) -> Option<Ty> {
+            None
+        }
+
+        fn symbol_name(&self, _symbol_id: SymbolId) -> Option<String> {
             None
         }
     }
