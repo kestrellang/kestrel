@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use kestrel_semantic_tree::ty::{Ty, TyId, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
 use kestrel_span::Span;
 
 use crate::constraint::Constraint;
@@ -101,6 +101,10 @@ fn unify(
     let ty_a = resolve_type(ctx, a);
     let ty_b = resolve_type(ctx, b);
 
+    // Keep track of original IDs for closure metadata lookup
+    let original_a = a;
+    let original_b = b;
+
     // If both are the same TyId (after resolution), they're already unified
     if ty_a.id() == ty_b.id() {
         return Ok(SolveResult::Solved);
@@ -137,6 +141,142 @@ fn unify(
         // Never unifies with anything (bottom type)
         (TyKind::Never, _) | (_, TyKind::Never) => Ok(SolveResult::Solved),
 
+        // UnresolvedFunction with Function - check param info compatibility
+        (
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type: ret_unresolved,
+            },
+            TyKind::Function {
+                params: expected_params,
+                return_type: expected_return,
+            },
+        ) => {
+            match param_info {
+                ParamInfo::Unconstrained => {
+                    // Accept any arity - no param constraints to check
+                    // Just unify return types
+                }
+                ParamInfo::ImplicitIt { it_type } => {
+                    if expected_params.len() != 1 {
+                        return Err(InferenceError::it_used_with_wrong_arity(
+                            expected_params.len(),
+                            span.clone(),
+                        ));
+                    }
+                    // Equate the it_type with the expected single parameter
+                    ctx.equate(it_type.id(), expected_params[0].id(), span.clone());
+                }
+                ParamInfo::Explicit { param_types } => {
+                    if param_types.len() != expected_params.len() {
+                        return Err(InferenceError::closure_arity_mismatch(
+                            param_types.len(),
+                            expected_params.len(),
+                            span.clone(),
+                        ));
+                    }
+                    for (a, b) in param_types.iter().zip(expected_params.iter()) {
+                        ctx.equate(a.id(), b.id(), span.clone());
+                    }
+                }
+            }
+            // Unify return types
+            ctx.equate(ret_unresolved.id(), expected_return.id(), span.clone());
+            Ok(SolveResult::Solved)
+        }
+
+        // Function with UnresolvedFunction (symmetric case)
+        (
+            TyKind::Function {
+                params: expected_params,
+                return_type: expected_return,
+            },
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type: ret_unresolved,
+            },
+        ) => {
+            match param_info {
+                ParamInfo::Unconstrained => {
+                    // Accept any arity - no param constraints to check
+                }
+                ParamInfo::ImplicitIt { it_type } => {
+                    if expected_params.len() != 1 {
+                        return Err(InferenceError::it_used_with_wrong_arity(
+                            expected_params.len(),
+                            span.clone(),
+                        ));
+                    }
+                    ctx.equate(it_type.id(), expected_params[0].id(), span.clone());
+                }
+                ParamInfo::Explicit { param_types } => {
+                    if param_types.len() != expected_params.len() {
+                        return Err(InferenceError::closure_arity_mismatch(
+                            param_types.len(),
+                            expected_params.len(),
+                            span.clone(),
+                        ));
+                    }
+                    for (a, b) in param_types.iter().zip(expected_params.iter()) {
+                        ctx.equate(a.id(), b.id(), span.clone());
+                    }
+                }
+            }
+            ctx.equate(ret_unresolved.id(), expected_return.id(), span.clone());
+            Ok(SolveResult::Solved)
+        }
+
+        // UnresolvedFunction with UnresolvedFunction
+        (
+            TyKind::UnresolvedFunction {
+                param_info: info_a,
+                return_type: ret_a,
+            },
+            TyKind::UnresolvedFunction {
+                param_info: info_b,
+                return_type: ret_b,
+            },
+        ) => {
+            // Unify param infos if compatible
+            match (info_a, info_b) {
+                (ParamInfo::Unconstrained, _) | (_, ParamInfo::Unconstrained) => {
+                    // One is unconstrained, the other's constraints win
+                    // Just unify return types
+                }
+                (ParamInfo::ImplicitIt { it_type: it_a }, ParamInfo::ImplicitIt { it_type: it_b }) => {
+                    // Both use it - unify the it types
+                    ctx.equate(it_a.id(), it_b.id(), span.clone());
+                }
+                (ParamInfo::Explicit { param_types: params_a }, ParamInfo::Explicit { param_types: params_b }) => {
+                    // Both have explicit params - must match arity
+                    if params_a.len() != params_b.len() {
+                        return Err(InferenceError::closure_arity_mismatch(
+                            params_a.len(),
+                            params_b.len(),
+                            span.clone(),
+                        ));
+                    }
+                    for (a, b) in params_a.iter().zip(params_b.iter()) {
+                        ctx.equate(a.id(), b.id(), span.clone());
+                    }
+                }
+                (ParamInfo::ImplicitIt { it_type }, ParamInfo::Explicit { param_types }) |
+                (ParamInfo::Explicit { param_types }, ParamInfo::ImplicitIt { it_type }) => {
+                    // ImplicitIt requires exactly 1 param
+                    if param_types.len() != 1 {
+                        return Err(InferenceError::closure_arity_mismatch(
+                            1,
+                            param_types.len(),
+                            span.clone(),
+                        ));
+                    }
+                    ctx.equate(it_type.id(), param_types[0].id(), span.clone());
+                }
+            }
+            ctx.equate(ret_a.id(), ret_b.id(), span.clone());
+            Ok(SolveResult::Solved)
+        }
+
         // Structural unification for compound types
         (TyKind::Tuple(elems_a), TyKind::Tuple(elems_b)) => {
             if elems_a.len() != elems_b.len() {
@@ -167,18 +307,109 @@ fn unify(
                 return_type: ret_b,
             },
         ) => {
-            if params_a.len() != params_b.len() {
-                return Err(InferenceError::type_mismatch(
-                    ty_a.clone(),
-                    ty_b.clone(),
-                    span.clone(),
-                ));
+            // Check if either side is a closure - if so, emit closure-specific errors
+            // Check both the resolved type ID and the original ID
+            let closure_a = ctx.closure_metadata().get(&ty_a.id()).cloned()
+                .or_else(|| ctx.closure_metadata().get(&original_a).cloned());
+            let closure_b = ctx.closure_metadata().get(&ty_b.id()).cloned()
+                .or_else(|| ctx.closure_metadata().get(&original_b).cloned());
+
+            // Determine which type is the closure and which is the expected type
+            if let Some(closure_meta) = closure_a {
+                // ty_a is a closure, ty_b is expected type
+                let expected_params = params_b;
+                let expected_return = ret_b;
+
+                // 1. Check if `it` is used with wrong arity
+                if closure_meta.uses_it && expected_params.len() != 1 {
+                    return Err(InferenceError::it_used_with_wrong_arity(
+                        expected_params.len(),
+                        closure_meta.span.clone(),
+                    ));
+                }
+
+                // 2. Check arity mismatch
+                // For implicit-it closures (param_count=0 and no explicit params), arity is determined by uses_it
+                let expected_arity = if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
+                    // Implicit-it closure: arity is 1 if uses_it, else 0
+                    if closure_meta.uses_it { 1 } else { 0 }
+                } else {
+                    // Explicit-param closure: use param_count directly
+                    closure_meta.param_count
+                };
+
+                if expected_arity != expected_params.len() {
+                    return Err(InferenceError::closure_arity_mismatch(
+                        expected_arity,
+                        expected_params.len(),
+                        closure_meta.span.clone(),
+                    ));
+                }
+
+                // 3. Check parameter types (generate constraints for now, errors will surface later)
+                for (pa, pb) in params_a.iter().zip(expected_params.iter()) {
+                    ctx.equate(pa.id(), pb.id(), span.clone());
+                }
+
+                // 4. Check return type (generate constraint for now, errors will surface later)
+                ctx.equate(ret_a.id(), expected_return.id(), span.clone());
+
+                Ok(SolveResult::Solved)
+            } else if let Some(closure_meta) = closure_b {
+                // ty_b is a closure, ty_a is expected type
+                let expected_params = params_a;
+                let expected_return = ret_a;
+
+                // 1. Check if `it` is used with wrong arity
+                if closure_meta.uses_it && expected_params.len() != 1 {
+                    return Err(InferenceError::it_used_with_wrong_arity(
+                        expected_params.len(),
+                        closure_meta.span.clone(),
+                    ));
+                }
+
+                // 2. Check arity mismatch
+                // For implicit-it closures (param_count=0 and no explicit params), arity is determined by uses_it
+                let expected_arity = if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
+                    // Implicit-it closure: arity is 1 if uses_it, else 0
+                    if closure_meta.uses_it { 1 } else { 0 }
+                } else {
+                    // Explicit-param closure: use param_count directly
+                    closure_meta.param_count
+                };
+
+                if expected_arity != expected_params.len() {
+                    return Err(InferenceError::closure_arity_mismatch(
+                        expected_arity,
+                        expected_params.len(),
+                        closure_meta.span.clone(),
+                    ));
+                }
+
+                // 3. Check parameter types (generate constraints for now, errors will surface later)
+                for (pa, pb) in params_b.iter().zip(expected_params.iter()) {
+                    ctx.equate(pa.id(), pb.id(), span.clone());
+                }
+
+                // 4. Check return type (generate constraint for now, errors will surface later)
+                ctx.equate(ret_b.id(), expected_return.id(), span.clone());
+
+                Ok(SolveResult::Solved)
+            } else {
+                // Neither is a closure - use generic function mismatch error
+                if params_a.len() != params_b.len() {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+                for (pa, pb) in params_a.iter().zip(params_b.iter()) {
+                    ctx.equate(pa.id(), pb.id(), span.clone());
+                }
+                ctx.equate(ret_a.id(), ret_b.id(), span.clone());
+                Ok(SolveResult::Solved)
             }
-            for (pa, pb) in params_a.iter().zip(params_b.iter()) {
-                ctx.equate(pa.id(), pb.id(), span.clone());
-            }
-            ctx.equate(ret_a.id(), ret_b.id(), span.clone());
-            Ok(SolveResult::Solved)
         }
 
         // Nominal types - check symbol equality and unify type arguments
@@ -530,6 +761,23 @@ fn occurs_check_inner(
                 .as_ref()
                 .map(|c| occurs_check_inner(var, c, ctx, visited))
                 .unwrap_or(false)
+        }
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            if occurs_check_inner(var, return_type, ctx, visited) {
+                return true;
+            }
+            match param_info {
+                ParamInfo::ImplicitIt { it_type } => {
+                    occurs_check_inner(var, it_type, ctx, visited)
+                }
+                ParamInfo::Explicit { param_types } => param_types
+                    .iter()
+                    .any(|p| occurs_check_inner(var, p, ctx, visited)),
+                ParamInfo::Unconstrained => false,
+            }
         }
         // Leaf types
         _ => false,

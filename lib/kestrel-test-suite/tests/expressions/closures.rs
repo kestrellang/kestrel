@@ -247,9 +247,9 @@ func apply(f: (Int) -> Int) -> Int {
 }
 
 func test() -> (Int) -> Int {
-    { 
-        let outer = it
-        apply { it + outer }
+    {
+        let outer = it;
+        apply({ it + outer })
     }
 }
 "#,
@@ -274,7 +274,7 @@ module Main
 
 func test() -> (Int) -> Int {
     { (x) in
-        let y = x * 2
+        let y = x * 2;
         y
     }
 }
@@ -292,9 +292,9 @@ module Main
 
 func test() -> (Int, Int) -> Int {
     { (x, y) in
-        let sum = x + y
-        let doubled = sum * 2
-        let result = doubled + 1
+        let sum = x + y;
+        let doubled = sum * 2;
+        let result = doubled + 1;
         result
     }
 }
@@ -312,9 +312,9 @@ module Main
 
 func test() -> (Int) -> Int {
     { (x) in
-        var acc = 0
-        acc = acc + x
-        acc = acc + x
+        var acc = 0;
+        acc = acc + x;
+        acc = acc + x;
         acc
     }
 }
@@ -353,11 +353,11 @@ module Main
 
 func test() -> (Int) -> Int {
     { (n) in
-        var i = 0
-        var sum = 0
+        var i = 0;
+        var sum = 0;
         while i < n {
-            sum = sum + i
-            i = i + 1
+            sum = sum + i;
+            i = i + 1;
         }
         sum
     }
@@ -383,7 +383,7 @@ mod captures {
 module Main
 
 func test() -> () -> Int {
-    let x = 10
+    let x = 10;
     { x + 1 }
 }
 "#,
@@ -399,7 +399,7 @@ func test() -> () -> Int {
 module Main
 
 func test() -> () -> Int {
-    var x = 10
+    var x = 10;
     { x + 1 }
 }
 "#,
@@ -415,9 +415,9 @@ func test() -> () -> Int {
 module Main
 
 func test() -> () -> Int {
-    let a = 1
-    let b = 2
-    let c = 3
+    let a = 1;
+    let b = 2;
+    let c = 3;
     { a + b + c }
 }
 "#,
@@ -448,9 +448,9 @@ func test(multiplier: Int) -> (Int) -> Int {
 module Main
 
 func test() -> () -> Int {
-    let outer = 100
+    let outer = 100;
     if true {
-        let inner = 10
+        let inner = 10;
         { outer + inner }
     } else {
         { outer }
@@ -469,9 +469,9 @@ func test() -> () -> Int {
 module Main
 
 func test() -> () -> Int {
-    var x = 10
-    { 
-        x = 20
+    var x = 10;
+    {
+        x = 20;
         x
     }
 }
@@ -489,9 +489,9 @@ func test() -> () -> Int {
 module Main
 
 func test() -> () -> Int {
-    var x = 10
-    let f = { x }
-    x = 20
+    var x = 10;
+    let f = { x };
+    x = 20;
     f
 }
 "#,
@@ -516,7 +516,7 @@ module Main
 
 func test() -> (Int) -> Int {
     { (x) in
-        x = 10
+        x = 10;
         x
     }
 }
@@ -674,7 +674,7 @@ func test() -> Int {
 module Main
 
 func test() {
-    let f: (Int, Int) -> Int = { (a, b) in a + b }
+    let f: (Int, Int) -> Int = { (a, b) in a + b };
 }
 "#,
         )
@@ -689,11 +689,11 @@ func test() {
 module Main
 
 func test() {
-    let f = { (x) in x }
+    let f = { (x) in x };
 }
 "#,
         )
-        .expect(HasError("cannot infer"));
+        .expect(HasError("could not infer type"));
     }
 
     #[test]
@@ -704,11 +704,11 @@ func test() {
 module Main
 
 func test() {
-    let f = { it + 1 }
+    let f = { it + 1 };
 }
 "#,
         )
-        .expect(HasError("cannot infer"));
+        .expect(HasError("could not infer type"));
     }
 }
 
@@ -787,7 +787,7 @@ func test() -> (Int) -> Int {
 module Main
 
 func test() {
-    let x: Int = { 42 }
+    let x: Int = { 42 };
 }
 "#,
         )
@@ -841,10 +841,10 @@ module Main
 
 func test() -> Int {
     let result = {
-        let a = 10
-        let b = 20
+        let a = 10;
+        let b = 20;
         a + b
-    }()
+    }();
     result
 }
 "#,
@@ -883,7 +883,7 @@ mod closures_as_values {
 module Main
 
 func test() -> Int {
-    let f: (Int) -> Int = { it * 2 }
+    let f: (Int) -> Int = { it * 2 };
     f(21)
 }
 "#,
@@ -922,7 +922,7 @@ func makeAdder(n: Int) -> (Int) -> Int {
 }
 
 func test() -> Int {
-    let add5 = makeAdder(5)
+    let add5 = makeAdder(5);
     add5(10)
 }
 "#,
@@ -942,8 +942,8 @@ struct Callback {
 }
 
 func test() -> Int {
-    let cb = Callback(action: { 42 })
-    cb.action()
+    let cb = Callback(action: { 42 });
+    (cb.action)()
 }
 "#,
         )
@@ -962,8 +962,8 @@ struct Handler[T] {
 }
 
 func test() -> Int {
-    let h = Handler[Int](handle: { it * 2 })
-    h.handle(21)
+    let h = Handler[Int](handle: { it * 2 });
+    (h.handle)(21)
 }
 "#,
         )
@@ -1001,8 +1001,8 @@ func test() -> (Int) -> (Int) -> Int {
 module Main
 
 func test() -> Int {
-    let f: (Int) -> (Int) -> Int = { (x) in { (y) in x + y } }
-    let add10 = f(10)
+    let f: (Int) -> (Int) -> Int = { (x) in { (y) in x + y } };
+    let add10 = f(10);
     add10(5)
 }
 "#,
@@ -1038,8 +1038,8 @@ func apply(f: (Int) -> Int) -> Int {
 
 func test() -> (Int) -> Int {
     {
-        let outer = it
-        apply { it + outer }
+        let outer = it;
+        apply({ it + outer })
     }
 }
 "#,
@@ -1128,9 +1128,9 @@ func earlyReturn(f: () -> Int) -> Int {
 }
 
 func test() -> Int {
-    earlyReturn { 
+    earlyReturn({
         return 42
-    }
+    })
 }
 "#,
         )
@@ -1224,7 +1224,7 @@ module Main
 
 func test() -> (Int) -> Int {
     {
-        let it = 100
+        let it = 100;
         it
     }
 }

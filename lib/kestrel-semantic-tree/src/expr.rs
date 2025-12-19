@@ -495,9 +495,63 @@ pub enum ExprKind {
         value: Option<Box<Expression>>,
     },
 
+    /// Closure expression: `{ params in body }` or `{ body }`
+    ///
+    /// Closures are anonymous functions that can capture variables from their enclosing scope.
+    /// Type is a function type based on parameters and return type.
+    Closure {
+        /// Explicit parameters, if any. None means implicit `it` style.
+        params: Option<Vec<ClosureParam>>,
+        /// Statements in the closure body
+        body: Vec<crate::stmt::Statement>,
+        /// Final expression (implicit return value)
+        tail_expr: Option<Box<Expression>>,
+        /// Variables captured from enclosing scope (filled by capture analysis)
+        captures: Vec<Capture>,
+        /// Whether `it` was actually referenced in the body (only meaningful when params is None)
+        uses_it: bool,
+        /// The implicit `it` parameter, if present (when params is None)
+        implicit_param: Option<(LocalId, Ty, Span)>,
+    },
+
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
+}
+
+/// A closure parameter.
+#[derive(Debug, Clone)]
+pub struct ClosureParam {
+    /// Parameter name
+    pub name: String,
+    /// Parameter type (may be inferred initially)
+    pub ty: Ty,
+    /// Whether the type was explicitly annotated
+    pub is_type_annotated: bool,
+    /// Source span
+    pub span: Span,
+}
+
+/// A captured variable from an enclosing scope.
+#[derive(Debug, Clone)]
+pub struct Capture {
+    /// The local variable ID being captured
+    pub local_id: LocalId,
+    /// Name of the captured variable
+    pub name: String,
+    /// Type of the captured variable
+    pub ty: Ty,
+    /// How the variable is captured
+    pub kind: CaptureKind,
+    /// Span where the capture occurs
+    pub span: Span,
+}
+
+/// How a variable is captured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureKind {
+    /// Immutable copy (only option currently)
+    Value,
 }
 
 /// Information about a loop label.
@@ -731,6 +785,26 @@ impl Expression {
                 } else {
                     "return".to_string()
                 }
+            }
+            ExprKind::Closure { params, tail_expr, uses_it, .. } => {
+                let params_str = match params {
+                    Some(ps) => {
+                        let p: Vec<_> = ps.iter().map(|p| p.name.clone()).collect();
+                        format!("({}) in ", p.join(", "))
+                    }
+                    None => {
+                        if *uses_it {
+                            String::new() // Implicit `it` style
+                        } else {
+                            String::new() // No params, no `it`
+                        }
+                    }
+                };
+                let body_str = tail_expr
+                    .as_ref()
+                    .map(|e| e.debug_compact())
+                    .unwrap_or_else(|| "...".to_string());
+                format!("{{ {}{} }}", params_str, body_str)
             }
             ExprKind::Error => "<error>".to_string(),
         }
@@ -1021,6 +1095,28 @@ impl Expression {
         }
     }
 
+    /// Create a primitive method call expression with an explicit result type.
+    /// Used when the receiver type is Infer and we can't determine the return type yet.
+    pub fn primitive_method_call_with_type(
+        receiver: Expression,
+        method: PrimitiveMethod,
+        arguments: Vec<CallArgument>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::PrimitiveMethodCall {
+                receiver: Box::new(receiver),
+                method,
+                arguments,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
     /// Create an error expression (poison value).
     pub fn error(span: Span) -> Self {
         Expression {
@@ -1194,6 +1290,36 @@ impl Expression {
                 value: value.map(Box::new),
             },
             ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a closure expression.
+    ///
+    /// Closures are anonymous functions that can capture variables from their enclosing scope.
+    /// The type should be a function type matching the parameters and return type.
+    pub fn closure(
+        params: Option<Vec<ClosureParam>>,
+        body: Vec<crate::stmt::Statement>,
+        tail_expr: Option<Expression>,
+        captures: Vec<Capture>,
+        uses_it: bool,
+        implicit_param: Option<(LocalId, Ty, Span)>,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Closure {
+                params,
+                body,
+                tail_expr: tail_expr.map(Box::new),
+                captures,
+                uses_it,
+                implicit_param,
+            },
+            ty,
             span,
             mutable: false,
         }

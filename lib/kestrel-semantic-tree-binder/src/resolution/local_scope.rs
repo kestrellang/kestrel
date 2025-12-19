@@ -146,6 +146,7 @@ mod tests {
     use super::*;
     use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
     use kestrel_semantic_tree::language::KestrelLanguage;
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
     use kestrel_span::Name;
     use kestrel_span::Span;

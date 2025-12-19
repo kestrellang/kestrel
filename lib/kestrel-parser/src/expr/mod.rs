@@ -133,6 +133,11 @@ impl Expression {
     pub fn is_return(&self) -> bool {
         self.kind() == SyntaxKind::ExprReturn
     }
+
+    /// Check if this is a closure expression
+    pub fn is_closure(&self) -> bool {
+        self.kind() == SyntaxKind::ExprClosure
+    }
 }
 
 /// Parser for type arguments with full type support: [T, (A, B), [Int], (X) -> Y]
@@ -290,6 +295,14 @@ pub enum ExprVariant {
         return_span: Span,
         value: Option<Box<ExprVariant>>,
     },
+    /// Closure expression: { params in body } or { body }
+    Closure {
+        lbrace: Span,
+        params: Option<ClosureParamsData>,
+        in_span: Option<Span>,
+        body: Vec<BlockItem>,
+        rbrace: Span,
+    },
 }
 
 /// Loop label data: label:
@@ -297,6 +310,23 @@ pub enum ExprVariant {
 pub struct LabelData {
     pub name: Span,
     pub colon: Span,
+}
+
+/// Closure parameter list data: (x, y: Int)
+#[derive(Debug, Clone)]
+pub struct ClosureParamsData {
+    pub lparen: Span,
+    pub params: Vec<ClosureParamData>,
+    pub commas: Vec<Span>,
+    pub rparen: Span,
+}
+
+/// Single closure parameter: name or name: Type
+#[derive(Debug, Clone)]
+pub struct ClosureParamData {
+    pub name: Span,
+    pub colon: Option<Span>,
+    pub ty: Option<TyVariant>,
 }
 
 /// Else clause: either a block or another if expression
@@ -1015,7 +1045,113 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             )
             .map(|(return_span, value)| ExprVariant::Return { return_span, value });
 
-        // Full primary expressions (includes arrays, tuples, paren, if, while, loop, break, continue, return)
+        // Closure expression: { params in body } or { body }
+        let closure_expr = {
+            let expr_for_closure_body = expr.clone();
+
+            // Single closure parameter: name or name: Type
+            let closure_param = skip_trivia()
+                .ignore_then(just(Token::Identifier).map_with_span(|_, span| Span::from(span)))
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
+                        .then(ty_parser())
+                        .or_not(),
+                )
+                .map(|(name, ty_opt)| {
+                    let (colon, ty) = match ty_opt {
+                        Some((c, t)) => (Some(c), Some(t)),
+                        None => (None, None),
+                    };
+                    ClosureParamData { name, colon, ty }
+                });
+
+            // Closure parameter list: (param, param, ...)
+            let closure_params = skip_trivia()
+                .ignore_then(just(Token::LParen).map_with_span(|_, span| Span::from(span)))
+                .then(
+                    closure_param
+                        .clone()
+                        .separated_by(skip_trivia().ignore_then(just(Token::Comma).map_with_span(|_, span| Span::from(span))))
+                        .allow_trailing()
+                        .map(|params| {
+                            // Extract commas - we'll track them properly later if needed
+                            let _commas: Vec<Span> = vec![];
+                            params
+                        }),
+                )
+                .then_ignore(skip_trivia())
+                .then(just(Token::RParen).map_with_span(|_, span| Span::from(span)))
+                .then_ignore(skip_trivia())
+                .then(just(Token::In).map_with_span(|_, span| Span::from(span)))
+                .map(|(((lparen, params), rparen), in_span)| {
+                    let commas: Vec<Span> = vec![];
+                    (
+                        Some(ClosureParamsData { lparen, params, commas, rparen }),
+                        Some(in_span),
+                    )
+                });
+
+            // Closure body item - reuse the same logic as inline_code_block
+            let closure_block_item =
+                inline_var_decl
+                    .clone()
+                    .map(BlockItem::Statement)
+                    .or(expr_for_closure_body
+                        .clone()
+                        .then(
+                            skip_trivia()
+                                .ignore_then(
+                                    just(Token::Semicolon)
+                                        .map_with_span(|_, span| Span::from(span)),
+                                )
+                                .map(Some)
+                                .or(empty().map(|_| None)),
+                        )
+                        .try_map(|(e, maybe_semi), span| {
+                            if let Some(semi) = maybe_semi {
+                                // Has semicolon - it's a regular expression statement
+                                Ok(BlockItem::Statement(StmtVariant::Expression(e, semi)))
+                            } else if is_inline_statement_like(&e) {
+                                // No semicolon but it's statement-like (if/while/loop) - OK
+                                Ok(BlockItem::StatementExpr(e))
+                            } else {
+                                // No semicolon and not statement-like - fail, let it be parsed as trailing
+                                Err(Simple::custom(span, "expected semicolon"))
+                            }
+                        }));
+
+            // Full closure: { [params in] body }
+            skip_trivia()
+                .ignore_then(just(Token::LBrace).map_with_span(|_, span| Span::from(span)))
+                .then(closure_params.or_not().map(|opt| opt.unwrap_or((None, None))))
+                .then(
+                    closure_block_item
+                        .repeated()
+                        .then(expr_for_closure_body.map(BlockItem::TrailingExpression).or_not())
+                        .map(|(mut statements, trailing)| {
+                            if let Some(expr) = trailing {
+                                statements.push(expr);
+                            }
+                            statements
+                        }),
+                )
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::RBrace).map_with_span(|_, span| Span::from(span))),
+                )
+                .map(|(((lbrace, (params, in_span)), body), rbrace)| {
+                    ExprVariant::Closure {
+                        lbrace,
+                        params,
+                        in_span,
+                        body,
+                        rbrace,
+                    }
+                })
+        };
+
+        // Full primary expressions (includes arrays, tuples, paren, if, while, loop, break, continue, return, closures)
         let primary = float
             .or(integer)
             .or(string)
@@ -1029,6 +1165,7 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .or(break_expr)
             .or(continue_expr)
             .or(return_expr)
+            .or(closure_expr)
             .or(path);
 
         // Postfix expression: primary followed by zero or more postfix operations
@@ -1346,6 +1483,15 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Return { return_span, value } => {
             emit_return_expr(sink, return_span.clone(), value.as_deref());
+        }
+        ExprVariant::Closure {
+            lbrace,
+            params,
+            in_span,
+            body,
+            rbrace,
+        } => {
+            emit_closure_expr(sink, lbrace.clone(), params, in_span, body, rbrace.clone());
         }
     }
 }
@@ -1828,6 +1974,78 @@ fn emit_return_expr(sink: &mut EventSink, return_span: Span, value: Option<&Expr
 
     sink.finish_node(); // ExprReturn
     sink.finish_node(); // Expression
+}
+
+/// Emit events for a closure expression
+fn emit_closure_expr(
+    sink: &mut EventSink,
+    lbrace: Span,
+    params: &Option<ClosureParamsData>,
+    in_span: &Option<Span>,
+    body: &[BlockItem],
+    rbrace: Span,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprClosure);
+
+    // Left brace
+    sink.add_token(SyntaxKind::LBrace, lbrace);
+
+    // Emit params if present
+    if let Some(params_data) = params {
+        sink.start_node(SyntaxKind::ClosureParams);
+        sink.add_token(SyntaxKind::LParen, params_data.lparen.clone());
+
+        for (i, param) in params_data.params.iter().enumerate() {
+            if i > 0 && i <= params_data.commas.len() {
+                sink.add_token(SyntaxKind::Comma, params_data.commas[i - 1].clone());
+            }
+            sink.start_node(SyntaxKind::ClosureParam);
+            sink.add_token(SyntaxKind::Identifier, param.name.clone());
+            if let Some(ref colon) = param.colon {
+                sink.add_token(SyntaxKind::Colon, colon.clone());
+            }
+            if let Some(ref ty) = param.ty {
+                emit_ty_variant(sink, ty);
+            }
+            sink.finish_node(); // ClosureParam
+        }
+
+        sink.add_token(SyntaxKind::RParen, params_data.rparen.clone());
+        sink.finish_node(); // ClosureParams
+    }
+
+    // Emit `in` keyword
+    if let Some(in_sp) = in_span {
+        sink.add_token(SyntaxKind::In, in_sp.clone());
+    }
+
+    // Emit body items
+    for item in body {
+        emit_block_item(sink, item);
+    }
+
+    // Right brace
+    sink.add_token(SyntaxKind::RBrace, rbrace);
+
+    sink.finish_node(); // ExprClosure
+    sink.finish_node(); // Expression
+}
+
+/// Helper to emit a block item
+fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
+    match item {
+        BlockItem::Statement(stmt) => {
+            use crate::stmt::emit_stmt_variant;
+            emit_stmt_variant(sink, stmt);
+        }
+        BlockItem::StatementExpr(expr) => {
+            emit_expr_variant(sink, expr);
+        }
+        BlockItem::TrailingExpression(expr) => {
+            emit_expr_variant(sink, expr);
+        }
+    }
 }
 
 /// Parse an expression and emit events
@@ -2468,6 +2686,64 @@ mod tests {
         let source = "continue outer";
         let expr = parse_expr_from_source(source);
         assert!(expr.is_continue());
+    }
+
+    // ===== Closure Expression Tests =====
+
+    #[test]
+    fn test_closure_no_params_no_body() {
+        let source = "{ }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_no_params_simple_body() {
+        let source = "{ 42 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_with_single_param() {
+        let source = "{ (x) in x * 2 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_with_multiple_params() {
+        let source = "{ (x, y) in x + y }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_with_type_annotation() {
+        let source = "{ (x: Int) in x * 2 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_with_mixed_type_annotations() {
+        let source = "{ (x: Int, y) in x + y }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_with_statements() {
+        let source = "{ (x) in let y: Int = x * 2; y }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
+    }
+
+    #[test]
+    fn test_closure_empty_params() {
+        let source = "{ () in 42 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_closure());
     }
 
     // ===== Type Arguments in Expression Tests =====

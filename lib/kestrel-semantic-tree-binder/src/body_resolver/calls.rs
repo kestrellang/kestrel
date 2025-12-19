@@ -23,12 +23,12 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::resolution::type_resolver::TypeResolver;
 
 use crate::diagnostics::{
-    AmbiguousTypeParameterInitError, FieldNotVisibleForInitError, ImplicitInitArityError,
-    ImplicitInitLabelError, InstanceMethodOnTypeError, MemberNotVisibleError,
-    NoInitInTypeParameterBoundsError, NoMatchingInitializerError, NoMatchingMethodError,
-    NoMatchingOverloadError, NoMatchingTypeParameterInitError, NonCallableError, NotGenericError,
-    OverloadDescription, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
-    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
+    AmbiguousTypeParameterInitError, ClosureArityError, FieldNotVisibleForInitError,
+    ImplicitInitArityError, ImplicitInitLabelError, InstanceMethodOnTypeError,
+    MemberNotVisibleError, NoInitInTypeParameterBoundsError, NoMatchingInitializerError,
+    NoMatchingMethodError, NoMatchingOverloadError, NoMatchingTypeParameterInitError,
+    NonCallableError, NotGenericError, OverloadDescription, TooFewTypeArgumentsError,
+    TooManyTypeArgumentsError, TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -358,17 +358,39 @@ pub fn resolve_call(
             }
 
             // Check if the type is callable
-            if let TyKind::Function { return_type, .. } = callee_ty.kind() {
-                Expression::call(callee, arguments, (**return_type).clone(), span)
-            } else {
-                ctx.diagnostics.add_diagnostic(
-                    NonCallableError {
-                        span: span.clone(),
-                        ty: format!("{}", callee_ty),
+            match callee_ty.kind() {
+                TyKind::Function {
+                    params,
+                    return_type,
+                } => {
+                    // Check argument count matches parameter count
+                    if arguments.len() != params.len() {
+                        ctx.diagnostics.add_diagnostic(
+                            ClosureArityError {
+                                span: span.clone(),
+                                expected: params.len(),
+                                provided: arguments.len(),
+                            }
+                            .into_diagnostic(),
+                        );
+                        return Expression::error(span);
                     }
-                    .into_diagnostic(),
-                );
-                Expression::error(span)
+                    Expression::call(callee, arguments, (**return_type).clone(), span)
+                }
+                TyKind::UnresolvedFunction { return_type, .. } => {
+                    // Callable - return type is known, params will be validated by type inference
+                    Expression::call(callee, arguments, (**return_type).clone(), span)
+                }
+                _ => {
+                    ctx.diagnostics.add_diagnostic(
+                        NonCallableError {
+                            span: span.clone(),
+                            ty: format!("{}", callee_ty),
+                        }
+                        .into_diagnostic(),
+                    );
+                    Expression::error(span)
+                }
             }
         }
 
@@ -388,17 +410,39 @@ pub fn resolve_call(
                 }
             }
 
-            if let TyKind::Function { return_type, .. } = callee_ty.kind() {
-                Expression::call(callee, arguments, (**return_type).clone(), span)
-            } else {
-                ctx.diagnostics.add_diagnostic(
-                    NonCallableError {
-                        span: span.clone(),
-                        ty: format!("{}", callee_ty),
+            match callee_ty.kind() {
+                TyKind::Function {
+                    params,
+                    return_type,
+                } => {
+                    // Check argument count matches parameter count
+                    if arguments.len() != params.len() {
+                        ctx.diagnostics.add_diagnostic(
+                            ClosureArityError {
+                                span: span.clone(),
+                                expected: params.len(),
+                                provided: arguments.len(),
+                            }
+                            .into_diagnostic(),
+                        );
+                        return Expression::error(span);
                     }
-                    .into_diagnostic(),
-                );
-                Expression::error(span)
+                    Expression::call(callee, arguments, (**return_type).clone(), span)
+                }
+                TyKind::UnresolvedFunction { return_type, .. } => {
+                    // Callable - return type is known, params will be validated by type inference
+                    Expression::call(callee, arguments, (**return_type).clone(), span)
+                }
+                _ => {
+                    ctx.diagnostics.add_diagnostic(
+                        NonCallableError {
+                            span: span.clone(),
+                            ty: format!("{}", callee_ty),
+                        }
+                        .into_diagnostic(),
+                    );
+                    Expression::error(span)
+                }
             }
         }
     }
@@ -591,7 +635,21 @@ fn resolve_single_function_call(
         return_ty
     };
 
-    Expression::generic_call(callee, arguments, call_substitutions, return_ty, span)
+    // Instantiate callee type with substitutions.
+    // This is the key fix: the callee's function type needs to have type parameters
+    // replaced with their concrete types so that constraint generation can properly
+    // unify closure types with the expected parameter types.
+    let instantiated_callee = if !call_substitutions.is_empty() {
+        let instantiated_ty = callee.ty.apply_substitutions(&call_substitutions);
+        Expression {
+            ty: instantiated_ty,
+            ..callee
+        }
+    } else {
+        callee
+    };
+
+    Expression::generic_call(instantiated_callee, arguments, call_substitutions, return_ty, span)
 }
 
 /// Collect a single overload description from a symbol.

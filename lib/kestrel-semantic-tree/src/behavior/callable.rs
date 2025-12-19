@@ -189,6 +189,13 @@ impl SignatureType {
                 // For associated types, use the associated type name
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }
+            TyKind::UnresolvedFunction { return_type, .. } => {
+                // Treat as a function type with unknown params
+                SignatureType::Function {
+                    params: vec![], // Unknown params
+                    return_type: Box::new(SignatureType::from_ty(return_type)),
+                }
+            }
         }
     }
 }

@@ -118,6 +118,7 @@ fn validate_assignment_target(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Return { .. }
+        | ExprKind::Closure { .. }
         | ExprKind::Error => {
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {

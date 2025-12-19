@@ -78,6 +78,46 @@ pub enum InferenceError {
         /// Description of what went wrong
         message: String,
     },
+
+    /// Closure has wrong number of parameters.
+    ClosureArityMismatch {
+        /// The closure's actual parameter count
+        actual: usize,
+        /// The expected parameter count
+        expected: usize,
+        /// Where the closure is defined
+        span: Span,
+    },
+
+    /// Closure return type doesn't match expected.
+    ClosureReturnTypeMismatch {
+        /// The closure's actual return type
+        actual: Ty,
+        /// The expected return type
+        expected: Ty,
+        /// Where the closure is defined
+        span: Span,
+    },
+
+    /// Closure parameter type doesn't match expected.
+    ClosureParamTypeMismatch {
+        /// The parameter index (0-based)
+        index: usize,
+        /// The closure's actual parameter type
+        actual: Ty,
+        /// The expected parameter type
+        expected: Ty,
+        /// Where the closure is defined
+        span: Span,
+    },
+
+    /// `it` used with wrong arity context.
+    ItUsedWithWrongArity {
+        /// The expected arity from context
+        expected_arity: usize,
+        /// Where the closure is defined
+        span: Span,
+    },
 }
 
 impl InferenceError {
@@ -134,6 +174,47 @@ impl InferenceError {
         }
     }
 
+    /// Create a closure arity mismatch error.
+    pub fn closure_arity_mismatch(actual: usize, expected: usize, span: Span) -> Self {
+        InferenceError::ClosureArityMismatch {
+            actual,
+            expected,
+            span,
+        }
+    }
+
+    /// Create a closure return type mismatch error.
+    pub fn closure_return_type_mismatch(actual: Ty, expected: Ty, span: Span) -> Self {
+        InferenceError::ClosureReturnTypeMismatch {
+            actual,
+            expected,
+            span,
+        }
+    }
+
+    /// Create a closure parameter type mismatch error.
+    pub fn closure_param_type_mismatch(
+        index: usize,
+        actual: Ty,
+        expected: Ty,
+        span: Span,
+    ) -> Self {
+        InferenceError::ClosureParamTypeMismatch {
+            index,
+            actual,
+            expected,
+            span,
+        }
+    }
+
+    /// Create an `it` used with wrong arity error.
+    pub fn it_used_with_wrong_arity(expected_arity: usize, span: Span) -> Self {
+        InferenceError::ItUsedWithWrongArity {
+            expected_arity,
+            span,
+        }
+    }
+
     /// Get the span associated with this error, if any.
     pub fn span(&self) -> Option<&Span> {
         match self {
@@ -144,6 +225,10 @@ impl InferenceError {
             InferenceError::AssociatedTypeNotFound { span, .. } => Some(span),
             InferenceError::Ambiguous { .. } => None,
             InferenceError::Internal { .. } => None,
+            InferenceError::ClosureArityMismatch { span, .. } => Some(span),
+            InferenceError::ClosureReturnTypeMismatch { span, .. } => Some(span),
+            InferenceError::ClosureParamTypeMismatch { span, .. } => Some(span),
+            InferenceError::ItUsedWithWrongArity { span, .. } => Some(span),
         }
     }
 }
@@ -185,6 +270,45 @@ impl std::fmt::Display for InferenceError {
             }
             InferenceError::Internal { message } => {
                 write!(f, "internal error: {}", message)
+            }
+            InferenceError::ClosureArityMismatch {
+                actual, expected, ..
+            } => {
+                write!(
+                    f,
+                    "closure has {} parameters but {} expected",
+                    actual, expected
+                )
+            }
+            InferenceError::ClosureReturnTypeMismatch {
+                actual, expected, ..
+            } => {
+                write!(
+                    f,
+                    "closure returns `{}` but `{}` expected",
+                    actual, expected
+                )
+            }
+            InferenceError::ClosureParamTypeMismatch {
+                index,
+                actual,
+                expected,
+                ..
+            } => {
+                write!(
+                    f,
+                    "closure parameter {} has type `{}` but `{}` expected",
+                    index + 1,
+                    actual,
+                    expected
+                )
+            }
+            InferenceError::ItUsedWithWrongArity { expected_arity, .. } => {
+                write!(
+                    f,
+                    "`it` can only be used when closure has exactly 1 parameter, but {} expected",
+                    expected_arity
+                )
             }
         }
     }

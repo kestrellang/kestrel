@@ -286,6 +286,22 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         }
+        ExprKind::Closure { body, tail_expr, .. } => {
+            // Analyze closure body for dead code
+            for stmt in body {
+                let d = analyze_statement(stmt, errors);
+                if d.diverges() {
+                    // If the closure diverges, subsequent statements are unreachable
+                    // but the closure expression itself doesn't make outer code unreachable
+                    break;
+                }
+            }
+            if let Some(tail) = tail_expr {
+                let _ = analyze_expression(tail, errors);
+            }
+            // Closures don't cause divergence in the enclosing scope
+            Divergence::None
+        }
         // Leaf expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)

@@ -153,6 +153,29 @@ impl Substitutions {
                 None => ty.clone(),
             },
 
+            // Unresolved function - apply substitutions to param info and return type
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => {
+                use super::ParamInfo;
+
+                let new_return = self.apply_with_visited(return_type, visited);
+                let new_param_info = match param_info {
+                    ParamInfo::Unconstrained => ParamInfo::Unconstrained,
+                    ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
+                        it_type: Box::new(self.apply_with_visited(it_type, visited)),
+                    },
+                    ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
+                        param_types: param_types
+                            .iter()
+                            .map(|p| self.apply_with_visited(p, visited))
+                            .collect(),
+                    },
+                };
+                Ty::unresolved_function(new_param_info, new_return, ty.span().clone())
+            }
+
             // Base types and special types - return as-is
             TyKind::Unit
             | TyKind::Never

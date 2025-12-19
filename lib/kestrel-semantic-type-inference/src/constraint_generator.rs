@@ -4,9 +4,13 @@
 //! for the expressions and statements within it.
 
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use semantic_tree::symbol::Symbol;
 
 use crate::context::InferenceContext;
 
@@ -127,7 +131,25 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
-            // TODO: Generate constraints for argument types matching parameter types
+
+            // Generate constraints between argument types and parameter types
+            // This enables bidirectional type inference for closures passed as arguments
+            match callee.ty.kind() {
+                TyKind::Function { params, .. } => {
+                    for (arg, param_ty) in arguments.iter().zip(params.iter()) {
+                        ctx.register_type(&arg.value.ty);
+                        ctx.register_type(param_ty);
+                        ctx.equate(arg.value.ty.id(), param_ty.id(), arg.span.clone());
+                    }
+                }
+                TyKind::UnresolvedFunction { .. } => {
+                    // Unresolved function - can't generate param constraints yet
+                    // The closure will be resolved through other constraints
+                }
+                _ => {
+                    // Callee type is not a function - might be an error or inference needed
+                }
+            }
         }
 
         ExprKind::PrimitiveMethodCall {
@@ -145,7 +167,33 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
-            // TODO: Generate constraints for field types
+
+            // Generate constraints between argument types and field types
+            // This enables bidirectional type inference for closures in struct fields
+            if let Some((struct_sym, substitutions)) = expr.ty.as_struct_with_subs() {
+                // Get field symbols from struct children
+                let fields: Vec<_> = struct_sym
+                    .metadata()
+                    .children()
+                    .into_iter()
+                    .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                    .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+                    .collect();
+
+                // Equate each argument type with its corresponding field type
+                for (arg, field) in arguments.iter().zip(fields.iter()) {
+                    // Get field type from TypedBehavior (resolved type) or fallback to field_type
+                    let raw_field_ty = field
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|typed| typed.ty().clone())
+                        .unwrap_or_else(|| field.field_type().clone());
+                    let field_ty = raw_field_ty.apply_substitutions(substitutions);
+                    ctx.register_type(&arg.value.ty);
+                    ctx.register_type(&field_ty);
+                    ctx.equate(arg.value.ty.id(), field_ty.id(), arg.span.clone());
+                }
+            }
         }
 
         // Assignment
@@ -221,6 +269,143 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 generate_expression_constraints(ctx, val);
             }
             // TODO: Equate return value type with function return type
+        }
+
+        ExprKind::Closure { body, tail_expr, params, uses_it, implicit_param, .. } => {
+            // Register the closure type
+            ctx.register_type(&expr.ty);
+
+            // Handle based on the closure's type
+            match expr.ty.kind() {
+                // Explicit params - closure has a concrete function type
+                TyKind::Function { params: closure_param_tys, return_type: closure_return_ty } => {
+                    ctx.register_type(closure_return_ty);
+
+                    // Record closure metadata for better error messages
+                    let param_count = params.as_ref().map(|p| p.len()).unwrap_or(0);
+                    let has_explicit_params = params.is_some();
+                    ctx.register_closure_metadata(crate::context::ClosureMetadata {
+                        expr_id: expr.id,
+                        param_count,
+                        uses_it: *uses_it,
+                        has_explicit_params,
+                        span: expr.span.clone(),
+                        ty_id: expr.ty.id(),
+                    });
+
+                    // Register parameter types and create constraints
+                    if let Some(param_list) = params {
+                        for (param, param_ty) in param_list.iter().zip(closure_param_tys.iter()) {
+                            ctx.register_type(&param.ty);
+                            ctx.register_type(param_ty);
+                            // Equate the parameter's declared/inferred type with the function type parameter
+                            ctx.equate(param.ty.id(), param_ty.id(), param.span.clone());
+                        }
+                    }
+
+                    // Handle implicit `it` parameter constraints
+                    if let Some((_, it_ty, it_span)) = implicit_param {
+                        if let Some(first_param_ty) = closure_param_tys.first() {
+                            ctx.register_type(it_ty);
+                            ctx.register_type(first_param_ty);
+                            // Equate `it` type with the first function parameter type
+                            ctx.equate(it_ty.id(), first_param_ty.id(), it_span.clone());
+                        }
+                    }
+
+                    // Generate constraints for body statements
+                    for stmt in body {
+                        generate_statement_constraints(ctx, stmt);
+                    }
+
+                    // Generate constraints for tail expression and return type
+                    if let Some(tail) = tail_expr {
+                        generate_expression_constraints(ctx, tail);
+                        // Equate tail expression type with closure return type
+                        ctx.equate(tail.ty.id(), closure_return_ty.id(), tail.span.clone());
+                    } else {
+                        // No tail expression means return type should be Unit
+                        let unit_ty = Ty::unit(expr.span.clone());
+                        ctx.register_type(&unit_ty);
+                        ctx.equate(unit_ty.id(), closure_return_ty.id(), expr.span.clone());
+                    }
+                }
+
+                // UnresolvedFunction - closure without explicit params
+                TyKind::UnresolvedFunction { param_info, return_type } => {
+                    use kestrel_semantic_tree::ty::ParamInfo;
+
+                    // Register nested types
+                    ctx.register_type(return_type);
+
+                    // Register and handle param info
+                    match param_info {
+                        ParamInfo::ImplicitIt { it_type } => {
+                            ctx.register_type(it_type);
+                            // Record closure metadata for better error messages
+                            ctx.register_closure_metadata(crate::context::ClosureMetadata {
+                                expr_id: expr.id,
+                                param_count: 1, // ImplicitIt means exactly 1 param
+                                uses_it: true,
+                                has_explicit_params: false,
+                                span: expr.span.clone(),
+                                ty_id: expr.ty.id(),
+                            });
+                        }
+                        ParamInfo::Unconstrained => {
+                            // Record closure metadata for better error messages
+                            ctx.register_closure_metadata(crate::context::ClosureMetadata {
+                                expr_id: expr.id,
+                                param_count: 0, // Will be determined by context
+                                uses_it: false,
+                                has_explicit_params: false,
+                                span: expr.span.clone(),
+                                ty_id: expr.ty.id(),
+                            });
+                        }
+                        ParamInfo::Explicit { param_types } => {
+                            for pt in param_types {
+                                ctx.register_type(pt);
+                            }
+                            // Record closure metadata for better error messages
+                            ctx.register_closure_metadata(crate::context::ClosureMetadata {
+                                expr_id: expr.id,
+                                param_count: param_types.len(),
+                                uses_it: false,
+                                has_explicit_params: true,
+                                span: expr.span.clone(),
+                                ty_id: expr.ty.id(),
+                            });
+                        }
+                    }
+
+                    // Generate constraints for body statements
+                    for stmt in body {
+                        generate_statement_constraints(ctx, stmt);
+                    }
+
+                    // Equate tail expression with return type
+                    if let Some(tail) = tail_expr {
+                        generate_expression_constraints(ctx, tail);
+                        ctx.equate(tail.ty.id(), return_type.id(), tail.span.clone());
+                    } else {
+                        // No tail expression means return type should be Unit
+                        let unit_ty = Ty::unit(expr.span.clone());
+                        ctx.register_type(&unit_ty);
+                        ctx.equate(unit_ty.id(), return_type.id(), expr.span.clone());
+                    }
+                }
+
+                // Fallback - shouldn't happen with well-formed trees
+                _ => {
+                    for stmt in body {
+                        generate_statement_constraints(ctx, stmt);
+                    }
+                    if let Some(tail) = tail_expr {
+                        generate_expression_constraints(ctx, tail);
+                    }
+                }
+            }
         }
 
         ExprKind::Error => {}

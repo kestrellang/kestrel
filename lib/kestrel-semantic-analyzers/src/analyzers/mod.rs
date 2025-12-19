@@ -1,4 +1,5 @@
 pub mod assignment_validation;
+pub mod closure;
 pub mod conformance;
 pub mod constraint_cycles;
 pub mod dead_code;
@@ -20,6 +21,7 @@ pub mod type_inference;
 pub mod visibility_consistency;
 
 pub use assignment_validation::AssignmentValidationAnalyzer;
+pub use closure::ClosureAnalyzer;
 pub use conformance::ConformanceAnalyzer;
 pub use constraint_cycles::ConstraintCycleAnalyzer;
 pub use dead_code::DeadCodeAnalyzer;

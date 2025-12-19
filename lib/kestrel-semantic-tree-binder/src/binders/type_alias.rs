@@ -303,6 +303,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::AssociatedType { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::UnresolvedFunction { .. } => "closure".to_string(),
     }
 }
 

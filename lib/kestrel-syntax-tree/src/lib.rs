@@ -128,6 +128,9 @@ pub enum SyntaxKind {
     ExprContinue,   // continue or continue label
     ExprReturn,     // return or return expr
     ExprTupleIndex, // tuple.0, tuple.1 (tuple element access)
+    ExprClosure,    // { params in body } or { body }
+    ClosureParams,  // (param, param) in closure
+    ClosureParam,   // Single closure parameter: name or name: Type
     LoopLabel,      // label: (before while/loop)
     ArgumentList,   // (arg1, label: arg2, ...)
     Argument,       // Single argument: expr or label: expr
@@ -168,6 +171,7 @@ pub enum SyntaxKind {
     Var,
     Where,
     While,
+    In,
 
     // Logical keywords
     And,
@@ -272,6 +276,7 @@ impl From<Token> for SyntaxKind {
             Token::Var => SyntaxKind::Var,
             Token::Where => SyntaxKind::Where,
             Token::While => SyntaxKind::While,
+            Token::In => SyntaxKind::In,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -400,6 +405,9 @@ impl Language for KestrelLanguage {
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
         const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
         const EXPR_TUPLE_INDEX: u16 = SyntaxKind::ExprTupleIndex as u16;
+        const EXPR_CLOSURE: u16 = SyntaxKind::ExprClosure as u16;
+        const CLOSURE_PARAMS: u16 = SyntaxKind::ClosureParams as u16;
+        const CLOSURE_PARAM: u16 = SyntaxKind::ClosureParam as u16;
         const LOOP_LABEL: u16 = SyntaxKind::LoopLabel as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
@@ -435,6 +443,7 @@ impl Language for KestrelLanguage {
         const VAR: u16 = SyntaxKind::Var as u16;
         const WHERE: u16 = SyntaxKind::Where as u16;
         const WHILE: u16 = SyntaxKind::While as u16;
+        const IN: u16 = SyntaxKind::In as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -554,6 +563,9 @@ impl Language for KestrelLanguage {
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
             EXPR_RETURN => SyntaxKind::ExprReturn,
             EXPR_TUPLE_INDEX => SyntaxKind::ExprTupleIndex,
+            EXPR_CLOSURE => SyntaxKind::ExprClosure,
+            CLOSURE_PARAMS => SyntaxKind::ClosureParams,
+            CLOSURE_PARAM => SyntaxKind::ClosureParam,
             LOOP_LABEL => SyntaxKind::LoopLabel,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
@@ -589,6 +601,7 @@ impl Language for KestrelLanguage {
             VAR => SyntaxKind::Var,
             WHERE => SyntaxKind::Where,
             WHILE => SyntaxKind::While,
+            IN => SyntaxKind::In,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,

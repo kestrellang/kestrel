@@ -79,6 +79,54 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
 
             InferenceError::Internal { message } => Diagnostic::error()
                 .with_message(format!("internal inference error: {}", message)),
+
+            InferenceError::ClosureArityMismatch {
+                actual,
+                expected,
+                span,
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "closure has {} parameters but {} expected",
+                    actual, expected
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())]),
+
+            InferenceError::ClosureReturnTypeMismatch {
+                actual,
+                expected,
+                span,
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "closure returns `{}` but `{}` expected",
+                    actual, expected
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())]),
+
+            InferenceError::ClosureParamTypeMismatch {
+                index,
+                actual,
+                expected,
+                span,
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "closure parameter {} has type `{}` but `{}` expected",
+                    index + 1,
+                    actual,
+                    expected
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())]),
+
+            InferenceError::ItUsedWithWrongArity {
+                expected_arity,
+                span,
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "`it` can only be used when closure has exactly 1 parameter, but {} expected",
+                    expected_arity
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message("used here")
+                ]),
         }
     }
 }

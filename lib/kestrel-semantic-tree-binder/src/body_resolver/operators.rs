@@ -329,6 +329,34 @@ fn desugar_binary_op(
         return Expression::primitive_method_call(lhs, prim_method, vec![arg], full_span);
     }
 
+    // If lhs type is Infer, don't emit error yet - type inference will resolve it.
+    if matches!(lhs.ty.kind(), TyKind::Infer) {
+        // For binary operations where the type is unknown, we need to set an appropriate
+        // result type based on the operator category:
+        // - Arithmetic ops (+ - * / %): result has same type as operands
+        // - Comparison ops (< > <= >= == !=): result is Bool
+        // - Logical ops (&& ||): result is Bool
+        let result_ty = match op {
+            // Comparison operators always return Bool
+            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                Ty::bool(full_span.clone())
+            }
+            // Logical operators return Bool
+            BinaryOp::And | BinaryOp::Or => Ty::bool(full_span.clone()),
+            // Arithmetic operators return the same type as operands
+            _ => lhs.ty.clone(),
+        };
+        let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
+        // Use a placeholder method - type inference will correct this
+        return Expression::primitive_method_call_with_type(
+            lhs,
+            placeholder_method_for_op(op),
+            vec![arg],
+            result_ty,
+            full_span,
+        );
+    }
+
     // For non-primitive types, emit an error since we don't support user-defined operators yet
     let error = UnsupportedBinaryOperator {
         operator_span: op_span.clone(),
@@ -340,6 +368,35 @@ fn desugar_binary_op(
     };
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
+}
+
+/// Get a placeholder primitive method for an operator.
+/// This is used when the operand type is Infer and we need to create a placeholder.
+fn placeholder_method_for_op(op: BinaryOp) -> PrimitiveMethod {
+    match op {
+        BinaryOp::Add => PrimitiveMethod::IntAdd,
+        BinaryOp::Sub => PrimitiveMethod::IntSub,
+        BinaryOp::Mul => PrimitiveMethod::IntMul,
+        BinaryOp::Div => PrimitiveMethod::IntDiv,
+        BinaryOp::Rem => PrimitiveMethod::IntRem,
+        BinaryOp::BitAnd => PrimitiveMethod::IntBitAnd,
+        BinaryOp::BitOr => PrimitiveMethod::IntBitOr,
+        BinaryOp::BitXor => PrimitiveMethod::IntBitXor,
+        BinaryOp::Shl => PrimitiveMethod::IntShl,
+        BinaryOp::Shr => PrimitiveMethod::IntShr,
+        BinaryOp::Eq => PrimitiveMethod::IntEq,
+        BinaryOp::Ne => PrimitiveMethod::IntNe,
+        BinaryOp::Lt => PrimitiveMethod::IntLt,
+        BinaryOp::Le => PrimitiveMethod::IntLe,
+        BinaryOp::Gt => PrimitiveMethod::IntGt,
+        BinaryOp::Ge => PrimitiveMethod::IntGe,
+        BinaryOp::And => PrimitiveMethod::BoolAnd,
+        BinaryOp::Or => PrimitiveMethod::BoolOr,
+        // Range and coalesce operators are not primitive methods - use a placeholder
+        BinaryOp::RangeInclusive | BinaryOp::RangeExclusive | BinaryOp::Coalesce => {
+            PrimitiveMethod::IntAdd // Placeholder, these should be handled differently
+        }
+    }
 }
 
 /// Get the symbol representation of a binary operator for error messages.

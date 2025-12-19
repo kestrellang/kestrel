@@ -174,6 +174,32 @@ fn find_less_visible_type(
             }
             None
         }
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            use kestrel_semantic_tree::ty::ParamInfo;
+
+            // Check return type
+            if let Some(result) = find_less_visible_type(return_type, required_level) {
+                return Some(result);
+            }
+            // Check param info types
+            match param_info {
+                ParamInfo::ImplicitIt { it_type } => {
+                    find_less_visible_type(it_type, required_level)
+                }
+                ParamInfo::Explicit { param_types } => {
+                    for pt in param_types {
+                        if let Some(result) = find_less_visible_type(pt, required_level) {
+                            return Some(result);
+                        }
+                    }
+                    None
+                }
+                ParamInfo::Unconstrained => None,
+            }
+        }
         TyKind::Unit
         | TyKind::Never
         | TyKind::Int(_)

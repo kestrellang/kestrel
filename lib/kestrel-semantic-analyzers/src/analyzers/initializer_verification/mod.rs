@@ -436,6 +436,16 @@ fn analyze_expression(
             }
             state.diverged = true;
         }
+        ExprKind::Closure { body, tail_expr, .. } => {
+            // Analyze closure body - closures capture variables but don't affect init state
+            for stmt in body {
+                let _ = analyze_statement(stmt, state.clone(), ctx);
+            }
+            if let Some(tail) = tail_expr {
+                let _ = analyze_expression(tail, state.clone(), false, ctx);
+            }
+            // Closures don't change the initialization state of the enclosing scope
+        }
         ExprKind::Error => {}
     }
     state

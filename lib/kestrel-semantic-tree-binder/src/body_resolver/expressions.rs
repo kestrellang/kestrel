@@ -100,6 +100,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprTupleIndex => resolve_tuple_index_expression(expr_node, ctx),
 
+        SyntaxKind::ExprClosure => resolve_closure_expression(expr_node, ctx),
+
         _ => Expression::error(span),
     }
 }
@@ -661,6 +663,403 @@ fn resolve_tuple_index_expression(
             Expression::error(span)
         }
     }
+}
+
+/// Check if `it` was referenced anywhere in the closure body.
+/// This walks the resolved statements and expressions to find any LocalRef to `it`.
+fn check_it_referenced_in_closure(
+    body: &[Statement],
+    tail_expr: Option<&Expression>,
+    ctx: &BodyResolutionContext,
+) -> bool {
+    // Look up what LocalId `it` is bound to in the current scope
+    let it_local_id = match ctx.local_scope.lookup("it") {
+        Some(id) => id,
+        None => return false, // `it` not bound, so can't be referenced
+    };
+
+    // Check statements
+    for stmt in body {
+        if statement_references_local(stmt, it_local_id) {
+            return true;
+        }
+    }
+
+    // Check tail expression
+    if let Some(expr) = tail_expr {
+        if expression_references_local(expr, it_local_id) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if a statement references a specific local.
+fn statement_references_local(
+    stmt: &Statement,
+    local_id: kestrel_semantic_tree::symbol::local::LocalId,
+) -> bool {
+    use kestrel_semantic_tree::stmt::StatementKind;
+    match &stmt.kind {
+        StatementKind::Binding { value, .. } => {
+            if let Some(v) = value {
+                expression_references_local(v, local_id)
+            } else {
+                false
+            }
+        }
+        StatementKind::Expr(expr) => expression_references_local(expr, local_id),
+    }
+}
+
+/// Check if an expression references a specific local (recursively).
+fn expression_references_local(
+    expr: &Expression,
+    local_id: kestrel_semantic_tree::symbol::local::LocalId,
+) -> bool {
+    use kestrel_semantic_tree::expr::{ExprKind, ElseBranch};
+
+    match &expr.kind {
+        // Direct reference to the local
+        ExprKind::LocalRef(id) => *id == local_id,
+
+        // Recursively check compound expressions
+        ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
+            elements.iter().any(|e| expression_references_local(e, local_id))
+        }
+
+        ExprKind::Grouping(inner) => expression_references_local(inner, local_id),
+
+        ExprKind::FieldAccess { object, .. } => expression_references_local(object, local_id),
+
+        ExprKind::TupleIndex { tuple, .. } => expression_references_local(tuple, local_id),
+
+        ExprKind::MethodRef { receiver, .. } => expression_references_local(receiver, local_id),
+
+        ExprKind::Call { callee, arguments, .. } => {
+            expression_references_local(callee, local_id)
+                || arguments.iter().any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
+        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+            expression_references_local(receiver, local_id)
+                || arguments.iter().any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
+        ExprKind::ImplicitStructInit { arguments, .. } => {
+            arguments.iter().any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
+        ExprKind::Assignment { target, value } => {
+            expression_references_local(target, local_id)
+                || expression_references_local(value, local_id)
+        }
+
+        ExprKind::If { condition, then_branch, then_value, else_branch } => {
+            if expression_references_local(condition, local_id) {
+                return true;
+            }
+
+            for stmt in then_branch {
+                if statement_references_local(stmt, local_id) {
+                    return true;
+                }
+            }
+
+            if let Some(then_val) = then_value {
+                if expression_references_local(then_val, local_id) {
+                    return true;
+                }
+            }
+
+            if let Some(else_br) = else_branch {
+                match else_br {
+                    ElseBranch::Block { statements, value } => {
+                        for stmt in statements {
+                            if statement_references_local(stmt, local_id) {
+                                return true;
+                            }
+                        }
+                        if let Some(val) = value {
+                            if expression_references_local(val, local_id) {
+                                return true;
+                            }
+                        }
+                    }
+                    ElseBranch::ElseIf(if_expr) => {
+                        if expression_references_local(if_expr, local_id) {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            false
+        }
+
+        ExprKind::While { condition, body, .. } => {
+            if expression_references_local(condition, local_id) {
+                return true;
+            }
+            for stmt in body {
+                if statement_references_local(stmt, local_id) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        ExprKind::Loop { body, .. } => {
+            for stmt in body {
+                if statement_references_local(stmt, local_id) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        ExprKind::Closure { body, tail_expr, .. } => {
+            // Check nested closure body
+            for stmt in body {
+                if statement_references_local(stmt, local_id) {
+                    return true;
+                }
+            }
+            if let Some(tail) = tail_expr {
+                if expression_references_local(tail, local_id) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        ExprKind::Return { value } => {
+            if let Some(val) = value {
+                expression_references_local(val, local_id)
+            } else {
+                false
+            }
+        }
+
+        // Leaf expressions - no references
+        ExprKind::Literal(_)
+        | ExprKind::SymbolRef(_)
+        | ExprKind::OverloadedRef(_)
+        | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
+        | ExprKind::Break { .. }
+        | ExprKind::Continue { .. }
+        | ExprKind::Error => false,
+    }
+}
+
+/// Resolve a closure expression: `{ params in body }` or `{ body }`
+fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Push a new scope for the closure
+    ctx.local_scope.push_scope();
+
+    // Parse parameters from ClosureParams node
+    let params = resolve_closure_params(node, ctx);
+
+    // If no explicit parameters, inject `it` as an implicit parameter
+    // This allows `it` to be referenced in the body (but only errors if actually used with wrong arity)
+    let implicit_param = if params.is_none() {
+        // Create an infer type for `it`
+        let it_ty = kestrel_semantic_tree::ty::Ty::infer(span.clone());
+        // Bind `it` as an immutable local in the closure scope
+        let local_id = ctx.local_scope.bind("it".to_string(), it_ty.clone(), false, span.clone());
+        Some((local_id, it_ty, span.clone()))
+    } else {
+        None
+    };
+    
+    let has_it = implicit_param.is_some();
+
+    // Resolve the closure body (statements and trailing expression)
+    let (body, tail_expr) = resolve_closure_body(node, ctx);
+
+    // Check if `it` was actually referenced in the body (if we injected it)
+    let it_was_used = if has_it {
+        check_it_referenced_in_closure(&body, tail_expr.as_ref(), ctx)
+    } else {
+        false
+    };
+
+    // Pop the closure scope
+    ctx.local_scope.pop_scope();
+
+    // Determine closure type
+    let closure_ty = if let Some(param_list) = &params {
+        // Explicit parameters - we know the parameter types
+        let param_types: Vec<kestrel_semantic_tree::ty::Ty> =
+            param_list.iter().map(|p| p.ty.clone()).collect();
+
+        let return_ty = tail_expr
+            .as_ref()
+            .map(|e| e.ty.clone())
+            .unwrap_or_else(|| kestrel_semantic_tree::ty::Ty::unit(span.clone()));
+
+        kestrel_semantic_tree::ty::Ty::function(param_types, return_ty, span.clone())
+    } else {
+        // No explicit parameters - create UnresolvedFunction with appropriate ParamInfo
+        use kestrel_semantic_tree::ty::ParamInfo;
+
+        let return_ty = tail_expr
+            .as_ref()
+            .map(|e| e.ty.clone())
+            .unwrap_or_else(|| kestrel_semantic_tree::ty::Ty::unit(span.clone()));
+
+        if it_was_used {
+            // Uses implicit `it` - exactly 1 param
+            let it_ty = implicit_param.as_ref().unwrap().1.clone();
+            kestrel_semantic_tree::ty::Ty::unresolved_function(
+                ParamInfo::ImplicitIt { it_type: Box::new(it_ty) },
+                return_ty,
+                span.clone(),
+            )
+        } else {
+            // No params, no `it` - unconstrained arity (could be any)
+            kestrel_semantic_tree::ty::Ty::unresolved_function(
+                ParamInfo::Unconstrained,
+                return_ty,
+                span.clone(),
+            )
+        }
+    };
+
+    // For now, captures is empty - capture analysis will be added later
+    let captures = Vec::new();
+
+    Expression::closure(params, body, tail_expr, captures, it_was_used, implicit_param, closure_ty, span)
+}
+
+/// Resolve closure parameters from the syntax tree.
+fn resolve_closure_params(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Vec<kestrel_semantic_tree::expr::ClosureParam>> {
+    use crate::resolution::type_resolver::TypeResolver;
+
+    // Find ClosureParams node
+    let params_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ClosureParams)?;
+
+    let mut params = Vec::new();
+    for child in params_node.children() {
+        if child.kind() == SyntaxKind::ClosureParam {
+            let param_span = get_node_span(&child, ctx.file_id);
+
+            // Extract name
+            let name = child
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind() == SyntaxKind::Identifier)
+                .map(|t| t.text().to_string())?;
+
+            // Extract optional type annotation
+            let ty_node = child.children().find(|c| c.kind() == SyntaxKind::Ty);
+            let (ty, is_annotated) = match ty_node {
+                Some(tn) => {
+                    let mut resolver = TypeResolver::new(
+                        ctx.model,
+                        ctx.diagnostics,
+                        ctx.source,
+                        ctx.file_id,
+                        ctx.function_id,
+                    );
+                    let resolved_ty = resolver.resolve(&tn);
+                    (resolved_ty, true)
+                }
+                None => (kestrel_semantic_tree::ty::Ty::infer(param_span.clone()), false),
+            };
+
+            // Bind parameter as local
+            ctx.local_scope.bind(
+                name.clone(),
+                ty.clone(),
+                false, // closure params are immutable
+                param_span.clone(),
+            );
+
+            params.push(kestrel_semantic_tree::expr::ClosureParam {
+                name,
+                ty,
+                is_type_annotated: is_annotated,
+                span: param_span,
+            });
+        }
+    }
+
+    Some(params)
+}
+
+/// Resolve the body of a closure.
+fn resolve_closure_body(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> (Vec<Statement>, Option<Expression>) {
+    let mut statements = Vec::new();
+    let mut tail_expr = None;
+
+    // Collect all children (nodes only, not tokens)
+    let children: Vec<_> = node.children().collect();
+
+    // Find where the body starts (after ClosureParams if present)
+    // The 'in' keyword is a token, not a node, so we skip it automatically
+    let mut body_start = 0;
+    for (i, child) in children.iter().enumerate() {
+        if child.kind() == SyntaxKind::ClosureParams {
+            body_start = i + 1;
+            break;
+        }
+    }
+
+    // Process body items
+    let body_children = &children[body_start..];
+    for (i, child) in body_children.iter().enumerate() {
+        let is_last = i == body_children.len() - 1;
+
+        match child.kind() {
+            SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                if let Some(stmt) = resolve_statement(child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::VariableDeclaration => {
+                if let Some(stmt) = super::statements::resolve_variable_declaration(child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::Expression => {
+                // If last child and no semicolon, it's the trailing expression
+                if is_last && !has_trailing_semicolon(child) {
+                    tail_expr = Some(resolve_expression(child, ctx));
+                } else {
+                    let expr = resolve_expression(child, ctx);
+                    let stmt_span = get_node_span(child, ctx.file_id);
+                    statements.push(Statement::expr(expr, stmt_span));
+                }
+            }
+            _ if is_expression_kind(child.kind()) => {
+                // Handle bare expression kinds (not wrapped in Expression)
+                if is_last {
+                    tail_expr = Some(resolve_expression(child, ctx));
+                } else {
+                    let expr = resolve_expression(child, ctx);
+                    let stmt_span = get_node_span(child, ctx.file_id);
+                    statements.push(Statement::expr(expr, stmt_span));
+                }
+            }
+            // Skip tokens like braces, 'in' keyword
+            _ => {}
+        }
+    }
+
+    (statements, tail_expr)
 }
 
 #[cfg(test)]

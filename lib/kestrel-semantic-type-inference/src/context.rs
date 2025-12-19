@@ -7,13 +7,30 @@
 use std::collections::HashMap;
 
 use kestrel_semantic_tree::expr::ExprId;
-use kestrel_semantic_tree::ty::{Ty, TyId, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
 use kestrel_span::Span;
 
 use crate::constraint::{Constraint, ProtocolRef};
 use crate::error::InferenceError;
 use crate::oracle::TypeOracle;
 use crate::solution::{Solution, ValueResolution};
+
+/// Metadata about a closure expression for error reporting.
+#[derive(Debug, Clone)]
+pub struct ClosureMetadata {
+    /// The expression ID of the closure
+    pub expr_id: ExprId,
+    /// Number of parameters in the closure
+    pub param_count: usize,
+    /// Whether the closure uses the implicit `it` parameter
+    pub uses_it: bool,
+    /// Whether the closure has explicit parameters (vs implicit)
+    pub has_explicit_params: bool,
+    /// The span of the closure expression
+    pub span: Span,
+    /// The type ID of the closure (function type)
+    pub ty_id: TyId,
+}
 
 /// Context for collecting and solving type inference constraints.
 ///
@@ -48,6 +65,8 @@ pub struct InferenceContext<'a> {
     type_registry: HashMap<TyId, Ty>,
     /// Accumulated errors during solving
     errors: Vec<InferenceError>,
+    /// Closure metadata for error reporting (TyId -> ClosureMetadata)
+    closure_metadata: HashMap<TyId, ClosureMetadata>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -60,6 +79,7 @@ impl<'a> InferenceContext<'a> {
             values: HashMap::new(),
             type_registry: HashMap::new(),
             errors: Vec::new(),
+            closure_metadata: HashMap::new(),
         }
     }
 
@@ -109,6 +129,23 @@ impl<'a> InferenceContext<'a> {
             TyKind::AssociatedType { container, .. } => {
                 if let Some(container_ty) = container {
                     self.register_type(container_ty);
+                }
+            }
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => {
+                self.register_type(return_type);
+                match param_info {
+                    ParamInfo::ImplicitIt { it_type } => {
+                        self.register_type(it_type);
+                    }
+                    ParamInfo::Explicit { param_types } => {
+                        for pt in param_types {
+                            self.register_type(pt);
+                        }
+                    }
+                    ParamInfo::Unconstrained => {}
                 }
             }
             // Leaf types - no nested types to register
@@ -174,6 +211,14 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Register metadata for a closure expression.
+    ///
+    /// This should be called during constraint generation for closures
+    /// to enable better error messages during type inference.
+    pub fn register_closure_metadata(&mut self, metadata: ClosureMetadata) {
+        self.closure_metadata.insert(metadata.ty_id, metadata);
+    }
+
     // === Solving ===
 
     /// Solve all collected constraints and return a solution.
@@ -229,6 +274,10 @@ impl<'a> InferenceContext<'a> {
 
     pub(crate) fn errors(&self) -> &[InferenceError] {
         &self.errors
+    }
+
+    pub(crate) fn closure_metadata(&self) -> &HashMap<TyId, ClosureMetadata> {
+        &self.closure_metadata
     }
 }
 

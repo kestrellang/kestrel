@@ -259,7 +259,7 @@ fn analyze_expression(
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
         }
-        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::Error | ExprKind::OverloadedRef(_) => {}
+        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::Error | ExprKind::OverloadedRef(_) | ExprKind::Closure { .. } => {}
         ExprKind::Array(exprs) | ExprKind::Tuple(exprs) => {
             for e in exprs {
                 state = analyze_expression(e, state, false, ctx);

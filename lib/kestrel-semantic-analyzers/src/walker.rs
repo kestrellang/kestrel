@@ -5,7 +5,7 @@ use crate::context::{AnalysisContext, reset_node_flags};
 use crate::runner::AnalyzerId;
 
 use kestrel_semantic_model::SemanticModel;
-use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedExecutableBehavior};
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::Pattern;
@@ -252,6 +252,19 @@ fn walk_expression(
                     if ctx.stopped {
                         return;
                     }
+                }
+            }
+            ExprKind::Closure { body, tail_expr, .. } => {
+                // Walk closure body statements
+                for stmt in body {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+                // Walk tail expression if present
+                if let Some(tail) = tail_expr {
+                    walk_expression(tail, analyzers, model, ctx);
                 }
             }
             // Leaf kinds or handled elsewhere

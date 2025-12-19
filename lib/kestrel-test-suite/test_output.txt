@@ -1,0 +1,2243 @@
+warning: method `errors` is never used
+   --> lib/kestrel-semantic-type-inference/src/context.rs:258:19
+    |
+ 72 | impl<'a> InferenceContext<'a> {
+    | ----------------------------- method in this implementation
+...
+258 |     pub(crate) fn errors(&self) -> &[InferenceError] {
+    |                   ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `kestrel-semantic-type-inference` (lib) generated 1 warning
+warning: unused import: `kestrel_semantic_tree::symbol::kind::KestrelSymbolKind`
+ --> lib/kestrel-semantic-tree-binder/src/syntax/helpers.rs:9:5
+  |
+9 | use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `kestrel_span::Span`
+  --> lib/kestrel-semantic-tree-binder/src/syntax/helpers.rs:11:5
+   |
+11 | use kestrel_span::Span;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `kestrel_semantic_tree::symbol::local::LocalContainer`
+  --> lib/kestrel-semantic-tree-binder/src/body_resolver/context.rs:15:5
+   |
+15 | use kestrel_semantic_tree::symbol::local::LocalContainer;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `func_sym`
+   --> lib/kestrel-semantic-tree-binder/src/binders/function.rs:103:14
+    |
+103 |     let Some(func_sym) = symbol.as_ref().downcast_ref::<FunctionSymbol>() else {
+    |              ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_func_sym`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `source` is never read
+  --> lib/kestrel-semantic-tree-binder/src/resolution/type_resolver.rs:38:5
+   |
+35 | pub struct TypeResolver<'a> {
+   |            ------------ field in this struct
+...
+38 |     source: &'a str,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_local_scope_from_dyn` is never used
+   --> lib/kestrel-semantic-tree-binder/src/body_resolver/context.rs:283:4
+    |
+283 | fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> LocalScope {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `source`
+  --> lib/kestrel-semantic-tree-builder/src/builders/field.rs:25:9
+   |
+25 |         source: &str,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_source`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `source`
+  --> lib/kestrel-semantic-tree-builder/src/builders/import.rs:20:9
+   |
+20 |         source: &str,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_source`
+
+warning: unused variable: `source`
+  --> lib/kestrel-semantic-tree-builder/src/builders/initializer.rs:23:9
+   |
+23 |         source: &str,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_source`
+
+warning: unused variable: `source`
+   --> lib/kestrel-semantic-tree-builder/src/builders/type_alias.rs:126:5
+    |
+126 |     source: &str,
+    |     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_source`
+
+warning: unused variable: `source`
+   --> lib/kestrel-semantic-tree-builder/src/builders/type_parameter.rs:169:5
+    |
+169 |     source: &str,
+    |     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_source`
+
+warning: `kestrel-semantic-tree-binder` (lib) generated 6 warnings (run `cargo fix --lib -p kestrel-semantic-tree-binder` to apply 4 suggestions)
+warning: `kestrel-semantic-tree-builder` (lib) generated 5 warnings (run `cargo fix --lib -p kestrel-semantic-tree-builder` to apply 5 suggestions)
+warning: unused import: `ResolvedExecutableBehavior`
+ --> lib/kestrel-semantic-analyzers/src/walker.rs:8:71
+  |
+8 | use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedExecutableBehavior};
+  |                                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `find_assignments_to_locals` is never used
+   --> lib/kestrel-semantic-analyzers/src/analyzers/closure/mod.rs:182:4
+    |
+182 | fn find_assignments_to_locals(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `walk_statement_for_assignments` is never used
+   --> lib/kestrel-semantic-analyzers/src/analyzers/closure/mod.rs:327:4
+    |
+327 | fn walk_statement_for_assignments(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `extension_id` is never read
+  --> lib/kestrel-semantic-analyzers/src/analyzers/extension_conflict/mod.rs:26:5
+   |
+25 | struct CollectedExtension {
+   |        ------------------ field in this struct
+26 |     extension_id: SymbolId,
+   |     ^^^^^^^^^^^^
+
+warning: field `if_span` is never read
+  --> lib/kestrel-semantic-analyzers/src/analyzers/type_check/diagnostics.rs:74:9
+   |
+72 | pub struct BranchTypeMismatchError {
+   |            ----------------------- field in this struct
+73 |     /// The span of the if expression
+74 |     pub if_span: Span,
+   |         ^^^^^^^
+
+warning: field `array_span` is never read
+   --> lib/kestrel-semantic-analyzers/src/analyzers/type_check/diagnostics.rs:107:9
+    |
+105 | pub struct ArrayElementTypeMismatchError {
+    |            ----------------------------- field in this struct
+106 |     /// The span of the array literal
+107 |     pub array_span: Span,
+    |         ^^^^^^^^^^
+
+warning: `kestrel-semantic-analyzers` (lib) generated 6 warnings (run `cargo fix --lib -p kestrel-semantic-analyzers` to apply 1 suggestion)
+warning: unused import: `super::*`
+   --> lib/kestrel-test-suite/tests/instantiation/expressions.rs:422:9
+    |
+422 |     use super::*;
+    |         ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `super::*`
+   --> lib/kestrel-test-suite/tests/instantiation/expressions.rs:727:9
+    |
+727 |     use super::*;
+    |         ^^^^^^^^
+
+warning: `kestrel-test-suite` (test "mod") generated 2 warnings (run `cargo fix --test "mod" -p kestrel-test-suite` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (/Users/dino/Documents/Projects/kestrel/target/debug/deps/kestrel_test_suite-3f44d7ce043aaf4f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mod.rs (/Users/dino/Documents/Projects/kestrel/target/debug/deps/mod-d8205d4b588342de)
+
+running 997 tests
+test declarations::associated_types::errors::type_alias_with_bounds_at_module_level ... ok
+test declarations::associated_types::associated_type_constraints::associated_type_with_single_bound ... ok
+test declarations::associated_types::associated_type_defaults::associated_type_with_default ... ok
+test declarations::associated_types::generic_defaults::associated_type_default_invalid_type_arg ... ok
+test declarations::associated_types::errors::associated_type_in_non_conforming_struct ... ok
+test declarations::associated_types::generic_defaults::associated_type_default_uses_protocol_type_param ... ok
+test declarations::associated_types::associated_type_defaults::associated_type_default_must_satisfy_constraint ... ok
+test declarations::associated_types::associated_type_constraints::associated_type_with_multiple_bounds ... ok
+test declarations::associated_types::associated_type_constraints::associated_type_bound_must_be_protocol ... ok
+test declarations::associated_types::errors::type_alias_without_equals_at_module_level ... ok
+test declarations::associated_types::errors::associated_type_without_equals_in_struct ... ok
+test declarations::associated_types::generic_defaults::associated_type_with_generic_default ... ok
+test declarations::associated_types::associated_type_defaults::associated_type_with_constraint_and_default ... ok
+test declarations::associated_types::generic_struct_binding::generic_struct_binds_type_parameter ... ok
+test declarations::associated_types::generic_defaults::struct_uses_generic_default ... ok
+test declarations::associated_types::generic_defaults::struct_overrides_generic_default ... ok
+test declarations::associated_types::generic_struct_binding::generic_struct_binds_transformed_type ... ok
+test declarations::associated_types::nested_associated_types::nested_associated_type_access ... ok
+test declarations::associated_types::nested_associated_types::nested_associated_type_equality ... ok
+test declarations::associated_types::generic_struct_binding::self_referential_associated_type ... ok
+test declarations::associated_types::protocol_declaration::protocol_with_associated_type_and_methods ... ok
+test declarations::associated_types::protocol_declaration::protocol_with_multiple_associated_types ... ok
+test declarations::associated_types::protocol_declaration::protocol_with_abstract_associated_type ... ok
+test declarations::associated_types::protocol_inheritance::child_protocol_inherits_associated_type ... ok
+test declarations::associated_types::nested_associated_types::where_clause_on_nested_associated_type ... ok
+test declarations::associated_types::protocol_inheritance::struct_conforming_to_refined_protocol_must_satisfy_constraint ... ok
+test declarations::associated_types::protocol_declaration::generic_protocol_with_associated_type ... ok
+test declarations::associated_types::qualified_binding::multiple_generic_protocol_conformances ... ok
+test declarations::associated_types::qualified_binding::qualified_associated_type_binding ... ok
+test declarations::associated_types::protocol_inheritance::protocol_refines_associated_type_constraint ... ok
+test declarations::associated_types::qualified_binding::qualified_binding_not_conforming ... ok
+test declarations::associated_types::qualified_binding::qualified_binding_wrong_protocol ... ok
+test declarations::associated_types::qualified_binding::ambiguous_associated_type_without_qualification ... ok
+test declarations::associated_types::qualified_binding::qualified_binding_for_generic_protocol ... ok
+test declarations::associated_types::struct_binding::struct_missing_associated_type ... ok
+test declarations::associated_types::struct_binding::struct_overrides_default_associated_type ... ok
+test declarations::associated_types::struct_binding::struct_associated_type_must_satisfy_constraint ... ok
+test declarations::associated_types::protocol_inheritance::struct_conforming_to_child_provides_associated_type ... ok
+test declarations::associated_types::struct_binding::struct_provides_associated_type ... ok
+test declarations::associated_types::where_clause_bounds::where_clause_associated_type_bound ... ok
+test declarations::associated_types::where_clause_bounds::where_clause_associated_type_multiple_bounds ... ok
+test declarations::associated_types::type_resolution::method_takes_associated_type_parameter ... ok
+test declarations::associated_types::type_resolution::method_returns_associated_type ... ok
+test declarations::associated_types::where_clause_bounds::where_clause_associated_type_not_found ... ok
+test declarations::associated_types::struct_binding::struct_uses_default_associated_type ... ok
+test declarations::associated_types::struct_binding::struct_provides_multiple_associated_types ... ok
+test declarations::associated_types::where_clause_bounds::protocol_inheritance_with_associated_type_constraint ... ok
+test declarations::associated_types::type_resolution::generic_function_with_associated_type_constraint ... ok
+test declarations::associated_types::where_clause_equality::where_clause_associated_type_equals_concrete ... ok
+test declarations::extensions::basic::empty_extension ... ok
+test declarations::extensions::basic::extension_with_method ... ok
+test declarations::extensions::basic::extension_method_accessible ... ok
+test declarations::associated_types::where_clause_equality::where_clause_two_associated_types_equal ... ok
+test declarations::associated_types::where_clause_equality::where_clause_associated_type_equals_type_parameter ... ok
+test declarations::extensions::basic::extension_with_multiple_methods ... ok
+test declarations::extensions::conflicts::different_specificity_no_conflict ... ok
+test declarations::extensions::conformance::extension_missing_protocol_method ... ok
+test declarations::extensions::conflicts::struct_method_vs_extension_method ... ok
+test declarations::extensions::conformance::extension_inherits_protocol_methods ... ok
+test declarations::extensions::conformance::extension_adds_conformance ... ok
+test declarations::extensions::conflicts::duplicate_method_same_specificity_error ... ok
+test declarations::extensions::conformance::extension_multiple_conformances ... ok
+test declarations::extensions::conformance::separate_extensions_satisfy_conformance ... ok
+test declarations::extensions::constraint_inference::extension_equality_constraint_enforcement ... ok
+test declarations::extensions::errors::extend_primitive ... ok
+test declarations::extensions::errors::extend_type_alias ... ok
+test declarations::extensions::errors::extend_unknown_type ... ok
+test declarations::extensions::conformance::extension_satisfies_protocol_method ... ok
+test declarations::extensions::errors::extension_type_param_not_in_scope ... ok
+test declarations::extensions::basic::multiple_extensions_same_type ... ok
+test declarations::extensions::constraint_inference::extension_associated_type_resolution ... ok
+test declarations::extensions::errors::wrong_type_param_count ... ok
+test declarations::extensions::generics::extension_generic_struct ... ok
+test declarations::extensions::generics::extension_specialized_not_on_wrong_type ... ok
+test declarations::extensions::generics::extension_uses_type_param_in_method ... ok
+test declarations::extensions::generics::extension_two_type_params_generic ... ok
+test declarations::extensions::generics::extension_mixed_type_params ... ok
+test declarations::extensions::generics::extension_mixed_not_applicable ... ok
+test declarations::extensions::generics::extension_specialized_concrete ... ok
+test declarations::extensions::self_type::extension_method_self_param ... ok
+test declarations::extensions::static_methods::extension_static_method ... ok
+test declarations::extensions::self_type::extension_method_uses_self ... ok
+test declarations::extensions::static_methods::generic_extension_static_method ... ok
+test declarations::extensions::visibility::public_extension_method ... ok
+test declarations::extensions::specialization::specialized_extension_wins ... ok
+test declarations::extensions::where_clause::extension_inherits_struct_constraints ... ok
+test declarations::extensions::where_clause::extension_adds_additional_constraint ... ok
+test declarations::functions::basic::function_with_return_type ... ok
+test declarations::functions::basic::function_with_parameters ... ok
+test declarations::functions::basic::empty_function ... ok
+test declarations::extensions::where_clause::extension_with_where_clause ... ok
+test declarations::functions::basic::private_function ... ok
+test declarations::functions::basic::public_function ... ok
+test declarations::functions::basic::static_function_in_struct ... ok
+test declarations::functions::in_structs::method_in_struct ... ok
+test declarations::extensions::visibility::private_extension_method ... ok
+test declarations::functions::overloading::overload_by_label ... ok
+test declarations::functions::overloading::overload_by_parameter_count ... ok
+test declarations::imports::errors::error_on_importing_internal_item_from_different_module ... ignored, Internal visibility across modules - needs investigation of import context
+test declarations::functions::overloading::overload_by_parameter_type ... ok
+test declarations::extensions::specialization::more_specialized_wins ... ok
+test declarations::extensions::where_clause::extension_where_clause_not_satisfied ... ok
+test declarations::imports::basic::import_entire_module ... ok
+test declarations::imports::basic::import_specific_items ... ok
+test declarations::imports::basic::import_with_item_alias ... ok
+test declarations::imports::basic::import_with_module_alias ... ok
+test declarations::functions::in_structs::multiple_methods_with_parameters ... ok
+test declarations::imports::errors::error_on_duplicate_import_same_item ... ok
+test declarations::imports::errors::error_on_importing_nonexistent_item_from_nested_module ... ok
+test declarations::imports::errors::error_on_importing_nonexistent_module ... ok
+test declarations::imports::errors::error_on_importing_nonexistent_item_from_module ... ok
+test declarations::imports::errors::error_when_imported_item_conflicts_with_local_declaration ... ok
+test declarations::imports::conflicts::resolve_naming_conflicts_with_item_aliases ... ok
+test declarations::imports::errors::error_on_importing_nonexistent_nested_module ... ok
+test declarations::protocol_method_linking::associated_types::method_with_associated_type_in_array ... ok
+test declarations::imports::visibility::internal_symbols_visible_within_same_module ... ok
+test declarations::imports::nested_modules::import_from_nested_module ... ok
+test declarations::imports::nested_modules::import_specific_items_from_nested ... ok
+test declarations::protocol_method_linking::associated_types::method_with_associated_type_parameter ... ok
+test declarations::imports::visibility::import_and_verify_public_items_are_accessible ... ok
+test declarations::imports::nested_modules::import_nested_module_with_alias ... ok
+test declarations::protocol_method_linking::basic::struct_method_implements_protocol_method ... ok
+test declarations::protocol_method_linking::basic::struct_method_not_implementing_protocol ... ok
+test declarations::protocol_method_linking::basic::multiple_methods_implementing_different_protocol_methods ... ok
+test declarations::protocol_method_linking::associated_types::method_with_associated_type_return ... ok
+test declarations::protocol_method_linking::basic::struct_method_with_labeled_parameter ... ok
+test declarations::protocol_method_linking::basic::struct_method_with_return_type ... ok
+test declarations::imports::errors::error_on_importing_private_item ... ok
+test declarations::protocol_method_linking::edge_cases::empty_protocol_no_methods_to_link ... ok
+test declarations::protocol_method_linking::edge_cases::method_overload_different_labels ... ok
+test declarations::protocol_method_linking::edge_cases::struct_with_no_conformances ... ok
+test declarations::protocol_method_linking::errors::receiver_kind_mismatch_instance_vs_static ... ok
+test declarations::protocol_method_linking::errors::receiver_kind_mismatch_static_vs_instance ... ok
+test declarations::protocol_method_linking::receiver_kinds::static_method_implements_static_protocol_method ... ok
+test declarations::protocol_method_linking::multiple_conformances::struct_implements_methods_from_multiple_protocols ... ok
+test declarations::protocol_method_linking::inheritance::struct_implements_inherited_protocol_method ... ok
+test declarations::protocol_method_linking::basic::struct_method_with_parameters ... ok
+test declarations::protocol_method_linking::receiver_kinds::mutating_method_implements_mutating_protocol_method ... ok
+test declarations::imports::errors::error_when_imported_items_conflict_from_different_imports ... ok
+test declarations::protocol_method_linking::inheritance::struct_implements_multiple_inherited_protocols ... ok
+test declarations::protocol_method_linking::errors::ambiguous_method_satisfies_multiple_protocols ... ok
+test declarations::protocol_method_linking::self_type::method_with_self_in_array ... ok
+test declarations::protocol_method_linking::self_type::method_with_self_return_type ... ok
+test declarations::protocol_method_linking::self_type::method_with_self_parameter ... ok
+test declarations::protocols::basic::public_protocol ... ok
+test declarations::protocol_method_linking::receiver_kinds::consuming_method_implements_consuming_protocol_method ... ok
+test declarations::protocols::basic::empty_protocol ... ok
+test declarations::protocols::basic::protocol_with_single_method ... ok
+test declarations::protocols::conformance::generic_struct_with_conformance ... ok
+test declarations::protocols::conformance::struct_with_multiple_conformances ... ok
+test declarations::protocols::basic::protocol_with_multiple_methods ... ok
+test declarations::protocols::conformance::struct_with_single_conformance ... ok
+test declarations::protocols::validation::empty_protocol_conformance_requires_no_methods ... ok
+test declarations::protocols::inheritance::protocol_inherits_multiple_protocols ... ok
+test declarations::protocols::inheritance::protocol_with_inherited_method_and_own_method ... ok
+test declarations::protocols::conformance::generic_struct_with_conformance_and_where_clause ... ok
+test declarations::protocols::inheritance::generic_protocol_with_inheritance ... ok
+test declarations::protocols::inheritance::protocol_inherits_single_protocol ... ok
+test declarations::protocols::validation::protocol_missing_method_from_inherited_protocol ... ok
+test declarations::protocols::validation::struct_implements_multiple_protocol_conformances ... ok
+test declarations::protocols::validation::struct_implements_inherited_protocol_methods ... ok
+test declarations::protocols::validation::protocol_conformance_with_inherited_protocols ... ok
+test declarations::protocols::validation::struct_implements_required_method ... ok
+test declarations::protocols::validation::struct_missing_method_from_second_conformance ... ok
+test declarations::protocols::validation::struct_implements_all_protocol_methods ... ok
+test declarations::protocols::validation::struct_with_labeled_parameter_method ... ok
+test declarations::protocols::validation::struct_with_method_wrong_return_type ... ok
+test declarations::protocols::validation::struct_missing_inherited_protocol_method ... ok
+test declarations::protocols::validation::struct_missing_one_of_multiple_methods ... ok
+test declarations::structs::basic::multiple_structs ... ok
+test declarations::protocols::validation::struct_with_method_wrong_parameter_count ... ok
+test declarations::protocols::validation::struct_missing_required_method ... ok
+test declarations::structs::basic::visibility_modifiers ... ok
+test declarations::structs::initializer_edge_cases::init_body_with_local_variables ... ok
+test declarations::structs::basic::empty_struct ... ok
+test declarations::protocols::validation::struct_with_wrong_label_on_method ... ok
+test declarations::structs::initializer_edge_cases::init_with_empty_body ... ok
+test declarations::structs::initializer_edge_cases::init_with_function_call_arguments ... ok
+test declarations::structs::initializers::explicit_initializer_with_parameters ... ok
+test declarations::structs::initializer_edge_cases::init_parameter_shadows_field_name ... ok
+test declarations::structs::initializers::initializer_with_labeled_params ... ok
+test declarations::structs::initializer_edge_cases::struct_with_multiple_methods ... ok
+test declarations::structs::initializer_edge_cases::init_with_unlabeled_params ... ok
+test declarations::structs::initializers::initializer_with_visibility ... ok
+test declarations::structs::initializers::initializer_without_params ... ok
+test declarations::structs::initializers::multiple_initializers ... ok
+test declarations::structs::instantiation::implicit_memberwise_init ... ok
+test declarations::structs::instantiation::empty_struct_instantiation ... ok
+test declarations::structs::instantiation::instantiation_in_variable_binding ... ok
+test declarations::structs::instantiation::instantiation_as_function_argument ... ok
+test declarations::structs::instantiation::explicit_init_instantiation ... ok
+test declarations::structs::instantiation::multiple_init_overloads ... ok
+test declarations::structs::instantiation_errors::explicit_init_call_succeeds ... ok
+test declarations::structs::instantiation_errors::calling_function_with_wrong_labels ... ok
+test declarations::structs::instantiation::explicit_init_with_labeled_params ... ok
+test declarations::structs::instantiation::instantiation_with_various_field_counts ... ok
+test declarations::structs::instantiation_errors::wrong_arity_too_few ... ok
+test declarations::structs::instantiation::instantiation_with_mixed_field_mutability ... ok
+test declarations::structs::nested::deeply_nested_structs ... ok
+test declarations::structs::nested::nested_struct ... ok
+test declarations::structs::instantiation_errors::wrong_label_name ... ok
+test declarations::structs::instantiation::nested_struct_instantiation ... ok
+test declarations::structs::nested::nested_struct_with_field ... ok
+test declarations::type_aliases::basic::simple_type_alias ... ok
+test declarations::type_aliases::basic::visibility_modifiers ... ok
+test declarations::type_aliases::cycle_detection::cycle_in_tuple_type ... ok
+test declarations::structs::instantiation_errors::struct_instantiation_success_after_error ... ok
+test declarations::type_aliases::cycle_detection::independent_chains ... ok
+test declarations::type_aliases::cycle_detection::mixed_valid_and_cyclic ... ok
+test declarations::type_aliases::cycle_detection::multi_way_cycles ... ok
+test declarations::structs::instantiation_errors::wrong_arity_too_many ... ok
+test declarations::type_aliases::cycle_detection::self_reference_cycle ... ok
+test declarations::type_aliases::basic::multiple_type_aliases ... ok
+test declarations::type_aliases::cycle_detection::valid_longer_chain ... ok
+test declarations::type_aliases::cycle_detection::valid_tuple_with_alias_reference ... ok
+test declarations::type_aliases::realistic::chained_aliases ... ok
+test declarations::type_aliases::cycle_detection::two_way_cycle ... ok
+test declarations::type_aliases::cycle_detection::valid_chain_to_builtin ... ok
+test declarations::type_aliases::realistic::multiple_aliases_same_target ... ok
+test declarations::type_aliases::realistic::mixed_visibility_aliases ... ok
+test declarations::type_aliases::realistic::collection_aliases ... ok
+test declarations::type_aliases::target_types::builtin_type_targets ... ok
+test declarations::type_aliases::multi_file::type_alias_with_imports ... ok
+test declarations::type_aliases::target_types::nested_tuple_types ... ok
+test declarations::type_aliases::realistic::domain_type_aliases ... ok
+test declarations::type_aliases::target_types::tuple_type_targets ... ok
+test declarations::type_aliases::unresolved_types::type_alias_to_unknown_type ... ok
+test declarations::wacky_inference::nested_associated_type_projections ... ok
+test declarations::type_aliases::target_types::struct_type_targets ... ok
+test declarations::wacky_inference::intentional_inference_failure_cases ... ok
+test expressions::body_literals::composite_expressions::array_literals_in_bodies ... ok
+test declarations::type_aliases::unresolved_types::type_alias_to_unknown_in_tuple ... ok
+test expressions::body_literals::composite_expressions::tuple_literals_in_bodies ... ok
+test expressions::body_literals::literal_expressions::primitive_literals_in_bodies ... ok
+test declarations::wacky_inference::transitive_equality_constraints_in_extension_method ... ok
+test expressions::calls::function_calls::function_calls::call_function_with_single_param ... ok
+test expressions::calls::function_calls::function_calls::call_simple_function_no_params ... ok
+test expressions::calls::function_calls::function_calls::call_three_param_function ... ok
+test expressions::calls::function_calls::function_calls::call_with_mixed_labeled_unlabeled_args ... ok
+test expressions::calls::function_calls::function_calls::call_function_with_multiple_params ... ok
+test expressions::calls::function_calls::function_calls::call_undefined_function_error ... ok
+test expressions::calls::function_calls::function_calls::call_with_missing_required_label_error ... ok
+test expressions::calls::function_calls::function_calls::call_with_three_labeled_arguments ... ok
+test expressions::calls::function_calls::function_calls::call_with_multiple_labeled_arguments ... ok
+test expressions::calls::function_calls::function_calls::call_with_too_many_arguments_error ... ok
+test expressions::calls::function_calls::function_calls::call_with_single_labeled_argument ... ok
+test expressions::calls::function_calls::function_calls::call_with_wrong_labeled_argument_error ... ok
+test expressions::calls::function_calls::function_calls::void_function_call ... ok
+test expressions::calls::function_calls::function_calls::deeply_nested_calls_four_levels ... ok
+test expressions::calls::function_calls::function_calls::call_with_too_few_arguments_error ... ok
+test expressions::calls::function_calls::function_calls::nested_function_calls_two_levels ... ok
+test expressions::calls::method_calls::method_calls::call_static_methods_with_various_params ... ok
+test expressions::calls::method_calls::method_calls::call_methods_with_various_parameter_styles ... ok
+test expressions::calls::method_calls::method_calls::method_call_error_cases ... ok
+test expressions::calls::method_calls::method_calls::method_visibility ... ok
+test expressions::calls::function_calls::function_calls::mixed_nested_and_labeled_calls ... ok
+test expressions::calls::function_calls::function_calls::function_return_type_in_variable_binding ... ok
+test expressions::calls::method_calls::method_calls::chained_method_calls_builder_and_cross_type ... ok
+test expressions::calls::method_calls::self_parameter::call_instance_methods_with_and_without_params ... ok
+test expressions::calls::method_calls::primitive_methods::primitive_methods_errors ... ok
+test expressions::calls::method_calls::self_parameter::chain_method_calls_and_self_calls ... ok
+test expressions::calls::method_calls::self_parameter::self_in_free_function_error ... ok
+test expressions::calls::method_calls::self_parameter::edge_cases_and_builder_pattern ... ok
+test expressions::calls::method_calls::self_parameter::protocol_with_all_method_types ... ok
+test expressions::calls::method_calls::self_parameter::self_in_static_method_error ... ok
+test expressions::calls::method_calls::self_parameter::generic_struct_with_methods ... ok
+test expressions::calls::method_calls::self_parameter::call_static_and_instance_methods_on_types ... ok
+test expressions::calls::method_calls::self_parameter::static_and_instance_methods ... ok
+test expressions::calls::method_calls::self_parameter::mutating_and_consuming_methods ... ok
+test expressions::closures::basic_syntax::closure_empty_params_with_in ... ok
+test expressions::calls::method_calls::self_parameter::access_self_fields_in_methods ... ok
+test expressions::closures::basic_syntax::closure_mixed_typed_untyped_params ... ok
+test expressions::closures::basic_syntax::closure_multiple_params_with_types ... ok
+test expressions::closures::basic_syntax::closure_no_params_no_in ... ok
+test expressions::calls::method_calls::self_parameter::struct_with_multiple_receiver_kinds ... ok
+test expressions::closures::basic_syntax::closure_single_param_with_type ... ok
+test expressions::closures::basic_syntax::closure_multiple_params_without_types ... ok
+test expressions::closures::basic_syntax::closure_single_param_without_type ... ok
+error: no method 'action' on type 'Callback'
+   ┌─ test.ks:10:5
+   │
+10 │     cb.action()
+   │ test expressions::closures::captures::capture_by_value_semantics ... ok
+    ^^^^^^^^^^^ method not found
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::closures_as_values::closure_in_struct_field ... FAILED
+test expressions::closures::captures::capture_function_parameter ... FAILED
+test expressions::closures::basic_syntax::closure_three_params ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test() -> () -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 3 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::captures::capture_from_nested_scope ... FAILED
+test expressions::closures::captures::capture_immutable_variable ... ok
+error: no method 'handle' on type 'Handler[I64]'
+   ┌─ test.ks:10:5
+   │
+10 │     h.handle(21)
+   test expressions::closures::captures::cannot_mutate_captured_variable ... FAILED
+│     ^^^^^^^^^^^^ method not found
+
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::closures_as_values::closure_in_generic_struct ... FAILED
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::closures_as_values::closure_returned_from_function ... FAILED
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::closures_as_values::closure_stored_in_variable ... FAILED
+test expressions::closures::captures::capture_mutable_variable_read_only ... ok
+test expressions::closures::edge_cases::closure_returning_unit ... ok
+test expressions::closures::edge_cases::closure_single_expression_is_tail ... ok
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::closures_as_values::closure_passed_to_function ... FAILED
+test expressions::closures::captures::capture_multiple_variables ... ok
+error: function 'test' requires a body
+  ┌─ test.ks:8:6
+  │
+8 │ func test() -> Int {
+  │      ^^^^ function declared without body
+
+test expressions::closures::edge_cases::closure_expression_with_semicolon_returns_unit ... ok
+test expressions::closures::edge_cases::closure_with_never_return ... FAILED
+test expressions::closures::edge_cases::empty_closure_body ... ok
+test expressions::closures::edge_cases::variable_named_it_in_closure ... ok
+error: type `_` is not callable
+  ┌─ test.ks:5:18
+  │  
+5 │       let result = {
+  │ ╭──────────────────^
+6 │ │         let a = 10;
+7 │ │         let b = 20;
+8 │ │         a + b
+9 │ │     }();
+  │ ╰───────^ this has type `_`
+  │  
+  = only functions and types can be called, but this expression has type `_`
+
+test expressions::closures::immediate_invocation::immediately_invoked_for_scoping ... FAILED
+error: type `_` is not callable
+  ┌─ test.ks:5:5
+  │
+5 │     { 42 }()
+  │     ^^^^^^^^ this has type `_`
+  │
+  = only functions and types can be called, but this expression has type `_`
+
+test expressions::closures::immediate_invocation::immediately_invoked_no_params ... FAILED
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::implicit_it::it_not_used_multi_param_context ... ok
+test expressions::closures::generics::closure_in_generic_function ... FAILED
+test expressions::closures::implicit_it::it_not_in_scope_with_explicit_params ... ok
+test expressions::closures::immediate_invocation::immediately_invoked_with_args ... ok
+test expressions::closures::implicit_it::it_not_used_zero_param_context ... ok
+test expressions::closures::edge_cases::param_named_it_shadows_implicit ... ok
+test expressions::closures::edge_cases::closure_with_only_statements ... ok
+error: function 'test' requires a body
+  ┌─ test.ks:8:6
+  │
+8 │ func test() -> (Int) -> Int {
+  │      ^^^^ function declared without body
+
+test expressions::closures::implicit_it::it_shadowed_in_nested_closure ... FAILED
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::immediate_invocation::immediately_invoked_wrong_arg_count ... FAILED
+test expressions::closures::implicit_it::it_used_multi_param_context_error ... FAILED
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::implicit_it::it_used_zero_param_context_error ... FAILED
+test expressions::closures::implicit_it::it_with_single_param_context ... FAILED
+test expressions::closures::multi_statement::closure_with_let_binding ... ok
+error: type mismatch: expected `Bool`, found `I64`
+   ┌─ test.ks:5:5
+   │  
+ 5 │ ╭     { (x) in
+ 6 │ │         if x > 0 {
+ 7 │ │             x
+ 8 │ │         } else {
+ 9 │ │             0 - x
+10 │ │         }
+11 │ │     }
+   │ ╰─────^ expected `Bool`
+
+error: type mismatch: expected `Bool`, found `I64`
+   ┌─ test.ks:5:5
+   │  
+ 5 │ ╭     { (x) in
+ 6 │ │         if x > 0 {
+ 7 │ │             x
+ 8 │ │         } else {
+ 9 │ │             0 - x
+10 │ │         }
+11 │ │     }
+   │ ╰─────^ expected `Bool`
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: if condition must be `Bool`, found `_`
+  ┌─ test.ks:6:12
+  │
+6 │         if x > 0 {
+  │            ^^^^^ expected `Bool`, found `_`
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::multi_statement::closure_with_if_expression ... FAILED
+test expressions::closures::generics::closure_with_generic_param_inferred ... FAILED
+error: function 'test' requires a body
+  ┌─ test.ks:8:6
+  │
+8 │ func test() -> (Int) -> Int {
+  │      ^^^^ function declared without body
+
+test expressions::closures::nested_closures::nested_closure_with_it_shadowing ... FAILED
+error: function 'test' requires a body
+  ┌─ test.ks:8:6
+  │
+8 │ func test() -> Int {
+  │      ^^^^ function declared without body
+
+test expressions::closures::trailing_closure::trailing_closure_only_argument ... FAILED
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::trailing_closure::non_trailing_closure_in_parens ... FAILED
+test expressions::closures::multi_statement::closure_with_multiple_statements ... ok
+test expressions::closures::multi_statement::closure_with_while_loop ... ok
+test expressions::closures::param_mutability::closure_param_immutable_by_default ... ok
+test expressions::closures::nested_closures::nested_closure_captures_outer_param ... ok
+error: function 'test' requires a body
+  ┌─ test.ks:8:6
+  │
+8 │ func test() -> Int {
+  │      ^^^^ function declared without body
+
+test expressions::closures::multi_statement::closure_with_var_binding ... ok
+test expressions::closures::nested_closures::deeply_nested_closures ... ok
+test expressions::closures::trailing_closure::trailing_closure_with_other_args ... FAILED
+test expressions::closures::type_checking::closure_arity_mismatch_too_few ... ok
+test expressions::closures::nested_closures::closure_returning_closure ... ok
+test expressions::closures::type_checking::closure_arity_mismatch_too_many ... ok
+test expressions::closures::type_checking::closure_return_type_mismatch ... ok
+test expressions::closures::type_checking::closure_assigned_to_non_function_type ... FAILED
+error: function 'test' requires a body
+  ┌─ test.ks:8:6
+  │
+8 │ func test() -> Int {
+  │      ^^^^ function declared without body
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::trailing_closure::trailing_closure_with_multiple_args ... FAILED
+test expressions::closures::type_inference::cannot_infer_without_context_error ... FAILED
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::type_inference::infer_from_variable_annotation ... ok
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::closures::type_inference::cannot_infer_it_type_without_context ... FAILED
+test expressions::closures::type_inference::infer_from_function_parameter_context ... FAILED
+test expressions::closures::type_inference::infer_return_type_from_body ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(a: Bool, b: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test() -> Int {
+  │   test expressions::control_flow::if_basic::if_with_complex_condition ... FAILED
+   ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::if_basic::if_with_else_compiles ... FAILED
+test expressions::closures::type_checking::closure_param_type_mismatch ... ok
+test expressions::control_flow::if_basic::if_without_semicolon_followed_by_expression ... ok
+test expressions::closures::type_inference::infer_param_type_from_expected ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test() -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::if_basic::multiple_if_without_semicolons ... FAILED
+test expressions::control_flow::if_basic::if_without_else_compiles ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test() -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::if_scoping::outer_variable_visible_inside_if ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(a: Bool, b: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::if_basic::nested_if_expressions ... FAILED
+test expressions::control_flow::if_scoping::variable_in_else_block_not_visible_outside ... ok
+test expressions::control_flow::if_with_statements::if_block_with_side_effects ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test() -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test() -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::if_scoping::variable_visible_within_its_block ... FAILEDerror: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4
+ │test expressions::control_flow::if_with_statements::if_block_with_multiple_statements ... FAILED
+ func test() -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(x: Int) -> Int {
+  │      ^test expressions::control_flow::if_scoping::shadowing_inside_if_block ... FAILED
+^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::if_basic::if_else_if_chain_compiles ... FAILED
+test expressions::control_flow::if_scoping::variable_in_if_block_not_visible_outside ... ok
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::never_type_propagation::if_as_expression_with_never_in_else ... FAILED
+test expressions::control_flow::never_type_propagation::if_as_expression_with_never_in_then ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(x: Int) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::never_type_propagation::if_else_if_chain_all_return ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(x: Int) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6test expressions::control_flow::never_type_propagation::if_else_if_with_return ... FAILED
+
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> test expressions::control_flow::never_type_propagation::if_with_return_in_else_branch ... FAILED
+Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: test expressions::field_access::field_access::chained_field_access_with_nested_structs ... ok
+could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::never_type_propagation::if_with_return_in_both_branches ... FAILED
+test expressions::field_access::field_access::multiple_field_access_in_single_expression ... ok
+test expressions::field_access::field_access::field_access_in_variable_declaration ... ok
+test expressions::field_access::field_access::public_field_access_with_multiple_accessors ... ok
+test expressions::field_access::field_access::nonexistent_field_error ... ok
+test expressions::field_access::field_access::private_field_access_error ... ok
+test expressions::field_access::field_access::simple_field_access_with_struct_verification ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::control_flow::never_type_propagation::if_with_return_in_then_branch ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(a: Bool, b: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::field_access::field_access::member_access_on_primitive_type_error ... ok
+test expressions::control_flow::never_type_propagation::nested_if_with_never_propagation ... FAILED
+test expressions::loops::break_continue::break_outside_loop_fails ... ok
+test expressions::loops::break_continue::break_in_while ... ok
+test expressions::loops::break_continue::continue_outside_loop_fails ... ok
+test expressions::loops::break_continue::break_in_loop ... ok
+test expressions::loops::break_continue::continue_in_while ... ok
+test expressions::loops::complex_control_flow::alternating_while_and_loop ... ok
+test expressions::loops::break_continue::break_in_if_outside_loop_fails ... ok
+test expressions::loops::complex_control_flow::three_levels_of_labeled_loops ... ok
+test expressions::loops::edge_cases::break_as_last_statement ... ok
+test expressions::loops::edge_cases::break_and_continue_in_same_loop ... ok
+test expressions::loops::edge_cases::continue_as_last_statement ... ok
+test expressions::loops::complex_control_flow::loop_with_conditional_break_and_continue ... ok
+test expressions::loops::complex_control_flow::nested_labeled_loops_with_mixed_breaks ... ok
+test expressions::loops::break_continue::continue_in_loop ... ok
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::loops::complex_control_flow::while_with_else_if_chain_inside ... FAILED
+test expressions::loops::edge_cases::empty_loop_body_with_break ... ok
+test expressions::loops::edge_cases::if_with_function_call_condition ... ok
+test expressions::loops::edge_cases::empty_while_body ... ok
+test expressions::loops::edge_cases::labeled_break_from_deeply_nested ... ok
+test expressions::loops::edge_cases::same_label_in_different_scopes ... ok
+test expressions::loops::edge_cases::while_with_comparison_condition ... ok
+test expressions::loops::edge_cases::multiple_breaks_in_loop ... ok
+test expressions::loops::edge_cases::loop_inside_if_inside_loop ... ok
+test expressions::loops::edge_cases::while_with_function_call_condition ... ok
+test expressions::loops::edge_cases::deeply_nested_loops ... ok
+test expressions::loops::error_cases::break_in_function_body_no_loop ... ok
+test expressions::loops::error_cases::break_in_nested_if_no_loop ... ok
+test expressions::loops::edge_cases::multiple_continues_in_loop ... ok
+test expressions::loops::edge_cases::if_inside_loop_inside_if ... ok
+test expressions::loops::error_cases::break_with_typo_in_label ... ok
+test expressions::loops::error_cases::break_to_label_that_exists_but_not_in_scope ... ok
+test expressions::loops::error_cases::continue_in_nested_if_no_loop ... ok
+test expressions::loops::error_cases::break_to_inner_label_from_outer ... ok
+test expressions::loops::error_cases::continue_in_function_body_no_loop ... ok
+test expressions::loops::error_cases::continue_with_typo_in_label ... ok
+test expressions::loops::error_cases::shadowed_variable_not_visible_after_loop ... ok
+test expressions::loops::error_cases::use_loop_variable_after_loop ... ok
+test expressions::loops::edge_cases::while_with_nested_function_call_condition ... ok
+test expressions::loops::labeled_loops::break_to_undeclared_label_fails ... ok
+test expressions::loops::error_cases::continue_to_label_that_exists_but_not_in_scope ... ok
+test expressions::loops::labeled_loops::labeled_while_with_continue ... ok
+test expressions::loops::loop_basic::loop_without_semicolon_followed_by_expression ... ok
+test expressions::loops::labeled_loops::labeled_loop_with_break ... ok
+test expressions::loops::labeled_loops::continue_to_undeclared_label_fails ... ok
+test expressions::loops::loop_basic::simple_loop_with_break ... ok
+test expressions::loops::labeled_loops::multiple_labeled_loops ... ok
+test expressions::loops::loop_basic::nested_loops ... ok
+test expressions::loops::loop_scoping::outer_variable_visible_inside_loop ... ok
+test expressions::loops::error_cases::use_nested_loop_variable_outside ... ok
+test expressions::loops::loop_scoping::variable_in_loop_block_not_visible_outside ... ok
+test expressions::loops::labeled_loops::labeled_while_with_break ... ok
+test expressions::loops::loop_scoping::variable_in_while_block_not_visible_outside ... ok
+test expressions::loops::statements_after_loops::statement_after_while_in_while ... ok
+test expressions::loops::statements_after_loops::statement_after_while_in_loop ... ok
+test expressions::loops::statements_after_loops::statement_after_nested_if_while_loop ... ok
+test expressions::loops::while_basic::nested_while_loops ... ok
+test expressions::loops::statements_after_loops::statement_after_if_in_while ... ok
+test expressions::loops::while_basic::simple_while_loop ... ok
+test expressions::loops::while_basic::while_with_complex_condition ... ok
+test expressions::loops::while_basic::while_without_semicolon_followed_by_expression ... ok
+test expressions::loops::statements_after_loops::statement_after_loop_in_while ... ok
+test expressions::operators::arithmetic_operators::float_arithmetic_operations ... ok
+test expressions::loops::while_basic::multiple_while_without_semicolons ... ok
+test expressions::operators::associativity::left_associative_arithmetic ... ok
+test expressions::operators::associativity::simple_comparison ... ok
+test expressions::operators::bitwise_operators::all_bitwise_operators ... ok
+test expressions::operators::arithmetic_operators::integer_arithmetic_operations ... ok
+test expressions::operators::combined_with_variables::operators_with_function_parameters ... ok
+test expressions::operators::combined_with_variables::operators_with_struct_fields ... ok
+test expressions::loops::statements_after_loops::multiple_statement_like_expressions_in_sequence ... ok
+test expressions::operators::precedence::and_before_or ... ok
+test expressions::operators::comparison_operators::all_comparison_operators ... ok
+test expressions::operators::precedence::complex_expression ... ok
+test expressions::operators::precedence::div_before_sub ... ok
+test expressions::operators::logical_operators::all_logical_operators ... ok
+test expressions::operators::edge_cases::deeply_nested_and_complex_expressions ... ok
+test expressions::operators::precedence::comparison_before_logical ... ok
+test expressions::operators::precedence::shift_before_add ... ok
+test expressions::operators::unary_operators::all_unary_operators ... ok
+test expressions::paths::complex_expressions::complex_type_declarations ... ok
+test expressions::paths::complex_expressions::deeply_nested_grouping ... ok
+test expressions::operators::edge_cases::chained_and_nested_unary_operators ... ok
+test expressions::paths::complex_expressions::empty_array_requires_type_annotation ... ok
+test expressions::paths::complex_expressions::empty_tuple_is_unit ... ok
+test expressions::paths::complex_expressions::let_with_function_type ... ok
+test expressions::operators::precedence::mul_before_add ... ok
+test expressions::paths::complex_expressions::numeric_literal_variants ... ok
+test expressions::paths::complex_expressions::mixed_literals ... ok
+test expressions::paths::complex_expressions::string_with_escapes ... ok
+test expressions::operators::type_errors::invalid_operator_type_combinations ... ok
+test expressions::paths::complex_expressions::single_element_tuple ... ok
+test expressions::paths::edge_cases::complex_function_types ... ok
+test expressions::paths::complex_expressions::nested_containers ... ok
+test expressions::paths::edge_cases::function_type_with_many_params ... ok
+test expressions::paths::edge_cases::comments_in_code ... ok
+test expressions::paths::edge_cases::deeply_nested_structures ... ok
+test expressions::paths::edge_cases::function_with_many_parameters ... ok
+test expressions::paths::edge_cases::mixed_statements_and_expressions ... ok
+test expressions::paths::edge_cases::numeric_zero_variants ... ok
+test expressions::paths::edge_cases::labeled_parameters ... ok
+test expressions::paths::edge_cases::parameter_with_same_name_as_type ... ok
+test expressions::paths::edge_cases::many_variable_declarations ... ok
+test expressions::paths::edge_cases::scientific_notation_variants ... ok
+test expressions::paths::edge_cases::trailing_commas ... ok
+test expressions::paths::edge_cases::unary_in_containers ... ok
+test expressions::paths::edge_cases::special_string_content ... ok
+test expressions::paths::edge_cases::declarations_with_unary_initializers ... ok
+test expressions::paths::edge_cases::unary_operators_on_paths ... ok
+test expressions::paths::edge_cases::special_types ... ok
+test expressions::paths::edge_cases::unary_operators_on_literals ... ok
+test expressions::paths::edge_cases::variable_shadowing_edge_case ... ok
+test expressions::paths::edge_cases::very_large_integer ... ok
+test expressions::paths::edge_cases::null_literals ... ok
+test expressions::paths::edge_cases::whitespace_handling ... ok
+test expressions::paths::expression_statements::expression_statement_literal ... ok
+test expressions::paths::expression_statements::expression_statement_path ... ok
+test expressions::paths::edge_cases::underscore_and_unicode_identifiers ... ok
+test expressions::paths::parameter_usage::use_single_parameter ... ok
+test expressions::paths::path_expressions::path_single_segment ... ok
+test expressions::paths::parameter_usage::multiple_parameters_usage ... ok
+test expressions::paths::expression_statements::multiple_expression_statements ... ok
+test expressions::paths::variable_declarations::let_with_array_type ... ok
+test expressions::paths::variable_declarations::let_with_complex_type ... ok
+test expressions::paths::variable_declarations::let_with_type ... ok
+test expressions::paths::path_expressions::paths_in_containers ... ok
+test expressions::paths::variable_declarations::multiple_declarations ... ok
+test expressions::paths::variable_declarations::var_with_type ... ok
+test expressions::paths::variable_declarations::let_without_initializer ... ok
+test expressions::paths::variable_shadowing::sequential_shadowing ... ok
+test expressions::returns::return_basic::bare_return_compiles ... ok
+test expressions::paths::variable_declarations::let_with_path_initializer ... ok
+test expressions::returns::return_basic::return_with_integer_compiles ... ok
+test expressions::returns::return_basic::return_with_bool_compiles ... ok
+test expressions::returns::return_basic::return_with_string_compiles ... ok
+test expressions::paths::variable_shadowing::let_shadows_parameter ... ok
+test expressions::returns::return_in_control_flow::return_in_if_branch ... ok
+test expressions::returns::return_basic::return_with_expression_compiles ... ok
+test expressions::returns::return_nested::multiple_returns_in_function ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(x: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+test expressions::returns::return_statement_like::return_with_semicolon_followed_by_code ... ok
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(a: Bool, b: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test expressions::returns::return_in_control_flow::return_in_both_if_else_branches ... FAILED
+test expressions::returns::return_nested::return_in_nested_if ... FAILED
+test expressions::returns::return_statement_like::return_without_semicolon_at_end ... ok
+test expressions::returns::return_with_complex_expressions::return_with_binary_expression ... ok
+test expressions::returns::return_nested::return_in_nested_loop ... ok
+test expressions::returns::return_in_control_flow::return_in_while_loop ... ok
+test expressions::returns::return_in_control_flow::return_in_loop ... ok
+test expressions::returns::return_with_complex_expressions::return_with_local_variable ... ok
+test expressions::returns::return_with_complex_expressions::return_with_grouping ... ok
+test framework::test_suite_features::conformance_behavior::struct_with_conformance ... ok
+test framework::test_suite_features::conformance_behavior::struct_without_conformance ... ok
+test framework::test_suite_features::error_expectations::fails_expectation ... ok
+test framework::test_suite_features::error_expectations::specific_error_message ... ok
+test framework::test_suite_features::child_count_behavior::struct_children ... ok
+test expressions::returns::return_with_complex_expressions::return_with_function_call ... ok
+test framework::test_suite_features::error_expectations::error_count ... ok
+test framework::test_suite_features::field_count_behavior::struct_with_multiple_fields ... ok
+test framework::test_suite_features::field_count_behavior::struct_with_no_fields ... ok
+test framework::test_suite_features::negated_behaviors::not_generic ... ok
+test framework::test_suite_features::function_behaviors::static_function ... ok
+test framework::test_suite_features::negated_behaviors::not_public ... ok
+test framework::test_suite_features::function_behaviors::protocol_method_no_body ... ok
+test framework::test_suite_features::path_based_lookup::disambiguate_same_names ... ok
+test framework::test_suite_features::function_behaviors::instance_method ... ok
+test framework::test_suite_features::path_based_lookup::deep_nested_path ... ok
+test inference::array_inference::infer_array_from_elements ... ok
+test inference::array_inference::infer_array_element_type_mismatch ... ok
+test inference::basic_inference::infer_int_from_literal ... ok
+test inference::basic_inference::infer_string_from_literal ... ok
+test inference::basic_inference::infer_from_another_variable ... ok
+test inference::bidirectional_inference::infer_from_variable_annotation ... ok
+test framework::test_suite_features::path_based_lookup::simple_name_lookup ... ok
+test framework::test_suite_features::path_based_lookup::nested_path_lookup ... ok
+test inference::bidirectional_inference::infer_from_expected_return_type ... ok
+test inference::basic_inference::infer_chain_of_variables ... ok
+test inference::basic_inference::infer_bool_from_literal ... ok
+test inference::generic_method_type_substitution::generic_method_chained_calls ... ok
+test inference::inference_errors::inferred_type_mismatch_in_return ... ok
+test inference::inference_errors::inferred_type_mismatch_with_usage ... ok
+test inference::inference_errors::inferred_type_mismatch_in_function_arg ... ok
+test inference::inference_from_expressions::infer_from_binary_op ... ok
+test inference::generic_method_type_substitution::generic_method_in_extension_infers_type_param ... ok
+test inference::inference_from_expressions::infer_from_comparison ... ok
+test inference::inference_from_expressions::infer_from_function_call ... ok
+test inference::inference_from_expressions::infer_from_method_call ... ok
+test inference::inference_errors::inferred_type_mismatch_in_assignment ... ok
+test inference::inference_from_expressions::infer_struct_from_constructor ... ok
+test inference::inference_in_control_flow::infer_in_while_body ... ok
+test inference::inference_with_generics::infer_generic_method_return ... ok
+test inference::inference_with_generics::infer_generic_from_context ... ok
+test instantiation::expressions::cloning::code_block_clone_empty_block ... ok
+test inference::inference_with_generics::infer_generic_struct_type_param ... ok
+test instantiation::expressions::cloning::code_block_clone_preserves_structure ... ok
+test instantiation::expressions::cloning::executable_behavior_clone_empty ... ok
+test instantiation::expressions::cloning::executable_behavior_clone_with_body ... ok
+test instantiation::expressions::cloning::expression_clone_preserves_type_and_span ... ok
+test instantiation::expressions::cloning::expression_clone_with_different_types ... ok
+test instantiation::expressions::cloning::statement_clone_preserves_binding_properties ... ok
+test instantiation::expressions::cloning::statement_clone_with_mutable_variable ... ok
+test instantiation::expressions::code_block_types::code_block_empty ... ok
+test instantiation::expressions::code_block_types::code_block_with_statements ... ok
+test instantiation::expressions::code_block_types::code_block_with_statements_and_yield ... ok
+test instantiation::expressions::code_block_types::code_block_with_yield ... ok
+test instantiation::expressions::executable_behavior::executable_behavior_creation ... ok
+test instantiation::expressions::executable_behavior::executable_behavior_mutable_body ... ok
+test instantiation::expressions::expression_types::expression_array_creation ... ok
+test instantiation::expressions::executable_behavior::executable_behavior_with_body ... ok
+test inference::static_method_type_substitution::static_method_in_extension_field_access ... ok
+test instantiation::expressions::expression_types::expression_error ... ok
+test instantiation::expressions::expression_types::expression_grouping_creation ... ok
+test instantiation::expressions::expression_types::expression_local_ref ... ok
+test instantiation::expressions::expression_types::expression_overloaded_ref ... ok
+test instantiation::expressions::expression_types::expression_symbol_ref ... ok
+test instantiation::expressions::expression_types::expression_struct_creation ... ok
+test instantiation::expressions::expression_types::expression_tuple_creation ... ok
+test inference::inference_in_control_flow::infer_in_loop_body ... ok
+test instantiation::expressions::literal_value_equality::literal_values_equal ... ok
+test instantiation::expressions::literal_value_equality::literal_values_not_equal ... ok
+test instantiation::expressions::nested_expressions::deeply_nested_array ... ok
+error: could not infer type for 1 placeholder(s)
+test instantiation::expressions::nested_expressions::nested_grouping ... ok
+ = try adding explicit type annotations to help the compiler
+
+test instantiation::expressions::nested_expressions::nested_tuple_in_array ... ok
+test instantiation::expressions::statement_types::statement_expr_creation ... ok
+test instantiation::expressions::statement_types::statement_let_creation ... ok
+test instantiation::expressions::statement_types::statement_span ... ok
+test inference::inference_in_control_flow::infer_from_if_else ... FAILED
+test instantiation::expressions::statement_types::statement_var_creation ... ok
+test instantiation::expressions::statement_types::statement_without_initializer ... ok
+test inference::static_method_type_substitution::static_method_in_extension_substitutes_type_param ... ok
+test inference::static_method_type_substitution::static_method_infers_type_from_args ... ok
+test inference::static_method_type_substitution::static_method_on_struct_field_access ... ok
+test inference::static_method_type_substitution::static_method_on_struct_substitutes_type_param ... ok
+test instantiation::expressions::integration::functions_with_varied_literal_return_types ... ok
+test inference::tuple_inference::infer_tuple_type ... ok
+test statements::assignments::assignment_expressions::assignment_with_array_literal ... ok
+test inference::tuple_inference::infer_nested_tuple ... ok
+test instantiation::expressions::integration::functions_with_aggregate_expressions ... ok
+test statements::assignments::assignment_expressions::assignment_with_string_value ... ok
+test statements::assignments::assignment_expressions::basic_assignment_to_var ... ok
+test statements::assignments::assignment_expressions::assignment_from_function_parameter ... ok
+test instantiation::expressions::integration::struct_with_method ... ok
+test statements::assignments::assignment_expressions::assignment_with_function_call_result ... ok
+test statements::variables::local_variables::array_variable_declaration ... ok
+test statements::assignments::assignment_expressions::assignment_expression_result ... ok
+test statements::variables::local_variables::tuple_variable_declaration ... ok
+test statements::variables::local_variables::mixed_variable_types ... ok
+test statements::variables::local_variables::let_and_var_with_initializers ... ok
+test statements::variables::local_variables::multiple_variable_declarations_in_sequence ... ok
+test statements::assignments::assignment_expressions::chained_assignments_with_different_types ... ok
+test statements::variables::local_variables::shadowing_parameter_with_local_variable ... ok
+test statements::variables::local_variables::variable_with_string_type ... ok
+test statements::variables::local_variables::var_with_reassignment ... ok
+test statements::assignments::assignment_expressions::multiple_sequential_assignments ... ok
+test types::generics::arity_errors::too_few_even_with_defaults ... ok
+test types::generics::arity_errors::too_many_type_arguments ... ok
+test types::generics::arity_errors::zero_type_arguments_when_required ... ok
+test types::generics::basic_parsing::generic_function ... ok
+test types::generics::arity_errors::too_few_type_arguments ... ok
+test types::generics::basic_parsing::generic_protocol ... ok
+test types::generics::basic_parsing::generic_struct_three_params ... ok
+test types::generics::basic_parsing::generic_struct_single_param ... ok
+test types::generics::basic_parsing::generic_struct_multiple_params ... ok
+test types::generics::arity_errors::correct_arity_with_defaults ... ok
+test types::generics::constraint_enforcement::ambiguous_method_error ... ok
+test types::generics::basic_parsing::non_generic_struct ... ok
+test types::generics::constraint_enforcement::ambiguous_with_and_keyword ... ok
+test types::generics::basic_parsing::generic_type_alias ... ok
+test types::generics::constraint_enforcement::constraint_on_unused_type_param ... ok
+test types::generics::constraint_enforcement::chained_method_calls ... ok
+test types::generics::constraint_enforcement::diamond_inheritance_same_method ... ok
+test types::generics::constraint_enforcement::calling_wrong_method_with_multiple_bounds ... ok
+test types::generics::constraint_enforcement::constrained_method_call_works ... ok
+test types::generics::constraint_enforcement::bounds_with_and_keyword ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_function_type ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_not_substituted ... ok
+test types::generics::constraint_enforcement::empty_protocol_bound ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_on_protocol_method ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_array_type ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_conflicts_with_inferred ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_return_type_mismatch ... ok
+test types::generics::constraint_enforcement::explicit_type_args_empty ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_undefined_type ... ok
+test types::generics::constraint_enforcement::explicit_type_args_multiple ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_tuple_type ... ok
+test types::generics::constraint_enforcement::explicit_type_args_on_non_generic ... ok
+test types::generics::constraint_enforcement::explicit_type_args_nested_calls ... ok
+test types::generics::constraint_enforcement::explicit_type_args_too_few ... ok
+test types::generics::constraint_enforcement::explicit_type_args_on_variable ... ok
+test types::generics::constraint_enforcement::explicit_type_arg_return_type_assigned_wrong ... ok
+test types::generics::constraint_enforcement::generic_protocol_bound_not_supported ... ok
+test types::generics::constraint_enforcement::explicit_type_args_with_constraint ... ok
+test types::generics::constraint_enforcement::generic_struct_init_wrong_field_type ... ok
+test types::generics::constraint_enforcement::inherited_protocol_method ... ok
+test types::generics::constraint_enforcement::inherited_method_not_ambiguous ... ok
+test types::generics::constraint_enforcement::method_call_result_used_in_expression ... ok
+test types::generics::constraint_enforcement::method_not_in_bounds_error ... ok
+test types::generics::constraint_enforcement::method_returning_different_type ... ok
+test types::generics::constraint_enforcement::explicit_type_args_simple_function ... ok
+test types::generics::constraint_enforcement::explicit_type_args_inferred_constraint ... ok
+test types::generics::constraint_enforcement::explicit_type_args_too_many ... ok
+test types::generics::constraint_enforcement::multiple_bounds_method_call ... ok
+test types::generics::constraint_enforcement::method_with_multiple_parameters ... ok
+test types::generics::constraint_enforcement::multiple_methods_same_protocol ... ok
+test types::generics::constraint_enforcement::protocol_method_with_labeled_params ... ok
+test types::generics::constraint_enforcement::self_in_array_parameter ... ok
+test types::generics::constraint_enforcement::self_substitution_in_return_type ... ok
+test types::generics::constraint_enforcement::self_in_tuple_return ... ok
+test types::generics::constraint_enforcement::self_substitution_in_parameter ... ok
+test types::generics::constraint_enforcement::struct_method_vs_protocol_method ... ok
+test types::generics::constraint_enforcement::protocol_method_with_positional_params ... ok
+test types::generics::constraint_enforcement::nested_function_with_own_bounds ... ok
+test types::generics::constraint_enforcement::three_way_ambiguity ... ok
+test types::generics::constraint_enforcement::wrong_labels_on_constrained_call ... ok
+test types::generics::defaults::all_params_with_defaults ... ok
+test types::generics::defaults::type_param_with_default ... ok
+test types::generics::constraint_enforcement::unconstrained_type_param_method_error ... ok
+test types::generics::defaults::use_default_type_argument ... ok
+test types::generics::edge_cases::generic_alias_preserves_param_count ... ok
+test types::generics::edge_cases::deeply_nested_generics ... ok
+test types::generics::edge_cases::generic_protocol_method_using_struct_type_param ... ok
+test types::generics::edge_cases::long_type_param_names ... ok
+test types::generics::edge_cases::many_type_params ... ok
+test types::generics::defaults::multiple_defaults ... ok
+test types::generics::constraint_enforcement::type_param_passed_to_another_generic ... ok
+test types::generics::defaults::override_default_type_argument ... ok
+test types::generics::edge_cases::mutually_referential_generics_error ... ok
+test types::generics::edge_cases::mutually_referential_generics_with_array_ok ... ok
+test types::generics::edge_cases::self_referential_generic_error ... ok
+test types::generics::edge_cases::self_referential_generic_with_array_ok ... ok
+test types::generics::edge_cases::single_letter_type_params ... ok
+test types::generics::edge_cases::type_param_same_name_as_struct ... ok
+test types::generics::edge_cases::type_param_shadowing_in_nested ... ok
+test types::generics::edge_cases::generic_in_optional_like_pattern ... ok
+test types::generics::edge_cases::where_clause_with_generic_bound ... ok
+test types::generics::instantiation::generic_type_in_protocol ... ok
+test types::generics::instantiation::generic_parameter_type ... ok
+test types::generics::instantiation::generic_return_type ... ok
+test types::generics::instantiation::nested_generic_types ... ok
+test types::generics::multiple_constraints::same_param_multiple_separate_constraints ... ok
+test types::generics::multiple_constraints::three_params_with_mixed_bounds ... ok
+test types::generics::nested_generics::generic_inside_generic ... ok
+test types::generics::instantiation::tuple_with_generic ... ok
+test types::generics::instantiation::generic_field_type ... ok
+test types::generics::nested_generics::non_generic_inside_generic ... ok
+test types::generics::instantiation::function_type_with_generic ... ok
+test types::generics::instantiation::multiple_type_args ... ok
+test types::generics::non_generic_errors::type_args_on_non_generic_type_alias ... ok
+test types::generics::non_generic_errors::type_args_on_non_generic_struct ... ok
+test types::generics::non_generic_errors::type_args_on_primitive ... ok
+test types::generics::multiple_constraints::two_params_with_separate_bounds ... ok
+test types::generics::type_alias_resolution::generic_alias_chaining ... ok
+test types::generics::type_alias_resolution::identity_type_alias_instantiated ... ok
+test types::generics::type_alias_resolution::identity_type_alias ... ok
+test types::generics::type_alias_resolution::nested_type_param_in_alias ... ok
+test types::generics::type_alias_resolution::type_alias_with_function_type ... ok
+test types::generics::type_alias_resolution::type_param_in_nested_tuple ... ok
+test types::generics::type_alias_resolution::pair_type_alias ... ok
+test types::generics::undeclared_type_params::typo_in_where_clause ... ok
+test types::generics::undeclared_type_params::undeclared_in_function_where_clause ... ok
+test types::generics::undeclared_type_params::undeclared_in_where_clause ... ok
+test types::generics::validation::default_ordering_error ... ok
+test types::generics::where_clause::simple_where_clause ... ok
+test types::generics::where_clause::where_clause_bound_is_struct ... ok
+test types::generics::validation::duplicate_type_param_error ... ok
+test types::generics::where_clause::where_clause_bound_is_type_alias ... ok
+test types::generics::validation::default_ordering_valid ... ok
+test types::generics::validation::duplicate_type_param_in_function ... ok
+test types::generics::where_clause::where_clause_valid_protocol_bound ... ok
+test types::generics::where_clause::where_clause_on_function ... ok
+test types::literals::arrays::array_basic_forms ... ok
+test types::generics::where_clause::where_clause_multiple_bounds ... ok
+test types::generics::where_clause::where_clause_unresolved_bound ... ok
+test types::literals::booleans::boolean_literals ... ok
+test types::literals::floats::float_basic_forms ... ok
+test types::literals::arrays::array_of_various_types ... ok
+test types::literals::complex::complex_nested_structures ... ok
+test types::literals::floats::float_scientific_notation ... ok
+test types::literals::arrays::array_mixed_types_error ... ok
+test types::literals::complex::all_literal_types_in_module ... ok
+test types::literals::grouping::grouping_parentheses ... ok
+test types::optional::non_optional_type_cannot_be_null ... ignored
+test types::literals::grouping::grouping_nested ... ok
+test types::literals::arrays::array_trailing_comma_and_nesting ... ok
+test types::literals::strings::string_basic_forms ... ok
+test types::literals::strings::string_escape_sequences ... ok
+test types::literals::tuples::tuple_basic_forms ... ok
+test types::literals::tuples::tuple_complex_content ... ok
+test types::literals::tuples::tuple_trailing_comma_and_nesting ... ok
+test types::literals::unit::unit_type ... ok
+test types::literals::integers::integer_decimal ... ok
+test types::optional::null_assignable_to_optional_type ... ok
+test types::literals::integers::integer_formats ... ok
+test types::static_type_param::basic_init::init_on_type_parameter ... ok
+test types::static_type_param::basic_init::init_with_arguments ... ok
+test types::static_type_param::basic_init::init_with_multiple_arguments ... ok
+test types::static_type_param::basic_init::init_overload_resolution ... ok
+test types::static_type_param::basic_static_method::static_method_with_arguments ... ok
+test types::static_type_param::basic_static_method::static_method_on_type_parameter ... ok
+test types::static_type_param::edge_cases::static_method_returning_different_type ... ok
+test types::static_type_param::edge_cases::type_param_in_static_method_argument ... ok
+test types::static_type_param::edge_cases::init_and_static_in_same_function ... ok
+test types::static_type_param::basic_static_method::static_method_non_self_return ... ok
+test types::static_type_param::edge_cases::multiple_type_params_different_bounds ... ok
+test types::static_type_param::error_cases::ambiguous_static_method ... ok
+test types::static_type_param::edge_cases::generic_protocol_bound ... ok
+test types::static_type_param::basic_static_method::static_method_with_self_parameter ... ok
+test types::static_type_param::error_cases::no_static_method_in_bounds ... ok
+test types::static_type_param::error_cases::standalone_type_parameter_error ... ok
+test types::static_type_param::error_cases::calling_instance_method_as_static ... ok
+test types::static_type_param::error_cases::unconstrained_type_param_init ... ok
+test types::static_type_param::error_cases::ambiguous_init ... ok
+test types::static_type_param::error_cases::unconstrained_type_param_static_method ... ok
+test types::static_type_param::error_cases::wrong_argument_labels ... ok
+test types::static_type_param::error_cases::no_init_in_bounds ... ok
+test types::static_type_param::inherited_protocols::diamond_inheritance_init ... ok
+test types::static_type_param::inherited_protocols::static_method_from_inherited_protocol ... ok
+test types::static_type_param::multiple_bounds::init_from_one_of_multiple_bounds ... ok
+test types::static_type_param::inherited_protocols::init_from_inherited_protocol ... ok
+test types::static_type_param::multiple_bounds::using_and_keyword_for_bounds ... ok
+test types::static_type_param::nested_scopes::struct_method_uses_struct_type_param ... ok
+test validation::cycles::constraint_cycles::mutual_constraint_reference_allowed ... ok
+test types::static_type_param::multiple_bounds::static_method_from_one_of_multiple_bounds ... ok
+test types::static_type_param::self_substitution::init_return_type_is_type_parameter ... ok
+test types::static_type_param::self_substitution::static_method_return_type_is_type_parameter ... ok
+test types::static_type_param::error_cases::wrong_argument_count ... ok
+test validation::cycles::protocol_inheritance_cycles::direct_protocol_self_inheritance ... ok
+test validation::cycles::constraint_cycles::no_cycle_independent_constraints ... ok
+test types::static_type_param::nested_scopes::struct_method_uses_struct_type_param_static ... ok
+test validation::cycles::protocol_inheritance_cycles::diamond_inheritance_ok ... ok
+test types::static_type_param::self_substitution::chained_static_calls ... ok
+test validation::cycles::protocol_inheritance_cycles::three_protocol_cycle ... ok
+test validation::cycles::protocol_inheritance_cycles::two_protocol_cycle ... ok
+test validation::cycles::protocol_inheritance_cycles::linear_protocol_inheritance_ok ... ok
+test validation::cycles::struct_cycles::direct_self_reference_error ... ok
+test validation::cycles::struct_cycles::nested_structs_valid_chain ... ok
+test validation::cycles::struct_cycles::self_reference_in_array_ok ... ok
+test validation::cycles::constraint_cycles::single_constraint_generic_struct ... ok
+test validation::cycles::struct_cycles::array_breaks_cycle ... ok
+test validation::cycles::struct_cycles::three_struct_cycle_error ... ok
+test validation::cycles::struct_cycles::no_cycle_acyclic_references ... ok
+test validation::cycles::struct_cycles::two_struct_cycle_error ... ok
+test validation::dead_code::after_break_continue::break_at_end_of_loop_no_warning ... ok
+test validation::dead_code::after_break_continue::code_after_break_in_loop_warns ... ok
+test validation::dead_code::after_return::code_after_return_warns ... ok
+test validation::cycles::struct_cycles::tuple_with_cycle_error ... ok
+test validation::dead_code::after_return::return_in_if_branch_code_after_is_reachable ... ok
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::dead_code::after_return::return_in_both_branches_code_after_unreachable ... FAILED
+test validation::dead_code::infinite_loop::code_after_infinite_loop_warns ... ok
+test validation::dead_code::infinite_loop::loop_with_conditional_break_code_after_reachable ... ok
+test validation::dead_code::after_break_continue::code_after_continue_in_loop_warns ... ok
+test validation::dead_code::infinite_loop::loop_with_break_code_after_reachable ... ok
+test validation::dead_code::infinite_loop::loop_with_return_code_after_unreachable ... ok
+test validation::dead_code::after_return::code_after_return_with_value_warns ... ok
+test validation::dead_code::after_return::no_code_after_return_no_warning ... ok
+test validation::exhaustive_return::basic_returns::function_missing_return_fails ... ok
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::dead_code::nested_control_flow::dead_code_in_nested_if ... FAILED
+test validation::exhaustive_return::basic_returns::unit_function_no_return_needed ... ok
+test validation::exhaustive_return::complex_control_flow::nested_if_inner_missing_else ... ok
+test validation::exhaustive_return::basic_returns::function_with_value_expression_compiles ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+test validation::exhaustive_return::basic_returns::function_with_return_compiles ... ok
+4 │ func test(a: Bool, b: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::exhaustive_return::complex_control_flow::multiple_early_returns ... ok
+test validation::dead_code::nested_control_flow::nested_return_in_loop ... ok
+test validation::exhaustive_return::complex_control_flow::nested_if_all_paths_return ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::exhaustive_return::if_else_branches::if_else_both_return ... FAILED
+test validation::exhaustive_return::complex_control_flow::early_return_then_fallthrough ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(x: Int) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::exhaustive_return::if_else_branches::if_else_chain_missing_final_else ... ok
+test validation::exhaustive_return::if_else_branches::if_else_chain_all_return ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::exhaustive_return::if_else_branches::if_else_both_have_values ... FAILED
+test validation::exhaustive_return::loops::infinite_loop_diverges ... ok
+test validation::exhaustive_return::if_else_branches::if_without_else_missing_return ... ok
+test validation::exhaustive_return::if_else_branches::if_returns_else_falls_through ... ok
+test validation::exhaustive_return::loops::while_with_return_after ... ok
+test validation::exhaustive_return::loops::loop_with_break_and_return_after ... ok
+test validation::exhaustive_return::loops::while_loop_may_not_execute ... ok
+test validation::exhaustive_return::loops::loop_with_break_needs_return_after ... ok
+test validation::exhaustive_return::loops::loop_with_return ... ok
+test validation::exhaustive_return::with_statements::statements_without_return ... ok
+test validation::exhaustive_return::with_statements::statements_then_value ... ok
+test validation::initializers::basic_initialization::field_read_before_assigned ... ok
+test validation::initializers::basic_initialization::let_field_double_assignment ... ok
+test validation::initializers::basic_initialization::all_fields_initialized ... ok
+error: initializer does not initialize all fields: 'x'
+   ┌─ test.ks:7:5
+   │  
+ 7 │ ╭     init(cond: Bool) {
+ 8 │ │         if cond {
+ 9 │ │             self.x = 1;
+10 │ │         } else {
+11 │ │   test validation::exhaustive_return::with_statements::statements_then_return ... ok
+          self.x = 2;
+12 │ │         }
+13 │ │     }
+   │ ╰─────^ in this initializer
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::initializers::if_else_branches::both_branches_initialize ... FAILED
+test validation::initializers::if_else_branches::then_branch_returns_else_initializes ... ok
+test validation::initializers::basic_initialization::missing_field_initialization ... ok
+test validation::initializers::loop_with_break::init_before_break ... ok
+test validation::initializers::let_fields_in_branches::let_field_assigned_then_reassigned_after_merge ... ok
+error: initializer does not initialize all fields: 'value'
+   ┌─ test.ks:7:5
+   │  
+ 7 │ ╭     init(cond: Bool) {
+ 8 │ │         if cond {
+ 9 │ │             self.value = 1;
+10 │ │         } else {
+11 │ │             self.value = 2;
+12 │ │         }
+13 │ │     }
+   │ ╰─────^ in this initializer
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::initializers::return_handling::early_return_in_branch_with_later_init ... ok
+error: initializer does not initialize all fields: 'n'
+   ┌─ test.ks:7:5
+   │  
+ 7 │ ╭     init(x: Int) {test validation::initializers::let_fields_in_branches::let_field_assigned_in_both_branches ... FAILED
+
+ 8 │ │    test validation::initializers::return_handling::return_after_all_initialized ... ok
+     if x == 1 {
+ 9 │ │             self.n = 10;
+10 │ │         } else if x == 2 {
+   · │
+14 │ │         }
+15 │ │     }
+   │ ╰─────^ in this initializer
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::initializers::if_else_branches::else_if_chain_all_initialize ... FAILED
+test validation::initializers::if_else_branches::only_then_branch_initializes ... ok
+test validation::initializers::while_loops::init_before_while ... ok
+test validation::initializers::while_loops::init_only_in_while_body ... ok
+test validation::initializers::uninitialized_variables::uninitialized_variable_access ... ok
+test validation::misc::duplicate_symbol::duplicate_protocol_errors ... ok
+test validation::misc::duplicate_symbol::duplicate_field_same_struct_errors ... ok
+test validation::misc::duplicate_symbol::function_overloading_allowed_with_different_signatures ... ok
+test validation::misc::duplicate_symbol::same_field_different_structs_compiles_and_verified ... ok
+test validation::initializers::return_handling::return_before_all_initialized ... ok
+test validation::misc::duplicate_symbol::different_types_different_names_compiles_and_verified ... ok
+test validation::misc::duplicate_symbol::struct_and_protocol_same_name_errors ... ok
+test validation::misc::function_body::function_with_body_compiles_and_has_correct_properties ... ok
+test validation::misc::function_body::function_with_return_type_requires_body ... ok
+test validation::misc::function_body::function_without_body_errors ... ok
+test validation::misc::duplicate_symbol::duplicate_struct_errors ... ok
+test validation::misc::module_resolution::deeply_nested_module_struct_compiles_and_verified ... ok
+test validation::misc::mixed::protocol_and_regular_function_coexist ... ok
+test validation::misc::duplicate_symbol::duplicate_type_alias_errors ... ok
+test validation::misc::protocol_methods::protocol_method_without_body_compiles_and_verified ... ok
+test validation::misc::module_resolution::nested_module_struct_compiles_and_verified ... ok
+test validation::misc::static_context::static_function_in_protocol_is_static ... ok
+test validation::misc::protocol_methods::protocol_with_multiple_methods_verified ... ok
+test validation::misc::static_context::static_function_in_struct_is_static_and_has_body ... ok
+test validation::misc::static_context::static_function_at_module_level_errors ... ok
+test validation::misc::visibility_consistency::protocol_method_with_private_param_in_public_protocol_errors ... ok
+test validation::misc::protocol_methods::protocol_method_with_body_errors ... ok
+test validation::misc::visibility_consistency::public_function_with_private_parameter_type_errors ... ok
+test validation::misc::visibility_consistency::public_function_with_private_return_type_errors ... ok
+test validation::mutability::assignment_validation::assign_to_field_on_immutable_receiver ... ok
+test validation::misc::visibility_consistency::public_field_with_private_type_errors ... ok
+test validation::mutability::assignment_validation::assign_to_immutable_field ... ok
+test validation::misc::visibility_consistency::internal_function_with_private_return_type_compiles_and_verified ... ok
+test validation::mutability::field_access::assign_to_mutable_field_on_immutable_receiver_fails ... ok
+test validation::mutability::field_access::assign_to_var_field_on_var_receiver ... ok
+test validation::misc::visibility_consistency::public_type_alias_with_private_underlying_errors ... ok
+test validation::mutability::field_access::assign_to_immutable_field_fails ... ok
+test validation::mutability::field_access::nested_field_assignment_inner_immutable_fails ... ok
+test validation::mutability::field_access::nested_field_assignment_receiver_immutable_fails ... ok
+test validation::mutability::initializers::init_with_only_var_fields ... ok
+test validation::mutability::initializers::init_can_assign_to_all_field_types ... ok
+test validation::mutability::initializers::init_with_only_let_fields ... ok
+test validation::mutability::invalid_targets::assign_to_function_call_result_fails ... ok
+test validation::mutability::field_access::nested_field_assignment_outer_immutable_fails ... ok
+test validation::mutability::invalid_targets::assign_to_literal_fails ... ok
+test validation::mutability::invalid_targets::assign_to_binary_expression_fails ... ok
+test validation::mutability::field_access::nested_field_assignment_all_mutable_succeeds ... ok
+test validation::mutability::local_variables::assign_to_let_fails ... ok
+test validation::mutability::local_variables::assign_to_var_succeeds ... ok
+test validation::type_checking::array_element_types::array_all_same_type_ok ... ok
+test validation::type_checking::array_element_types::array_mixed_int_bool ... ok
+test validation::type_checking::array_element_types::array_mixed_string_int ... ok
+test validation::mutability::local_variables::multiple_assignments_to_var ... ok
+test validation::mutability::invalid_targets::assign_to_struct_initializer_fails ... ok
+test validation::mutability::local_variables::assign_to_parameter_fails ... ok
+test validation::type_checking::array_element_types::array_mixed_int_string ... ok
+test validation::misc::name_resolution::ambiguous_name_diagnostic ... ok
+test validation::type_checking::array_element_types::array_mixed_multiple_wrong ... ok
+test validation::type_checking::assignment_types::assign_correct_type_ok ... ok
+test validation::type_checking::assignment_types::assign_int_to_bool_variable ... ok
+test validation::type_checking::array_element_types::array_single_element_ok ... ok
+test validation::type_checking::assignment_types::assign_bool_to_string_variable ... ok
+test validation::type_checking::assignment_types::assign_string_to_int_variable ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::branch_types::if_else_branches_same_type_ok ... FAILED
+test validation::type_checking::branch_types::if_else_if_else_branches_mismatch ... ok
+test validation::type_checking::assignment_types::assign_to_struct_field_wrong_type ... ok
+test validation::type_checking::call_argument_types::call_non_callable_int ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func testtest validation::type_checking::call_argument_types::call_non_callable_struct ... ok
+(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+test validation::type_checking::assignment_types::assign_tuple_to_int_variable ... ok
+4 │ func test(a: Bool, test validation::type_checking::branch_types::if_else_branches_mismatch_bool_int ... FAILED
+b: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 2 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::branch_types::nested_if_else_mismatch ... FAILED
+test validation::type_checking::call_argument_types::call_with_correct_args_ok ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::branch_types::if_without_else_unit_ok ... ok
+test validation::type_checking::branch_types::if_else_branches_mismatch_tuple_int ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: test validation::type_checking::call_argument_types::call_with_tuple_for_int ... ok
+Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::branch_types::if_else_branches_mismatch_int_string ... FAILED
+test validation::type_checking::call_argument_types::call_with_wrong_first_arg ... ok
+test validation::type_checking::condition_types::if_condition_bool_ok ... ok
+test validation::type_checking::call_argument_types::method_call_with_wrong_arg ... ok
+test validation::type_checking::call_argument_types::call_with_wrong_second_arg ... ok
+test validation::type_checking::condition_types::if_condition_string ... ok
+test validation::type_checking::condition_types::if_condition_comparison_ok ... ok
+test validation::type_checking::condition_types::if_condition_unit ... ok
+test validation::type_checking::condition_types::if_condition_tuple ... ok
+test validation::type_checking::condition_types::if_condition_int ... ok
+test validation::type_checking::call_argument_types::call_with_wrong_arg_type ... ok
+test validation::type_checking::condition_types::while_condition_bool_ok ... ok
+test validation::type_checking::edge_cases::chained_assignments_type_mismatch ... ok
+test validation::type_checking::edge_cases::loop_with_wrong_return ... ok
+test validation::type_checking::condition_types::while_condition_int ... ok
+test validation::type_checking::edge_cases::while_with_wrong_return ... ok
+test validation::type_checking::condition_types::while_condition_string ... ok
+test validation::type_checking::function_types::function_returning_function_ok ... ok
+test validation::type_checking::edge_cases::return_from_nested_if ... ok
+warning: unreachable code after infinite loop
+   ┌─ test.ks:12:5
+   │
+12 │     0
+   │     ^ this code will never execute
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::never_type::break_propagates_never ... FAILED
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::never_type::never_in_both_branches_ok ... FAILED
+test validation::type_checking::edge_cases::multiple_errors_in_function ... ok
+test validation::type_checking::return_types::correct_return_type_ok ... ok
+test validation::type_checking::return_types::bare_return_in_unit_function_ok ... ok
+test validation::type_checking::return_types::implicit_return_wrong_type ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+4 │ func test(cond: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 1 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::never_type::never_in_if_else_ok ... FAILED
+test validation::type_checking::return_types::return_int_for_string ... ok
+test validation::type_checking::return_types::return_bool_for_int ... ok
+error: function 'test' does not return a value on all code paths
+  ┌─ test.ks:4:6
+  │
+test validation::type_checking::return_types::return_array_for_int ... ok
+4 │ func test(a: Bool, b: Bool, c: Bool) -> Int {
+  │      ^^^^ this function has a non-unit return type
+  │
+  = all code paths must end with a return statement or a value expression
+
+error: could not infer type for 3 placeholder(s)
+ = try adding explicit type annotations to help the compiler
+
+test validation::type_checking::return_types::return_tuple_for_int ... ok
+test validation::type_checking::edge_cases::deeply_nested_type_mismatch ... FAILED
+test validation::type_checking::return_types::bare_return_in_non_unit_function ... ok
+test validation::type_checking::return_types::return_wrong_type ... ok
+test validation::type_checking::struct_init_types::struct_init_bool_for_int ... ok
+test validation::type_checking::return_types::return_unit_for_int ... ok
+test validation::type_checking::struct_init_types::struct_init_wrong_field_type ... ok
+test validation::type_checking::struct_init_types::struct_init_wrong_second_field_type ... ok
+test validation::type_checking::struct_init_types::struct_init_all_fields_wrong ... ok
+test validation::type_checking::struct_types::assign_different_struct_types ... ok
+test validation::type_checking::struct_types::pass_wrong_struct_to_function ... ok
+test validation::type_checking::struct_types::return_wrong_struct_type ... ok
+test validation::type_checking::struct_types::same_struct_type_ok ... ok
+test validation::type_checking::struct_init_types::struct_init_correct_types_ok ... ok
+test validation::type_checking::tuple_indexing::large_tuple_index ... ok
+test validation::type_checking::tuple_indexing::chained_tuple_index ... ok
+test validation::type_checking::tuple_indexing::tuple_index_mutability ... ok
+test validation::type_checking::tuple_indexing::basic_tuple_index ... ok
+test validation::type_checking::tuple_indexing::tuple_index_from_function_return ... ok
+test validation::type_checking::tuple_indexing::tuple_index_wrong_type ... ok
+test validation::type_checking::tuple_indexing::tuple_index_immutable_error ... ok
+test validation::type_checking::tuple_indexing::tuple_index_on_non_tuple ... ok
+test validation::type_checking::tuple_types::tuple_correct_ok ... ok
+test validation::type_checking::tuple_types::tuple_wrong_element_types ... ok
+test validation::type_checking::type_alias::chained_type_alias ... ok
+test validation::type_checking::tuple_indexing::tuple_index_out_of_bounds ... ok
+test validation::visibility::fileprivate_method_not_visible_outside_file ... ok
+test validation::type_checking::type_alias::type_alias_mismatch ... ok
+test validation::type_checking::variable_binding_types::bind_bool_to_string_variable ... ok
+test validation::type_checking::variable_binding_types::bind_array_to_int_variable ... ok
+test validation::type_checking::variable_binding_types::bind_correct_type_ok ... ok
+test validation::type_checking::variable_binding_types::bind_int_to_bool_variable ... ok
+test validation::type_checking::tuple_types::tuple_wrong_element_count ... ok
+test validation::type_checking::type_alias::type_alias_expanded_correctly ... ok
+test validation::type_checking::variable_binding_types::bind_string_to_int_variable ... ok
+test validation::type_checking::variable_binding_types::bind_tuple_to_int_variable ... ok
+test validation::visibility::private_method_not_visible_outside_struct ... ok
+test validation::visibility::internal_method_not_visible_outside_module ... ok
+
+failures:
+
+---- expressions::closures::closures_as_values::closure_in_struct_field stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::closures_as_values::closure_in_struct_field' (46929842) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- expressions::closures::captures::capture_function_parameter stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::captures::capture_function_parameter' (46929837) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::captures::capture_from_nested_scope stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::captures::capture_from_nested_scope' (46929836) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::closures::captures::cannot_mutate_captured_variable stdout ----
+
+thread 'expressions::closures::captures::cannot_mutate_captured_variable' (46929834) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to fail with an error, but it succeeded
+
+---- expressions::closures::closures_as_values::closure_in_generic_struct stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::closures_as_values::closure_in_generic_struct' (46929841) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::closures::closures_as_values::closure_returned_from_function stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::closures_as_values::closure_returned_from_function' (46929844) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::closures_as_values::closure_stored_in_variable stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::closures_as_values::closure_stored_in_variable' (46929845) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::closures_as_values::closure_passed_to_function stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::closures_as_values::closure_passed_to_function' (46929843) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::edge_cases::closure_with_never_return stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::edge_cases::closure_with_never_return' (46929849) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::immediate_invocation::immediately_invoked_for_scoping stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::immediate_invocation::immediately_invoked_for_scoping' (46929856) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::immediate_invocation::immediately_invoked_no_params stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::immediate_invocation::immediately_invoked_no_params' (46929857) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::generics::closure_in_generic_function stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::generics::closure_in_generic_function' (46929854) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::implicit_it::it_shadowed_in_nested_closure stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::implicit_it::it_shadowed_in_nested_closure' (46929863) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::immediate_invocation::immediately_invoked_wrong_arg_count stdout ----
+
+thread 'expressions::closures::immediate_invocation::immediately_invoked_wrong_arg_count' (46929859) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to fail with an error, but it succeeded
+
+---- expressions::closures::implicit_it::it_used_multi_param_context_error stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::implicit_it::it_used_multi_param_context_error' (46929864) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'it', but got: ["could not infer type for 1 placeholder(s)"]
+
+---- expressions::closures::implicit_it::it_used_zero_param_context_error stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::implicit_it::it_used_zero_param_context_error' (46929865) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'it', but got: ["could not infer type for 1 placeholder(s)"]
+
+---- expressions::closures::implicit_it::it_with_single_param_context stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::implicit_it::it_with_single_param_context' (46929866) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::multi_statement::closure_with_if_expression stdout ----
+DEBUG unify functions: params_a=1, params_b=1
+  ty_a.id=TyId(2772), original_a=TyId(2772), has_closure_meta=false
+  ty_b.id=TyId(2779), original_b=TyId(2779), has_closure_meta=true
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::multi_statement::closure_with_if_expression' (46929867) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 4 error(s)
+
+---- expressions::closures::generics::closure_with_generic_param_inferred stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::generics::closure_with_generic_param_inferred' (46929855) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::nested_closures::nested_closure_with_it_shadowing stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::nested_closures::nested_closure_with_it_shadowing' (46929875) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::trailing_closure::trailing_closure_only_argument stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::trailing_closure::trailing_closure_only_argument' (46929878) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::trailing_closure::non_trailing_closure_in_parens stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::trailing_closure::non_trailing_closure_in_parens' (46929877) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::trailing_closure::trailing_closure_with_other_args stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::trailing_closure::trailing_closure_with_other_args' (46929880) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::type_checking::closure_assigned_to_non_function_type stdout ----
+
+thread 'expressions::closures::type_checking::closure_assigned_to_non_function_type' (46929883) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to fail with an error, but it succeeded
+
+---- expressions::closures::trailing_closure::trailing_closure_with_multiple_args stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::trailing_closure::trailing_closure_with_multiple_args' (46929879) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::closures::type_inference::cannot_infer_without_context_error stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::type_inference::cannot_infer_without_context_error' (46929887) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'cannot infer', but got: ["could not infer type for 1 placeholder(s)"]
+
+---- expressions::closures::type_inference::cannot_infer_it_type_without_context stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::type_inference::cannot_infer_it_type_without_context' (46929886) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'cannot infer', but got: ["could not infer type for 2 placeholder(s)"]
+
+---- expressions::closures::type_inference::infer_from_function_parameter_context stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::closures::type_inference::infer_from_function_parameter_context' (46929888) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::control_flow::if_basic::if_with_complex_condition stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_basic::if_with_complex_condition' (46929893) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_basic::if_with_else_compiles stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_basic::if_with_else_compiles' (46929894) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_basic::multiple_if_without_semicolons stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_basic::multiple_if_without_semicolons' (46929897) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_scoping::outer_variable_visible_inside_if stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_scoping::outer_variable_visible_inside_if' (46929899) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_basic::nested_if_expressions stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_basic::nested_if_expressions' (46929898) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_scoping::variable_visible_within_its_block stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_scoping::variable_visible_within_its_block' (46929903) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_with_statements::if_block_with_multiple_statements stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_with_statements::if_block_with_multiple_statements' (46929904) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_scoping::shadowing_inside_if_block stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_scoping::shadowing_inside_if_block' (46929900) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::if_basic::if_else_if_chain_compiles stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::if_basic::if_else_if_chain_compiles' (46929892) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::never_type_propagation::if_as_expression_with_never_in_else stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::if_as_expression_with_never_in_else' (46929906) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::control_flow::never_type_propagation::if_else_if_chain_all_return stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::if_else_if_chain_all_return' (46929908) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::never_type_propagation::if_else_if_with_return stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::if_else_if_with_return' (46929909) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::never_type_propagation::if_with_return_in_else_branch stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::if_with_return_in_else_branch' (46929911) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::never_type_propagation::if_with_return_in_both_branches stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::if_with_return_in_both_branches' (46929910) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::never_type_propagation::if_with_return_in_then_branch stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::if_with_return_in_then_branch' (46929912) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::control_flow::never_type_propagation::nested_if_with_never_propagation stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::control_flow::never_type_propagation::nested_if_with_never_propagation' (46929913) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::loops::complex_control_flow::while_with_else_if_chain_inside stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::loops::complex_control_flow::while_with_else_if_chain_inside' (46929933) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- expressions::returns::return_in_control_flow::return_in_both_if_else_branches stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::returns::return_in_control_flow::return_in_both_if_else_branches' (46930058) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- expressions::returns::return_nested::return_in_nested_if stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'expressions::returns::return_nested::return_in_nested_if' (46930063) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- inference::inference_in_control_flow::infer_from_if_else stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'inference::inference_in_control_flow::infer_from_if_else' (46930108) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- validation::dead_code::after_return::return_in_both_branches_code_after_unreachable stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::dead_code::after_return::return_in_both_branches_code_after_unreachable' (46930367) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- validation::dead_code::nested_control_flow::dead_code_in_nested_if stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::dead_code::nested_control_flow::dead_code_in_nested_if' (46930373) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 1 error(s)
+
+---- validation::exhaustive_return::complex_control_flow::nested_if_all_paths_return stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::exhaustive_return::complex_control_flow::nested_if_all_paths_return' (46930381) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::exhaustive_return::if_else_branches::if_else_both_return stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::exhaustive_return::if_else_branches::if_else_both_return' (46930384) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::exhaustive_return::if_else_branches::if_else_chain_all_return stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::exhaustive_return::if_else_branches::if_else_chain_all_return' (46930385) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::exhaustive_return::if_else_branches::if_else_both_have_values stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::exhaustive_return::if_else_branches::if_else_both_have_values' (46930383) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::initializers::if_else_branches::both_branches_initialize stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::initializers::if_else_branches::both_branches_initialize' (46930402) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::initializers::let_fields_in_branches::let_field_assigned_in_both_branches stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::initializers::let_fields_in_branches::let_field_assigned_in_both_branches' (46930406) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::initializers::if_else_branches::else_if_chain_all_initialize stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::initializers::if_else_branches::else_if_chain_all_initialize' (46930403) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::type_checking::branch_types::if_else_branches_same_type_ok stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::branch_types::if_else_branches_same_type_ok' (46930478) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::type_checking::branch_types::if_else_branches_mismatch_bool_int stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::branch_types::if_else_branches_mismatch_bool_int' (46930475) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'incompatible types', but got: ["function 'test' does not return a value on all code paths", "could not infer type for 1 placeholder(s)"]
+
+---- validation::type_checking::branch_types::nested_if_else_mismatch stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::branch_types::nested_if_else_mismatch' (46930481) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'incompatible types', but got: ["function 'test' does not return a value on all code paths", "could not infer type for 2 placeholder(s)"]
+
+---- validation::type_checking::branch_types::if_else_branches_mismatch_tuple_int stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::branch_types::if_else_branches_mismatch_tuple_int' (46930477) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'incompatible types', but got: ["function 'test' does not return a value on all code paths", "could not infer type for 1 placeholder(s)"]
+
+---- validation::type_checking::branch_types::if_else_branches_mismatch_int_string stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::branch_types::if_else_branches_mismatch_int_string' (46930476) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'incompatible types', but got: ["function 'test' does not return a value on all code paths", "could not infer type for 1 placeholder(s)"]
+
+---- validation::type_checking::never_type::break_propagates_never stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::never_type::break_propagates_never' (46930506) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::type_checking::never_type::never_in_both_branches_ok stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::never_type::never_in_both_branches_ok' (46930507) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::type_checking::never_type::never_in_if_else_ok stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::never_type::never_in_if_else_ok' (46930508) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected compilation to succeed, but got 2 error(s)
+
+---- validation::type_checking::edge_cases::deeply_nested_type_mismatch stdout ----
+
+--- Compiler Diagnostics ---
+
+thread 'validation::type_checking::edge_cases::deeply_nested_type_mismatch' (46930500) panicked at /Users/dino/Documents/Projects/kestrel/lib/kestrel-test-suite/src/lib.rs:192:13:
+Expectation failed: Expected an error containing 'incompatible types', but got: ["function 'test' does not return a value on all code paths", "could not infer type for 3 placeholder(s)"]
+
+
+failures:
+    expressions::closures::captures::cannot_mutate_captured_variable
+    expressions::closures::captures::capture_from_nested_scope
+    expressions::closures::captures::capture_function_parameter
+    expressions::closures::closures_as_values::closure_in_generic_struct
+    expressions::closures::closures_as_values::closure_in_struct_field
+    expressions::closures::closures_as_values::closure_passed_to_function
+    expressions::closures::closures_as_values::closure_returned_from_function
+    expressions::closures::closures_as_values::closure_stored_in_variable
+    expressions::closures::edge_cases::closure_with_never_return
+    expressions::closures::generics::closure_in_generic_function
+    expressions::closures::generics::closure_with_generic_param_inferred
+    expressions::closures::immediate_invocation::immediately_invoked_for_scoping
+    expressions::closures::immediate_invocation::immediately_invoked_no_params
+    expressions::closures::immediate_invocation::immediately_invoked_wrong_arg_count
+    expressions::closures::implicit_it::it_shadowed_in_nested_closure
+    expressions::closures::implicit_it::it_used_multi_param_context_error
+    expressions::closures::implicit_it::it_used_zero_param_context_error
+    expressions::closures::implicit_it::it_with_single_param_context
+    expressions::closures::multi_statement::closure_with_if_expression
+    expressions::closures::nested_closures::nested_closure_with_it_shadowing
+    expressions::closures::trailing_closure::non_trailing_closure_in_parens
+    expressions::closures::trailing_closure::trailing_closure_only_argument
+    expressions::closures::trailing_closure::trailing_closure_with_multiple_args
+    expressions::closures::trailing_closure::trailing_closure_with_other_args
+    expressions::closures::type_checking::closure_assigned_to_non_function_type
+    expressions::closures::type_inference::cannot_infer_it_type_without_context
+    expressions::closures::type_inference::cannot_infer_without_context_error
+    expressions::closures::type_inference::infer_from_function_parameter_context
+    expressions::control_flow::if_basic::if_else_if_chain_compiles
+    expressions::control_flow::if_basic::if_with_complex_condition
+    expressions::control_flow::if_basic::if_with_else_compiles
+    expressions::control_flow::if_basic::multiple_if_without_semicolons
+    expressions::control_flow::if_basic::nested_if_expressions
+    expressions::control_flow::if_scoping::outer_variable_visible_inside_if
+    expressions::control_flow::if_scoping::shadowing_inside_if_block
+    expressions::control_flow::if_scoping::variable_visible_within_its_block
+    expressions::control_flow::if_with_statements::if_block_with_multiple_statements
+    expressions::control_flow::never_type_propagation::if_as_expression_with_never_in_else
+    expressions::control_flow::never_type_propagation::if_else_if_chain_all_return
+    expressions::control_flow::never_type_propagation::if_else_if_with_return
+    expressions::control_flow::never_type_propagation::if_with_return_in_both_branches
+    expressions::control_flow::never_type_propagation::if_with_return_in_else_branch
+    expressions::control_flow::never_type_propagation::if_with_return_in_then_branch
+    expressions::control_flow::never_type_propagation::nested_if_with_never_propagation
+    expressions::loops::complex_control_flow::while_with_else_if_chain_inside
+    expressions::returns::return_in_control_flow::return_in_both_if_else_branches
+    expressions::returns::return_nested::return_in_nested_if
+    inference::inference_in_control_flow::infer_from_if_else
+    validation::dead_code::after_return::return_in_both_branches_code_after_unreachable
+    validation::dead_code::nested_control_flow::dead_code_in_nested_if
+    validation::exhaustive_return::complex_control_flow::nested_if_all_paths_return
+    validation::exhaustive_return::if_else_branches::if_else_both_have_values
+    validation::exhaustive_return::if_else_branches::if_else_both_return
+    validation::exhaustive_return::if_else_branches::if_else_chain_all_return
+    validation::initializers::if_else_branches::both_branches_initialize
+    validation::initializers::if_else_branches::else_if_chain_all_initialize
+    validation::initializers::let_fields_in_branches::let_field_assigned_in_both_branches
+    validation::type_checking::branch_types::if_else_branches_mismatch_bool_int
+    validation::type_checking::branch_types::if_else_branches_mismatch_int_string
+    validation::type_checking::branch_types::if_else_branches_mismatch_tuple_int
+    validation::type_checking::branch_types::if_else_branches_same_type_ok
+    validation::type_checking::branch_types::nested_if_else_mismatch
+    validation::type_checking::edge_cases::deeply_nested_type_mismatch
+    validation::type_checking::never_type::break_propagates_never
+    validation::type_checking::never_type::never_in_both_branches_ok
+    validation::type_checking::never_type::never_in_if_else_ok
+
+test result: FAILED. 929 passed; 66 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+error: test failed, to rerun pass `--test mod`

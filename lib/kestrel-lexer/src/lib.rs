@@ -177,6 +177,9 @@ pub enum Token {
     #[token("if")]
     If,
 
+    #[token("in")]
+    In,
+
     #[token("loop")]
     Loop,
 
@@ -602,5 +605,30 @@ mod tests {
         assert_eq!(tokens[3].value, Token::Equals);
         assert_eq!(tokens[4].value, Token::Identifier); // Aliased
         assert_eq!(tokens[5].value, Token::Semicolon);
+    }
+
+    #[test]
+    fn test_in_keyword() {
+        // Test `in` keyword for closure parameters
+        let source = "{ (x) in x }";
+        let tokens = filter_trivia(lex(source, 0).collect());
+
+        assert_eq!(tokens.len(), 7);
+        assert_eq!(tokens[0].value, Token::LBrace);
+        assert_eq!(tokens[1].value, Token::LParen);
+        assert_eq!(tokens[2].value, Token::Identifier); // x
+        assert_eq!(tokens[3].value, Token::RParen);
+        assert_eq!(tokens[4].value, Token::In);
+        assert_eq!(tokens[5].value, Token::Identifier); // x
+        assert_eq!(tokens[6].value, Token::RBrace);
+
+        // Ensure `in` is not confused with identifiers starting with "in"
+        let source = "in inside inner";
+        let tokens = filter_trivia(lex(source, 0).collect());
+
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].value, Token::In);
+        assert_eq!(tokens[1].value, Token::Identifier); // inside
+        assert_eq!(tokens[2].value, Token::Identifier); // inner
     }
 }

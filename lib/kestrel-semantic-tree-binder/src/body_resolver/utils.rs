@@ -56,6 +56,7 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprContinue
             | SyntaxKind::ExprReturn
             | SyntaxKind::ExprTupleIndex
+            | SyntaxKind::ExprClosure
     )
 }
 

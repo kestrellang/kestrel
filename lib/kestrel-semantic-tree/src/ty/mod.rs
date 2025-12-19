@@ -2,7 +2,7 @@ mod kind;
 pub mod substitutions;
 pub mod where_clause;
 
-pub use kind::{FloatBits, IntBits, TyKind};
+pub use kind::{FloatBits, IntBits, ParamInfo, TyKind};
 pub use substitutions::Substitutions;
 pub use where_clause::{Constraint, WhereClause};
 
@@ -159,6 +159,29 @@ impl fmt::Display for Ty {
             TyKind::SelfType => f.write_str("Self"),
             TyKind::Infer => f.write_str("_"),
             TyKind::Error => f.write_str("<error>"),
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => {
+                match param_info {
+                    ParamInfo::Unconstrained => {
+                        write!(f, "(...) -> {}", return_type)
+                    }
+                    ParamInfo::ImplicitIt { it_type } => {
+                        write!(f, "({}) -> {}", it_type, return_type)
+                    }
+                    ParamInfo::Explicit { param_types } => {
+                        f.write_char('(')?;
+                        for (i, p) in param_types.iter().enumerate() {
+                            if i > 0 {
+                                f.write_str(", ")?;
+                            }
+                            write!(f, "{}", p)?;
+                        }
+                        write!(f, ") -> {}", return_type)
+                    }
+                }
+            }
         }
     }
 }
@@ -373,6 +396,20 @@ impl Ty {
         )
     }
 
+    /// Create an unresolved function type (for closures with unknown params).
+    ///
+    /// This is used when a closure's parameter types cannot be determined
+    /// from the closure body alone and must be inferred from context.
+    pub fn unresolved_function(param_info: ParamInfo, return_type: Ty, span: Span) -> Self {
+        Self::new(
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type: Box::new(return_type),
+            },
+            span,
+        )
+    }
+
     // === Type joining (for Never propagation) ===
 
     /// Join two types, handling Never type propagation.
@@ -539,6 +576,26 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_type_alias(symbol.clone(), new_subs, self.span.clone())
+            }
+
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => {
+                let new_return = return_type.substitute_self(replacement);
+                let new_param_info = match param_info {
+                    ParamInfo::Unconstrained => ParamInfo::Unconstrained,
+                    ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
+                        it_type: Box::new(it_type.substitute_self(replacement)),
+                    },
+                    ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
+                        param_types: param_types
+                            .iter()
+                            .map(|p| p.substitute_self(replacement))
+                            .collect(),
+                    },
+                };
+                Ty::unresolved_function(new_param_info, new_return, self.span.clone())
             }
 
             _ => self.clone(),
@@ -861,6 +918,10 @@ impl Ty {
             // This allows generic code to compile before constraint checking
             // (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => true,
 
+            // UnresolvedFunction is compatible with anything (not yet fully resolved)
+            // Type inference will resolve and validate the actual compatibility
+            (TyKind::UnresolvedFunction { .. }, _) | (_, TyKind::UnresolvedFunction { .. }) => true,
+
             // Everything else is not assignable
             _ => false,
         }
@@ -902,6 +963,8 @@ impl Ty {
         is_type_alias => TyKind::TypeAlias { .. },
         /// Check if this is an associated type reference
         is_associated_type => TyKind::AssociatedType { .. },
+        /// Check if this is an unresolved function type (closure with unknown params)
+        is_unresolved_function => TyKind::UnresolvedFunction { .. },
     }
 
     // === Accessor methods ===
@@ -1030,6 +1093,17 @@ impl Ty {
             TyKind::AssociatedType { symbol, container } => {
                 Some((symbol, container.as_ref().map(|b| b.as_ref())))
             }
+            _ => None,
+        }
+    }
+
+    /// Get param info and return type if this is an unresolved function type
+    pub fn as_unresolved_function(&self) -> Option<(&ParamInfo, &Ty)> {
+        match &self.kind {
+            TyKind::UnresolvedFunction {
+                param_info,
+                return_type,
+            } => Some((param_info, return_type)),
             _ => None,
         }
     }

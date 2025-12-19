@@ -7,7 +7,7 @@ use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, ExprKind, Expression};
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyKind};
 
 use crate::solution::Solution;
 
@@ -201,6 +201,61 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .as_ref()
                 .map(|v| Box::new(apply_to_expression(v, solution))),
         },
+
+        ExprKind::Closure {
+            params,
+            body,
+            tail_expr,
+            captures,
+            uses_it,
+            implicit_param,
+        } => {
+            // Apply solution to closure parameters
+            let resolved_params = params.as_ref().map(|ps| {
+                ps.iter()
+                    .map(|p| kestrel_semantic_tree::expr::ClosureParam {
+                        name: p.name.clone(),
+                        ty: resolve_type(&p.ty, solution),
+                        is_type_annotated: p.is_type_annotated,
+                        span: p.span.clone(),
+                    })
+                    .collect()
+            });
+
+            // Apply solution to body statements
+            let resolved_body = body.iter().map(|s| apply_to_statement(s, solution)).collect();
+
+            // Apply solution to tail expression
+            let resolved_tail = tail_expr
+                .as_ref()
+                .map(|e| Box::new(apply_to_expression(e, solution)));
+
+            // Apply solution to captures
+            let resolved_captures = captures
+                .iter()
+                .map(|c| kestrel_semantic_tree::expr::Capture {
+                    local_id: c.local_id,
+                    name: c.name.clone(),
+                    ty: resolve_type(&c.ty, solution),
+                    kind: c.kind,
+                    span: c.span.clone(),
+                })
+                .collect();
+
+            // Apply solution to implicit_param
+            let resolved_implicit_param = implicit_param.as_ref().map(|(id, ty, span)| {
+                (*id, resolve_type(ty, solution), span.clone())
+            });
+
+            ExprKind::Closure {
+                params: resolved_params,
+                body: resolved_body,
+                tail_expr: resolved_tail,
+                captures: resolved_captures,
+                uses_it: *uses_it,
+                implicit_param: resolved_implicit_param,
+            }
+        }
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)
@@ -267,6 +322,25 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
                 .collect();
             let resolved_return = resolve_type(return_type, solution);
             Ty::function(resolved_params, resolved_return, ty.span().clone())
+        }
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
+            let resolved_return = resolve_type(return_type, solution);
+            let resolved_param_info = match param_info {
+                ParamInfo::Unconstrained => ParamInfo::Unconstrained,
+                ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
+                    it_type: Box::new(resolve_type(it_type, solution)),
+                },
+                ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
+                    param_types: param_types
+                        .iter()
+                        .map(|p| resolve_type(p, solution))
+                        .collect(),
+                },
+            };
+            Ty::unresolved_function(resolved_param_info, resolved_return, ty.span().clone())
         }
         // Nominal types with substitutions would need recursive resolution too,
         // but for now just return the original type

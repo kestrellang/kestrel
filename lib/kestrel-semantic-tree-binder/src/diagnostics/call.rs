@@ -364,6 +364,30 @@ impl IntoDiagnostic for NonCallableError {
     }
 }
 
+/// Error when calling a closure with wrong number of arguments.
+pub struct ClosureArityError {
+    /// Span of the call expression
+    pub span: Span,
+    /// Expected number of arguments
+    pub expected: usize,
+    /// Provided number of arguments
+    pub provided: usize,
+}
+
+impl IntoDiagnostic for ClosureArityError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "wrong number of arguments to closure: expected {}, found {}",
+                self.expected, self.provided
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected {} argument(s)", self.expected)),
+            ])
+    }
+}
+
 /// Error when a name is ambiguous (multiple candidates in scope).
 pub struct AmbiguousNameError {
     /// Span of the ambiguous name

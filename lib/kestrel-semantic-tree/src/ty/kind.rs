@@ -23,6 +23,29 @@ pub enum FloatBits {
     F64,
 }
 
+/// Parameter information for an unresolved closure type.
+///
+/// When a closure is created without explicit parameter annotations, we may not
+/// know the full function type yet. This enum tracks what we do know about the
+/// parameters based on how the closure body is written.
+#[derive(Debug, Clone)]
+pub enum ParamInfo {
+    /// No constraints on arity - closure body doesn't reference any parameters.
+    /// The closure could have any number of parameters (0, 1, 2, ...).
+    /// Example: `{ 42 }`, `{ "hello" }`
+    Unconstrained,
+
+    /// Uses implicit `it` parameter, so must have exactly 1 parameter.
+    /// The `it_type` is the type variable for that parameter.
+    /// Example: `{ it + 1 }`, `{ it.foo() }`
+    ImplicitIt { it_type: Box<Ty> },
+
+    /// Has explicit parameter list (possibly with inferred types).
+    /// We know the exact arity but types may still be inference variables.
+    /// Example: `{ (x) in x }`, `{ (x: Int, y) in x + y }`
+    Explicit { param_types: Vec<Ty> },
+}
+
 /// Represents the kind of a semantic type
 /// These are resolved types after semantic analysis
 #[derive(Debug, Clone)]
@@ -105,5 +128,19 @@ pub enum TyKind {
         /// The type that contains this associated type (e.g., `T` in `T.Item`)
         /// None when used within the protocol itself
         container: Option<Box<Ty>>,
+    },
+
+    /// Unresolved function type (closure whose full type is not yet determined).
+    ///
+    /// More specific than `Infer` - we know it's a function type, but the exact
+    /// parameter types may depend on context. This allows:
+    /// - Closures to be recognized as callable before full type inference
+    /// - Proper error messages when `it` is used in wrong arity context
+    /// - Immediate invocation of closures like `{ 42 }()`
+    UnresolvedFunction {
+        /// What we know about the parameters
+        param_info: ParamInfo,
+        /// The return type (may itself be an inference variable)
+        return_type: Box<Ty>,
     },
 }
