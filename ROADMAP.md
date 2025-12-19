@@ -333,16 +333,20 @@
 
 ## Phase 8: Closures & First-Class Functions
 
-- [ ] Closure Expressions
-  - [ ] Closure syntax (e.g., `{ x, y in x + y }` or `func(x, y) { x + y }`)
-  - [ ] Capturing variables from enclosing scope
-  - [ ] Capture semantics (by value vs by reference)
-- [ ] Function References
-  - [ ] Reference named functions as values
-  - [ ] Pass functions to higher-order functions
-- [ ] Closure Type Inference
-  - [ ] Infer parameter types from context
-  - [ ] `numbers.map({ n in n * 2 })` infers `n: Int`
+- [x] Closure Expressions
+  - [x] Closure syntax (e.g., `{ x, y in x + y }` or `{ body }`)
+  - [x] Capturing variables from enclosing scope (immutable by-value captures)
+  - [x] Capture semantics (by value vs by reference)
+- [x] Function References
+  - [x] Reference named functions as values
+  - [x] Pass functions to higher-order functions
+- [x] Closure Type Inference
+  - [x] Infer parameter types from context
+  - [x] `numbers.map({ n in n * 2 })` infers `n: Int`
+  - [x] Implicit `it` parameter for single-parameter closures
+- [x] Trailing Closure Syntax
+  - [x] Swift-style trailing closures
+  - [x] Multiple trailing closures with labels
 
 ## Phase 9: Enums & Algebraic Data Types
 
@@ -394,19 +398,20 @@
 
 ## Current Status
 
-**Phase**: Phase 7 (Type Inference) - ✅ COMPLETE
-**Progress**: Phases 1-7 complete.
+**Phase**: Phase 9 (Enums & Algebraic Data Types) - 🚧 IN PROGRESS
+**Progress**: Phases 1-8 complete.
 
-**Phase 7 Completed Features**:
+**Phase 8 Completed Features**:
 
-- ✅ Local Type Inference
-- ✅ Generic Type Argument Inference
-- ✅ Bidirectional Type Checking
-- ✅ Static Method Type Parameter Substitution
-- ✅ Generic Method Type Parameter Substitution
-- ✅ Constraint-based Type Inference (Hindley-Milner system)
+- ✅ Closure Expressions with multiple syntax forms
+- ✅ Immutable by-value variable captures
+- ✅ First-class function references
+- ✅ Higher-order function support
+- ✅ Closure parameter type inference (bidirectional)
+- ✅ Implicit `it` parameter for single-parameter closures
+- ✅ Multiple trailing closure syntax with labels
 
-**Ready for Phase 8**: Closures & First-Class Functions
+**Ready for Phase 9**: Enums & Algebraic Data Types
 
 ## Notes
 
