@@ -570,7 +570,7 @@ fn unify(
             ty_a.clone(),
             ty_b.clone(),
             span.clone(),
-        )),
+        ))
     }
 }
 

@@ -1066,11 +1066,15 @@ pub fn resolve_method_call(
                     }
 
                     // Compute the function type with substitutions applied
+                    // Must substitute both type parameters AND Self
                     let method_fn_ty = {
                         let param_tys: Vec<Ty> = callable
                             .parameters()
                             .iter()
-                            .map(|p| substitute_type(&p.ty, &call_substitutions))
+                            .map(|p| {
+                                let ty = substitute_type(&p.ty, &call_substitutions);
+                                substitute_self(&ty, &resolved_receiver_ty)
+                            })
                             .collect();
                         let ret_ty = substitute_type(&return_ty, &call_substitutions);
                         Ty::function(param_tys, ret_ty, span.clone())
