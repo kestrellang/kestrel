@@ -55,6 +55,8 @@ pub struct LocalScope {
     current_bindings: HashMap<String, LocalId>,
     /// History stack for restoring bindings when exiting scopes
     shadow_stack: Vec<Vec<(String, Option<LocalId>)>>,
+    /// Tracks which scope depth each local was created at (for capture analysis)
+    local_depths: HashMap<LocalId, usize>,
 }
 
 impl LocalScope {
@@ -65,6 +67,7 @@ impl LocalScope {
             scopes: Vec::new(),
             current_bindings: HashMap::new(),
             shadow_stack: Vec::new(),
+            local_depths: HashMap::new(),
         };
         // Start with the function's parameter scope
         scope.push_scope();
@@ -108,6 +111,9 @@ impl LocalScope {
         // Create a new local in the container
         let local_id = self.container.add_local(name.clone(), ty, mutable, span);
 
+        // Record the scope depth this local was created at (for capture analysis)
+        self.local_depths.insert(local_id, self.scopes.len());
+
         // Update current bindings
         self.current_bindings.insert(name.clone(), local_id);
 
@@ -138,6 +144,12 @@ impl LocalScope {
     /// Get the current scope depth (for debugging)
     pub fn depth(&self) -> usize {
         self.scopes.len()
+    }
+
+    /// Get the scope depth at which a local was created.
+    /// Used for capture analysis to determine if a variable is from an outer scope.
+    pub fn scope_depth_of(&self, id: LocalId) -> Option<usize> {
+        self.local_depths.get(&id).copied()
     }
 }
 

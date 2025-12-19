@@ -44,13 +44,8 @@ impl DeclarationBinder for InitializerBinder {
             true,
         );
 
-        // Initializers always return Self (the struct type)
-        // Get the parent struct to determine Self type
-        let return_type = symbol
-            .metadata()
-            .parent()
-            .map(|p| Ty::self_type(p.metadata().span().clone()))
-            .unwrap_or_else(|| Ty::error(span.clone()));
+        // Initializers return unit type - they don't return a value
+        let return_type = Ty::unit(span.clone());
 
         // Initializers always have ReceiverKind::Initializing
         let receiver_kind = ReceiverKind::Initializing;

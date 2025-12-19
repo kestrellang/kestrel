@@ -30,7 +30,7 @@ impl Analyzer for ClosureAnalyzer {
     }
 
     fn visit_expression(&mut self, expr: &Expression, ctx: &mut AnalysisContext) {
-        let ExprKind::Closure { params, tail_expr, captures, uses_it, .. } = &expr.kind else {
+        let ExprKind::Closure { params, body, tail_expr, captures, uses_it, .. } = &expr.kind else {
             return;
         };
 
@@ -48,7 +48,7 @@ impl Analyzer for ClosureAnalyzer {
         validate_closure_type(expr, params, tail_expr, ctx);
 
         // Check for assignment to captured variables
-        validate_capture_assignments(captures, container_id, ctx);
+        validate_capture_assignments(body, tail_expr.as_deref(), captures, container_id, ctx);
 
         // Check for assignment to closure parameters
         validate_parameter_assignments(expr, params, container_id, ctx);
@@ -124,33 +124,30 @@ fn validate_closure_type(
 
 /// Validate that captured variables are not assigned to.
 fn validate_capture_assignments(
+    body: &[kestrel_semantic_tree::stmt::Statement],
+    tail_expr: Option<&Expression>,
     captures: &[kestrel_semantic_tree::expr::Capture],
     container_id: Option<semantic_tree::symbol::SymbolId>,
     ctx: &mut AnalysisContext,
 ) {
-    // For each capture, we need to check if it's being assigned to anywhere in the closure body
-    // This requires walking the closure body and checking for assignments
+    if captures.is_empty() {
+        return;
+    }
 
     // Build a set of captured local IDs for quick lookup
     let captured_ids: std::collections::HashSet<_> = captures.iter()
         .map(|c| c.local_id)
         .collect();
 
-    // We need to walk the closure body to find assignments
-    // For now, this is a placeholder - the actual implementation would need to
-    // recursively walk the closure body statements and check for assignments
-    // to captured variables.
+    // Walk the closure body to find assignments to captured variables
+    for stmt in body {
+        walk_statement_for_assignments(stmt, &captured_ids, container_id, ctx);
+    }
 
-    // The assignment would be detected by looking for ExprKind::Assignment where
-    // the target is a LocalRef that matches one of the captured_ids.
-    // When found, report CannotAssignToCapturedVariableError with the variable name.
-
-    // To get the variable name, we'd use:
-    // ctx.model.query(LocalName { container_id, local_id })
-
-    // This is a simplified stub - full implementation would require a separate
-    // visitor that walks the closure body
-    let _ = (captured_ids, container_id, ctx);
+    // Check the tail expression too
+    if let Some(tail) = tail_expr {
+        find_assignments_to_locals(tail, &captured_ids, container_id, ctx);
+    }
 }
 
 /// Validate that closure parameters are not assigned to.

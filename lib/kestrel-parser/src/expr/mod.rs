@@ -938,9 +938,12 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 skip_trivia()
                     .ignore_then(just(Token::Else).map_with_span(|_, span| Span::from(span)))
                     .then(
-                        // Either another expression (for else if) or a block
-                        // Using expr.clone() allows `else if` to work via the recursive parser
-                        expr.clone()
+                        // Either else-if or a plain else block
+                        // Check for 'if' keyword first to distinguish from closure syntax
+                        skip_trivia()
+                            .ignore_then(just(Token::If))
+                            .rewind()
+                            .ignore_then(expr.clone())
                             .map(ElseClauseVariant::ElseIf)
                             .or(inline_code_block.clone().map(ElseClauseVariant::Block)),
                     )

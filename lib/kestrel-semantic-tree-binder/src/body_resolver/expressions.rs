@@ -858,6 +858,9 @@ fn expression_references_local(
 fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.file_id);
 
+    // Record the scope depth before entering the closure (for capture analysis)
+    let closure_entry_depth = ctx.local_scope.depth();
+
     // Push a new scope for the closure
     ctx.local_scope.push_scope();
 
@@ -930,8 +933,8 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
         }
     };
 
-    // For now, captures is empty - capture analysis will be added later
-    let captures = Vec::new();
+    // Collect captured variables from the closure body
+    let captures = collect_captures(&body, tail_expr.as_ref(), closure_entry_depth, &ctx.local_scope);
 
     Expression::closure(params, body, tail_expr, captures, it_was_used, implicit_param, closure_ty, span)
 }
@@ -1060,6 +1063,222 @@ fn resolve_closure_body(
     }
 
     (statements, tail_expr)
+}
+
+/// Collect captured variables from a closure body.
+///
+/// A variable is captured if:
+/// 1. It's referenced as a LocalRef in the body or tail expression
+/// 2. It was declared before the closure scope (scope_depth < closure_entry_depth)
+///
+/// Captures are deduplicated by LocalId.
+fn collect_captures(
+    body: &[Statement],
+    tail_expr: Option<&Expression>,
+    closure_entry_depth: usize,
+    local_scope: &crate::LocalScope,
+) -> Vec<kestrel_semantic_tree::expr::Capture> {
+    use kestrel_semantic_tree::expr::{Capture, CaptureKind};
+    use kestrel_semantic_tree::symbol::local::LocalId;
+    use std::collections::HashSet;
+
+    let mut captures = Vec::new();
+    let mut seen_ids: HashSet<LocalId> = HashSet::new();
+
+    // Helper to process a single LocalRef
+    let mut process_local_ref = |local_id: LocalId, _name: &str, ty: &kestrel_semantic_tree::ty::Ty, span: &kestrel_span::Span| {
+        // Check if already captured
+        if seen_ids.contains(&local_id) {
+            return;
+        }
+
+        // Check if this local was declared before the closure scope
+        // Variables at closure_entry_depth or below are from outer scopes
+        if let Some(local_depth) = local_scope.scope_depth_of(local_id) {
+            if local_depth <= closure_entry_depth {
+                // This is a capture! Get the name from the local_scope
+                let name = local_scope
+                    .get_local(local_id)
+                    .map(|l| l.name().to_string())
+                    .unwrap_or_default();
+
+                seen_ids.insert(local_id);
+                captures.push(Capture {
+                    local_id,
+                    name,
+                    ty: ty.clone(),
+                    kind: CaptureKind::Value,
+                    span: span.clone(),
+                });
+            }
+        }
+    };
+
+    // Walk all statements
+    for stmt in body {
+        collect_captures_from_statement(stmt, &mut process_local_ref);
+    }
+
+    // Walk the tail expression
+    if let Some(expr) = tail_expr {
+        collect_captures_from_expression(expr, &mut process_local_ref);
+    }
+
+    captures
+}
+
+/// Walk a statement to find LocalRef expressions.
+fn collect_captures_from_statement<F>(stmt: &Statement, process: &mut F)
+where
+    F: FnMut(kestrel_semantic_tree::symbol::local::LocalId, &str, &kestrel_semantic_tree::ty::Ty, &kestrel_span::Span),
+{
+    use kestrel_semantic_tree::stmt::StatementKind;
+
+    match &stmt.kind {
+        StatementKind::Expr(expr) => {
+            collect_captures_from_expression(expr, process);
+        }
+        StatementKind::Binding { value, .. } => {
+            // Walk the initializer value if present
+            if let Some(expr) = value {
+                collect_captures_from_expression(expr, process);
+            }
+        }
+    }
+}
+
+/// Walk an expression to find LocalRef expressions.
+fn collect_captures_from_expression<F>(expr: &Expression, process: &mut F)
+where
+    F: FnMut(kestrel_semantic_tree::symbol::local::LocalId, &str, &kestrel_semantic_tree::ty::Ty, &kestrel_span::Span),
+{
+    use kestrel_semantic_tree::expr::ExprKind;
+
+    match &expr.kind {
+        // The key case: LocalRef - look up the name from the local scope
+        ExprKind::LocalRef(local_id) => {
+            // We need to get the name from somewhere - use the local_scope or just use a placeholder
+            // Actually, we need to pass the name through. Let's look it up from the context.
+            // For now, we'll use the expression span to identify the capture location.
+            // The actual name will be retrieved later during capture creation.
+            process(*local_id, "", &expr.ty, &expr.span);
+        }
+
+        // Recursively walk compound expressions
+        ExprKind::Grouping(inner) => {
+            collect_captures_from_expression(inner, process);
+        }
+        ExprKind::Call { callee, arguments, .. } => {
+            collect_captures_from_expression(callee, process);
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+            collect_captures_from_expression(receiver, process);
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+        ExprKind::MethodRef { receiver, .. } => {
+            collect_captures_from_expression(receiver, process);
+        }
+        ExprKind::FieldAccess { object, .. } => {
+            collect_captures_from_expression(object, process);
+        }
+        ExprKind::TupleIndex { tuple, .. } => {
+            collect_captures_from_expression(tuple, process);
+        }
+        ExprKind::ImplicitStructInit { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+        ExprKind::Assignment { target, value } => {
+            collect_captures_from_expression(target, process);
+            collect_captures_from_expression(value, process);
+        }
+        ExprKind::Tuple(elements) => {
+            for elem in elements {
+                collect_captures_from_expression(elem, process);
+            }
+        }
+        ExprKind::Array(elements) => {
+            for elem in elements {
+                collect_captures_from_expression(elem, process);
+            }
+        }
+        ExprKind::If { condition, then_branch, then_value, else_branch } => {
+            collect_captures_from_expression(condition, process);
+            for stmt in then_branch {
+                collect_captures_from_statement(stmt, process);
+            }
+            if let Some(val) = then_value {
+                collect_captures_from_expression(val, process);
+            }
+            if let Some(else_br) = else_branch {
+                collect_captures_from_else_branch(else_br, process);
+            }
+        }
+        ExprKind::While { condition, body: while_body, .. } => {
+            collect_captures_from_expression(condition, process);
+            for stmt in while_body {
+                collect_captures_from_statement(stmt, process);
+            }
+        }
+        ExprKind::Loop { body: loop_body, .. } => {
+            for stmt in loop_body {
+                collect_captures_from_statement(stmt, process);
+            }
+        }
+        ExprKind::Break { .. } => {
+            // Break doesn't have a value in this AST
+        }
+        ExprKind::Continue { .. } => {}
+        ExprKind::Return { value } => {
+            if let Some(val) = value {
+                collect_captures_from_expression(val, process);
+            }
+        }
+        ExprKind::Closure { body, tail_expr, .. } => {
+            // For nested closures, we still walk their bodies to find captures
+            // These will be captures from the outer closure's perspective
+            for stmt in body {
+                collect_captures_from_statement(stmt, process);
+            }
+            if let Some(tail) = tail_expr {
+                collect_captures_from_expression(tail, process);
+            }
+        }
+
+        // Leaf nodes - no recursion needed
+        ExprKind::Literal(_)
+        | ExprKind::SymbolRef(_)
+        | ExprKind::OverloadedRef(_)
+        | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
+        | ExprKind::Error => {}
+    }
+}
+
+/// Walk an else branch to find LocalRef expressions.
+fn collect_captures_from_else_branch<F>(else_branch: &kestrel_semantic_tree::expr::ElseBranch, process: &mut F)
+where
+    F: FnMut(kestrel_semantic_tree::symbol::local::LocalId, &str, &kestrel_semantic_tree::ty::Ty, &kestrel_span::Span),
+{
+    match else_branch {
+        kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
+            for stmt in statements {
+                collect_captures_from_statement(stmt, process);
+            }
+            if let Some(val) = value {
+                collect_captures_from_expression(val, process);
+            }
+        }
+        kestrel_semantic_tree::expr::ElseBranch::ElseIf(expr) => {
+            collect_captures_from_expression(expr, process);
+        }
+    }
 }
 
 #[cfg(test)]
