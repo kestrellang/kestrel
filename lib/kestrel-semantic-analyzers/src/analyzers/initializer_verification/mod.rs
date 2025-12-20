@@ -446,6 +446,14 @@ fn analyze_expression(
             }
             // Closures don't change the initialization state of the enclosing scope
         }
+        ExprKind::EnumCase { .. } => {}
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    state = analyze_expression(&arg.value, state, false, ctx);
+                }
+            }
+        }
         ExprKind::Error => {}
     }
     state

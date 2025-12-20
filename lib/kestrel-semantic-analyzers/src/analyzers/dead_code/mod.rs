@@ -302,6 +302,18 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             // Closures don't cause divergence in the enclosing scope
             Divergence::None
         }
+        // Implicit member access - check arguments if present
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    let d = analyze_expression(&arg.value, errors);
+                    if d.diverges() {
+                        return d;
+                    }
+                }
+            }
+            Divergence::None
+        }
         // Leaf expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -309,6 +321,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::EnumCase { .. }
         | ExprKind::Error => Divergence::None,
     }
 }

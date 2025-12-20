@@ -842,12 +842,22 @@ fn expression_references_local(
             }
         }
 
+        // Implicit member access - check arguments if present
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                args.iter().any(|arg| expression_references_local(&arg.value, local_id))
+            } else {
+                false
+            }
+        }
+
         // Leaf expressions - no references
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Error => false,
@@ -1251,12 +1261,22 @@ where
             }
         }
 
+        // Implicit member access - check arguments if present
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    collect_captures_from_expression(&arg.value, process);
+                }
+            }
+        }
+
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::EnumCase { .. }
         | ExprKind::Error => {}
     }
 }

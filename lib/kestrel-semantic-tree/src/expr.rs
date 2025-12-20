@@ -514,6 +514,23 @@ pub enum ExprKind {
         implicit_param: Option<(LocalId, Ty, Span)>,
     },
 
+    /// Reference to a resolved enum case (simple case without arguments).
+    /// Used for enum cases like `Option.None` or `.None`.
+    EnumCase {
+        /// The symbol ID of the enum case
+        case_id: SymbolId,
+    },
+
+    /// Unresolved implicit member access: `.Case` or `.Case(args)`.
+    /// Type inference resolves this to EnumCase or validates against expected type.
+    /// Used for Swift-style shorthand enum syntax.
+    ImplicitMemberAccess {
+        /// The name of the member (case) being accessed
+        member_name: String,
+        /// Optional arguments for associated values
+        arguments: Option<Vec<CallArgument>>,
+    },
+
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
@@ -805,6 +822,27 @@ impl Expression {
                     .map(|e| e.debug_compact())
                     .unwrap_or_else(|| "...".to_string());
                 format!("{{ {}{} }}", params_str, body_str)
+            }
+            ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
+            ExprKind::ImplicitMemberAccess {
+                member_name,
+                arguments,
+            } => {
+                if let Some(args) = arguments {
+                    let args_str: Vec<String> = args
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, a.value.debug_compact())
+                            } else {
+                                a.value.debug_compact()
+                            }
+                        })
+                        .collect();
+                    format!(".{}({})", member_name, args_str.join(", "))
+                } else {
+                    format!(".{}", member_name)
+                }
             }
             ExprKind::Error => "<error>".to_string(),
         }
@@ -1140,6 +1178,41 @@ impl Expression {
                 arguments,
             },
             ty: struct_type,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a resolved enum case expression.
+    ///
+    /// Used when a path resolves to an enum case without associated values.
+    /// Enum cases are not mutable lvalues.
+    pub fn enum_case(case_id: SymbolId, ty: Ty, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::EnumCase { case_id },
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an implicit member access with `Ty::infer()`.
+    ///
+    /// Type inference will resolve the actual type based on context.
+    /// Used for Swift-style shorthand: `.None` instead of `Option.None`.
+    pub fn implicit_member_access(
+        member_name: String,
+        arguments: Option<Vec<CallArgument>>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::ImplicitMemberAccess {
+                member_name,
+                arguments,
+            },
+            ty: Ty::infer(span.clone()),
             span,
             mutable: false,
         }

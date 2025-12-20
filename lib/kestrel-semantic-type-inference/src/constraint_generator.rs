@@ -425,6 +425,19 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         }
 
+        // Enum case reference: type is already set during binding
+        ExprKind::EnumCase { .. } => {}
+
+        // Implicit member access: will be resolved during type inference
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            // Process argument expressions if present
+            if let Some(args) = arguments {
+                for arg in args {
+                    generate_expression_constraints(ctx, &arg.value);
+                }
+            }
+        }
+
         ExprKind::Error => {}
     }
 }

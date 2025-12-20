@@ -267,12 +267,23 @@ fn walk_expression(
                     walk_expression(tail, analyzers, model, ctx);
                 }
             }
+            ExprKind::ImplicitMemberAccess { arguments, .. } => {
+                if let Some(args) = arguments {
+                    for arg in args {
+                        walk_expression(&arg.value, analyzers, model, ctx);
+                        if ctx.stopped {
+                            return;
+                        }
+                    }
+                }
+            }
             // Leaf kinds or handled elsewhere
             ExprKind::Literal(_)
             | ExprKind::LocalRef(_)
             | ExprKind::SymbolRef(_)
             | ExprKind::TypeRef(_)
             | ExprKind::TypeParameterRef(_)
+            | ExprKind::EnumCase { .. }
             | ExprKind::Break { .. }
             | ExprKind::Continue { .. }
             | ExprKind::Return { value: None }

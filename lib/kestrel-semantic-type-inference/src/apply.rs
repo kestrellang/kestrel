@@ -72,6 +72,16 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         ExprKind::OverloadedRef(ids) => ExprKind::OverloadedRef(ids.clone()),
         ExprKind::TypeRef(id) => ExprKind::TypeRef(*id),
         ExprKind::TypeParameterRef(id) => ExprKind::TypeParameterRef(*id),
+        ExprKind::EnumCase { case_id } => ExprKind::EnumCase { case_id: *case_id },
+        ExprKind::ImplicitMemberAccess {
+            member_name,
+            arguments,
+        } => ExprKind::ImplicitMemberAccess {
+            member_name: member_name.clone(),
+            arguments: arguments
+                .as_ref()
+                .map(|args| args.iter().map(|arg| apply_to_argument(arg, solution)).collect()),
+        },
         ExprKind::Error => ExprKind::Error,
         ExprKind::Break { loop_id, label } => ExprKind::Break {
             loop_id: *loop_id,

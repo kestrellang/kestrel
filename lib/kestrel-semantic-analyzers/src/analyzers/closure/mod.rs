@@ -307,6 +307,15 @@ fn find_assignments_to_locals(
             }
         }
 
+        // Implicit member access - check arguments if present
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+                }
+            }
+        }
+
         // Leaf expressions - no sub-expressions to check
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -314,6 +323,7 @@ fn find_assignments_to_locals(
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Error => {}

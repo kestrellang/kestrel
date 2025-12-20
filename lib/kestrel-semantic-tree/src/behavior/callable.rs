@@ -177,6 +177,9 @@ impl SignatureType {
             TyKind::Struct { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }
+            TyKind::Enum { symbol, .. } => {
+                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
+            }
             TyKind::Protocol { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }

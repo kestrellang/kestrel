@@ -109,6 +109,21 @@ fn find_less_visible_type(
             }
             None
         }
+        TyKind::Enum {
+            symbol: enum_symbol,
+            substitutions,
+        } => {
+            let level = get_visibility_level_from_symbol(enum_symbol);
+            if level < required_level {
+                return Some((enum_symbol.metadata().name().value.clone(), level));
+            }
+            for (_, arg_ty) in substitutions.iter() {
+                if let Some(result) = find_less_visible_type(arg_ty, required_level) {
+                    return Some(result);
+                }
+            }
+            None
+        }
         TyKind::Protocol {
             symbol: protocol_symbol,
             substitutions,

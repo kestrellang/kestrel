@@ -256,12 +256,24 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         }
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    let s = analyze_expression(&arg.value);
+                    if s.definitely_returns() {
+                        return s;
+                    }
+                }
+            }
+            ReturnState::MayFallThrough
+        }
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::EnumCase { .. }
         | ExprKind::Closure { .. }
         | ExprKind::Error => ReturnState::MayFallThrough,
     }

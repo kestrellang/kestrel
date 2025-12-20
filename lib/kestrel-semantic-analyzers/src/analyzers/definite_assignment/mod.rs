@@ -259,7 +259,14 @@ fn analyze_expression(
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
         }
-        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::Error | ExprKind::OverloadedRef(_) | ExprKind::Closure { .. } => {}
+        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::EnumCase { .. } | ExprKind::Error | ExprKind::OverloadedRef(_) | ExprKind::Closure { .. } => {}
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    state = analyze_expression(&arg.value, state, false, ctx);
+                }
+            }
+        }
         ExprKind::Array(exprs) | ExprKind::Tuple(exprs) => {
             for e in exprs {
                 state = analyze_expression(e, state, false, ctx);

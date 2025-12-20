@@ -512,6 +512,54 @@ fn unify(
             Ok(SolveResult::Solved)
         }
 
+        (
+            TyKind::Enum {
+                symbol: sym_a,
+                substitutions: subs_a,
+            },
+            TyKind::Enum {
+                symbol: sym_b,
+                substitutions: subs_b,
+            },
+        ) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+
+            if id_a != id_b {
+                return Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ));
+            }
+
+            // Unify substitutions by matching keys (type parameter IDs)
+            for (key, sub_a) in subs_a.iter() {
+                if let Some(sub_b) = subs_b.get(*key) {
+                    ctx.equate(sub_a.id(), sub_b.id(), span.clone());
+                } else {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+            }
+            for (key, _) in subs_b.iter() {
+                if !subs_a.contains(*key) {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+            }
+            Ok(SolveResult::Solved)
+        }
+
         // Type parameters - only equal if they're the same parameter
         (TyKind::TypeParameter(param_a), TyKind::TypeParameter(param_b)) => {
             use semantic_tree::symbol::Symbol;
@@ -755,6 +803,7 @@ fn occurs_check_inner(
                 || occurs_check_inner(var, return_type, ctx, visited)
         }
         TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
         | TyKind::Protocol { substitutions, .. }
         | TyKind::TypeAlias { substitutions, .. } => substitutions
             .iter()
