@@ -138,6 +138,11 @@ impl Expression {
     pub fn is_closure(&self) -> bool {
         self.kind() == SyntaxKind::ExprClosure
     }
+
+    /// Check if this is an implicit member access expression
+    pub fn is_implicit_member_access(&self) -> bool {
+        self.kind() == SyntaxKind::ExprImplicitMemberAccess
+    }
 }
 
 /// Parser for type arguments with full type support: [T, (A, B), [Int], (X) -> Y]
@@ -305,6 +310,23 @@ pub enum ExprVariant {
         body: Vec<BlockItem>,
         rbrace: Span,
     },
+    /// Implicit member access expression: .Case or .Case(args)
+    /// Used for enum shorthand: let x: Direction = .north
+    ImplicitMemberAccess {
+        dot: Span,
+        member: Span,
+        /// Optional argument list for enum cases with associated values
+        arguments: Option<ArgumentListData>,
+    },
+}
+
+/// Argument list data for implicit member access
+#[derive(Debug, Clone)]
+pub struct ArgumentListData {
+    pub lparen: Span,
+    pub arguments: Vec<CallArg>,
+    pub commas: Vec<Span>,
+    pub rparen: Span,
 }
 
 /// Loop label data: label:
@@ -1156,6 +1178,78 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 })
         };
 
+        // Implicit member access: .Case or .Case(args)
+        // Used for enum shorthand when type can be inferred
+        let implicit_member_access = {
+            // Reuse the argument list parser from call expressions
+            let implicit_arg_list = skip_trivia()
+                .ignore_then(just(Token::LParen).map_with_span(|_, span| Span::from(span)))
+                .then(
+                    // Empty arg list
+                    skip_trivia()
+                        .ignore_then(just(Token::RParen).map_with_span(|_, span| Span::from(span)))
+                        .map(|rparen| (vec![], vec![], rparen))
+                        .or(
+                            // Non-empty: arg followed by optional commas and more
+                            argument
+                                .clone()
+                                .then(
+                                    skip_trivia()
+                                        .ignore_then(
+                                            just(Token::Comma)
+                                                .map_with_span(|_, span| Span::from(span)),
+                                        )
+                                        .then(skip_trivia().ignore_then(argument.clone()))
+                                        .repeated(),
+                                )
+                                .then(
+                                    skip_trivia()
+                                        .ignore_then(
+                                            just(Token::Comma)
+                                                .map_with_span(|_, span| Span::from(span)),
+                                        )
+                                        .or_not(),
+                                )
+                                .then(skip_trivia().ignore_then(
+                                    just(Token::RParen).map_with_span(|_, span| Span::from(span)),
+                                ))
+                                .map(|(((first, rest), trailing), rparen)| {
+                                    let mut arguments = vec![first];
+                                    let mut commas = Vec::new();
+                                    for (comma, arg) in rest {
+                                        commas.push(comma);
+                                        arguments.push(arg);
+                                    }
+                                    if let Some(tc) = trailing {
+                                        commas.push(tc);
+                                    }
+                                    (arguments, commas, rparen)
+                                }),
+                        ),
+                )
+                .map(|(lparen, (arguments, commas, rparen))| ArgumentListData {
+                    lparen,
+                    arguments,
+                    commas,
+                    rparen,
+                });
+
+            skip_trivia()
+                .ignore_then(just(Token::Dot).map_with_span(|_, span| Span::from(span)))
+                .then(
+                    skip_trivia().ignore_then(filter_map(|span, token| match token {
+                        Token::Identifier => Ok(Span::from(span)),
+                        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                    })),
+                )
+                .then(implicit_arg_list.or_not())
+                .map(|((dot, member), arguments)| ExprVariant::ImplicitMemberAccess {
+                    dot,
+                    member,
+                    arguments,
+                })
+        };
+
         // Trailing closure argument parser: { closure } or label: { closure }
         // Returns a CallArg with the closure as value
         let trailing_closure_arg = {
@@ -1188,6 +1282,8 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         };
 
         // Full primary expressions (includes arrays, tuples, paren, if, while, loop, break, continue, return, closures)
+        // NOTE: implicit_member_access must come before path because .Foo should be
+        // parsed as an implicit member access, not as a member access on an implicit receiver
         let primary = float
             .or(integer)
             .or(string)
@@ -1202,6 +1298,7 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .or(continue_expr)
             .or(return_expr)
             .or(closure_expr)
+            .or(implicit_member_access)
             .or(path);
 
         // Postfix expression: primary followed by zero or more postfix operations,
@@ -1581,6 +1678,13 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             rbrace,
         } => {
             emit_closure_expr(sink, lbrace.clone(), params, in_span, body, rbrace.clone());
+        }
+        ExprVariant::ImplicitMemberAccess {
+            dot,
+            member,
+            arguments,
+        } => {
+            emit_implicit_member_access_expr(sink, dot.clone(), member.clone(), arguments.as_ref());
         }
     }
 }
@@ -2141,6 +2245,57 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
             emit_expr_variant(sink, expr);
         }
     }
+}
+
+/// Emit events for an implicit member access expression (.Case or .Case(args))
+fn emit_implicit_member_access_expr(
+    sink: &mut EventSink,
+    dot: Span,
+    member: Span,
+    arguments: Option<&ArgumentListData>,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprImplicitMemberAccess);
+
+    // Emit the dot
+    sink.add_token(SyntaxKind::Dot, dot);
+
+    // Emit the member name wrapped in a Name node
+    sink.start_node(SyntaxKind::Name);
+    sink.add_token(SyntaxKind::Identifier, member);
+    sink.finish_node(); // Name
+
+    // Emit argument list if present
+    if let Some(args) = arguments {
+        sink.start_node(SyntaxKind::ArgumentList);
+        sink.add_token(SyntaxKind::LParen, args.lparen.clone());
+
+        for (i, arg) in args.arguments.iter().enumerate() {
+            sink.start_node(SyntaxKind::Argument);
+
+            // If labeled, emit label and colon
+            if let (Some(label), Some(colon)) = (&arg.label, &arg.colon) {
+                sink.add_token(SyntaxKind::Identifier, label.clone());
+                sink.add_token(SyntaxKind::Colon, colon.clone());
+            }
+
+            // Emit the argument value
+            emit_expr_variant(sink, &arg.value);
+
+            sink.finish_node(); // Argument
+
+            // Add comma after argument if there is one
+            if i < args.commas.len() {
+                sink.add_token(SyntaxKind::Comma, args.commas[i].clone());
+            }
+        }
+
+        sink.add_token(SyntaxKind::RParen, args.rparen.clone());
+        sink.finish_node(); // ArgumentList
+    }
+
+    sink.finish_node(); // ExprImplicitMemberAccess
+    sink.finish_node(); // Expression
 }
 
 /// Parse an expression and emit events
@@ -2985,5 +3140,71 @@ mod tests {
         let source = r#"Button(title: "OK") onTap: { save() }"#;
         let expr = parse_expr_from_source(source);
         assert!(expr.is_call());
+    }
+
+    // ===== Implicit Member Access Tests =====
+
+    #[test]
+    fn test_implicit_member_access_simple() {
+        // .Foo - simple implicit member access for enum case
+        let source = ".Foo";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
+    }
+
+    #[test]
+    fn test_implicit_member_access_with_empty_args() {
+        // .Foo() - with empty argument list
+        let source = ".Foo()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
+    }
+
+    #[test]
+    fn test_implicit_member_access_with_labeled_arg() {
+        // .Foo(x: 1) - with labeled argument
+        let source = ".Foo(x: 1)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
+    }
+
+    #[test]
+    fn test_implicit_member_access_with_multiple_args() {
+        // .Foo(x: 1, y: 2) - with multiple labeled arguments
+        let source = ".Foo(x: 1, y: 2)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
+    }
+
+    #[test]
+    fn test_implicit_member_access_with_unlabeled_arg() {
+        // .Some(42) - with unlabeled argument (like Option.Some)
+        let source = ".Some(42)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
+    }
+
+    #[test]
+    fn test_implicit_member_access_with_expression_arg() {
+        // .Point(x: 1 + 2, y: 3 * 4) - with complex expression arguments
+        let source = ".Point(x: 1 + 2, y: 3 * 4)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
+    }
+
+    #[test]
+    fn test_implicit_member_access_in_array() {
+        // [.north, .south] - implicit member access in array literal
+        let source = "[.north, .south]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_implicit_member_access_with_trailing_comma() {
+        // .Foo(x: 1,) - with trailing comma in arguments
+        let source = ".Foo(x: 1,)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_implicit_member_access());
     }
 }

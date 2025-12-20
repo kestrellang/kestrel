@@ -12,7 +12,8 @@ use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, ExtensionBodyItem,
     ExtensionDeclarationData, FieldDeclarationData, FunctionDeclarationData,
     InitializerDeclarationData, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
-    ReceiverModifier, StructBodyItem, StructDeclarationData, TypeAliasDeclarationData,
+    ReceiverModifier, TypeDeclarationBodyItem, StructDeclarationData, TypeAliasDeclarationData,
+    EnumDeclarationData, EnumCaseDeclarationData,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -316,7 +317,7 @@ pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData
     sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
 
     for item in data.body {
-        emit_struct_body_item(sink, item);
+        emit_type_declaration_body_item(sink, item);
     }
 
     sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
@@ -325,18 +326,20 @@ pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData
     sink.finish_node(); // StructDeclaration
 }
 
-/// Emit events for a struct body item
-fn emit_struct_body_item(sink: &mut EventSink, item: StructBodyItem) {
+/// Emit events for a type declaration body item (struct or enum body item)
+fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBodyItem) {
     match item {
-        StructBodyItem::Field(data) => emit_field_declaration(sink, data),
-        StructBodyItem::Function(data) => emit_function_declaration(sink, data),
-        StructBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
-        StructBodyItem::Struct(data) => emit_struct_declaration(sink, data),
-        StructBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
-        StructBodyItem::Module(module_span, path_segments) => {
+        TypeDeclarationBodyItem::Field(data) => emit_field_declaration(sink, data),
+        TypeDeclarationBodyItem::Function(data) => emit_function_declaration(sink, data),
+        TypeDeclarationBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
+        TypeDeclarationBodyItem::Struct(data) => emit_struct_declaration(sink, *data),
+        TypeDeclarationBodyItem::Enum(data) => emit_enum_declaration(sink, *data),
+        TypeDeclarationBodyItem::EnumCase(data) => emit_enum_case(sink, data),
+        TypeDeclarationBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
+        TypeDeclarationBodyItem::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
         }
-        StructBodyItem::Import(import_span, path_segments, alias, items) => {
+        TypeDeclarationBodyItem::Import(import_span, path_segments, alias, items) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
         }
     }
@@ -502,4 +505,95 @@ fn emit_extension_body_item(sink: &mut EventSink, item: ExtensionBodyItem) {
         ExtensionBodyItem::Function(data) => emit_function_declaration(sink, data),
         ExtensionBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
     }
+}
+
+// =============================================================================
+// Enum Emitters
+// =============================================================================
+
+/// Emit events for an indirect modifier
+pub fn emit_indirect_modifier(sink: &mut EventSink, indirect_span: Span) {
+    sink.start_node(SyntaxKind::IndirectModifier);
+    sink.add_token(SyntaxKind::Indirect, indirect_span);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case parameter (label: Type)
+pub fn emit_enum_case_parameter(sink: &mut EventSink, data: &super::data::EnumCaseParameterData) {
+    sink.start_node(SyntaxKind::EnumCaseParameter);
+    emit_name(sink, data.label.clone());
+    sink.add_token(SyntaxKind::Colon, data.colon.clone());
+    emit_ty_variant(sink, &data.ty);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case parameter list
+pub fn emit_enum_case_parameter_list(
+    sink: &mut EventSink,
+    lparen: Span,
+    parameters: &[super::data::EnumCaseParameterData],
+    rparen: Span,
+) {
+    sink.start_node(SyntaxKind::EnumCaseParameterList);
+    sink.add_token(SyntaxKind::LParen, lparen);
+    for param in parameters {
+        emit_enum_case_parameter(sink, param);
+    }
+    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case declaration
+///
+/// This is the single source of truth for enum case declaration emission.
+pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
+    sink.start_node(SyntaxKind::EnumCaseDeclaration);
+    sink.add_token(SyntaxKind::Case, data.case_span);
+    emit_name(sink, data.name_span);
+
+    if let Some((lparen, ref params, rparen)) = data.parameters {
+        emit_enum_case_parameter_list(sink, lparen, params, rparen);
+    }
+
+    sink.finish_node();
+}
+
+/// Emit events for an enum declaration
+///
+/// This is the single source of truth for enum declaration emission.
+pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
+    sink.start_node(SyntaxKind::EnumDeclaration);
+
+    emit_visibility(sink, data.visibility);
+
+    if let Some(indirect_span) = data.indirect {
+        emit_indirect_modifier(sink, indirect_span);
+    }
+
+    sink.add_token(SyntaxKind::Enum, data.enum_span);
+    emit_name(sink, data.name_span);
+
+    if let Some((lbracket, params, rbracket)) = data.type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(conf) = data.conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::EnumBody);
+    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+
+    for item in data.body {
+        emit_type_declaration_body_item(sink, item);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.finish_node(); // EnumBody
+
+    sink.finish_node(); // EnumDeclaration
 }

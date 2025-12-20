@@ -45,6 +45,12 @@ pub enum SyntaxKind {
     StructBody,
     ExtensionDeclaration,
     ExtensionBody,
+    EnumDeclaration,
+    EnumBody,
+    EnumCaseDeclaration,
+    EnumCaseParameter,
+    EnumCaseParameterList,
+    IndirectModifier,
     ImportDeclaration,
     ImportItem,
     ModuleDeclaration,
@@ -128,12 +134,13 @@ pub enum SyntaxKind {
     ExprContinue,   // continue or continue label
     ExprReturn,     // return or return expr
     ExprTupleIndex, // tuple.0, tuple.1 (tuple element access)
-    ExprClosure,    // { params in body } or { body }
-    ClosureParams,  // (param, param) in closure
-    ClosureParam,   // Single closure parameter: name or name: Type
-    LoopLabel,      // label: (before while/loop)
-    ArgumentList,   // (arg1, label: arg2, ...)
-    Argument,       // Single argument: expr or label: expr
+    ExprClosure,            // { params in body } or { body }
+    ClosureParams,          // (param, param) in closure
+    ClosureParam,           // Single closure parameter: name or name: Type
+    LoopLabel,              // label: (before while/loop)
+    ArgumentList,           // (arg1, label: arg2, ...)
+    Argument,               // Single argument: expr or label: expr
+    ExprImplicitMemberAccess, // .Case or .Case(args)
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -147,14 +154,17 @@ pub enum SyntaxKind {
     // Keywords
     As,
     Break,
+    Case,
     Consuming,
     Continue,
     Else,
+    Enum,
     Extend,
     Fileprivate,
     Func,
     If,
     Import,
+    Indirect,
     Loop,
     Init,
     Internal,
@@ -252,14 +262,17 @@ impl From<Token> for SyntaxKind {
             // Keywords
             Token::As => SyntaxKind::As,
             Token::Break => SyntaxKind::Break,
+            Token::Case => SyntaxKind::Case,
             Token::Consuming => SyntaxKind::Consuming,
             Token::Continue => SyntaxKind::Continue,
             Token::Else => SyntaxKind::Else,
+            Token::Enum => SyntaxKind::Enum,
             Token::Extend => SyntaxKind::Extend,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
             Token::Import => SyntaxKind::Import,
+            Token::Indirect => SyntaxKind::Indirect,
             Token::Init => SyntaxKind::Init,
             Token::Loop => SyntaxKind::Loop,
             Token::Internal => SyntaxKind::Internal,
@@ -339,6 +352,12 @@ impl Language for KestrelLanguage {
         const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
         const EXTENSION_DECLARATION: u16 = SyntaxKind::ExtensionDeclaration as u16;
         const EXTENSION_BODY: u16 = SyntaxKind::ExtensionBody as u16;
+        const ENUM_DECLARATION: u16 = SyntaxKind::EnumDeclaration as u16;
+        const ENUM_BODY: u16 = SyntaxKind::EnumBody as u16;
+        const ENUM_CASE_DECLARATION: u16 = SyntaxKind::EnumCaseDeclaration as u16;
+        const ENUM_CASE_PARAMETER: u16 = SyntaxKind::EnumCaseParameter as u16;
+        const ENUM_CASE_PARAMETER_LIST: u16 = SyntaxKind::EnumCaseParameterList as u16;
+        const INDIRECT_MODIFIER: u16 = SyntaxKind::IndirectModifier as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
         const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
@@ -411,6 +430,7 @@ impl Language for KestrelLanguage {
         const LOOP_LABEL: u16 = SyntaxKind::LoopLabel as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
+        const EXPR_IMPLICIT_MEMBER_ACCESS: u16 = SyntaxKind::ExprImplicitMemberAccess as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -419,14 +439,17 @@ impl Language for KestrelLanguage {
         const NULL: u16 = SyntaxKind::Null as u16;
         const AS: u16 = SyntaxKind::As as u16;
         const BREAK: u16 = SyntaxKind::Break as u16;
+        const CASE: u16 = SyntaxKind::Case as u16;
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const CONTINUE: u16 = SyntaxKind::Continue as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
+        const ENUM: u16 = SyntaxKind::Enum as u16;
         const EXTEND: u16 = SyntaxKind::Extend as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
         const IMPORT: u16 = SyntaxKind::Import as u16;
+        const INDIRECT: u16 = SyntaxKind::Indirect as u16;
         const INIT: u16 = SyntaxKind::Init as u16;
         const LOOP: u16 = SyntaxKind::Loop as u16;
         const INTERNAL: u16 = SyntaxKind::Internal as u16;
@@ -497,6 +520,12 @@ impl Language for KestrelLanguage {
             STRUCT_BODY => SyntaxKind::StructBody,
             EXTENSION_DECLARATION => SyntaxKind::ExtensionDeclaration,
             EXTENSION_BODY => SyntaxKind::ExtensionBody,
+            ENUM_DECLARATION => SyntaxKind::EnumDeclaration,
+            ENUM_BODY => SyntaxKind::EnumBody,
+            ENUM_CASE_DECLARATION => SyntaxKind::EnumCaseDeclaration,
+            ENUM_CASE_PARAMETER => SyntaxKind::EnumCaseParameter,
+            ENUM_CASE_PARAMETER_LIST => SyntaxKind::EnumCaseParameterList,
+            INDIRECT_MODIFIER => SyntaxKind::IndirectModifier,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
             IMPORT_ITEM => SyntaxKind::ImportItem,
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
@@ -569,6 +598,7 @@ impl Language for KestrelLanguage {
             LOOP_LABEL => SyntaxKind::LoopLabel,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
+            EXPR_IMPLICIT_MEMBER_ACCESS => SyntaxKind::ExprImplicitMemberAccess,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,
@@ -577,14 +607,17 @@ impl Language for KestrelLanguage {
             NULL => SyntaxKind::Null,
             AS => SyntaxKind::As,
             BREAK => SyntaxKind::Break,
+            CASE => SyntaxKind::Case,
             CONSUMING => SyntaxKind::Consuming,
             CONTINUE => SyntaxKind::Continue,
             ELSE => SyntaxKind::Else,
+            ENUM => SyntaxKind::Enum,
             EXTEND => SyntaxKind::Extend,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,
             IMPORT => SyntaxKind::Import,
+            INDIRECT => SyntaxKind::Indirect,
             INIT => SyntaxKind::Init,
             LOOP => SyntaxKind::Loop,
             INTERNAL => SyntaxKind::Internal,

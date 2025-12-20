@@ -10,7 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::ConformanceListData;
 use crate::common::{
-    StructBodyItem, StructDeclarationData, emit_struct_declaration,
+    TypeDeclarationBodyItem, StructDeclarationData, emit_struct_declaration,
     field_declaration_parser_internal, function_declaration_parser_internal, identifier,
     import_declaration_parser_internal, initializer_declaration_parser_internal,
     module_declaration_parser_internal, token, visibility_parser_internal,
@@ -99,25 +99,26 @@ impl StructDeclaration {
 /// Struct bodies can contain: fields, functions, initializers, nested structs, type aliases, modules, and imports.
 fn struct_body_item_parser_internal(
     struct_parser: impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone,
-) -> impl Parser<Token, StructBodyItem, Error = Simple<Token>> + Clone {
+) -> impl Parser<Token, TypeDeclarationBodyItem, Error = Simple<Token>> + Clone {
     let module_parser = module_declaration_parser_internal()
-        .map(|(module_span, path)| StructBodyItem::Module(module_span, path));
+        .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
 
     let import_parser =
         import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
-            StructBodyItem::Import(import_span, path, alias, items)
+            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
         });
 
-    let nested_struct_parser = struct_parser.map(StructBodyItem::Struct);
+    // Nested structs are boxed to avoid infinite size
+    let nested_struct_parser = struct_parser.map(|data| TypeDeclarationBodyItem::Struct(Box::new(data)));
 
     let initializer_parser =
-        initializer_declaration_parser_internal().map(StructBodyItem::Initializer);
+        initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
 
-    let function_parser = function_declaration_parser_internal().map(StructBodyItem::Function);
+    let function_parser = function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
 
-    let type_alias_parser = type_alias_declaration_parser_internal().map(StructBodyItem::TypeAlias);
+    let type_alias_parser = type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
 
-    let field_parser = field_declaration_parser_internal().map(StructBodyItem::Field);
+    let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
 
     module_parser
         .or(import_parser)

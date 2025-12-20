@@ -107,17 +107,20 @@ pub struct StructDeclarationData {
     pub conformances: Option<ConformanceListData>,
     pub where_clause: Option<WhereClauseData>,
     pub lbrace_span: Span,
-    pub body: Vec<StructBodyItem>,
+    pub body: Vec<TypeDeclarationBodyItem>,
     pub rbrace_span: Span,
 }
 
-/// Items that can appear in a struct body
+/// Items that can appear in a type declaration body (struct or enum)
+/// Used to enable mutual nesting of structs and enums
 #[derive(Debug, Clone)]
-pub enum StructBodyItem {
+pub enum TypeDeclarationBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
-    Struct(StructDeclarationData),
+    Struct(Box<StructDeclarationData>),  // Boxed to avoid infinite size
+    Enum(Box<EnumDeclarationData>),      // Boxed to avoid infinite size
+    EnumCase(EnumCaseDeclarationData),   // Only valid in enum bodies
     TypeAlias(TypeAliasDeclarationData), // Associated type bindings
     Module(Span, Vec<Span>),             // module_span, path_segments
     Import(
@@ -126,6 +129,42 @@ pub enum StructBodyItem {
         Option<Span>,
         Option<Vec<(Span, Option<Span>)>>,
     ), // import_span, path, alias, items
+}
+
+/// Deprecated: Use TypeDeclarationBodyItem instead
+/// Kept for backwards compatibility during migration
+#[deprecated(note = "Use TypeDeclarationBodyItem instead")]
+pub type StructBodyItem = TypeDeclarationBodyItem;
+
+/// Raw parsed data for enum case parameter (label: Type)
+#[derive(Debug, Clone)]
+pub struct EnumCaseParameterData {
+    pub label: Span,
+    pub colon: Span,
+    pub ty: TyVariant,
+}
+
+/// Raw parsed data for enum case declaration
+#[derive(Debug, Clone)]
+pub struct EnumCaseDeclarationData {
+    pub case_span: Span,
+    pub name_span: Span,
+    pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>, // (lparen, params, rparen)
+}
+
+/// Raw parsed data for enum declaration
+#[derive(Debug, Clone)]
+pub struct EnumDeclarationData {
+    pub visibility: Option<(Token, Span)>,
+    pub indirect: Option<Span>,
+    pub enum_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub conformances: Option<ConformanceListData>,
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<TypeDeclarationBodyItem>,
+    pub rbrace_span: Span,
 }
 
 /// Raw parsed data for protocol declaration internals
