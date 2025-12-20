@@ -87,6 +87,13 @@ fn try_solve(
             expr_id,
             span,
         } => resolve_member(ctx, *receiver, member, *is_static, *result, *expr_id, span),
+        Constraint::ImplicitMember {
+            expr_ty,
+            member_name,
+            argument_tys,
+            expr_id,
+            span,
+        } => resolve_implicit_member(ctx, *expr_ty, member_name, argument_tys, *expr_id, span),
     }
 }
 
@@ -729,6 +736,131 @@ fn resolve_member(
     }
 }
 
+/// Resolve an implicit member access (enum shorthand like `.SomeCase`).
+fn resolve_implicit_member(
+    ctx: &mut InferenceContext<'_>,
+    expr_ty: TyId,
+    member_name: &str,
+    argument_tys: &[(Option<String>, TyId)],
+    expr_id: kestrel_semantic_tree::expr::ExprId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    #[allow(unused_imports)]
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    #[allow(unused_imports)]
+    use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
+    use semantic_tree::symbol::Symbol;
+
+    let resolved_ty = resolve_type(ctx, expr_ty);
+
+    // If still Infer, defer until expected type is known
+    if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Must be an enum type
+    let TyKind::Enum {
+        symbol: enum_symbol,
+        substitutions,
+    } = resolved_ty.kind()
+    else {
+        // Not an enum - error
+        return Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            member_name.to_string(),
+            span.clone(),
+        ));
+    };
+
+    // Find the case by name
+    let cases = enum_symbol.cases();
+    let case = cases.iter().find(|c| c.metadata().name().value == member_name);
+
+    let Some(case) = case else {
+        return Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            member_name.to_string(),
+            span.clone(),
+        ));
+    };
+
+    // Check if case has associated values (CallableBehavior)
+    let callable = case.callable_behavior();
+
+    match (&callable, argument_tys.is_empty()) {
+        // Simple case, no args expected, none provided - OK
+        (None, true) => {
+            ctx.values_mut()
+                .insert(expr_id, ValueResolution::simple(case.metadata().id()));
+            Ok(SolveResult::Solved)
+        }
+
+        // Simple case but args provided - error
+        (None, false) => Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            format!("{}(...)", member_name),
+            span.clone(),
+        )),
+
+        // Case with params, no args provided - error (unless params are empty)
+        (Some(cb), true) if !cb.parameters().is_empty() => Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            member_name.to_string(),
+            span.clone(),
+        )),
+
+        // Case with empty params, no args - OK
+        (Some(_cb), true) => {
+            ctx.values_mut()
+                .insert(expr_id, ValueResolution::simple(case.metadata().id()));
+            Ok(SolveResult::Solved)
+        }
+
+        // Case with params, args provided - validate
+        (Some(cb), false) => {
+            let params = cb.parameters();
+
+            // Check arity
+            if params.len() != argument_tys.len() {
+                return Err(InferenceError::closure_arity_mismatch(
+                    argument_tys.len(),
+                    params.len(),
+                    span.clone(),
+                ));
+            }
+
+            // Check labels and equate types
+            for ((label, arg_ty_id), param) in argument_tys.iter().zip(params.iter()) {
+                // Check label matches
+                let expected_label = param.label.as_ref().map(|l| l.value.as_str());
+                let actual_label = label.as_deref();
+
+                if actual_label != expected_label {
+                    // Label mismatch - for now report as member not found
+                    return Err(InferenceError::member_not_found(
+                        resolved_ty.clone(),
+                        format!(
+                            "{}({}:)",
+                            member_name,
+                            actual_label.unwrap_or("_")
+                        ),
+                        span.clone(),
+                    ));
+                }
+
+                // Apply substitutions to parameter type and equate
+                let param_ty = param.ty.apply_substitutions(substitutions);
+                ctx.register_type(&param_ty);
+                ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
+            ctx.values_mut()
+                .insert(expr_id, ValueResolution::simple(case.metadata().id()));
+            Ok(SolveResult::Solved)
+        }
+    }
+}
+
 /// Follow the substitution chain to get the current resolved type for an ID.
 fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // Follow substitution chain
@@ -867,6 +999,16 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             } => {
                 check_resolved_id(*receiver, ctx, &mut unresolved);
                 check_resolved_id(*result, ctx, &mut unresolved);
+            }
+            Constraint::ImplicitMember {
+                expr_ty,
+                argument_tys,
+                ..
+            } => {
+                check_resolved_id(*expr_ty, ctx, &mut unresolved);
+                for (_, arg_ty) in argument_tys {
+                    check_resolved_id(*arg_ty, ctx, &mut unresolved);
+                }
             }
         }
     }

@@ -89,6 +89,24 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// Implicit member access for enum shorthand: .Case or .Case(args)
+    ///
+    /// Resolved when the expression's expected type becomes known through
+    /// unification with context (e.g., parameter type, return type, binding type).
+    ImplicitMember {
+        /// The expression's type (starts as Infer, unified with expected type)
+        expr_ty: TyId,
+        /// The member/case name
+        member_name: String,
+        /// Argument type IDs if present (for associated values)
+        /// Each entry is (optional label, type_id)
+        argument_tys: Vec<(Option<String>, TyId)>,
+        /// Expression ID for value resolution recording
+        expr_id: ExprId,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -138,6 +156,24 @@ impl Constraint {
             Constraint::Conforms { protocol, .. } => &protocol.span,
             Constraint::Normalizes { span, .. } => span,
             Constraint::MemberAccess { span, .. } => span,
+            Constraint::ImplicitMember { span, .. } => span,
+        }
+    }
+
+    /// Create an implicit member access constraint.
+    pub fn implicit_member(
+        expr_ty: TyId,
+        member_name: String,
+        argument_tys: Vec<(Option<String>, TyId)>,
+        expr_id: ExprId,
+        span: Span,
+    ) -> Self {
+        Constraint::ImplicitMember {
+            expr_ty,
+            member_name,
+            argument_tys,
+            expr_id,
+            span,
         }
     }
 }

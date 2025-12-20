@@ -215,6 +215,22 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Add an implicit member constraint: resolve `.Member` or `.Member(args)` based on expected type.
+    ///
+    /// This is used for enum shorthand syntax where the enum type is inferred from context.
+    pub fn implicit_member(
+        &mut self,
+        expr_ty: TyId,
+        member_name: String,
+        argument_tys: Vec<(Option<String>, TyId)>,
+        expr_id: ExprId,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::implicit_member(
+            expr_ty, member_name, argument_tys, expr_id, span,
+        ));
+    }
+
     /// Register metadata for a closure expression.
     ///
     /// This should be called during constraint generation for closures

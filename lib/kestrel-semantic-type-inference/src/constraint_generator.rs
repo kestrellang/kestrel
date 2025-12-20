@@ -429,13 +429,32 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         ExprKind::EnumCase { .. } => {}
 
         // Implicit member access: will be resolved during type inference
-        ExprKind::ImplicitMemberAccess { arguments, .. } => {
-            // Process argument expressions if present
-            if let Some(args) = arguments {
-                for arg in args {
-                    generate_expression_constraints(ctx, &arg.value);
-                }
-            }
+        ExprKind::ImplicitMemberAccess { member_name, arguments } => {
+            // Register the expression type
+            ctx.register_type(&expr.ty);
+            
+            // Process argument expressions and collect their type IDs
+            let argument_tys: Vec<(Option<String>, _)> = arguments
+                .as_ref()
+                .map(|args| {
+                    args.iter()
+                        .map(|arg| {
+                            generate_expression_constraints(ctx, &arg.value);
+                            ctx.register_type(&arg.value.ty);
+                            (arg.label.clone(), arg.value.ty.id())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            
+            // Generate the ImplicitMember constraint
+            ctx.implicit_member(
+                expr.ty.id(),
+                member_name.clone(),
+                argument_tys,
+                expr.id,
+                expr.span.clone(),
+            );
         }
 
         ExprKind::Error => {}
