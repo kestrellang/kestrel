@@ -473,7 +473,7 @@ mod instantiation {
             }
 
             func test() {
-                let color: Color = .Red
+                let color: Color = .Red;
             }
         "#,
         )
@@ -491,7 +491,7 @@ mod instantiation {
             }
 
             func test() {
-                let shape: Shape = .Circle(radius: 5.0)
+                let shape: Shape = .Circle(radius: 5.0);
             }
         "#,
         )
@@ -550,9 +550,9 @@ mod instantiation {
             }
 
             func test() {
-                var status: Status = .Pending
-                status = .Active
-                status = .Complete
+                var status: Status = .Pending;
+                status = .Active;
+                status = .Complete;
             }
         "#,
         )
@@ -588,7 +588,7 @@ mod instantiation {
             }
 
             func test() {
-                let x = Option[Int].None
+                let x = Option[Int].None;
             }
         "#,
         )
@@ -629,7 +629,7 @@ mod error_unknown_case {
             }
 
             func test() {
-                let color: Color = .Purple
+                let color: Color = .Purple;
             }
         "#,
         )
@@ -754,7 +754,7 @@ mod error_cannot_infer_shorthand {
             }
 
             func test() {
-                let x = .Red
+                let x = .Red;
             }
         "#,
         )
@@ -774,7 +774,7 @@ mod error_cannot_infer_shorthand {
             }
 
             func test() {
-                let x = .Red
+                let x = .Red;
             }
         "#,
         )
@@ -790,7 +790,7 @@ mod error_cannot_infer_shorthand {
             }
 
             func test() {
-                let x = .Circle(radius: 5.0)
+                let x = .Circle(radius: 5.0);
             }
         "#,
         )
@@ -1097,8 +1097,8 @@ mod edge_cases {
             }
 
             func test() {
-                let a: A = .Value
-                let b: B = .Value
+                let a: A = .Value;
+                let b: B = .Value;
             }
         "#,
         )

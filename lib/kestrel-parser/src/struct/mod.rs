@@ -15,6 +15,7 @@ use crate::common::{
     import_declaration_parser_internal, initializer_declaration_parser_internal,
     module_declaration_parser_internal, token, visibility_parser_internal,
 };
+use crate::enum_decl::enum_declaration_parser_internal;
 use crate::event::{EventSink, TreeBuilder};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
@@ -70,7 +71,7 @@ impl StructDeclaration {
             .map(|tok| tok.kind())
     }
 
-    /// Get child declaration items (nested structs, imports, modules, fields, functions, initializers)
+    /// Get child declaration items (nested structs, nested enums, imports, modules, fields, functions, initializers)
     pub fn children(&self) -> Vec<SyntaxNode> {
         self.syntax
             .children()
@@ -81,6 +82,7 @@ impl StructDeclaration {
                         matches!(
                             child.kind(),
                             SyntaxKind::StructDeclaration
+                                | SyntaxKind::EnumDeclaration
                                 | SyntaxKind::ImportDeclaration
                                 | SyntaxKind::ModuleDeclaration
                                 | SyntaxKind::FieldDeclaration
@@ -111,6 +113,9 @@ fn struct_body_item_parser_internal(
     // Nested structs are boxed to avoid infinite size
     let nested_struct_parser = struct_parser.map(|data| TypeDeclarationBodyItem::Struct(Box::new(data)));
 
+    // Nested enums are boxed to avoid infinite size
+    let nested_enum_parser = enum_declaration_parser_internal().map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
+
     let initializer_parser =
         initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
 
@@ -123,6 +128,7 @@ fn struct_body_item_parser_internal(
     module_parser
         .or(import_parser)
         .or(nested_struct_parser)
+        .or(nested_enum_parser)
         .or(initializer_parser)
         .or(type_alias_parser) // Check type alias before function (both can have visibility)
         .or(function_parser)

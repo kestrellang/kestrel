@@ -643,4 +643,59 @@ mod tests {
         assert!(has_struct, "Should have StructDeclaration in syntax tree");
         assert!(has_enum, "Should have EnumDeclaration in syntax tree");
     }
+
+    #[test]
+    fn test_shorthand_in_assignment_expression() {
+        use crate::event::TreeBuilder;
+
+        // Test that .CaseName works in assignment expressions
+        let source = r#"module Test
+            enum Status {
+                case Pending
+                case Active
+                case Complete
+            }
+
+            func test() {
+                var status: Status = .Pending;
+                status = .Active;
+                status = .Complete;
+            }
+        "#;
+
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        fn find_nodes(
+            node: &kestrel_syntax_tree::SyntaxNode,
+            kind: SyntaxKind,
+        ) -> Vec<kestrel_syntax_tree::SyntaxNode> {
+            let mut result = Vec::new();
+            if node.kind() == kind {
+                result.push(node.clone());
+            }
+            for child in node.children() {
+                result.extend(find_nodes(&child, kind));
+            }
+            result
+        }
+
+        let func_decls = find_nodes(&tree, SyntaxKind::FunctionDeclaration);
+        assert_eq!(func_decls.len(), 1, "Should have 1 FunctionDeclaration");
+        
+        for func in &func_decls {
+            let has_body = func.children().any(|c| c.kind() == SyntaxKind::FunctionBody);
+            assert!(has_body, "Function should have a body");
+        }
+        
+        let implicit_accesses = find_nodes(&tree, SyntaxKind::ExprImplicitMemberAccess);
+        assert_eq!(implicit_accesses.len(), 3, "Should have 3 ExprImplicitMemberAccess (.Pending, .Active, .Complete)");
+    }
 }

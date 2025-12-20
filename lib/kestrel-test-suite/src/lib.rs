@@ -765,6 +765,7 @@ impl std::fmt::Debug for Behavior {
 
 /// Helper to get type parameter count for a symbol
 fn get_type_param_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
+    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
     use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -783,6 +784,9 @@ fn get_type_param_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize
     }
     if let Some(a) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
         return a.type_parameters().len();
+    }
+    if let Some(e) = symbol_ref.as_any().downcast_ref::<EnumSymbol>() {
+        return e.type_parameters().len();
     }
     0
 }
