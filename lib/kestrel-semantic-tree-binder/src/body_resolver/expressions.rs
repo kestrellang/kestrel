@@ -17,7 +17,7 @@ use crate::diagnostics::{
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
-use super::calls::resolve_call_expression;
+use super::calls::{resolve_argument_list, resolve_call_expression};
 use super::context::BodyResolutionContext;
 use super::operators::{
     resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression,
@@ -101,6 +101,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprTupleIndex => resolve_tuple_index_expression(expr_node, ctx),
 
         SyntaxKind::ExprClosure => resolve_closure_expression(expr_node, ctx),
+
+        SyntaxKind::ExprImplicitMemberAccess => resolve_implicit_member_access(expr_node, ctx),
 
         _ => Expression::error(span),
     }
@@ -1073,6 +1075,39 @@ fn resolve_closure_body(
     }
 
     (statements, tail_expr)
+}
+
+/// Resolve an implicit member access expression: `.foo` or `.foo(args)`
+///
+/// This handles Swift-style shorthand for enum cases like `.None` instead of `Option.None`.
+/// The actual type resolution happens during type inference when the expected type is known.
+fn resolve_implicit_member_access(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Extract member name from Name child
+    let member_name = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Name)
+        .and_then(|name_node| {
+            name_node
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind() == SyntaxKind::Identifier)
+                .map(|t| t.text().to_string())
+        })
+        .unwrap_or_else(|| "?".to_string());
+
+    // Extract optional arguments from ArgumentList
+    let arguments = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ArgumentList)
+        .map(|arg_list| resolve_argument_list(&arg_list, ctx));
+
+    // Return with Ty::infer() - type inference will resolve the actual type
+    Expression::implicit_member_access(member_name, arguments, span)
 }
 
 /// Collect captured variables from a closure body.

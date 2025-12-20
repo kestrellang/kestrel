@@ -215,7 +215,7 @@ fn extract_type_arguments_from_callee(
 }
 
 /// Resolve an argument list node into CallArguments
-fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
+pub(crate) fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
     let mut arguments = Vec::new();
 
     for child in node.children() {
