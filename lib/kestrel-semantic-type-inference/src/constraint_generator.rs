@@ -109,7 +109,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // References: type is already set during binding
         ExprKind::LocalRef(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) => {}
-        ExprKind::OverloadedRef(_) | ExprKind::TypeParameterRef(_) => {}
+        ExprKind::OverloadedRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef => {}
 
         // Field access: type is the field type
         ExprKind::FieldAccess { object, .. } => {

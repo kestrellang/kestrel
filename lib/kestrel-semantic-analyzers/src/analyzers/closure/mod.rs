@@ -323,6 +323,7 @@ fn find_assignments_to_locals(
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }

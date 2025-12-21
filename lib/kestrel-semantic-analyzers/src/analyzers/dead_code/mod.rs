@@ -321,6 +321,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::Error => Divergence::None,
     }

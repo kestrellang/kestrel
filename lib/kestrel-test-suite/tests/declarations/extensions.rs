@@ -702,3 +702,25 @@ mod constraint_inference {
         .expect(HasError("type mismatch"));
     }
 }
+
+mod future_features {
+    use super::*;
+
+    #[test]
+    #[ignore] // Issue: Extensions on enums not yet supported in binder
+    fn extend_enum() {
+        Test::new(
+            r#"module Test
+            enum Color {
+                case Red
+                case Green
+                case Blue
+            }
+            extend Color {
+                func isRed() -> Bool { return true; }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}

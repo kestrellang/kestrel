@@ -397,6 +397,62 @@ mod recursive_enums {
         .expect(Compiles)
         .expect(Symbol::new("Simple").is(SymbolKind::Enum));
     }
+
+    #[test]
+    #[ignore] // Issue: Indirect recursion through struct is not caught
+    fn recursive_through_struct_requires_indirect() {
+        Test::new(
+            r#"module Test
+            enum Node {
+                case Leaf
+                case Branch(data: Box)
+            }
+            struct Box {
+                var node: Node
+            }
+        "#,
+        )
+        .expect(HasError("recursive enum requires `indirect`"));
+    }
+}
+
+mod future_features {
+    use super::*;
+
+    #[test]
+    #[ignore] // Issue: Enum methods (instance and static) not yet supported in binder
+    fn enum_methods() {
+        Test::new(
+            r#"module Test
+            indirect enum LinkedList[T] {
+                case Node(value: T, next: LinkedList[T])
+                case Empty
+
+                func length() -> Int { return 0; }
+                static func createEmpty() -> LinkedList[T] { return .Empty; }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    #[ignore] // Issue: Enum protocol conformance not yet supported in binder
+    fn enum_protocol_conformance() {
+        Test::new(
+            r#"module Test
+            protocol Named {
+                func name() -> String
+            }
+            enum State: Named {
+                case Active
+                case Inactive
+                func name() -> String { return "State"; }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod instantiation {

@@ -111,6 +111,7 @@ fn validate_assignment_target(
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::ImplicitMemberAccess { .. }
         | ExprKind::Assignment { .. }

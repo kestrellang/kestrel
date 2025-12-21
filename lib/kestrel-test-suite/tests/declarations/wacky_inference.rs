@@ -28,7 +28,6 @@ fn transitive_equality_constraints_in_extension_method() {
 }
 
 #[test]
-#[ignore = "Associated type projection via T.AssocType syntax not yet implemented"]
 fn nested_associated_type_projections() {
     Test::new(
         r#"module Test

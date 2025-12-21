@@ -358,6 +358,11 @@ pub enum ExprKind {
     /// When calling `T()` or `T.create()` where T is a type parameter.
     /// Stores the SymbolId of the TypeParameterSymbol.
     TypeParameterRef(SymbolId),
+    /// Reference to a qualified associated type for static member access.
+    /// e.g., `T.Next` where `Next` is an associated type in T's protocol bounds.
+    /// The actual type (`Ty::qualified_associated_type`) is stored in the expression's `ty` field.
+    /// This is used for chained associated type access like `T.Next.Next.staticMethod()`.
+    AssociatedTypeRef,
 
     // Member access
     /// Field access: `obj.field`
@@ -695,6 +700,7 @@ impl Expression {
             ExprKind::OverloadedRef(_) => "overloaded".to_string(),
             ExprKind::TypeRef(id) => format!("type_{:?}", id),
             ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
+            ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
             ExprKind::FieldAccess { object, field } => {
                 format!("{}.{}", object.debug_compact(), field)
             }
@@ -1002,6 +1008,20 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::TypeParameterRef(symbol_id),
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an associated type reference expression.
+    /// Used when accessing an associated type on a type parameter for static member access.
+    /// E.g., `T.Next` where T: Level1 and Level1 has `type Next: Level2`.
+    /// The `ty` parameter should be a `Ty::qualified_associated_type(...)`.
+    pub fn associated_type_ref(ty: Ty, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::AssociatedTypeRef,
             ty,
             span,
             mutable: false,

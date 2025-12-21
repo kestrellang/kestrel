@@ -283,6 +283,7 @@ fn walk_expression(
             | ExprKind::SymbolRef(_)
             | ExprKind::TypeRef(_)
             | ExprKind::TypeParameterRef(_)
+            | ExprKind::AssociatedTypeRef
             | ExprKind::EnumCase { .. }
             | ExprKind::Break { .. }
             | ExprKind::Continue { .. }
