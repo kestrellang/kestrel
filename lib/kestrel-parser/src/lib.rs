@@ -68,6 +68,7 @@ pub mod extension;
 pub mod field;
 pub mod function;
 pub mod import;
+pub mod input;
 pub mod module;
 pub mod parser;
 pub mod protocol;

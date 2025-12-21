@@ -4,6 +4,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 /// Represents a type expression
 ///
@@ -116,63 +117,73 @@ impl TyExpression {
     }
 }
 
-/// Internal parser for unit type: ()
-/// Note: This is now handled by ty_parser directly, but kept for reference
-#[allow(dead_code)]
-fn unit_type_parser() -> impl Parser<Token, (Span, Span), Error = Simple<Token>> + Clone {
-    just(Token::LParen)
-        .map_with_span(|_, span| Span::from(span))
-        .then(just(Token::RParen).map_with_span(|_, span| Span::from(span)))
+/// Check if a token is trivia (whitespace or comment)
+fn is_trivia(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Whitespace | Token::LineComment | Token::BlockComment
+    )
+}
+
+/// Parser that skips trivia tokens
+fn skip_trivia<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| is_trivia(token))
+        .repeated()
+        .ignored()
 }
 
 /// Internal parser for never type: !
 /// Skips leading whitespace
-fn never_type_parser() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-
-    skip_trivia().ignore_then(just(Token::Bang).map_with_span(|_, span| Span::from(span)))
+fn never_type_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+    skip_trivia().ignore_then(just(Token::Bang).map_with(|_, e| to_kestrel_span(e.span())))
 }
 
 /// Internal parser for path segments: Ident or Ident.Ident.Ident
 /// Skips leading whitespace before the first identifier
-fn path_segments_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-
+fn path_segments_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        filter_map(|span, token| match token {
-            Token::Identifier => Ok(Span::from(span)),
-            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-        })
+        select! {
+            Token::Identifier = e => to_kestrel_span(e.span()),
+        }
         .separated_by(just(Token::Dot))
-        .at_least(1),
+        .at_least(1)
+        .collect(),
     )
 }
 
 /// Combined type parser that returns a variant
 /// Supports: !, (), (T1, T2), (T1) -> T2, Path, Path[Args]
-pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>> + Clone {
+pub(crate) fn ty_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, TyVariant, ParserExtra<'tokens>> + Clone {
     recursive(|ty| {
-        use crate::common::skip_trivia;
-
         // Never type: !
         let never = never_type_parser().map(TyVariant::Never);
 
         // Inferred type: _
         let inferred = skip_trivia()
-            .ignore_then(just(Token::Underscore).map_with_span(|_, span| Span::from(span)))
+            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
             .map(TyVariant::Inferred);
 
         // Unit type or tuple/function type
         let paren_types = {
             skip_trivia()
-                .ignore_then(just(Token::LParen).map_with_span(|_, span| Span::from(span)))
-                .then(ty.clone().separated_by(just(Token::Comma)).allow_trailing())
-                .then(just(Token::RParen).map_with_span(|_, span| Span::from(span)))
+                .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(
+                    ty.clone()
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(
                     // Optional arrow and return type for function types
                     skip_trivia()
                         .ignore_then(just(Token::Arrow))
-                        .map_with_span(|_, span| Span::from(span))
+                        .map_with(|_, e| to_kestrel_span(e.span()))
                         .then(ty.clone())
                         .or_not(),
                 )
@@ -193,7 +204,12 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
                 // Optional type arguments: [T1, T2]
                 skip_trivia()
                     .ignore_then(just(Token::LBracket))
-                    .ignore_then(ty.clone().separated_by(just(Token::Comma)).allow_trailing())
+                    .ignore_then(
+                        ty.clone()
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing()
+                            .collect::<Vec<_>>(),
+                    )
                     .then_ignore(skip_trivia())
                     .then_ignore(just(Token::RBracket))
                     .or_not(),
@@ -202,12 +218,9 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
 
         // Array type: [T]
         let array = skip_trivia()
-            .ignore_then(just(Token::LBracket).map_with_span(|_, span| Span::from(span)))
+            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(ty.clone())
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::RBracket).map_with_span(|_, span| Span::from(span))),
-            )
+            .then(skip_trivia().ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))))
             .map(|((lbracket, element_ty), rbracket)| {
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
             });
@@ -219,7 +232,7 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
         base_ty
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Question).map_with_span(|_, span| Span::from(span)))
+                    .ignore_then(just(Token::Question).map_with(|_, e| to_kestrel_span(e.span())))
                     .or_not(),
             )
             .map(|(base, opt_span)| {
@@ -238,18 +251,19 @@ pub fn parse_ty<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    use crate::input::{create_input, prepare_tokens};
 
-    match ty_parser().parse(stream) {
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
+
+    match ty_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_ty_variant(sink, &variant);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

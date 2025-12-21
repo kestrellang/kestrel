@@ -2,6 +2,14 @@
 //!
 //! This module provides reusable Chumsky parser combinators that are used
 //! by multiple parser modules to avoid code duplication.
+//!
+//! # Chumsky 0.12 Migration Notes
+//!
+//! All parsers use the new chumsky 0.12 API with:
+//! - Lifetime parameters for zero-copy parsing
+//! - `select!` macro instead of `filter_map`
+//! - `map_with` instead of `map_with_span`
+//! - `Rich` errors instead of `Simple`
 
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
@@ -12,6 +20,7 @@ use super::data::{
     ReceiverModifier,
 };
 use crate::block::{CodeBlockData, code_block_parser};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 
@@ -24,31 +33,37 @@ pub fn is_trivia(token: &Token) -> bool {
 }
 
 /// Parser that skips trivia tokens
-pub fn skip_trivia() -> impl Parser<Token, (), Error = Simple<Token>> + Clone {
-    filter(|token: &Token| is_trivia(token))
+pub fn skip_trivia<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| is_trivia(token))
         .repeated()
         .ignored()
 }
 
 /// Wrap a parser to skip leading trivia
-pub fn trivia<P, O>(parser: P) -> impl Parser<Token, O, Error = Simple<Token>> + Clone
+pub fn trivia<'tokens, 'src: 'tokens, P, O>(
+    parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, O, ParserExtra<'tokens>> + Clone
 where
-    P: Parser<Token, O, Error = Simple<Token>> + Clone,
+    P: Parser<'tokens, ParserInput<'tokens>, O, ParserExtra<'tokens>> + Clone,
 {
     skip_trivia().ignore_then(parser)
 }
 
 /// Match a specific token, skipping leading trivia
-pub fn token(t: Token) -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
-    trivia(just(t).map_with_span(|_, span| Span::from(span)))
+pub fn token<'tokens>(
+    t: Token,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+    trivia(just(t).map_with(|_, e| to_kestrel_span(e.span())))
 }
 
 /// Parse an identifier, skipping leading trivia
-pub fn identifier() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
-    trivia(filter_map(|span, token| match token {
-        Token::Identifier => Ok(Span::from(span)),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    }))
+pub fn identifier<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+    trivia(select! {
+        Token::Identifier = e => to_kestrel_span(e.span()),
+    })
 }
 
 /// Internal Chumsky parser for module path segments
@@ -59,9 +74,13 @@ pub fn identifier() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
 /// # Examples
 /// - `A` → `[span(A)]`
 /// - `A.B.C` → `[span(A), span(B), span(C)]`
-pub fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone
+pub fn module_path_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone
 {
-    identifier().separated_by(token(Token::Dot)).at_least(1)
+    identifier()
+        .separated_by(token(Token::Dot))
+        .at_least(1)
+        .collect()
 }
 
 /// Internal Chumsky parser for optional visibility modifier
@@ -72,14 +91,15 @@ pub fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Si
 /// # Examples
 /// - `public class Foo` → `Some((Token::Public, span))`
 /// - `class Foo` → `None`
-pub fn visibility_parser_internal()
--> impl Parser<Token, Option<(Token, Span)>, Error = Simple<Token>> + Clone {
-    trivia(filter_map(|span, token| match token {
-        Token::Public | Token::Private | Token::Internal | Token::Fileprivate => {
-            Ok((token, Span::from(span)))
-        }
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    }))
+pub fn visibility_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Option<(Token, Span)>, ParserExtra<'tokens>>
+       + Clone {
+    trivia(select! {
+        Token::Public = e => (Token::Public, to_kestrel_span(e.span())),
+        Token::Private = e => (Token::Private, to_kestrel_span(e.span())),
+        Token::Internal = e => (Token::Internal, to_kestrel_span(e.span())),
+        Token::Fileprivate = e => (Token::Fileprivate, to_kestrel_span(e.span())),
+    })
     .or_not()
 }
 
@@ -91,8 +111,9 @@ pub fn visibility_parser_internal()
 /// # Examples
 /// - `module A` → `(span(module), [span(A)])`
 /// - `module A.B.C` → `(span(module), [span(A), span(B), span(C)])`
-pub fn module_declaration_parser_internal()
--> impl Parser<Token, (Span, Vec<Span>), Error = Simple<Token>> + Clone {
+pub fn module_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<Span>), ParserExtra<'tokens>>
+       + Clone {
     token(Token::Module).then(module_path_parser_internal())
 }
 
@@ -105,8 +126,9 @@ pub fn module_declaration_parser_internal()
 /// # Examples
 /// - `Foo` → `(span(Foo), None)`
 /// - `Foo as Bar` → `(span(Foo), Some(span(Bar)))`
-pub fn import_item_parser_internal()
--> impl Parser<Token, (Span, Option<Span>), Error = Simple<Token>> + Clone {
+pub fn import_item_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Option<Span>), ParserExtra<'tokens>>
+       + Clone {
     identifier().then(token(Token::As).ignore_then(identifier()).or_not())
 }
 
@@ -118,13 +140,19 @@ pub fn import_item_parser_internal()
 /// # Examples
 /// - `(D, E)` → `[(span(D), None), (span(E), None)]`
 /// - `(D as E, F)` → `[(span(D), Some(span(E))), (span(F), None)]`
-pub fn import_items_parser_internal()
--> impl Parser<Token, Vec<(Span, Option<Span>)>, Error = Simple<Token>> + Clone {
+pub fn import_items_parser_internal<'tokens>(
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    Vec<(Span, Option<Span>)>,
+    ParserExtra<'tokens>,
+> + Clone {
     token(Token::LParen)
         .ignore_then(
             import_item_parser_internal()
                 .separated_by(token(Token::Comma))
-                .at_least(1),
+                .at_least(1)
+                .collect(),
         )
         .then_ignore(token(Token::RParen))
 }
@@ -143,15 +171,16 @@ pub fn import_items_parser_internal()
 /// - `import A.B.C` → `(span(import), [span(A), span(B), span(C)], None, None)`
 /// - `import A.B.C as D` → `(span(import), [span(A), span(B), span(C)], Some(span(D)), None)`
 /// - `import A.B.C.(D, E)` → `(span(import), [span(A), span(B), span(C)], None, Some([...]))`
-pub fn import_declaration_parser_internal() -> impl Parser<
-    Token,
+pub fn import_declaration_parser_internal<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
     (
         Span,
         Vec<Span>,
         Option<Span>,
         Option<Vec<(Span, Option<Span>)>>,
     ),
-    Error = Simple<Token>,
+    ParserExtra<'tokens>,
 > + Clone {
     token(Token::Import)
         .then(module_path_parser_internal())
@@ -185,10 +214,12 @@ pub fn import_declaration_parser_internal() -> impl Parser<
 /// # Examples
 /// - `static func foo()` → `Some(span(static))`
 /// - `func foo()` → `None`
-pub fn static_parser() -> impl Parser<Token, Option<Span>, Error = Simple<Token>> + Clone {
+pub fn static_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone
+{
     skip_trivia()
-        .ignore_then(just(Token::Static).map_with_span(|_, span| Some(Span::from(span))))
-        .or(empty().map(|_| None))
+        .ignore_then(just(Token::Static).map_with(|_, e| Some(to_kestrel_span(e.span()))))
+        .or(empty().to(None))
 }
 
 /// Parser for optional receiver modifier (mutating/consuming)
@@ -199,17 +230,22 @@ pub fn static_parser() -> impl Parser<Token, Option<Span>, Error = Simple<Token>
 /// - `mutating func foo()` → `Some((ReceiverModifier::Mutating, span))`
 /// - `consuming func foo()` → `Some((ReceiverModifier::Consuming, span))`
 /// - `func foo()` → `None`
-pub fn receiver_modifier_parser()
--> impl Parser<Token, Option<(ReceiverModifier, Span)>, Error = Simple<Token>> + Clone {
+pub fn receiver_modifier_parser<'tokens>(
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    Option<(ReceiverModifier, Span)>,
+    ParserExtra<'tokens>,
+> + Clone {
     skip_trivia()
         .ignore_then(
             just(Token::Mutating)
-                .map_with_span(|_, span| Some((ReceiverModifier::Mutating, Span::from(span))))
-                .or(just(Token::Consuming).map_with_span(|_, span| {
-                    Some((ReceiverModifier::Consuming, Span::from(span)))
+                .map_with(|_, e| Some((ReceiverModifier::Mutating, to_kestrel_span(e.span()))))
+                .or(just(Token::Consuming).map_with(|_, e| {
+                    Some((ReceiverModifier::Consuming, to_kestrel_span(e.span())))
                 })),
         )
-        .or(empty().map(|_| None))
+        .or(empty().to(None))
 }
 
 /// Parser for let/var mutability keyword
@@ -219,11 +255,13 @@ pub fn receiver_modifier_parser()
 /// # Returns
 /// - `(span, false)` for `let`
 /// - `(span, true)` for `var`
-pub fn let_var_parser() -> impl Parser<Token, (Span, bool), Error = Simple<Token>> + Clone {
+pub fn let_var_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, bool), ParserExtra<'tokens>> + Clone
+{
     skip_trivia().ignore_then(
         just(Token::Let)
-            .map_with_span(|_, span| (Span::from(span), false))
-            .or(just(Token::Var).map_with_span(|_, span| (Span::from(span), true))),
+            .map_with(|_, e| (to_kestrel_span(e.span()), false))
+            .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
     )
 }
 
@@ -236,59 +274,51 @@ pub fn let_var_parser() -> impl Parser<Token, (Span, bool), Error = Simple<Token
 /// # Examples
 /// - `x: Int` → label=None, bind_name=x
 /// - `with x: Int` → label="with", bind_name=x
-pub(crate) fn parameter_parser() -> impl Parser<Token, ParameterData, Error = Simple<Token>> + Clone
+pub(crate) fn parameter_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone
 {
-    // Try to parse: identifier identifier : type (labeled parameter)
-    // Or: identifier : type (unlabeled parameter)
-    skip_trivia()
-        .ignore_then(filter_map(|span, token| match token {
-            Token::Identifier => Ok(Span::from(span)),
-            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-        }))
-        .then(
-            // Optional second identifier (if present, first was label)
-            skip_trivia()
-                .ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(Span::from(span)),
-                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                }))
-                .or_not(),
-        )
-        .then(
-            skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span))),
-        )
+    // Parse identifier (with trivia skipping)
+    let ident = trivia(select! {
+        Token::Identifier = e => to_kestrel_span(e.span()),
+    });
+
+    // Labeled parameter: label name: Type
+    let labeled = ident
+        .clone()
+        .then(ident.clone())
+        .then(trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(ty_parser())
-        .map(|(((first_ident, second_ident_opt), colon), ty)| {
-            match second_ident_opt {
-                Some(second_ident) => {
-                    // Two identifiers: first is label, second is bind_name
-                    ParameterData {
-                        label: Some(first_ident),
-                        bind_name: second_ident,
-                        colon,
-                        ty,
-                    }
-                }
-                None => {
-                    // One identifier: it's the bind_name, no label
-                    ParameterData {
-                        label: None,
-                        bind_name: first_ident,
-                        colon,
-                        ty,
-                    }
-                }
-            }
-        })
+        .map(|(((label, bind_name), colon), ty)| ParameterData {
+            label: Some(label),
+            bind_name,
+            colon,
+            ty,
+        });
+
+    // Unlabeled parameter: name: Type
+    let unlabeled = ident
+        .then(trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(ty_parser())
+        .map(|((bind_name, colon), ty)| ParameterData {
+            label: None,
+            bind_name,
+            colon,
+            ty,
+        });
+
+    // Try labeled first (more specific), then unlabeled
+    labeled.or(unlabeled)
 }
 
 /// Parser for parameter list (zero or more parameters separated by commas)
-pub(crate) fn parameter_list_parser()
--> impl Parser<Token, Vec<ParameterData>, Error = Simple<Token>> + Clone {
+pub(crate) fn parameter_list_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ParameterData>, ParserExtra<'tokens>>
+       + Clone {
     skip_trivia().ignore_then(
         parameter_parser()
-            .separated_by(just(Token::Comma).map_with_span(|_, span| Span::from(span)))
-            .allow_trailing(),
+            .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
+            .allow_trailing()
+            .collect(),
     )
 }
 
@@ -297,10 +327,15 @@ pub(crate) fn parameter_list_parser()
 /// # Returns
 /// - `Some((arrow_span, type))` if return type is present
 /// - `None` if no return type
-pub(crate) fn return_type_parser()
--> impl Parser<Token, Option<(Span, TyVariant)>, Error = Simple<Token>> + Clone {
+pub(crate) fn return_type_parser<'tokens>(
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    Option<(Span, TyVariant)>,
+    ParserExtra<'tokens>,
+> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Arrow).map_with_span(|_, span| Span::from(span)))
+        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
         .then(ty_parser())
         .map(|(arrow, ty)| (arrow, ty))
         .or_not()
@@ -311,9 +346,10 @@ pub(crate) fn return_type_parser()
 /// # Returns
 /// - `Some(CodeBlockData)` if body is present
 /// - `None` if no body (e.g., protocol method declarations)
-pub fn function_body_parser()
--> impl Parser<Token, Option<CodeBlockData>, Error = Simple<Token>> + Clone {
-    code_block_parser().map(Some).or(empty().map(|_| None))
+pub fn function_body_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Option<CodeBlockData>, ParserExtra<'tokens>>
+       + Clone {
+    code_block_parser().map(Some).or(empty().to(None))
 }
 
 // =============================================================================
@@ -325,8 +361,9 @@ pub fn function_body_parser()
 /// Syntax: `(visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
 ///
 /// This is the single source of truth for function declaration parsing.
-pub fn function_declaration_parser_internal()
--> impl Parser<Token, FunctionDeclarationData, Error = Simple<Token>> + Clone {
+pub fn function_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, FunctionDeclarationData, ParserExtra<'tokens>>
+       + Clone {
     visibility_parser_internal()
         .then(static_parser())
         .then(receiver_modifier_parser())
@@ -389,8 +426,9 @@ pub fn function_declaration_parser_internal()
 ///
 /// This is the single source of truth for field declaration parsing.
 /// An optional trailing semicolon is allowed for inline field declarations.
-pub fn field_declaration_parser_internal()
--> impl Parser<Token, FieldDeclarationData, Error = Simple<Token>> + Clone {
+pub fn field_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, FieldDeclarationData, ParserExtra<'tokens>>
+       + Clone {
     visibility_parser_internal()
         .then(static_parser())
         .then(let_var_parser())
@@ -429,8 +467,13 @@ pub fn field_declaration_parser_internal()
 /// Body is optional for protocol initializer declarations.
 ///
 /// This is the single source of truth for initializer declaration parsing.
-pub fn initializer_declaration_parser_internal()
--> impl Parser<Token, InitializerDeclarationData, Error = Simple<Token>> + Clone {
+pub fn initializer_declaration_parser_internal<'tokens>(
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    InitializerDeclarationData,
+    ParserExtra<'tokens>,
+> + Clone {
     visibility_parser_internal()
         .then(token(Token::Init))
         .then(token(Token::LParen))

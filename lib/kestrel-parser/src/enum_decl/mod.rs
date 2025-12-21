@@ -11,12 +11,13 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::ConformanceListData;
 use crate::common::{
-    EnumCaseDeclarationData, EnumCaseParameterData, EnumDeclarationData, TypeDeclarationBodyItem,
     emit_enum_declaration, field_declaration_parser_internal, function_declaration_parser_internal,
     identifier, import_declaration_parser_internal, initializer_declaration_parser_internal,
-    module_declaration_parser_internal, token, visibility_parser_internal,
+    module_declaration_parser_internal, token, visibility_parser_internal, EnumCaseDeclarationData,
+    EnumCaseParameterData, EnumDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
 use crate::ty::ty_parser;
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
@@ -114,8 +115,23 @@ impl EnumDeclaration {
     }
 }
 
+/// Parser that skips trivia tokens
+fn skip_trivia<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| {
+            matches!(
+                token,
+                Token::Whitespace | Token::LineComment | Token::BlockComment
+            )
+        })
+        .repeated()
+        .ignored()
+}
+
 /// Parser for enum case parameter: `label: Type`
-fn enum_case_parameter_parser() -> impl Parser<Token, EnumCaseParameterData, Error = Simple<Token>> + Clone
+fn enum_case_parameter_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone
 {
     identifier()
         .then(token(Token::Colon))
@@ -124,7 +140,8 @@ fn enum_case_parameter_parser() -> impl Parser<Token, EnumCaseParameterData, Err
 }
 
 /// Parser for enum case declaration: `case Name` or `case Name(label: Type, ...)`
-fn enum_case_parser() -> impl Parser<Token, EnumCaseDeclarationData, Error = Simple<Token>> + Clone
+fn enum_case_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseDeclarationData, ParserExtra<'tokens>> + Clone
 {
     token(Token::Case)
         .then(identifier())
@@ -134,17 +151,20 @@ fn enum_case_parser() -> impl Parser<Token, EnumCaseDeclarationData, Error = Sim
                 .then(
                     enum_case_parameter_parser()
                         .separated_by(just(Token::Comma))
-                        .allow_trailing(),
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
                 )
                 .then(token(Token::RParen))
                 .map(|((lparen, params), rparen)| Some((lparen, params, rparen)))
                 .or(empty().map(|_| None)),
         )
-        .map(|((case_span, name_span), parameters)| EnumCaseDeclarationData {
-            case_span,
-            name_span,
-            parameters,
-        })
+        .map(
+            |((case_span, name_span), parameters)| EnumCaseDeclarationData {
+                case_span,
+                name_span,
+                parameters,
+            },
+        )
 }
 
 /// Internal parser for enum body items
@@ -152,9 +172,11 @@ fn enum_case_parser() -> impl Parser<Token, EnumCaseDeclarationData, Error = Sim
 /// Enum bodies can contain: cases, functions, initializers, nested structs/enums,
 /// type aliases, modules, and imports.
 /// Note: Fields are technically parsed but should be rejected at semantic analysis.
-fn enum_body_item_parser_internal(
-    enum_parser: impl Parser<Token, EnumDeclarationData, Error = Simple<Token>> + Clone,
-) -> impl Parser<Token, TypeDeclarationBodyItem, Error = Simple<Token>> + Clone {
+fn enum_body_item_parser_internal<'tokens>(
+    enum_parser: impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>>
+        + Clone,
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
+{
     let module_parser = module_declaration_parser_internal()
         .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
 
@@ -164,8 +186,7 @@ fn enum_body_item_parser_internal(
         });
 
     // Nested enums are boxed to avoid infinite size
-    let nested_enum_parser =
-        enum_parser.map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
+    let nested_enum_parser = enum_parser.map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
 
     // Enum cases
     let case_parser = enum_case_parser().map(TypeDeclarationBodyItem::EnumCase);
@@ -194,19 +215,18 @@ fn enum_body_item_parser_internal(
 }
 
 /// Parser for the optional `indirect` modifier
-fn indirect_modifier_parser() -> impl Parser<Token, Option<Span>, Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-    
+fn indirect_modifier_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Indirect).map_with_span(|_, span| Some(Span::from(span))))
-        .or(empty().map(|_| None))
+        .ignore_then(just(Token::Indirect).map_with(|_, e| Some(to_kestrel_span(e.span()))))
+        .or(empty().to(None))
 }
 
 /// Internal Chumsky parser for enum declaration
 ///
 /// This is the single source of truth for enum declaration parsing.
-pub fn enum_declaration_parser_internal(
-) -> impl Parser<Token, EnumDeclarationData, Error = Simple<Token>> + Clone {
+pub fn enum_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
     recursive(|enum_parser| {
         visibility_parser_internal()
             .then(indirect_modifier_parser())
@@ -216,7 +236,11 @@ pub fn enum_declaration_parser_internal(
             .then(conformance_list_parser().or_not())
             .then(where_clause_parser().or_not())
             .then(token(Token::LBrace))
-            .then(enum_body_item_parser_internal(enum_parser).repeated())
+            .then(
+                enum_body_item_parser_internal(enum_parser)
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
             .then(token(Token::RBrace))
             .map(
                 |(
@@ -224,10 +248,7 @@ pub fn enum_declaration_parser_internal(
                         (
                             (
                                 (
-                                    (
-                                        (((visibility, indirect), enum_span), name_span),
-                                        type_params,
-                                    ),
+                                    ((((visibility, indirect), enum_span), name_span), type_params),
                                     conformances,
                                 ),
                                 where_clause,
@@ -265,18 +286,20 @@ pub fn parse_enum_declaration<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match enum_declaration_parser_internal().parse(stream) {
+    match enum_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_enum_declaration(sink, data);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

@@ -13,11 +13,12 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::ConformanceListData;
 use crate::common::{
-    ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
-    function_declaration_parser_internal, identifier, initializer_declaration_parser_internal,
-    token, visibility_parser_internal,
+    emit_protocol_declaration, function_declaration_parser_internal, identifier,
+    initializer_declaration_parser_internal, token, visibility_parser_internal, ProtocolBodyItem,
+    ProtocolDeclarationData,
 };
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
@@ -92,8 +93,8 @@ impl ProtocolDeclaration {
 }
 
 /// Parser for protocol body items (functions, associated types, or initializers)
-fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = Simple<Token>> + Clone
-{
+fn protocol_body_item_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolBodyItem, ParserExtra<'tokens>> + Clone {
     let function = function_declaration_parser_internal().map(ProtocolBodyItem::Function);
 
     let associated_type =
@@ -113,8 +114,9 @@ fn protocol_body_item_parser() -> impl Parser<Token, ProtocolBodyItem, Error = S
 /// Internal Chumsky parser for protocol declaration
 ///
 /// This is the single source of truth for protocol declaration parsing.
-pub fn protocol_declaration_parser_internal()
--> impl Parser<Token, ProtocolDeclarationData, Error = Simple<Token>> + Clone {
+pub fn protocol_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolDeclarationData, ParserExtra<'tokens>> + Clone
+{
     visibility_parser_internal()
         .then(token(Token::Protocol))
         .then(identifier())
@@ -122,7 +124,7 @@ pub fn protocol_declaration_parser_internal()
         .then(conformance_list_parser().or_not())
         .then(where_clause_parser().or_not())
         .then(token(Token::LBrace))
-        .then(protocol_body_item_parser().repeated())
+        .then(protocol_body_item_parser().repeated().collect::<Vec<_>>())
         .then(token(Token::RBrace))
         .map(
             |(
@@ -163,18 +165,20 @@ pub fn parse_protocol_declaration<I>(source: &str, tokens: I, sink: &mut EventSi
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match protocol_declaration_parser_internal().parse(stream) {
+    match protocol_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_protocol_declaration(sink, data);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

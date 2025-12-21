@@ -9,6 +9,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_function_declaration, function_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span};
 
 /// Represents a function declaration: (visibility)? (static)? fn name[T]?(params) (-> return_type)? (where ...)? { }
 ///
@@ -113,18 +114,17 @@ where
 {
     use chumsky::Parser;
 
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match function_declaration_parser_internal().parse(stream) {
+    match function_declaration_parser_internal().parse(input).into_result() {
         Ok(data) => {
             emit_function_declaration(sink, data);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

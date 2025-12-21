@@ -85,52 +85,32 @@ impl ParseError {
         }
     }
 
-    /// Create a parse error from a Chumsky error
-    pub fn from_chumsky_error<T: fmt::Debug + std::hash::Hash + Eq>(
-        error: chumsky::error::Simple<T>,
+    /// Create a parse error from a chumsky 0.12 Rich error
+    pub fn from_rich_error<'a, T: fmt::Debug + fmt::Display>(
+        error: &chumsky::error::Rich<'a, T>,
     ) -> Self {
-        let span = Some(Span::from(error.span()));
+        use crate::input::to_kestrel_span;
+        
+        let span = Some(to_kestrel_span(*error.span()));
 
-        // Determine error kind
+        // Determine error kind based on what was found
         let kind = if error.found().is_none() {
             ParseErrorKind::UnexpectedEof
         } else {
             ParseErrorKind::UnexpectedToken
         };
 
-        // Format expected tokens
-        let expected: Vec<String> = error
-            .expected()
-            .filter_map(|opt| opt.as_ref().map(|t| format!("{:?}", t)))
-            .collect();
-
         // Format found token
         let found = error.found().map(|t| format!("{:?}", t));
 
-        // Build user-friendly message
-        let message = if expected.is_empty() {
-            match &found {
-                Some(f) => format!("unexpected {}", f),
-                None => "unexpected end of input".to_string(),
-            }
-        } else if expected.len() == 1 {
-            match &found {
-                Some(f) => format!("expected {}, found {}", expected[0], f),
-                None => format!("expected {}", expected[0]),
-            }
-        } else {
-            let expected_str = expected.join(", ");
-            match &found {
-                Some(f) => format!("expected one of [{}], found {}", expected_str, f),
-                None => format!("expected one of [{}]", expected_str),
-            }
-        };
+        // Build user-friendly message from the Rich error
+        let message = format!("{}", error.reason());
 
         Self {
             kind,
             message,
             span,
-            expected,
+            expected: Vec::new(), // Rich errors don't expose expected tokens the same way
             found,
         }
     }

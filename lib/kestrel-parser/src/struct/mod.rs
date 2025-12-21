@@ -10,13 +10,14 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::ConformanceListData;
 use crate::common::{
-    TypeDeclarationBodyItem, StructDeclarationData, emit_struct_declaration,
-    field_declaration_parser_internal, function_declaration_parser_internal, identifier,
-    import_declaration_parser_internal, initializer_declaration_parser_internal,
-    module_declaration_parser_internal, token, visibility_parser_internal,
+    emit_struct_declaration, field_declaration_parser_internal,
+    function_declaration_parser_internal, identifier, import_declaration_parser_internal,
+    initializer_declaration_parser_internal, module_declaration_parser_internal, token,
+    visibility_parser_internal, StructDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::enum_decl::enum_declaration_parser_internal;
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
@@ -99,9 +100,11 @@ impl StructDeclaration {
 /// Internal parser for struct body items
 ///
 /// Struct bodies can contain: fields, functions, initializers, nested structs, type aliases, modules, and imports.
-fn struct_body_item_parser_internal(
-    struct_parser: impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone,
-) -> impl Parser<Token, TypeDeclarationBodyItem, Error = Simple<Token>> + Clone {
+fn struct_body_item_parser_internal<'tokens>(
+    struct_parser: impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>>
+        + Clone,
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
+{
     let module_parser = module_declaration_parser_internal()
         .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
 
@@ -111,17 +114,21 @@ fn struct_body_item_parser_internal(
         });
 
     // Nested structs are boxed to avoid infinite size
-    let nested_struct_parser = struct_parser.map(|data| TypeDeclarationBodyItem::Struct(Box::new(data)));
+    let nested_struct_parser =
+        struct_parser.map(|data| TypeDeclarationBodyItem::Struct(Box::new(data)));
 
     // Nested enums are boxed to avoid infinite size
-    let nested_enum_parser = enum_declaration_parser_internal().map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
+    let nested_enum_parser = enum_declaration_parser_internal()
+        .map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
 
     let initializer_parser =
         initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
 
-    let function_parser = function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
+    let function_parser =
+        function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
 
-    let type_alias_parser = type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
 
     let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
 
@@ -138,8 +145,9 @@ fn struct_body_item_parser_internal(
 /// Internal Chumsky parser for struct declaration
 ///
 /// This is the single source of truth for struct declaration parsing.
-pub fn struct_declaration_parser_internal()
--> impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone {
+pub fn struct_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
+{
     recursive(|struct_parser| {
         visibility_parser_internal()
             .then(token(Token::Struct))
@@ -148,7 +156,11 @@ pub fn struct_declaration_parser_internal()
             .then(conformance_list_parser().or_not())
             .then(where_clause_parser().or_not())
             .then(token(Token::LBrace))
-            .then(struct_body_item_parser_internal(struct_parser).repeated())
+            .then(
+                struct_body_item_parser_internal(struct_parser)
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
             .then(token(Token::RBrace))
             .map(
                 |(
@@ -193,18 +205,20 @@ pub fn parse_struct_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match struct_declaration_parser_internal().parse(stream) {
+    match struct_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_struct_declaration(sink, data);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

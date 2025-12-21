@@ -10,9 +10,9 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
 /// Represents a statement
@@ -76,27 +76,39 @@ pub enum StmtVariant {
     Expression(ExprVariant, Span), // (expression, semicolon_span)
 }
 
+/// Parser that skips trivia tokens
+fn skip_trivia<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| {
+            matches!(
+                token,
+                Token::Whitespace | Token::LineComment | Token::BlockComment
+            )
+        })
+        .repeated()
+        .ignored()
+}
+
 /// Parser for variable declaration
 ///
 /// Syntax: let/var name (: Type)? (= expr)? ;
-fn variable_declaration_parser()
--> impl Parser<Token, VariableDeclarationData, Error = Simple<Token>> + Clone {
+fn variable_declaration_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, VariableDeclarationData, ParserExtra<'tokens>> + Clone
+{
     skip_trivia()
         .ignore_then(
             just(Token::Let)
-                .map_with_span(|_, span| (Span::from(span), false))
-                .or(just(Token::Var).map_with_span(|_, span| (Span::from(span), true))),
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
-        .then(
-            skip_trivia().ignore_then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(Span::from(span)),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            })),
-        )
+        .then(skip_trivia().ignore_then(select! {
+            Token::Identifier = e => to_kestrel_span(e.span()),
+        }))
         .then(
             // Optional type annotation: : Type
             skip_trivia()
-                .ignore_then(just(Token::Colon).map_with_span(|_, span| Span::from(span)))
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(ty_parser())
                 .map(|(colon, ty)| (colon, ty))
                 .or_not(),
@@ -104,14 +116,14 @@ fn variable_declaration_parser()
         .then(
             // Optional initializer: = expr
             skip_trivia()
-                .ignore_then(just(Token::Equals).map_with_span(|_, span| Span::from(span)))
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(expr_parser())
                 .map(|(eq, expr)| (eq, expr))
                 .or_not(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(
@@ -133,10 +145,11 @@ fn variable_declaration_parser()
 /// Parser for expression statement
 ///
 /// Syntax: expr ;
-fn expression_statement_parser()
--> impl Parser<Token, (ExprVariant, Span), Error = Simple<Token>> + Clone {
+fn expression_statement_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (ExprVariant, Span), ParserExtra<'tokens>> + Clone {
     expr_parser().then(
-        skip_trivia().ignore_then(just(Token::Semicolon).map_with_span(|_, span| Span::from(span))),
+        skip_trivia()
+            .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
     )
 }
 
@@ -145,7 +158,8 @@ fn expression_statement_parser()
 /// Currently supports:
 /// - Variable declarations: let/var name: Type = expr;
 /// - Expression statements: expr;
-pub fn stmt_parser() -> impl Parser<Token, StmtVariant, Error = Simple<Token>> + Clone {
+pub fn stmt_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone {
     // Variable declaration starts with let or var
     let var_decl = variable_declaration_parser().map(StmtVariant::VariableDeclaration);
 
@@ -222,18 +236,17 @@ pub fn parse_stmt<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match stmt_parser().parse(stream) {
+    match stmt_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_stmt_variant(sink, &variant);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

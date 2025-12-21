@@ -13,14 +13,6 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    EnumDeclarationData,
-    ExtensionDeclarationData,
-    FieldDeclarationData,
-    FunctionDeclarationData,
-    ProtocolDeclarationData,
-    // Shared data types
-    StructDeclarationData,
-    TypeAliasDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
     emit_field_declaration,
@@ -35,27 +27,33 @@ use crate::common::{
     function_declaration_parser_internal,
     import_declaration_parser_internal,
     module_declaration_parser_internal,
-    skip_trivia,
+    EnumDeclarationData,
+    ExtensionDeclarationData,
+    FieldDeclarationData,
+    FunctionDeclarationData,
+    ProtocolDeclarationData,
+    // Shared data types
+    StructDeclarationData,
+    TypeAliasDeclarationData,
 };
-use crate::enum_decl::{
-    EnumDeclaration, enum_declaration_parser_internal, parse_enum_declaration,
-};
+use crate::enum_decl::{enum_declaration_parser_internal, parse_enum_declaration, EnumDeclaration};
 use crate::event::EventSink;
 use crate::extension::{
-    ExtensionDeclaration, extension_declaration_parser_internal, parse_extension_declaration,
+    extension_declaration_parser_internal, parse_extension_declaration, ExtensionDeclaration,
 };
-use crate::field::{FieldDeclaration, parse_field_declaration};
-use crate::function::{FunctionDeclaration, parse_function_declaration};
-use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::module::{ModuleDeclaration, parse_module_declaration};
+use crate::field::{parse_field_declaration, FieldDeclaration};
+use crate::function::{parse_function_declaration, FunctionDeclaration};
+use crate::import::{parse_import_declaration, ImportDeclaration};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::module::{parse_module_declaration, ModuleDeclaration};
 use crate::protocol::{
-    ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
+    parse_protocol_declaration, protocol_declaration_parser_internal, ProtocolDeclaration,
 };
 use crate::r#struct::{
-    StructDeclaration, parse_struct_declaration, struct_declaration_parser_internal,
+    parse_struct_declaration, struct_declaration_parser_internal, StructDeclaration,
 };
 use crate::type_alias::{
-    TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
+    parse_type_alias_declaration, type_alias_declaration_parser_internal, TypeAliasDeclaration,
 };
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
@@ -156,12 +154,26 @@ where
     }
 }
 
+/// Parser that skips trivia tokens
+fn skip_trivia<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| {
+            matches!(
+                token,
+                Token::Whitespace | Token::LineComment | Token::BlockComment
+            )
+        })
+        .repeated()
+        .ignored()
+}
+
 /// Internal Chumsky parser for a single declaration item
 ///
 /// This parser ROUTES to the module-specific parsers - it does not implement
 /// parsing logic itself.
-fn declaration_item_parser_internal()
--> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
+fn declaration_item_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
     // Route to module-specific parsers
     let module_parser = module_declaration_parser_internal()
         .map(|(span, path)| DeclarationItemData::Module(span, path));
@@ -200,11 +212,13 @@ fn declaration_item_parser_internal()
 }
 
 /// Internal Chumsky parser for multiple declaration items
-fn declaration_items_parser_internal()
--> impl Parser<Token, Vec<DeclarationItemData>, Error = Simple<Token>> + Clone {
+fn declaration_items_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<DeclarationItemData>, ParserExtra<'tokens>> + Clone
+{
     declaration_item_parser_internal()
         .repeated()
         .at_least(0)
+        .collect()
         .then_ignore(skip_trivia())
 }
 
@@ -291,13 +305,15 @@ pub fn parse_source_file<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
     sink.start_node(SyntaxKind::SourceFile);
 
-    match declaration_items_parser_internal().parse(stream) {
+    match declaration_items_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(items) => {
             for item_data in items {
                 emit_declaration_item(sink, item_data);
@@ -306,7 +322,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }
@@ -689,13 +705,19 @@ mod tests {
 
         let func_decls = find_nodes(&tree, SyntaxKind::FunctionDeclaration);
         assert_eq!(func_decls.len(), 1, "Should have 1 FunctionDeclaration");
-        
+
         for func in &func_decls {
-            let has_body = func.children().any(|c| c.kind() == SyntaxKind::FunctionBody);
+            let has_body = func
+                .children()
+                .any(|c| c.kind() == SyntaxKind::FunctionBody);
             assert!(has_body, "Function should have a body");
         }
-        
+
         let implicit_accesses = find_nodes(&tree, SyntaxKind::ExprImplicitMemberAccess);
-        assert_eq!(implicit_accesses.len(), 3, "Should have 3 ExprImplicitMemberAccess (.Pending, .Active, .Complete)");
+        assert_eq!(
+            implicit_accesses.len(),
+            3,
+            "Should have 3 ExprImplicitMemberAccess (.Pending, .Active, .Complete)"
+        );
     }
 }
