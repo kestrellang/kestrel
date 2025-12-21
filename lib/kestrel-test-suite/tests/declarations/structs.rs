@@ -133,8 +133,8 @@ mod initializers {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
         "#,
@@ -150,7 +150,7 @@ mod initializers {
                 var count: Int
 
                 init() {
-                    self.count = 0
+                    self.count = 0;
                 }
             }
         "#,
@@ -167,13 +167,13 @@ mod initializers {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
 
                 init() {
-                    self.x = 0
-                    self.y = 0
+                    self.x = 0;
+                    self.y = 0;
                 }
             }
         "#,
@@ -189,7 +189,7 @@ mod initializers {
                 var x: Int
 
                 public init(x: Int) {
-                    self.x = x
+                    self.x = x;
                 }
             }
         "#,
@@ -205,9 +205,9 @@ mod initializers {
                 var x: Int
                 var y: Int
 
-                init(at x: Int, and y: Int) {
-                    self.x = x
-                    self.y = y
+                init(atX x: Int, atY y: Int) {
+                    self.x = x;
+                    self.y = y;
                 }
             }
         "#,
@@ -266,8 +266,8 @@ mod instantiation {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
 
@@ -288,8 +288,8 @@ mod instantiation {
                 var y: Int
 
                 init(atX x: Int, atY y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
 
@@ -310,25 +310,25 @@ mod instantiation {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
 
                 init() {
-                    self.x = 0
-                    self.y = 0
+                    self.x = 0;
+                    self.y = 0;
                 }
 
                 init(value: Int) {
-                    self.x = value
-                    self.y = value
+                    self.x = value;
+                    self.y = value;
                 }
             }
 
             func test() {
-                let p1 = Point(x: 1, y: 2)
-                let p2 = Point()
-                let p3 = Point(value: 5)
+                let p1 = Point(x: 1, y: 2);
+                let p2 = Point();
+                let p3 = Point(value: 5);
             }
         "#,
         )
@@ -581,8 +581,8 @@ mod instantiation_errors {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
 
@@ -607,8 +607,8 @@ mod initializer_edge_cases {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
         "#,
@@ -617,7 +617,8 @@ mod initializer_edge_cases {
     }
 
     #[test]
-    fn init_with_unlabeled_params() {
+    fn init_with_different_param_names() {
+        // Test that init parameters can have different names from fields
         Test::new(
             r#"module Test
             struct Point {
@@ -625,13 +626,13 @@ mod initializer_edge_cases {
                 var y: Int
 
                 init(xVal: Int, yVal: Int) {
-                    self.x = xVal
-                    self.y = yVal
+                    self.x = xVal;
+                    self.y = yVal;
                 }
             }
 
             func test() -> Point {
-                Point(1, 2)
+                Point(xVal: 1, yVal: 2)
             }
         "#,
         )
@@ -647,8 +648,8 @@ mod initializer_edge_cases {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
 
@@ -657,7 +658,7 @@ mod initializer_edge_cases {
             }
 
             func test() -> Point {
-                Point(getInt(), getInt())
+                Point(x: getInt(), y: getInt())
             }
         "#,
         )
@@ -673,9 +674,9 @@ mod initializer_edge_cases {
                 var y: Int
 
                 init(value: Int) {
-                    let doubled: Int = value
-                    self.x = doubled
-                    self.y = doubled
+                    let doubled: Int = value;
+                    self.x = doubled;
+                    self.y = doubled;
                 }
             }
         "#,
@@ -692,8 +693,8 @@ mod initializer_edge_cases {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
 
                 func sum() -> Int {
