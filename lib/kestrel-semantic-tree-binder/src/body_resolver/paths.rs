@@ -115,10 +115,26 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // eprintln!("ResolveValuePath({:?}) = {:?}", path, resolution);
     match resolution {
         ValuePathResolution::Symbol { symbol_id, ty } => {
-            // Check if this is a static method accessed via a qualified type path
+            // Check if this is a static method or enum case accessed via a qualified type path
             // e.g., Box[Int].wrap where wrap is a static method
+            // or Option[Int].None where None is an enum case
             if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
                 if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                    // Handle simple enum cases (without associated values) with explicit type arguments
+                    // e.g., Option[Int].None where None is a simple case
+                    // Cases with associated values (like Some) are handled via the call path
+                    if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
+                        // Only handle cases without CallableBehavior (simple cases)
+                        if get_callable_behavior(&symbol).is_none() {
+                            // Apply the qualified type's substitutions to the case's type
+                            if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
+                                let substituted_ty = ty.apply_substitutions(substitutions);
+                                return Expression::enum_case(symbol_id, substituted_ty, span);
+                            }
+                        }
+                    }
+                    
+                    // Handle static methods
                     if let Some(callable) = get_callable_behavior(&symbol) {
                         if callable.is_static() {
                             // Get struct symbol from qualified type
@@ -793,11 +809,20 @@ fn extract_qualified_type_from_path(
 
     // No explicit type arguments - only return Some for generic types that need inference
     // For non-generic types like Point, return None to use the original SymbolRef path
-    if let TyKind::Struct { symbol, .. } = base_ty.kind() {
-        if !symbol.type_parameters().is_empty() {
-            // Generic type without explicit args - return base type for inference
-            return Some(base_ty);
+    match base_ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            if !symbol.type_parameters().is_empty() {
+                // Generic type without explicit args - return base type for inference
+                return Some(base_ty);
+            }
         }
+        TyKind::Enum { symbol, .. } => {
+            if !symbol.type_parameters().is_empty() {
+                // Generic enum without explicit args - return base type for inference
+                return Some(base_ty);
+            }
+        }
+        _ => {}
     }
 
     // Non-generic type without type args - return None to use original path

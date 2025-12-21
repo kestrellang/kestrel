@@ -57,6 +57,7 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ExprReturn
             | SyntaxKind::ExprTupleIndex
             | SyntaxKind::ExprClosure
+            | SyntaxKind::ExprImplicitMemberAccess
     )
 }
 
@@ -523,6 +524,17 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
                 new_subs.insert(*id, substitute_type(inner_ty, substitutions));
             }
             Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        }
+        TyKind::Enum {
+            symbol,
+            substitutions: inner_subs,
+        } => {
+            // Apply our substitutions to the inner substitutions
+            let mut new_subs = Substitutions::new();
+            for (id, inner_ty) in inner_subs.iter() {
+                new_subs.insert(*id, substitute_type(inner_ty, substitutions));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
         }
         // For simple types, just return a clone
         _ => ty.clone(),

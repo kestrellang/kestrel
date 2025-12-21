@@ -830,24 +830,35 @@ fn resolve_implicit_member(
             }
 
             // Check labels and equate types
-            for ((label, arg_ty_id), param) in argument_tys.iter().zip(params.iter()) {
-                // Check label matches
+            let mut labels_match = true;
+            let provided_labels: Vec<Option<String>> = argument_tys.iter()
+                .map(|(label, _)| label.clone())
+                .collect();
+            let expected_labels: Vec<Option<String>> = params.iter()
+                .map(|p| p.label.as_ref().map(|l| l.value.clone()))
+                .collect();
+
+            for ((label, _), param) in argument_tys.iter().zip(params.iter()) {
                 let expected_label = param.label.as_ref().map(|l| l.value.as_str());
                 let actual_label = label.as_deref();
-
                 if actual_label != expected_label {
-                    // Label mismatch - for now report as member not found
-                    return Err(InferenceError::member_not_found(
-                        resolved_ty.clone(),
-                        format!(
-                            "{}({}:)",
-                            member_name,
-                            actual_label.unwrap_or("_")
-                        ),
-                        span.clone(),
-                    ));
+                    labels_match = false;
+                    break;
                 }
+            }
 
+            if !labels_match {
+                return Err(InferenceError::no_matching_overload(
+                    member_name.to_string(),
+                    resolved_ty.clone(),
+                    provided_labels,
+                    expected_labels,
+                    span.clone(),
+                ));
+            }
+
+            // All labels match - equate types
+            for ((_, arg_ty_id), param) in argument_tys.iter().zip(params.iter()) {
                 // Apply substitutions to parameter type and equate
                 let param_ty = param.ty.apply_substitutions(substitutions);
                 ctx.register_type(&param_ty);
@@ -970,7 +981,40 @@ fn occurs_check_inner(
 
 /// Check that all inference placeholders have been resolved.
 /// If any remain unresolved, adds an Ambiguous error to the context.
+/// 
+/// Also processes any remaining constraints that may now be solvable
+/// (e.g., ImplicitMember constraints that were deferred waiting for type info).
 fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
+    // First, try to solve any remaining constraints one more time.
+    // This handles cases where constraints were deferred but the types
+    // have since been resolved through other unification.
+    let remaining_constraints = ctx.take_constraints();
+    for constraint in remaining_constraints {
+        match try_solve(ctx, &constraint) {
+            Ok(SolveResult::Solved) => {
+                // Great, constraint is now solved
+            }
+            Ok(SolveResult::Deferred) => {
+                // Still can't solve - check if it's an ImplicitMember that we can
+                // report a better error for
+                if let Constraint::ImplicitMember { member_name, span, .. } = &constraint {
+                    // Report specific error for unresolved enum shorthand
+                    ctx.add_error(InferenceError::cannot_infer_enum_type(
+                        member_name.clone(),
+                        span.clone(),
+                    ));
+                } else {
+                    // Put it back for generic error checking below
+                    ctx.push_constraint(constraint);
+                }
+            }
+            Err(error) => {
+                // Constraint failed - record the error
+                ctx.add_error(error);
+            }
+        }
+    }
+
     let mut unresolved = Vec::new();
 
     // Check all registered types

@@ -15,10 +15,11 @@ pub use runner::{run, run_all};
 pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
     use analyzers::{
         AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer, ConstraintCycleAnalyzer,
-        DeadCodeAnalyzer, DefiniteAssignmentAnalyzer, DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer,
-        ExtensionConflictAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer, ImportAnalyzer,
-        InitializerVerificationAnalyzer, ProtocolMethodAnalyzer, StaticContextAnalyzer,
-        StructCycleAnalyzer, TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
+        DeadCodeAnalyzer, DefiniteAssignmentAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
+        DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExtensionConflictAnalyzer,
+        FunctionBodyAnalyzer, GenericsAnalyzer, ImportAnalyzer, InitializerVerificationAnalyzer,
+        ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, StaticContextAnalyzer, StructCycleAnalyzer,
+        TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
         VisibilityConsistencyAnalyzer,
     };
 
@@ -43,6 +44,9 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(ProtocolMethodAnalyzer::new()),
         Box::new(StaticContextAnalyzer::new()),
         Box::new(DuplicateSymbolAnalyzer::new()),
+        Box::new(DuplicateCaseAnalyzer::new()),
+        Box::new(DuplicateLabelAnalyzer::new()),
+        Box::new(RecursiveEnumAnalyzer::new()),
         Box::new(VisibilityConsistencyAnalyzer::new()),
         Box::new(GenericsAnalyzer::new()),
         Box::new(ImportAnalyzer::new()),

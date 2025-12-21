@@ -36,8 +36,8 @@ use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, matches_signature,
-    substitute_self,
+    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, infer_type_arguments,
+    matches_signature, substitute_self, substitute_type,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -531,9 +531,28 @@ pub fn resolve_member_call(
 
                 // Apply substitutions from the base type to the return type
                 // e.g., for Box[Int].get() where get returns T, substitute T with Int
+                // or for Option[Int].Some where Some returns Option[T], substitute T with Int
                 let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
                 if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
                     return_ty = return_ty.apply_substitutions(substitutions);
+                } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs() {
+                    // Check if base type already has concrete substitutions
+                    let has_concrete_subs = !substitutions.is_empty() 
+                        && substitutions.iter().all(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
+                    
+                    if has_concrete_subs {
+                        // Base type has concrete type args (e.g., Option[Int].Some)
+                        return_ty = return_ty.apply_substitutions(substitutions);
+                    } else {
+                        // Base type has no concrete type args - infer from arguments
+                        // e.g., Option.Some(value: 42) should infer T = Int from the argument
+                        let type_params = enum_sym.type_parameters();
+                        if !type_params.is_empty() {
+                            let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                            let inferred_subs = infer_type_arguments(&type_params, &callable, &arg_types);
+                            return_ty = substitute_type(&return_ty, &inferred_subs);
+                        }
+                    }
                 }
 
                 // Create method ref and then call

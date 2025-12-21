@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree::utils::{extract_identifier_from_name, find_child, get_node_span};
@@ -41,7 +42,10 @@ impl DeclarationBinder for EnumCaseBinder {
             .any(|child| child.kind() == SyntaxKind::EnumCaseParameterList);
 
         if !has_parameters {
-            // Simple case without associated values - no CallableBehavior needed
+            // Simple case without associated values - add ValueBehavior with enum type
+            let enum_type = get_parent_enum_type(symbol, span.clone());
+            let value_behavior = ValueBehavior::new(enum_type, span);
+            symbol.metadata().add_behavior(value_behavior);
             return;
         }
 
@@ -121,7 +125,21 @@ fn get_parent_enum_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, span: kestrel
     // Get parent enum symbol
     if let Some(parent) = symbol.metadata().parent() {
         if let Ok(enum_sym) = parent.downcast_arc::<EnumSymbol>() {
-            return Ty::r#enum(enum_sym, span);
+            let type_params = enum_sym.type_parameters();
+            if type_params.is_empty() {
+                // Non-generic enum - return simple enum type
+                return Ty::r#enum(enum_sym, span);
+            } else {
+                // Generic enum - create type with type parameter references
+                // e.g., for Option[T], return Option[T] where T maps to TypeParameter(T)
+                // This allows type inference to properly unify when called
+                let mut substitutions = Substitutions::new();
+                for param in &type_params {
+                    let param_ty = Ty::type_parameter(param.clone(), span.clone());
+                    substitutions.insert(param.metadata().id(), param_ty);
+                }
+                return Ty::generic_enum(enum_sym, substitutions, span);
+            }
         }
     }
     Ty::error(span)

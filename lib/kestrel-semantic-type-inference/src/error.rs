@@ -118,6 +118,28 @@ pub enum InferenceError {
         /// Where the closure is defined
         span: Span,
     },
+
+    /// No matching overload for call (wrong labels or arity).
+    NoMatchingOverload {
+        /// The name of the function/case being called
+        name: String,
+        /// The type being called on (for methods/cases)
+        receiver_ty: Ty,
+        /// The provided argument labels (None = unlabeled)
+        provided_labels: Vec<Option<String>>,
+        /// The expected argument labels
+        expected_labels: Vec<Option<String>>,
+        /// Where the call occurred
+        span: Span,
+    },
+
+    /// Cannot infer enum type for shorthand syntax.
+    CannotInferEnumType {
+        /// The member name being accessed
+        member_name: String,
+        /// Where the shorthand was used
+        span: Span,
+    },
 }
 
 impl InferenceError {
@@ -215,6 +237,28 @@ impl InferenceError {
         }
     }
 
+    /// Create a no matching overload error.
+    pub fn no_matching_overload(
+        name: String,
+        receiver_ty: Ty,
+        provided_labels: Vec<Option<String>>,
+        expected_labels: Vec<Option<String>>,
+        span: Span,
+    ) -> Self {
+        InferenceError::NoMatchingOverload {
+            name,
+            receiver_ty,
+            provided_labels,
+            expected_labels,
+            span,
+        }
+    }
+
+    /// Create a cannot infer enum type error.
+    pub fn cannot_infer_enum_type(member_name: String, span: Span) -> Self {
+        InferenceError::CannotInferEnumType { member_name, span }
+    }
+
     /// Get the span associated with this error, if any.
     pub fn span(&self) -> Option<&Span> {
         match self {
@@ -229,6 +273,8 @@ impl InferenceError {
             InferenceError::ClosureReturnTypeMismatch { span, .. } => Some(span),
             InferenceError::ClosureParamTypeMismatch { span, .. } => Some(span),
             InferenceError::ItUsedWithWrongArity { span, .. } => Some(span),
+            InferenceError::NoMatchingOverload { span, .. } => Some(span),
+            InferenceError::CannotInferEnumType { span, .. } => Some(span),
         }
     }
 }
@@ -308,6 +354,28 @@ impl std::fmt::Display for InferenceError {
                     f,
                     "`it` can only be used when closure has exactly 1 parameter, but {} expected",
                     expected_arity
+                )
+            }
+            InferenceError::NoMatchingOverload {
+                name,
+                receiver_ty,
+                provided_labels,
+                expected_labels,
+                ..
+            } => {
+                let provided: Vec<_> = provided_labels.iter().map(|l| l.as_deref().unwrap_or("_")).collect();
+                let expected: Vec<_> = expected_labels.iter().map(|l| l.as_deref().unwrap_or("_")).collect();
+                write!(
+                    f,
+                    "no matching overload for '{}' on {}: provided ({}) but expected ({})",
+                    name, receiver_ty, provided.join(", "), expected.join(", ")
+                )
+            }
+            InferenceError::CannotInferEnumType { member_name, .. } => {
+                write!(
+                    f,
+                    "cannot infer enum type for shorthand '.{}'",
+                    member_name
                 )
             }
         }
