@@ -399,7 +399,6 @@ mod recursive_enums {
     }
 
     #[test]
-    #[ignore] // Issue: Indirect recursion through struct is not caught
     fn recursive_through_struct_requires_indirect() {
         Test::new(
             r#"module Test
@@ -420,7 +419,6 @@ mod future_features {
     use super::*;
 
     #[test]
-    #[ignore] // Issue: Enum methods (instance and static) not yet supported in binder
     fn enum_methods() {
         Test::new(
             r#"module Test
@@ -437,7 +435,6 @@ mod future_features {
     }
 
     #[test]
-    #[ignore] // Issue: Enum protocol conformance not yet supported in binder
     fn enum_protocol_conformance() {
         Test::new(
             r#"module Test

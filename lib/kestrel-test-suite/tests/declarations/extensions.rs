@@ -707,7 +707,6 @@ mod future_features {
     use super::*;
 
     #[test]
-    #[ignore] // Issue: Extensions on enums not yet supported in binder
     fn extend_enum() {
         Test::new(
             r#"module Test
