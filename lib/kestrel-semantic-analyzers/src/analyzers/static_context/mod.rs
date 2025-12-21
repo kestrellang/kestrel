@@ -1,6 +1,6 @@
 //! Analyzer for static modifier context
 //!
-//! Ensures that the `static` keyword is only used inside structs, protocols, or extensions.
+//! Ensures that the `static` keyword is only used inside structs, protocols, extensions, or enums.
 
 use std::sync::Arc;
 
@@ -52,6 +52,7 @@ impl Analyzer for StaticContextAnalyzer {
                 KestrelSymbolKind::Struct,
                 KestrelSymbolKind::Protocol,
                 KestrelSymbolKind::Extension,
+                KestrelSymbolKind::Enum,
             ],
         });
         if !(data.is_static() && !in_valid_context) {

@@ -5,12 +5,14 @@
 //! - `DuplicateLabelAnalyzer`: Detects duplicate parameter labels within a case
 //! - `RecursiveEnumAnalyzer`: Detects recursive enums without `indirect` keyword
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
+use kestrel_semantic_model::queries::StructFieldTypes;
+use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -241,18 +243,19 @@ impl Analyzer for RecursiveEnumAnalyzer {
                 continue;
             }
 
-            check_for_recursion(enum_sym.as_ref(), ctx);
+            check_for_recursion(enum_sym.as_ref(), ctx.model, ctx);
         }
     }
 }
 
-fn check_for_recursion(enum_sym: &EnumSymbol, ctx: &mut AnalysisContext) {
+fn check_for_recursion(enum_sym: &EnumSymbol, model: &SemanticModel, ctx: &mut AnalysisContext) {
     let enum_id = enum_sym.metadata().id();
 
     for case in enum_sym.cases() {
         if let Some(callable) = case.callable_behavior() {
             for param in callable.parameters() {
-                if type_contains_enum(&param.ty, enum_id) {
+                let mut visited = HashSet::new();
+                if type_contains_enum(&param.ty, enum_id, model, &mut visited) {
                     ctx.report(RecursiveEnumError {
                         enum_name: enum_sym.metadata().name().value.clone(),
                         enum_span: enum_sym.metadata().span().clone(),
@@ -268,16 +271,35 @@ fn check_for_recursion(enum_sym: &EnumSymbol, ctx: &mut AnalysisContext) {
 
 /// Check if a type contains a reference to the given enum.
 ///
-/// This checks direct references in the type itself, tuples, and arrays.
-/// We don't check inside structs or through type aliases as those provide
-/// their own indirection.
-fn type_contains_enum(ty: &Ty, enum_id: SymbolId) -> bool {
+/// This checks direct references in the type itself, tuples, and structs.
+/// Arrays provide heap indirection so they don't count as containing the enum.
+fn type_contains_enum(
+    ty: &Ty,
+    enum_id: SymbolId,
+    model: &SemanticModel,
+    visited: &mut HashSet<SymbolId>,
+) -> bool {
     match ty.kind() {
         TyKind::Enum { symbol, .. } => symbol.metadata().id() == enum_id,
-        TyKind::Tuple(elements) => elements.iter().any(|e| type_contains_enum(e, enum_id)),
-        TyKind::Array(element) => type_contains_enum(element, enum_id),
-        // Note: We don't check inside Struct or through type aliases
-        // as those provide their own indirection
+        TyKind::Tuple(elements) => elements
+            .iter()
+            .any(|e| type_contains_enum(e, enum_id, model, visited)),
+        TyKind::Array(_) => false, // Arrays provide heap indirection
+        TyKind::Struct { symbol, .. } => {
+            let struct_id = symbol.metadata().id();
+            // Avoid infinite loops on struct cycles
+            if visited.contains(&struct_id) {
+                return false;
+            }
+            visited.insert(struct_id);
+            // Check each field of the struct
+            for field in model.query(StructFieldTypes { struct_id }) {
+                if type_contains_enum(&field.ty, enum_id, model, visited) {
+                    return true;
+                }
+            }
+            false
+        }
         _ => false,
     }
 }

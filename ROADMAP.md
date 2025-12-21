@@ -350,10 +350,17 @@
 
 ## Phase 9: Enums & Algebraic Data Types
 
-- [ ] Enum Declarations
-  - [ ] Simple enums: `enum Color { Red, Green, Blue }`
-  - [ ] Enums with associated values: `enum Option[T] { Some(T), None }`
-  - [ ] Recursive enums
+- [x] Enum Declarations
+  - [x] Simple enums: `enum Color { case Red, Green, Blue }`
+  - [x] Enums with associated values: `enum Option[T] { case Some(T), None }`
+  - [x] Recursive enums with `indirect` keyword
+  - [x] Indirect recursion detection through structs
+  - [x] Generic enums with type parameters and where clauses
+  - [x] Enum instantiation (full path `Color.Red` and shorthand `.Red`)
+  - [x] Protocol conformance for enums
+  - [x] Instance methods in enums
+  - [x] Static methods in enums
+  - [x] Enum extensions (`extend Color { ... }`)
 - [ ] Pattern Matching
   - [ ] `match` expressions
   - [ ] Exhaustiveness checking
@@ -399,19 +406,19 @@
 ## Current Status
 
 **Phase**: Phase 9 (Enums & Algebraic Data Types) - 🚧 IN PROGRESS
-**Progress**: Phases 1-8 complete.
+**Progress**: Phases 1-8 complete. Enum declarations complete, pattern matching in progress.
 
-**Phase 8 Completed Features**:
+**Phase 9 Completed Features**:
 
-- ✅ Closure Expressions with multiple syntax forms
-- ✅ Immutable by-value variable captures
-- ✅ First-class function references
-- ✅ Higher-order function support
-- ✅ Closure parameter type inference (bidirectional)
-- ✅ Implicit `it` parameter for single-parameter closures
-- ✅ Multiple trailing closure syntax with labels
+- ✅ Simple and generic enum declarations
+- ✅ Enums with associated values
+- ✅ Recursive enums with `indirect` keyword
+- ✅ Indirect recursion detection through structs
+- ✅ Protocol conformance for enums
+- ✅ Instance and static methods in enums
+- ✅ Enum extensions
 
-**Ready for Phase 9**: Enums & Algebraic Data Types
+**Next Up**: Pattern matching (`match` expressions, exhaustiveness checking)
 
 ## Notes
 

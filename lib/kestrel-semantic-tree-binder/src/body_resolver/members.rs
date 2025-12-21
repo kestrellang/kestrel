@@ -1259,13 +1259,14 @@ fn filter_applicable_extensions(
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 
-    // Get substitutions from actual type
-    let actual_subs = match actual_ty.as_struct_with_subs() {
-        Some((_, subs)) => subs,
-        None => {
-            // Not a struct type - no extensions apply
-            return Vec::new();
-        }
+    // Get substitutions from actual type (struct or enum)
+    let actual_subs = if let Some((_, subs)) = actual_ty.as_struct_with_subs() {
+        subs
+    } else if let Some((_, subs)) = actual_ty.as_enum_with_subs() {
+        subs
+    } else {
+        // Not a struct or enum type - no extensions apply
+        return Vec::new();
     };
 
     // Filter extensions by applicability
@@ -1284,10 +1285,13 @@ fn filter_applicable_extensions(
 
             let target_ty = target_behavior.target_type();
 
-            // Extract substitutions from extension's target type
-            let extension_subs = match target_ty.as_struct_with_subs() {
-                Some((_, subs)) => subs,
-                None => return None,
+            // Extract substitutions from extension's target type (struct or enum)
+            let extension_subs = if let Some((_, subs)) = target_ty.as_struct_with_subs() {
+                subs
+            } else if let Some((_, subs)) = target_ty.as_enum_with_subs() {
+                subs
+            } else {
+                return None;
             };
 
             // Check if this extension's type arguments are applicable to the actual type
