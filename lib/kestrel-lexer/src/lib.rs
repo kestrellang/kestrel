@@ -199,6 +199,12 @@ pub enum Token {
     #[token("while")]
     While,
 
+    #[token("match")]
+    Match,
+
+    #[token("guard")]
+    Guard,
+
     // ===== Braces =====
     #[token("(")]
     LParen,
@@ -270,6 +276,9 @@ pub enum Token {
 
     #[token("->")]
     Arrow,
+
+    #[token("=>")]
+    FatArrow,
 
     // Single-character operators
     #[token("=")]

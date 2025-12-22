@@ -142,6 +142,17 @@ pub enum SyntaxKind {
     Argument,               // Single argument: expr or label: expr
     ExprImplicitMemberAccess, // .Case or .Case(args)
 
+    // Pattern nodes
+    Pattern,             // Root pattern wrapper
+    WildcardPattern,     // _
+    BindingPattern,      // name or var name
+    TuplePattern,        // (p1, p2, ...)
+    TuplePatternElement, // Single element in tuple pattern
+    LiteralPattern,      // 42, "hello", 'c', true
+    EnumPattern,         // .Case or .Case(args)
+    EnumPatternArg,      // Single arg in enum pattern: label or label: pattern
+    ErrorPattern,        // Error recovery
+
     // ===== Tokens (Terminals) =====
     // Literals
     Identifier,
@@ -182,6 +193,8 @@ pub enum SyntaxKind {
     Where,
     While,
     In,
+    Match,
+    Guard,
 
     // Logical keywords
     And,
@@ -217,6 +230,7 @@ pub enum SyntaxKind {
     BangEquals,
     QuestionQuestion,
     Arrow,
+    FatArrow,
     // Single-character
     Equals,
     Plus,
@@ -290,6 +304,8 @@ impl From<Token> for SyntaxKind {
             Token::Where => SyntaxKind::Where,
             Token::While => SyntaxKind::While,
             Token::In => SyntaxKind::In,
+            Token::Match => SyntaxKind::Match,
+            Token::Guard => SyntaxKind::Guard,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -320,6 +336,7 @@ impl From<Token> for SyntaxKind {
             Token::BangEquals => SyntaxKind::BangEquals,
             Token::QuestionQuestion => SyntaxKind::QuestionQuestion,
             Token::Arrow => SyntaxKind::Arrow,
+            Token::FatArrow => SyntaxKind::FatArrow,
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
@@ -431,6 +448,16 @@ impl Language for KestrelLanguage {
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
         const EXPR_IMPLICIT_MEMBER_ACCESS: u16 = SyntaxKind::ExprImplicitMemberAccess as u16;
+        // Pattern nodes
+        const PATTERN: u16 = SyntaxKind::Pattern as u16;
+        const WILDCARD_PATTERN: u16 = SyntaxKind::WildcardPattern as u16;
+        const BINDING_PATTERN: u16 = SyntaxKind::BindingPattern as u16;
+        const TUPLE_PATTERN: u16 = SyntaxKind::TuplePattern as u16;
+        const TUPLE_PATTERN_ELEMENT: u16 = SyntaxKind::TuplePatternElement as u16;
+        const LITERAL_PATTERN: u16 = SyntaxKind::LiteralPattern as u16;
+        const ENUM_PATTERN: u16 = SyntaxKind::EnumPattern as u16;
+        const ENUM_PATTERN_ARG: u16 = SyntaxKind::EnumPatternArg as u16;
+        const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -467,6 +494,8 @@ impl Language for KestrelLanguage {
         const WHERE: u16 = SyntaxKind::Where as u16;
         const WHILE: u16 = SyntaxKind::While as u16;
         const IN: u16 = SyntaxKind::In as u16;
+        const MATCH: u16 = SyntaxKind::Match as u16;
+        const GUARD: u16 = SyntaxKind::Guard as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -495,6 +524,7 @@ impl Language for KestrelLanguage {
         const BANG_EQUALS: u16 = SyntaxKind::BangEquals as u16;
         const QUESTION_QUESTION: u16 = SyntaxKind::QuestionQuestion as u16;
         const ARROW: u16 = SyntaxKind::Arrow as u16;
+        const FAT_ARROW: u16 = SyntaxKind::FatArrow as u16;
         const EQUALS: u16 = SyntaxKind::Equals as u16;
         const PLUS: u16 = SyntaxKind::Plus as u16;
         const MINUS: u16 = SyntaxKind::Minus as u16;
@@ -599,6 +629,16 @@ impl Language for KestrelLanguage {
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
             EXPR_IMPLICIT_MEMBER_ACCESS => SyntaxKind::ExprImplicitMemberAccess,
+            // Pattern nodes
+            PATTERN => SyntaxKind::Pattern,
+            WILDCARD_PATTERN => SyntaxKind::WildcardPattern,
+            BINDING_PATTERN => SyntaxKind::BindingPattern,
+            TUPLE_PATTERN => SyntaxKind::TuplePattern,
+            TUPLE_PATTERN_ELEMENT => SyntaxKind::TuplePatternElement,
+            LITERAL_PATTERN => SyntaxKind::LiteralPattern,
+            ENUM_PATTERN => SyntaxKind::EnumPattern,
+            ENUM_PATTERN_ARG => SyntaxKind::EnumPatternArg,
+            ERROR_PATTERN => SyntaxKind::ErrorPattern,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,
@@ -635,6 +675,8 @@ impl Language for KestrelLanguage {
             WHERE => SyntaxKind::Where,
             WHILE => SyntaxKind::While,
             IN => SyntaxKind::In,
+            MATCH => SyntaxKind::Match,
+            GUARD => SyntaxKind::Guard,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,
@@ -663,6 +705,7 @@ impl Language for KestrelLanguage {
             BANG_EQUALS => SyntaxKind::BangEquals,
             QUESTION_QUESTION => SyntaxKind::QuestionQuestion,
             ARROW => SyntaxKind::Arrow,
+            FAT_ARROW => SyntaxKind::FatArrow,
             EQUALS => SyntaxKind::Equals,
             PLUS => SyntaxKind::Plus,
             MINUS => SyntaxKind::Minus,

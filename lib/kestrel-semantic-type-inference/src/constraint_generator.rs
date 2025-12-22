@@ -6,6 +6,7 @@
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -54,8 +55,8 @@ pub fn generate_constraints(
 fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Statement) {
     match &stmt.kind {
         StatementKind::Binding { pattern, value } => {
-            // Register the pattern type
-            ctx.register_type(&pattern.ty);
+            // Generate constraints for the pattern
+            generate_pattern_constraints(ctx, pattern);
 
             // If there's an initializer, equate its type with the pattern type
             if let Some(init) = value {
@@ -66,6 +67,65 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
         }
         StatementKind::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
+        }
+    }
+}
+
+/// Generate constraints for a pattern.
+///
+/// This registers the pattern's type and generates constraints based on the pattern kind:
+/// - For tuples: creates tuple type constraints from elements
+/// - For literals: constrains to the literal's type
+/// - For enum variants: the case resolution happens later during type application
+///
+/// # Arguments
+/// * `ctx` - The inference context to add constraints to
+/// * `pattern` - The pattern to generate constraints for
+pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pattern) {
+    // Register the pattern's type
+    ctx.register_type(&pattern.ty);
+
+    match &pattern.kind {
+        PatternKind::Local { .. } => {
+            // Local bindings just register their type - nothing more needed
+        }
+
+        PatternKind::Wildcard => {
+            // Wildcard patterns match anything - type is already registered
+        }
+
+        PatternKind::Tuple { elements } => {
+            // For tuple patterns, generate constraints for each element
+            // and ensure the tuple type matches
+            if let TyKind::Tuple(elem_tys) = pattern.ty.kind() {
+                for (elem, elem_ty) in elements.iter().zip(elem_tys.iter()) {
+                    generate_pattern_constraints(ctx, elem);
+                    ctx.register_type(elem_ty);
+                    ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                }
+            } else {
+                // Pattern type is not a tuple - still process elements
+                for elem in elements {
+                    generate_pattern_constraints(ctx, elem);
+                }
+            }
+        }
+
+        PatternKind::Literal { .. } => {
+            // Literal patterns have concrete types - nothing more needed
+            // The type is set during pattern creation
+        }
+
+        PatternKind::EnumVariant { bindings, .. } => {
+            // For enum patterns, generate constraints for each binding
+            // The case resolution happens during type application when we know the enum type
+            for binding in bindings {
+                generate_pattern_constraints(ctx, &binding.pattern);
+            }
+        }
+
+        PatternKind::Error => {
+            // Error patterns are poison values - don't generate constraints
         }
     }
 }

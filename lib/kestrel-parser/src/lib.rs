@@ -71,6 +71,7 @@ pub mod import;
 pub mod input;
 pub mod module;
 pub mod parser;
+pub mod pattern;
 pub mod protocol;
 pub mod stmt;
 pub mod r#struct;

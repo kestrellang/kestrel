@@ -105,7 +105,11 @@ impl Statement {
                             "let"
                         }
                     }
-                    PatternKind::Error => "let",
+                    PatternKind::Wildcard
+                    | PatternKind::Tuple { .. }
+                    | PatternKind::Literal { .. }
+                    | PatternKind::EnumVariant { .. }
+                    | PatternKind::Error => "let",
                 };
                 let name = pattern.name().unwrap_or("<error>");
                 let value_str = value

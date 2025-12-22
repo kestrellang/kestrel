@@ -21,6 +21,7 @@ mod expressions;
 mod members;
 mod operators;
 mod paths;
+pub mod patterns;
 mod statements;
 mod utils;
 

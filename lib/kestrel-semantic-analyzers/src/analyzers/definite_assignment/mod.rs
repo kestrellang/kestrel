@@ -7,6 +7,7 @@ use kestrel_semantic_model::ExecutableBodyFor;
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{ExprKind, Expression, ElseBranch};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
@@ -118,13 +119,7 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
             if let Some(value_expr) = value {
                 state = analyze_expression(value_expr, state, false, ctx);
                 // Mark variables in pattern as initialized
-                use kestrel_semantic_tree::pattern::PatternKind;
-                match &pattern.kind {
-                    PatternKind::Local { local_id, .. } => {
-                        state.assigned.insert(*local_id);
-                    }
-                    PatternKind::Error => {}
-                }
+                mark_pattern_locals_assigned(pattern, &mut state);
             }
         }
         StatementKind::Expr(expr) => {
@@ -303,6 +298,40 @@ fn analyze_expression(
         }
     }
     state
+}
+
+/// Recursively mark all local bindings in a pattern as assigned.
+///
+/// This handles:
+/// - Local bindings: mark the local as assigned
+/// - Tuple patterns: recursively mark all elements
+/// - Enum variant patterns: recursively mark all bindings
+/// - Wildcard, literal, error: nothing to mark
+fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
+    match &pattern.kind {
+        PatternKind::Local { local_id, .. } => {
+            state.assigned.insert(*local_id);
+        }
+        PatternKind::Wildcard => {
+            // Wildcards don't bind anything
+        }
+        PatternKind::Tuple { elements } => {
+            for elem in elements {
+                mark_pattern_locals_assigned(elem, state);
+            }
+        }
+        PatternKind::Literal { .. } => {
+            // Literals don't bind anything
+        }
+        PatternKind::EnumVariant { bindings, .. } => {
+            for binding in bindings {
+                mark_pattern_locals_assigned(&binding.pattern, state);
+            }
+        }
+        PatternKind::Error => {
+            // Error patterns don't bind anything
+        }
+    }
 }
 
 pub mod diagnostics;
