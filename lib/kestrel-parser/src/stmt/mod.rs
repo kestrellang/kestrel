@@ -2,7 +2,7 @@
 //!
 //! This module provides parsing for Kestrel statements.
 //! Currently supports:
-//! - Variable declarations: let/var name: Type = expr;
+//! - Variable declarations: let/var pattern: Type = expr;
 //! - Expression statements: expr;
 
 use chumsky::prelude::*;
@@ -13,6 +13,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
 /// Represents a statement
@@ -57,8 +58,8 @@ pub struct VariableDeclarationData {
     pub mutability_span: Span,
     /// Whether this is mutable (var) or not (let)
     pub is_mutable: bool,
-    /// Name span
-    pub name_span: Span,
+    /// The pattern being bound
+    pub pattern: PatternVariant,
     /// Optional type annotation: (colon_span, type)
     pub type_annotation: Option<(Span, TyVariant)>,
     /// Optional initializer: (equals_span, expression)
@@ -92,7 +93,7 @@ fn skip_trivia<'tokens>(
 
 /// Parser for variable declaration
 ///
-/// Syntax: let/var name (: Type)? (= expr)? ;
+/// Syntax: let/var pattern (: Type)? (= expr)? ;
 fn variable_declaration_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, VariableDeclarationData, ParserExtra<'tokens>> + Clone
 {
@@ -102,9 +103,7 @@ fn variable_declaration_parser<'tokens>(
                 .map_with(|_, e| (to_kestrel_span(e.span()), false))
                 .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
-        .then(skip_trivia().ignore_then(select! {
-            Token::Identifier = e => to_kestrel_span(e.span()),
-        }))
+        .then(pattern_parser())
         .then(
             // Optional type annotation: : Type
             skip_trivia()
@@ -127,13 +126,13 @@ fn variable_declaration_parser<'tokens>(
         )
         .map(
             |(
-                ((((mutability_span, is_mutable), name_span), type_annotation), initializer),
+                ((((mutability_span, is_mutable), pattern), type_annotation), initializer),
                 semicolon,
             )| {
                 VariableDeclarationData {
                     mutability_span,
                     is_mutable,
-                    name_span,
+                    pattern,
                     type_annotation,
                     initializer,
                     semicolon,
@@ -195,10 +194,8 @@ fn emit_variable_declaration(sink: &mut EventSink, data: &VariableDeclarationDat
         sink.add_token(SyntaxKind::Let, data.mutability_span.clone());
     }
 
-    // Name
-    sink.start_node(SyntaxKind::Name);
-    sink.add_token(SyntaxKind::Identifier, data.name_span.clone());
-    sink.finish_node();
+    // Pattern
+    emit_pattern_variant(sink, &data.pattern);
 
     // Optional type annotation
     if let Some((colon_span, ty)) = &data.type_annotation {

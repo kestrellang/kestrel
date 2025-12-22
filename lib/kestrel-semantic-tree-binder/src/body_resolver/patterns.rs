@@ -42,17 +42,40 @@ pub fn resolve_pattern(
     ctx: &mut BodyResolutionContext,
     expected_ty: Option<&Ty>,
 ) -> Pattern {
+    resolve_pattern_with_mutability(pattern_node, ctx, expected_ty, false)
+}
+
+/// Resolve a pattern syntax node with an optional forced mutability.
+///
+/// When `force_mutable` is true, all binding patterns will be created as mutable,
+/// even if they don't have the `var` keyword. This is used for `var (a, b)` style
+/// declarations where mutability is specified at the statement level.
+///
+/// # Arguments
+/// * `pattern_node` - The syntax node for the pattern
+/// * `ctx` - The body resolution context
+/// * `expected_ty` - Optional expected type hint for the pattern
+/// * `force_mutable` - If true, all bindings will be mutable
+///
+/// # Returns
+/// A resolved `Pattern` with its type and span.
+pub fn resolve_pattern_with_mutability(
+    pattern_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    expected_ty: Option<&Ty>,
+    force_mutable: bool,
+) -> Pattern {
     let span = get_node_span(pattern_node, ctx.file_id);
 
     // Handle Pattern wrapper node
     if pattern_node.kind() == SyntaxKind::Pattern {
         if let Some(inner) = pattern_node.children().next() {
-            return resolve_pattern_inner(&inner, ctx, expected_ty, span);
+            return resolve_pattern_inner(&inner, ctx, expected_ty, span, force_mutable);
         }
         return Pattern::error(span);
     }
 
-    resolve_pattern_inner(pattern_node, ctx, expected_ty, span)
+    resolve_pattern_inner(pattern_node, ctx, expected_ty, span, force_mutable)
 }
 
 /// Resolve the inner pattern node (unwrapped from Pattern wrapper).
@@ -61,13 +84,14 @@ fn resolve_pattern_inner(
     ctx: &mut BodyResolutionContext,
     expected_ty: Option<&Ty>,
     span: Span,
+    force_mutable: bool,
 ) -> Pattern {
     match node.kind() {
         SyntaxKind::WildcardPattern => resolve_wildcard_pattern(node, ctx, expected_ty),
-        SyntaxKind::BindingPattern => resolve_binding_pattern(node, ctx, expected_ty),
-        SyntaxKind::TuplePattern => resolve_tuple_pattern(node, ctx, expected_ty),
+        SyntaxKind::BindingPattern => resolve_binding_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::TuplePattern => resolve_tuple_pattern(node, ctx, expected_ty, force_mutable),
         SyntaxKind::LiteralPattern => resolve_literal_pattern(node, ctx, expected_ty),
-        SyntaxKind::EnumPattern => resolve_enum_pattern(node, ctx, expected_ty),
+        SyntaxKind::EnumPattern => resolve_enum_pattern(node, ctx, expected_ty, force_mutable),
         SyntaxKind::ErrorPattern => Pattern::error(span),
         _ => {
             // Unknown pattern kind - treat as error
@@ -92,13 +116,15 @@ fn resolve_binding_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
     expected_ty: Option<&Ty>,
+    force_mutable: bool,
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
-    // Check for `var` keyword (mutable binding)
-    let is_mutable = node
+    // Check for `var` keyword (mutable binding) or force_mutable from statement level
+    let has_var_keyword = node
         .children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Var);
+    let is_mutable = force_mutable || has_var_keyword;
     let mutability = if is_mutable {
         Mutability::Mutable
     } else {
@@ -147,6 +173,7 @@ fn resolve_tuple_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
     expected_ty: Option<&Ty>,
+    force_mutable: bool,
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
@@ -171,7 +198,7 @@ fn resolve_tuple_pattern(
             
             // The element node contains the actual pattern
             if let Some(inner_pattern) = elem_node.children().next() {
-                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(&elem_node, ctx.file_id))
+                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(&elem_node, ctx.file_id), force_mutable)
             } else {
                 Pattern::error(get_node_span(&elem_node, ctx.file_id))
             }
@@ -245,6 +272,7 @@ fn resolve_enum_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
     expected_ty: Option<&Ty>,
+    force_mutable: bool,
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
@@ -264,7 +292,7 @@ fn resolve_enum_pattern(
     let bindings: Vec<EnumPatternBinding> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::EnumPatternArg)
-        .map(|arg_node| resolve_enum_pattern_arg(&arg_node, ctx))
+        .map(|arg_node| resolve_enum_pattern_arg(&arg_node, ctx, force_mutable))
         .collect();
 
     // Type is inferred from context - will be resolved during type inference
@@ -278,6 +306,7 @@ fn resolve_enum_pattern(
 fn resolve_enum_pattern_arg(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
+    force_mutable: bool,
 ) -> EnumPatternBinding {
     let span = get_node_span(node, ctx.file_id);
 
@@ -299,7 +328,7 @@ fn resolve_enum_pattern_arg(
         let pattern = node
             .children()
             .find(|c| is_pattern_kind(c.kind()))
-            .map(|p| resolve_pattern(&p, ctx, None))
+            .map(|p| resolve_pattern_with_mutability(&p, ctx, None, force_mutable))
             .unwrap_or_else(|| Pattern::error(span.clone()));
 
         EnumPatternBinding::new(label, pattern, span)
@@ -309,20 +338,22 @@ fn resolve_enum_pattern_arg(
         
         // Create a binding pattern for this label
         let binding_ty = Ty::infer(span.clone());
+        let is_mutable = force_mutable;
+        let mutability = if is_mutable { Mutability::Mutable } else { Mutability::Immutable };
         let local_id = ctx.local_scope.bind(
             label_str.clone(),
             binding_ty.clone(),
-            false, // immutable by default
+            is_mutable,
             span.clone(),
         );
-        let pattern = Pattern::local(local_id, Mutability::Immutable, label_str, binding_ty, span.clone());
+        let pattern = Pattern::local(local_id, mutability, label_str, binding_ty, span.clone());
 
         EnumPatternBinding::new(None, pattern, span)
     }
 }
 
 /// Check if a SyntaxKind is a pattern kind.
-fn is_pattern_kind(kind: SyntaxKind) -> bool {
+pub fn is_pattern_kind(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::Pattern

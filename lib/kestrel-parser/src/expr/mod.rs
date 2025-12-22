@@ -738,7 +738,7 @@ pub fn expr_parser<'tokens>(
                 just(Token::Let).map_with(|_, e| (to_kestrel_span(e.span()), false))
                     .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
             )
-            .then(skip_trivia().ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) }))
+            .then(crate::pattern::pattern_parser())
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
@@ -752,11 +752,11 @@ pub fn expr_parser<'tokens>(
                     .or_not(),
             )
             .then(skip_trivia().ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))))
-            .map(|((((( mutability_span, is_mutable), name_span), type_annotation), initializer), semicolon)| {
+            .map(|((((( mutability_span, is_mutable), pattern), type_annotation), initializer), semicolon)| {
                 StmtVariant::VariableDeclaration(VariableDeclarationData {
                     mutability_span,
                     is_mutable,
-                    name_span,
+                    pattern,
                     type_annotation,
                     initializer,
                     semicolon,

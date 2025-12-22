@@ -136,16 +136,14 @@ fn code_block_items_parser<'tokens>(
     //   - If statement-like: statement expression (no semicolon needed)
     //   - Otherwise: fail (will be retried as trailing expression)
 
-    // Variable declaration: let/var name: Type = expr;
+    // Variable declaration: let/var pattern: Type = expr;
     let var_decl = skip_trivia()
         .ignore_then(
             just(Token::Let)
                 .map_with(|_, e| (to_kestrel_span(e.span()), false))
                 .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
-        .then(skip_trivia().ignore_then(select! {
-            Token::Identifier = e => to_kestrel_span(e.span()),
-        }))
+        .then(crate::pattern::pattern_parser())
         .then(
             // Optional type annotation: : Type
             skip_trivia()
@@ -165,12 +163,12 @@ fn code_block_items_parser<'tokens>(
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
-            |(((((mutability_span, is_mutable), name_span), type_annotation), initializer), semicolon)| {
+            |(((((mutability_span, is_mutable), pattern), type_annotation), initializer), semicolon)| {
                 BlockItem::Statement(StmtVariant::VariableDeclaration(
                     crate::stmt::VariableDeclarationData {
                         mutability_span,
                         is_mutable,
-                        name_span,
+                        pattern,
                         type_annotation,
                         initializer,
                         semicolon,

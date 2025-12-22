@@ -6,13 +6,13 @@
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
-use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use kestrel_syntax_tree::utils::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
+use super::patterns::{is_pattern_kind, resolve_pattern_with_mutability};
 use super::utils::{is_expression_kind, validate_not_standalone_type_param};
 
 /// Resolve a statement syntax node
@@ -74,18 +74,10 @@ pub fn resolve_variable_declaration(
 ) -> Option<Statement> {
     let span = get_node_span(decl_node, ctx.file_id);
 
-    // Determine if let or var
+    // Determine if let or var (affects mutability of all bindings in pattern)
     let is_mutable = decl_node
         .children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Var);
-    let mutability = if is_mutable {
-        Mutability::Mutable
-    } else {
-        Mutability::Immutable
-    };
-
-    // Extract name
-    let name = extract_var_name(decl_node)?;
 
     // Extract type annotation (if any)
     let ty = extract_var_type(decl_node, ctx);
@@ -100,55 +92,47 @@ pub fn resolve_variable_declaration(
             validate_not_standalone_type_param(expr, ctx)
         });
 
-    // Determine the type from annotation or initializer
-    let resolved_ty = ty.unwrap_or_else(|| {
-        value
-            .as_ref()
-            .map(|e| e.ty.clone())
-            .unwrap_or_else(|| Ty::infer(span.clone()))
-    });
+    // Determine the expected type from annotation or initializer
+    let expected_ty = ty.or_else(|| value.as_ref().map(|e| e.ty.clone()));
 
-    // Bind the local variable
-    let name_span = get_name_span(decl_node, ctx.file_id).unwrap_or(span.clone());
-    let local_id = ctx.local_scope.bind(
-        name.clone(),
-        resolved_ty.clone(),
-        is_mutable,
-        name_span.clone(),
-    );
-
-    // Create the pattern
-    let pattern = Pattern::local(local_id, mutability, name, resolved_ty, name_span);
-
-    Some(Statement::binding(pattern, value, span))
-}
-
-/// Extract the variable name from a VariableDeclaration node
-fn extract_var_name(decl_node: &SyntaxNode) -> Option<String> {
-    // Look for Name node
-    if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
-        // Get identifier token from Name
-        return name_node
+    // Find and resolve the pattern
+    // Look for Pattern node first (new syntax), then fall back to Name (old syntax) or BindingPattern
+    let pattern = if let Some(pattern_node) = decl_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Pattern || is_pattern_kind(c.kind()))
+    {
+        // Pass the mutability from the statement level (var vs let)
+        resolve_pattern_with_mutability(&pattern_node, ctx, expected_ty.as_ref(), is_mutable)
+    } else if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
+        // Old syntax: Name node with identifier
+        let name = name_node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::Identifier)
-            .map(|t| t.text().to_string());
-    }
+            .map(|t| t.text().to_string())?;
 
-    // Fallback: look for bare Identifier
-    decl_node
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)
-        .map(|t| t.text().to_string())
-}
+        let name_span = get_node_span(&name_node, ctx.file_id);
+        let mutability = if is_mutable {
+            Mutability::Mutable
+        } else {
+            Mutability::Immutable
+        };
 
-/// Get the span of the name in a variable declaration
-fn get_name_span(decl_node: &SyntaxNode, file_id: usize) -> Option<Span> {
-    if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
-        return Some(get_node_span(&name_node, file_id));
-    }
-    None
+        let resolved_ty = expected_ty.unwrap_or_else(|| Ty::infer(span.clone()));
+        let local_id = ctx.local_scope.bind(
+            name.clone(),
+            resolved_ty.clone(),
+            is_mutable,
+            name_span.clone(),
+        );
+
+        Pattern::local(local_id, mutability, name, resolved_ty, name_span)
+    } else {
+        // No pattern found - return error pattern
+        Pattern::error(span.clone())
+    };
+
+    Some(Statement::binding(pattern, value, span))
 }
 
 /// Extract type annotation from a variable declaration
