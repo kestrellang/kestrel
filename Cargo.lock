@@ -331,6 +331,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-semantic-pattern-matching"
+version = "0.8.0"
+dependencies = [
+ "kestrel-semantic-tree",
+ "kestrel-span",
+ "semantic-tree",
+]
+
+[[package]]
 name = "kestrel-semantic-tree"
 version = "0.8.0"
 dependencies = [

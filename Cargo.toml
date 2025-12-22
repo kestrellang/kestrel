@@ -45,6 +45,7 @@ members = [
     "lib/kestrel-semantic-tree-builder",
     "lib/kestrel-semantic-tree-binder",
     "lib/kestrel-semantic-type-inference",
+    "lib/kestrel-semantic-pattern-matching",
     "lib/kestrel-reporting",
     "lib/kestrel-compiler",
     "lib/kestrel-test-suite"
