@@ -107,6 +107,21 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// Enum pattern binding constraint: binds pattern types to enum case parameter types.
+    ///
+    /// When matching `.Some(value)`, the type of `value` must match the `Some` case's
+    /// parameter type. This constraint defers the binding until the enum type is known.
+    EnumPatternBinding {
+        /// The enum type (pattern's type, which equals the scrutinee type)
+        enum_ty: TyId,
+        /// The case name being matched (e.g., "Some")
+        case_name: String,
+        /// Binding types: each entry is (optional label, binding pattern's TyId)
+        binding_tys: Vec<(Option<String>, TyId)>,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -157,6 +172,7 @@ impl Constraint {
             Constraint::Normalizes { span, .. } => span,
             Constraint::MemberAccess { span, .. } => span,
             Constraint::ImplicitMember { span, .. } => span,
+            Constraint::EnumPatternBinding { span, .. } => span,
         }
     }
 
@@ -173,6 +189,21 @@ impl Constraint {
             member_name,
             argument_tys,
             expr_id,
+            span,
+        }
+    }
+
+    /// Create an enum pattern binding constraint.
+    pub fn enum_pattern_binding(
+        enum_ty: TyId,
+        case_name: String,
+        binding_tys: Vec<(Option<String>, TyId)>,
+        span: Span,
+    ) -> Self {
+        Constraint::EnumPatternBinding {
+            enum_ty,
+            case_name,
+            binding_tys,
             span,
         }
     }

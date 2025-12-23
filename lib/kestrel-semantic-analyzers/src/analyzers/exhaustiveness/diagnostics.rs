@@ -103,3 +103,34 @@ impl IntoDiagnostic for UnreachablePatternWarning {
             ])
     }
 }
+
+/// Warning when a range pattern overlaps with a previous range pattern.
+///
+/// Example:
+/// ```ignore
+/// match x {
+///     0..=10 => "first",
+///     5..=15 => "second",  // Warning: overlaps with 0..=10
+///     _ => "other"
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct OverlappingRangeWarning {
+    /// Span of the overlapping pattern
+    pub pattern_span: Span,
+}
+
+impl IntoDiagnostic for OverlappingRangeWarning {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::warning()
+            .with_message("overlapping range pattern")
+            .with_labels(vec![Label::primary(
+                self.pattern_span.file_id,
+                self.pattern_span.range(),
+            )
+            .with_message("this range overlaps with a previous pattern")])
+            .with_notes(vec![
+                "some values in this range are already covered by earlier patterns".to_string(),
+            ])
+    }
+}

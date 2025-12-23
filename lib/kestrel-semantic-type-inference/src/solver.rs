@@ -94,6 +94,12 @@ fn try_solve(
             expr_id,
             span,
         } => resolve_implicit_member(ctx, *expr_ty, member_name, argument_tys, *expr_id, span),
+        Constraint::EnumPatternBinding {
+            enum_ty,
+            case_name,
+            binding_tys,
+            span,
+        } => resolve_enum_pattern_binding(ctx, *enum_ty, case_name, binding_tys, span),
     }
 }
 
@@ -872,6 +878,83 @@ fn resolve_implicit_member(
     }
 }
 
+/// Resolve an enum pattern binding constraint.
+///
+/// This connects the types of bindings in an enum pattern (like `.Some(value)`)
+/// to the corresponding parameter types of the enum case.
+fn resolve_enum_pattern_binding(
+    ctx: &mut InferenceContext<'_>,
+    enum_ty: TyId,
+    case_name: &str,
+    binding_tys: &[(Option<String>, TyId)],
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    #[allow(unused_imports)]
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    let resolved_ty = resolve_type(ctx, enum_ty);
+
+    // If still Infer, defer until the enum type is known
+    if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Must be an enum type
+    let TyKind::Enum {
+        symbol: enum_symbol,
+        substitutions,
+    } = resolved_ty.kind()
+    else {
+        // Not an enum type - this shouldn't happen in well-formed code,
+        // but we can just skip the constraint (type mismatch will be caught elsewhere)
+        return Ok(SolveResult::Solved);
+    };
+
+    // Find the case by name
+    let cases = enum_symbol.cases();
+    let case = cases.iter().find(|c| c.metadata().name().value == case_name);
+
+    let Some(case) = case else {
+        // Case not found - this will be caught by other validation
+        return Ok(SolveResult::Solved);
+    };
+
+    // Get the callable behavior (parameter types) if the case has associated values
+    let Some(callable) = case.callable_behavior() else {
+        // Case has no parameters, but we have bindings - this shouldn't happen
+        // in well-formed patterns, but we can skip
+        return Ok(SolveResult::Solved);
+    };
+
+    let params = callable.parameters();
+
+    // Match bindings to parameters
+    // For positional bindings (no label), match by position
+    // For labeled bindings, match by label
+    for (idx, (label, binding_ty_id)) in binding_tys.iter().enumerate() {
+        let param = if let Some(label_name) = label {
+            // Labeled binding - find parameter by label
+            params.iter().find(|p| {
+                p.external_label() == Some(label_name.as_str())
+                    || p.internal_name() == label_name.as_str()
+            })
+        } else {
+            // Positional binding - use index
+            params.get(idx)
+        };
+
+        if let Some(param) = param {
+            // Apply substitutions to the parameter type and equate
+            let param_ty = param.ty.apply_substitutions(substitutions);
+            ctx.register_type(&param_ty);
+            ctx.equate(*binding_ty_id, param_ty.id(), span.clone());
+        }
+    }
+
+    Ok(SolveResult::Solved)
+}
+
 /// Follow the substitution chain to get the current resolved type for an ID.
 fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // Follow substitution chain
@@ -1052,6 +1135,16 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
                 check_resolved_id(*expr_ty, ctx, &mut unresolved);
                 for (_, arg_ty) in argument_tys {
                     check_resolved_id(*arg_ty, ctx, &mut unresolved);
+                }
+            }
+            Constraint::EnumPatternBinding {
+                enum_ty,
+                binding_tys,
+                ..
+            } => {
+                check_resolved_id(*enum_ty, ctx, &mut unresolved);
+                for (_, binding_ty) in binding_tys {
+                    check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
             }
         }

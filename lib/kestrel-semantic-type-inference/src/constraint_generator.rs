@@ -116,11 +116,30 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             // The type is set during pattern creation
         }
 
-        PatternKind::EnumVariant { bindings, .. } => {
+        PatternKind::EnumVariant { case_name, bindings, .. } => {
             // For enum patterns, generate constraints for each binding
-            // The case resolution happens during type application when we know the enum type
             for binding in bindings {
                 generate_pattern_constraints(ctx, &binding.pattern);
+            }
+            
+            // If there are bindings, generate a constraint to connect their types
+            // to the enum case's parameter types. This is deferred until the enum
+            // type is resolved.
+            if !bindings.is_empty() {
+                let binding_tys: Vec<(Option<String>, _)> = bindings
+                    .iter()
+                    .map(|b| {
+                        ctx.register_type(&b.pattern.ty);
+                        (b.label.clone(), b.pattern.ty.id())
+                    })
+                    .collect();
+                
+                ctx.enum_pattern_binding(
+                    pattern.ty.id(),
+                    case_name.clone(),
+                    binding_tys,
+                    pattern.span.clone(),
+                );
             }
         }
 

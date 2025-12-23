@@ -231,6 +231,22 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Add an enum pattern binding constraint.
+    ///
+    /// This is used when matching enum patterns like `.Some(value)` to connect
+    /// the binding's type to the enum case's parameter type.
+    pub fn enum_pattern_binding(
+        &mut self,
+        enum_ty: TyId,
+        case_name: String,
+        binding_tys: Vec<(Option<String>, TyId)>,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::enum_pattern_binding(
+            enum_ty, case_name, binding_tys, span,
+        ));
+    }
+
     /// Register metadata for a closure expression.
     ///
     /// This should be called during constraint generation for closures

@@ -37,7 +37,7 @@ use kestrel_semantic_pattern_matching::ExhaustivenessChecker;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 
 mod diagnostics;
-use diagnostics::{EmptyMatchError, NonExhaustiveMatchError, UnreachablePatternWarning};
+use diagnostics::{EmptyMatchError, NonExhaustiveMatchError, OverlappingRangeWarning, UnreachablePatternWarning};
 
 pub struct ExhaustivenessAnalyzer;
 
@@ -97,8 +97,21 @@ impl Analyzer for ExhaustivenessAnalyzer {
                 });
             }
 
-            // Report unreachable patterns
+            // Report overlapping range patterns
+            for &arm_index in &result.overlapping_arms {
+                if let Some(arm) = arms.get(arm_index) {
+                    ctx.report(OverlappingRangeWarning {
+                        pattern_span: arm.pattern.span.clone(),
+                    });
+                }
+            }
+
+            // Report unreachable patterns (only if not already reported as overlapping)
             for &arm_index in &result.redundant_arms {
+                // Skip if already reported as overlapping
+                if result.overlapping_arms.contains(&arm_index) {
+                    continue;
+                }
                 if let Some(arm) = arms.get(arm_index) {
                     ctx.report(UnreachablePatternWarning {
                         pattern_span: arm.pattern.span.clone(),

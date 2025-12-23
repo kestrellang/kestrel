@@ -33,7 +33,7 @@ use crate::constructor::Constructor;
 use crate::matrix::{PatternMatrix, PatternRow};
 use crate::usefulness::is_useful_impl;
 use crate::witness::Witness;
-use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind, RangeBound};
 use kestrel_semantic_tree::ty::Ty;
 
 /// Result of exhaustiveness checking.
@@ -50,6 +50,11 @@ pub struct ExhaustivenessResult {
     /// A pattern is redundant if it can never match because all its
     /// cases are already covered by previous patterns.
     pub redundant_arms: Vec<usize>,
+
+    /// Indices of arms with overlapping range patterns.
+    /// A range pattern overlaps when part of its range is covered by
+    /// previous patterns but the pattern is still partially reachable.
+    pub overlapping_arms: Vec<usize>,
 }
 
 impl ExhaustivenessResult {
@@ -59,6 +64,7 @@ impl ExhaustivenessResult {
             is_exhaustive: true,
             missing_patterns: vec![],
             redundant_arms: vec![],
+            overlapping_arms: vec![],
         }
     }
 
@@ -68,12 +74,19 @@ impl ExhaustivenessResult {
             is_exhaustive: false,
             missing_patterns: missing,
             redundant_arms: vec![],
+            overlapping_arms: vec![],
         }
     }
 
     /// Add a redundant arm index
     pub fn with_redundant_arm(mut self, index: usize) -> Self {
         self.redundant_arms.push(index);
+        self
+    }
+
+    /// Add an overlapping arm index
+    pub fn with_overlapping_arm(mut self, index: usize) -> Self {
+        self.overlapping_arms.push(index);
         self
     }
 }
@@ -106,6 +119,7 @@ impl<'a> ExhaustivenessChecker<'a> {
     /// - Whether the match is exhaustive
     /// - Missing patterns (witnesses) if non-exhaustive
     /// - Redundant arm indices
+    /// - Overlapping arm indices
     pub fn check(&self, patterns: &[&Pattern], has_guards: &[bool]) -> ExhaustivenessResult {
         if patterns.is_empty() {
             // Empty match - need at least one pattern for any type except Never
@@ -118,12 +132,36 @@ impl<'a> ExhaustivenessChecker<'a> {
         // Build the pattern matrix and check for redundancy
         let mut matrix = PatternMatrix::single_column(self.scrutinee_type.clone());
         let mut redundant_arms = Vec::new();
+        let mut overlapping_arms = Vec::new();
+
+        // Track previous range patterns for overlap detection
+        let mut previous_ranges: Vec<(usize, i64, i64)> = Vec::new();
 
         for (i, (pattern, &has_guard)) in patterns.iter().zip(has_guards.iter()).enumerate() {
             // Check if this pattern is useful given the previous patterns
             // For or-patterns, we check usefulness of the whole or-pattern
             let query = PatternRow::new(vec![(*pattern).clone()], i, has_guard);
             let usefulness = is_useful_impl(&matrix, &query);
+
+            // Check for overlapping ranges before checking redundancy
+            if let Some((current_start, current_end)) = extract_int_range(pattern) {
+                // Check if this range overlaps with any previous range
+                let has_overlap = previous_ranges.iter().any(|&(_, prev_start, prev_end)| {
+                    ranges_overlap(current_start, current_end, prev_start, prev_end)
+                });
+
+                if has_overlap && !has_guard {
+                    // This range overlaps with a previous range
+                    // Note: We detect overlaps independently of the usefulness check because
+                    // the usefulness algorithm doesn't handle partial range overlaps correctly
+                    overlapping_arms.push(i);
+                }
+
+                // Track this range for future overlap checks
+                if !has_guard {
+                    previous_ranges.push((i, current_start, current_end));
+                }
+            }
 
             if !usefulness.is_useful && !has_guard {
                 // Pattern is not useful (redundant)
@@ -159,6 +197,7 @@ impl<'a> ExhaustivenessChecker<'a> {
         };
 
         result.redundant_arms = redundant_arms;
+        result.overlapping_arms = overlapping_arms;
         result
     }
 
@@ -234,6 +273,31 @@ impl<'a> ExhaustivenessChecker<'a> {
             }
         }
     }
+}
+
+/// Extract integer range bounds from a pattern, if it is a range pattern.
+///
+/// Returns `Some((start, end))` for inclusive ranges.
+fn extract_int_range(pattern: &Pattern) -> Option<(i64, i64)> {
+    match &pattern.kind {
+        PatternKind::Range { start, end, inclusive } => {
+            match (start, end) {
+                (RangeBound::Integer(s), RangeBound::Integer(e)) => {
+                    let end_val = if *inclusive { *e } else { e - 1 };
+                    Some((*s, end_val))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if two ranges overlap.
+///
+/// Two ranges [a, b] and [c, d] overlap if a <= d && c <= b.
+fn ranges_overlap(start1: i64, end1: i64, start2: i64, end2: i64) -> bool {
+    start1 <= end2 && start2 <= end1
 }
 
 /// Expand or-patterns into a list of alternative patterns.
