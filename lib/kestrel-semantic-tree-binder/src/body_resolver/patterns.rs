@@ -12,8 +12,9 @@
 //! - Literal (`42`, `"hello"`, `true`): Matches a specific value
 //! - Enum (`.Case` or `.Case(args)`): Matches an enum variant
 
+use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::LiteralValue;
-use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern, PatternKind};
+use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern, PatternKind, RangeBound, StructPatternField};
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -92,6 +93,12 @@ fn resolve_pattern_inner(
         SyntaxKind::TuplePattern => resolve_tuple_pattern(node, ctx, expected_ty, force_mutable),
         SyntaxKind::LiteralPattern => resolve_literal_pattern(node, ctx, expected_ty),
         SyntaxKind::EnumPattern => resolve_enum_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::RangePattern => resolve_range_pattern(node, ctx, expected_ty),
+        SyntaxKind::OrPattern => resolve_or_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::StructPattern => resolve_struct_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::ArrayPattern => resolve_array_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::AtPattern => resolve_at_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::RestPattern => resolve_rest_pattern(node, ctx, expected_ty),
         SyntaxKind::ErrorPattern => Pattern::error(span),
         _ => {
             // Unknown pattern kind - treat as error
@@ -310,7 +317,7 @@ fn resolve_enum_pattern_arg(
 ) -> EnumPatternBinding {
     let span = get_node_span(node, ctx.file_id);
 
-    // Get the label (first identifier)
+    // Get the label (first identifier token, not from a nested pattern)
     let label = node
         .children_with_tokens()
         .filter_map(|elem| elem.into_token())
@@ -322,16 +329,27 @@ fn resolve_enum_pattern_arg(
         .children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Colon);
 
+    // Check if there's a nested pattern node (for unlabeled patterns like `_`)
+    let nested_pattern = node.children().find(|c| is_pattern_kind(c.kind()));
+
     if has_colon {
         // Labeled binding: `label: pattern`
         // Find the nested pattern
-        let pattern = node
-            .children()
-            .find(|c| is_pattern_kind(c.kind()))
+        let pattern = nested_pattern
             .map(|p| resolve_pattern_with_mutability(&p, ctx, None, force_mutable))
             .unwrap_or_else(|| Pattern::error(span.clone()));
 
         EnumPatternBinding::new(label, pattern, span)
+    } else if label.is_none() && nested_pattern.is_some() {
+        // Unlabeled pattern: just a pattern like `_`, `(a, b)`, `.Nested(x)`, etc.
+        let pattern = resolve_pattern_with_mutability(
+            &nested_pattern.unwrap(),
+            ctx,
+            None,
+            force_mutable,
+        );
+
+        EnumPatternBinding::new(None, pattern, span)
     } else {
         // Simple binding: just an identifier that becomes a binding pattern
         let label_str = label.unwrap_or_else(|| "_".to_string());
@@ -352,6 +370,461 @@ fn resolve_enum_pattern_arg(
     }
 }
 
+/// Resolve a struct pattern (`Point { x, y }` or `Point { x: a, y: b }`).
+fn resolve_struct_pattern(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    expected_ty: Option<&Ty>,
+    force_mutable: bool,
+) -> Pattern {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Extract struct name (first identifier)
+    let struct_name = node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string());
+
+    let struct_name = match struct_name {
+        Some(n) => n,
+        None => return Pattern::error(span),
+    };
+
+    // Check for rest pattern (..)
+    let has_rest = node
+        .children()
+        .any(|c| c.kind() == SyntaxKind::StructPatternRest);
+
+    // Extract fields from StructPatternField nodes
+    let fields: Vec<StructPatternField> = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::StructPatternField)
+        .map(|field_node| resolve_struct_pattern_field(&field_node, ctx, force_mutable))
+        .collect();
+
+    // Type is inferred from context - will be resolved during type inference
+    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
+
+    // struct_id is None - resolved during type inference
+    Pattern::struct_pattern(None, struct_name, fields, has_rest, ty, span)
+}
+
+/// Resolve a single struct pattern field.
+fn resolve_struct_pattern_field(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    force_mutable: bool,
+) -> StructPatternField {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Get the field name (first identifier)
+    let field_name = node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string())
+        .unwrap_or_else(|| "_".to_string());
+
+    // Check if there's a colon (explicit binding with nested pattern)
+    let has_colon = node
+        .children_with_tokens()
+        .any(|elem| elem.kind() == SyntaxKind::Colon);
+
+    if has_colon {
+        // Explicit binding: `field: pattern`
+        // Find the nested pattern
+        let pattern = node
+            .children()
+            .find(|c| is_pattern_kind(c.kind()))
+            .map(|p| resolve_pattern_with_mutability(&p, ctx, None, force_mutable))
+            .unwrap_or_else(|| Pattern::error(span.clone()));
+
+        StructPatternField::new(field_name, pattern, span)
+    } else {
+        // Shorthand binding: just an identifier that becomes a binding pattern
+        // `{ x }` is equivalent to `{ x: x }`
+        let binding_ty = Ty::infer(span.clone());
+        let is_mutable = force_mutable;
+        let mutability = if is_mutable { Mutability::Mutable } else { Mutability::Immutable };
+        let local_id = ctx.local_scope.bind(
+            field_name.clone(),
+            binding_ty.clone(),
+            is_mutable,
+            span.clone(),
+        );
+        let pattern = Pattern::local(local_id, mutability, field_name.clone(), binding_ty, span.clone());
+
+        StructPatternField::new(field_name, pattern, span)
+    }
+}
+
+/// Resolve a range pattern (`0..=9` or `0..<10`).
+fn resolve_range_pattern(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    expected_ty: Option<&Ty>,
+) -> Pattern {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Collect all tokens in order
+    let tokens: Vec<_> = node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .collect();
+
+    // We expect: start_literal, range_operator, end_literal
+    // The range operator is ..= (inclusive) or ..< (exclusive)
+    let mut start_bound: Option<RangeBound> = None;
+    let mut end_bound: Option<RangeBound> = None;
+    let mut inclusive = true;
+    let mut found_operator = false;
+
+    for token in &tokens {
+        match token.kind() {
+            SyntaxKind::Integer => {
+                let text = token.text();
+                let value = parse_integer(text);
+                let bound = RangeBound::Integer(value);
+                if !found_operator {
+                    start_bound = Some(bound);
+                } else {
+                    end_bound = Some(bound);
+                }
+            }
+            SyntaxKind::String => {
+                // Handle char literals (single-char strings like 'a')
+                let text = token.text();
+                // Remove quotes and handle escape sequences
+                let inner = text.trim_matches('"').trim_matches('\'');
+                if let Some(c) = inner.chars().next() {
+                    let bound = RangeBound::Char(c);
+                    if !found_operator {
+                        start_bound = Some(bound);
+                    } else {
+                        end_bound = Some(bound);
+                    }
+                }
+            }
+            SyntaxKind::DotDotEquals => {
+                found_operator = true;
+                inclusive = true;
+            }
+            SyntaxKind::DotDotLess => {
+                found_operator = true;
+                inclusive = false;
+            }
+            _ => {}
+        }
+    }
+
+    // Validate we have both bounds
+    let (start, end) = match (start_bound, end_bound) {
+        (Some(s), Some(e)) => (s, e),
+        _ => return Pattern::error(span),
+    };
+
+    // Validate that start <= end (or start < end for exclusive ranges)
+    let is_valid_range = match (&start, &end) {
+        (RangeBound::Integer(s), RangeBound::Integer(e)) => {
+            if inclusive {
+                *s <= *e
+            } else {
+                *s < *e
+            }
+        }
+        (RangeBound::Char(s), RangeBound::Char(e)) => {
+            if inclusive {
+                *s <= *e
+            } else {
+                *s < *e
+            }
+        }
+        _ => false, // Mismatched types are invalid
+    };
+
+    if !is_valid_range {
+        use crate::diagnostics::InvalidRangeBoundsError;
+        let error = InvalidRangeBoundsError {
+            span: span.clone(),
+            inclusive,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Pattern::error(span);
+    }
+
+    // Determine the type based on the bounds
+    let ty = match (&start, &end) {
+        (RangeBound::Integer(_), RangeBound::Integer(_)) => {
+            expected_ty.cloned().unwrap_or_else(|| Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span.clone()))
+        }
+        (RangeBound::Char(_), RangeBound::Char(_)) => {
+            // We'd need a Char type here - for now use infer
+            expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()))
+        }
+        // Mismatched bounds (e.g., int..=char) - error
+        _ => return Pattern::error(span),
+    };
+
+    Pattern::range(start, end, inclusive, ty, span)
+}
+
+/// Resolve an or-pattern (`p1 or p2 or ...`).
+fn resolve_or_pattern(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    expected_ty: Option<&Ty>,
+    force_mutable: bool,
+) -> Pattern {
+    use std::collections::HashMap;
+    
+    let span = get_node_span(node, ctx.file_id);
+
+    // Collect all child patterns (filter out the `or` keywords)
+    let alternatives: Vec<Pattern> = node
+        .children()
+        .filter(|c| is_pattern_kind(c.kind()))
+        .map(|alt_node| resolve_pattern_inner(&alt_node, ctx, expected_ty, get_node_span(&alt_node, ctx.file_id), force_mutable))
+        .collect();
+
+    if alternatives.len() < 2 {
+        // Or-patterns need at least 2 alternatives
+        return Pattern::error(span);
+    }
+
+    // Validate that all alternatives bind the same names
+    // For simplicity, we'll collect bindings from each alternative and compare
+    fn collect_bindings(pattern: &Pattern) -> HashMap<String, Ty> {
+        let mut bindings = HashMap::new();
+        collect_bindings_inner(pattern, &mut bindings);
+        bindings
+    }
+
+    fn collect_bindings_inner(pattern: &Pattern, bindings: &mut HashMap<String, Ty>) {
+        use kestrel_semantic_tree::pattern::PatternKind;
+        match &pattern.kind {
+            PatternKind::Local { name, .. } => {
+                bindings.insert(name.clone(), pattern.ty.clone());
+            }
+            PatternKind::Tuple { elements } => {
+                for elem in elements {
+                    collect_bindings_inner(elem, bindings);
+                }
+            }
+            PatternKind::EnumVariant { bindings: enum_bindings, .. } => {
+                for binding in enum_bindings {
+                    collect_bindings_inner(&binding.pattern, bindings);
+                }
+            }
+            PatternKind::Or { alternatives } => {
+                // For nested or-patterns, use the first alternative's bindings
+                if let Some(first) = alternatives.first() {
+                    collect_bindings_inner(first, bindings);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Get bindings from first alternative as reference
+    let first_bindings = collect_bindings(&alternatives[0]);
+
+    // Check all alternatives have the same bindings
+    for (i, alt) in alternatives.iter().enumerate().skip(1) {
+        let alt_bindings = collect_bindings(alt);
+        
+        // Check that both have the same set of names
+        let first_names: std::collections::HashSet<_> = first_bindings.keys().collect();
+        let alt_names: std::collections::HashSet<_> = alt_bindings.keys().collect();
+        
+        if first_names != alt_names {
+            use crate::diagnostics::InconsistentOrPatternBindingsError;
+            let error = InconsistentOrPatternBindingsError {
+                span: span.clone(),
+                alternative_index: i + 1,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return Pattern::error(span);
+        }
+        
+        // TODO: Also check that the types are compatible
+    }
+
+    // Type is the type of the first alternative (they should all be compatible)
+    let ty = expected_ty.cloned().unwrap_or_else(|| alternatives[0].ty.clone());
+
+    Pattern::or_pattern(alternatives, ty, span)
+}
+
+/// Resolve an array pattern (`[a, b, ..rest]`).
+fn resolve_array_pattern(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    expected_ty: Option<&Ty>,
+    force_mutable: bool,
+) -> Pattern {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Get expected element type if we have an array type
+    let expected_element_ty: Option<&Ty> = expected_ty.and_then(|ty| {
+        if let kestrel_semantic_tree::ty::TyKind::Array(element_type) = ty.kind() {
+            Some(element_type.as_ref())
+        } else {
+            None
+        }
+    });
+
+    let mut prefix: Vec<Pattern> = Vec::new();
+    let mut suffix: Vec<Pattern> = Vec::new();
+    let mut rest: Option<Option<String>> = None;
+    let mut in_suffix = false;
+
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::ArrayPatternElement => {
+                // Get the inner pattern
+                let pattern = if let Some(inner) = child.children().next() {
+                    resolve_pattern_with_mutability(&inner, ctx, expected_element_ty, force_mutable)
+                } else {
+                    Pattern::error(get_node_span(&child, ctx.file_id))
+                };
+
+                if in_suffix {
+                    suffix.push(pattern);
+                } else {
+                    prefix.push(pattern);
+                }
+            }
+            SyntaxKind::ArrayPatternRest => {
+                // We're now in the suffix
+                in_suffix = true;
+                
+                // Check if there's a named binding
+                let name_token = child
+                    .children_with_tokens()
+                    .filter_map(|elem| elem.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier);
+                
+                if let Some(token) = name_token {
+                    let name = token.text().to_string();
+                    let name_span = {
+                        let text_range = token.text_range();
+                        Span::new(ctx.file_id, text_range.start().into()..text_range.end().into())
+                    };
+                    
+                    // The rest binding will be a slice/array of the element type
+                    let rest_ty = expected_element_ty
+                        .cloned()
+                        .map(|elem_ty| Ty::array(elem_ty, span.clone()))
+                        .unwrap_or_else(|| Ty::infer(span.clone()));
+                    
+                    let is_mutable = force_mutable;
+                    ctx.local_scope.bind(
+                        name.clone(),
+                        rest_ty,
+                        is_mutable,
+                        name_span,
+                    );
+                    rest = Some(Some(name));
+                } else {
+                    // Anonymous rest: `..` - just ignore remaining elements
+                    rest = Some(None);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Build element type from patterns
+    let element_ty = if let Some(first) = prefix.first() {
+        first.ty.clone()
+    } else if let Some(first) = suffix.first() {
+        first.ty.clone()
+    } else {
+        expected_element_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()))
+    };
+
+    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::array(element_ty, span.clone()));
+
+    Pattern::array(prefix, rest, suffix, ty, span)
+}
+
+/// Resolve an @-pattern (`name @ subpattern`).
+fn resolve_at_pattern(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    expected_ty: Option<&Ty>,
+    force_mutable: bool,
+) -> Pattern {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Check for `var` keyword (mutable binding) or force_mutable from statement level
+    let has_var_keyword = node
+        .children_with_tokens()
+        .any(|elem| elem.kind() == SyntaxKind::Var);
+    let is_mutable = force_mutable || has_var_keyword;
+    let mutability = if is_mutable {
+        Mutability::Mutable
+    } else {
+        Mutability::Immutable
+    };
+
+    // Extract the identifier name
+    let name = node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string());
+
+    let name = match name {
+        Some(n) => n,
+        None => return Pattern::error(span),
+    };
+
+    // Get span for the name token
+    let name_span = node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| {
+            let text_range = t.text_range();
+            Span::new(ctx.file_id, text_range.start().into()..text_range.end().into())
+        })
+        .unwrap_or_else(|| span.clone());
+
+    // Find and resolve the subpattern
+    let subpattern = node
+        .children()
+        .find(|c| is_pattern_kind(c.kind()))
+        .map(|p| resolve_pattern_with_mutability(&p, ctx, expected_ty, force_mutable))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    // Determine type from expected type or subpattern's type
+    let ty = expected_ty.cloned().unwrap_or_else(|| subpattern.ty.clone());
+
+    // Bind the local variable
+    let local_id = ctx.local_scope.bind(
+        name.clone(),
+        ty.clone(),
+        is_mutable,
+        name_span,
+    );
+
+    Pattern::at_pattern(name, local_id, mutability, subpattern, ty, span)
+}
+
+/// Resolve a rest pattern (`..`).
+fn resolve_rest_pattern(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+    _expected_ty: Option<&Ty>,
+) -> Pattern {
+    let span = get_node_span(node, ctx.file_id);
+    // Rest patterns have unit type (they don't bind a value, just match remaining elements)
+    let ty = Ty::unit(span.clone());
+    Pattern::rest(ty, span)
+}
+
 /// Check if a SyntaxKind is a pattern kind.
 pub fn is_pattern_kind(kind: SyntaxKind) -> bool {
     matches!(
@@ -362,6 +835,12 @@ pub fn is_pattern_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::TuplePattern
             | SyntaxKind::LiteralPattern
             | SyntaxKind::EnumPattern
+            | SyntaxKind::RangePattern
+            | SyntaxKind::OrPattern
+            | SyntaxKind::StructPattern
+            | SyntaxKind::ArrayPattern
+            | SyntaxKind::AtPattern
+            | SyntaxKind::RestPattern
             | SyntaxKind::ErrorPattern
     )
 }

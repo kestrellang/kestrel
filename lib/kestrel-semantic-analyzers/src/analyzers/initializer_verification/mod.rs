@@ -455,6 +455,16 @@ fn analyze_expression(
                 }
             }
         }
+        ExprKind::Match { scrutinee, arms } => {
+            state = analyze_expression(scrutinee, state, false, ctx);
+            for arm in arms {
+                let mut arm_state = state.clone();
+                if let Some(guard) = &arm.guard {
+                    arm_state = analyze_expression(guard, arm_state, false, ctx);
+                }
+                arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
+            }
+        }
         ExprKind::Error => {}
     }
     state

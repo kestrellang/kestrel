@@ -253,6 +253,9 @@ pub enum Token {
     #[token("..<")]
     DotDotLess,
 
+    #[token("..")]
+    DotDot,
+
     #[token("<<")]
     LessLess,
 
@@ -313,6 +316,9 @@ pub enum Token {
 
     #[token(">")]
     Greater,
+
+    #[token("@")]
+    At,
 }
 
 pub type SpannedToken = Spanned<Token>;

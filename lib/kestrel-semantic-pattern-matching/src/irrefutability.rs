@@ -83,6 +83,27 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
         // if the enum has only one case.
         PatternKind::EnumVariant { .. } => false,
 
+        // Range patterns are REFUTABLE - they only match values within the range
+        // e.g., `0..=9` doesn't match 10
+        PatternKind::Range { .. } => false,
+
+        // Struct patterns are irrefutable if all field patterns are irrefutable
+        PatternKind::Struct { fields, .. } => {
+            fields.iter().all(|f| is_irrefutable(&f.pattern))
+        }
+
+        // Array patterns are REFUTABLE - they check array length
+        PatternKind::Array { .. } => false,
+
+        // Or-patterns are irrefutable if ANY alternative is irrefutable
+        PatternKind::Or { alternatives } => alternatives.iter().any(is_irrefutable),
+
+        // At-patterns are irrefutable if the subpattern is irrefutable
+        PatternKind::At { subpattern, .. } => is_irrefutable(subpattern),
+
+        // Rest patterns are always irrefutable (they match any remaining elements)
+        PatternKind::Rest => true,
+
         // Error patterns are treated as irrefutable to avoid cascading errors.
         // If we already have an error in the pattern, don't complain about
         // refutability too.

@@ -50,6 +50,27 @@ pub enum Witness {
 
     /// Boolean value
     Bool(bool),
+
+    /// An array witness (e.g., `[_, 42, ..]`)
+    Array(Vec<Witness>),
+
+    /// A struct witness (e.g., `Point { x: _, y: 0 }`)
+    Struct {
+        /// The struct name
+        name: String,
+        /// Field witnesses (may be partial with `..`)
+        fields: Vec<(String, Witness)>,
+    },
+
+    /// A range witness (e.g., `0..=9`)
+    Range {
+        /// Start of range
+        start: String,
+        /// End of range
+        end: String,
+        /// Whether inclusive
+        inclusive: bool,
+    },
 }
 
 impl Witness {
@@ -100,6 +121,28 @@ impl Witness {
         Witness::Literal(format!("\"{}\"", s))
     }
 
+    /// Create an array witness
+    pub fn array(elements: Vec<Witness>) -> Self {
+        Witness::Array(elements)
+    }
+
+    /// Create a struct witness
+    pub fn struct_witness(name: impl Into<String>, fields: Vec<(String, Witness)>) -> Self {
+        Witness::Struct {
+            name: name.into(),
+            fields,
+        }
+    }
+
+    /// Create a range witness
+    pub fn range(start: impl Into<String>, end: impl Into<String>, inclusive: bool) -> Self {
+        Witness::Range {
+            start: start.into(),
+            end: end.into(),
+            inclusive,
+        }
+    }
+
     /// Format the witness for display in error messages
     pub fn display(&self) -> String {
         match self {
@@ -122,6 +165,31 @@ impl Witness {
             Witness::Literal(s) => s.clone(),
 
             Witness::Bool(b) => b.to_string(),
+
+            Witness::Array(elements) => {
+                let elems_str: Vec<String> = elements.iter().map(|e| e.display()).collect();
+                format!("[{}]", elems_str.join(", "))
+            }
+
+            Witness::Struct { name, fields } => {
+                if fields.is_empty() {
+                    format!("{} {{ .. }}", name)
+                } else {
+                    let fields_str: Vec<String> = fields
+                        .iter()
+                        .map(|(n, w)| format!("{}: {}", n, w.display()))
+                        .collect();
+                    format!("{} {{ {} }}", name, fields_str.join(", "))
+                }
+            }
+
+            Witness::Range { start, end, inclusive } => {
+                if *inclusive {
+                    format!("{}..={}", start, end)
+                } else {
+                    format!("{}..{}", start, end)
+                }
+            }
         }
     }
 }

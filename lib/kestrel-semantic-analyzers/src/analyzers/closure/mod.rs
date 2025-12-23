@@ -328,6 +328,16 @@ fn find_assignments_to_locals(
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Error => {}
+
+        ExprKind::Match { scrutinee, arms } => {
+            find_assignments_to_locals(scrutinee, target_locals, container_id, ctx);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    find_assignments_to_locals(guard, target_locals, container_id, ctx);
+                }
+                find_assignments_to_locals(&arm.body, target_locals, container_id, ctx);
+            }
+        }
     }
 }
 

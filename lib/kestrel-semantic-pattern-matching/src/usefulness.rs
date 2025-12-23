@@ -1,36 +1,83 @@
-//! Usefulness analysis for patterns.
+//! Usefulness analysis for patterns using Maranget's algorithm.
 //!
-//! A pattern is **useful** with respect to a set of existing patterns if there
+//! A pattern vector `q` is **useful** with respect to a pattern matrix `P` if there
 //! exists at least one value that:
-//! 1. Matches the new pattern
-//! 2. Does NOT match any of the existing patterns
+//! 1. Matches `q`
+//! 2. Does NOT match any row in `P`
 //!
 //! This is the core algorithm behind both:
-//! - **Exhaustiveness checking**: A match is exhaustive if a wildcard is NOT useful
-//! - **Redundancy detection**: A pattern is redundant if it's NOT useful
+//! - **Exhaustiveness checking**: A match is exhaustive if a wildcard row is NOT useful
+//! - **Redundancy detection**: A pattern arm is redundant if it's NOT useful
 //!
-//! # Algorithm
+//! # Maranget's Algorithm
 //!
-//! This implements a simplified version of Maranget's usefulness algorithm.
-//! The key insight is to recursively decompose patterns by their constructors:
+//! The algorithm works by recursively decomposing the pattern matrix:
 //!
-//! 1. If the existing patterns are empty, the new pattern is useful (matches everything)
-//! 2. If the new pattern is a wildcard, check if any constructor is not fully covered
-//! 3. If the new pattern is a specific constructor, check usefulness for that constructor
+//! 1. **Base case (empty matrix)**: If `P` is empty, `q` is useful (matches anything)
+//! 2. **Base case (unit width)**: If width is 0, check if `P` has any unguarded rows
+//! 3. **Constructor case**: If `q[0]` has constructor `c`:
+//!    - Specialize `P` and `q` for `c`
+//!    - Recursively check usefulness
+//! 4. **Wildcard case**: If `q[0]` is a wildcard:
+//!    - For each constructor `c` of the type:
+//!      - Specialize and recurse
+//!    - If type has infinite constructors, use default matrix
 //!
 //! # References
 //!
 //! - Luc Maranget, "Warnings for pattern matching" (JFP 2007)
+//! - Rust's pattern exhaustiveness checking (`rustc_pattern_analysis`)
 
-use kestrel_semantic_tree::expr::LiteralValue;
+use crate::constructor::Constructor;
+use crate::matrix::{PatternMatrix, PatternRow};
+use crate::witness::Witness;
 use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use std::collections::HashSet;
+
+/// Check if a pattern acts like a catch-all (matches any value).
+fn is_catch_all_pattern(pattern: &Pattern) -> bool {
+    match &pattern.kind {
+        PatternKind::Wildcard | PatternKind::Local { .. } | PatternKind::Rest => true,
+        PatternKind::At { subpattern, .. } => is_catch_all_pattern(subpattern),
+        PatternKind::Or { alternatives } => alternatives.iter().any(is_catch_all_pattern),
+        _ => false,
+    }
+}
+
+/// Result of usefulness analysis.
+#[derive(Debug, Clone)]
+pub struct UsefulnessResult {
+    /// Whether the pattern is useful
+    pub is_useful: bool,
+    /// Witness value if useful (for generating error messages)
+    pub witness: Option<Witness>,
+}
+
+impl UsefulnessResult {
+    /// Create a result indicating the pattern is not useful.
+    pub fn not_useful() -> Self {
+        UsefulnessResult {
+            is_useful: false,
+            witness: None,
+        }
+    }
+
+    /// Create a result indicating the pattern is useful.
+    pub fn useful(witness: Witness) -> Self {
+        UsefulnessResult {
+            is_useful: true,
+            witness: Some(witness),
+        }
+    }
+}
 
 /// Check if a pattern is useful given a set of previous patterns.
 ///
-/// Returns `true` if there exists a value that:
-/// - Matches `pattern`
-/// - Does NOT match any pattern in `previous_patterns`
+/// This is the main entry point for usefulness checking.
+/// It's a wrapper around the matrix-based algorithm.
 ///
 /// # Arguments
 ///
@@ -43,275 +90,387 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 /// `true` if the pattern is useful (can match something new),
 /// `false` if the pattern is redundant (all its matches are covered).
 pub fn is_useful(pattern: &Pattern, previous_patterns: &[&Pattern], ty: &Ty) -> bool {
-    // Base case: if there are no previous patterns, this pattern is useful
-    // (it can match any value)
-    if previous_patterns.is_empty() {
-        return true;
+    // Build the pattern matrix from previous patterns
+    let mut matrix = PatternMatrix::single_column(ty.clone());
+    for (i, p) in previous_patterns.iter().enumerate() {
+        matrix.push_row(vec![(*p).clone()], i, false);
     }
 
-    // Check if any previous pattern is a "catch-all" (wildcard or binding)
-    // If so, this pattern is NOT useful - everything is already covered
-    let has_catch_all = previous_patterns.iter().any(|p| is_catch_all(p));
-    if has_catch_all {
-        return false;
-    }
+    // The pattern to check as a single-row matrix
+    let query_row = PatternRow::new(vec![pattern.clone()], 0, false);
 
-    // Check based on the pattern kind
-    match &pattern.kind {
-        PatternKind::Wildcard | PatternKind::Local { .. } => {
-            // Wildcard/binding is useful if previous patterns don't cover all constructors
-            is_wildcard_useful(previous_patterns, ty)
-        }
-
-        PatternKind::Literal { value } => {
-            // Literal is useful if no previous pattern matches this exact value
-            is_literal_useful(value, previous_patterns)
-        }
-
-        PatternKind::EnumVariant {
-            case_name,
-            bindings,
-            ..
-        } => {
-            // Enum variant is useful if either:
-            // 1. No previous pattern matches this case
-            // 2. This pattern's sub-patterns are useful within the case
-            is_enum_variant_useful(case_name, bindings, previous_patterns, ty)
-        }
-
-        PatternKind::Tuple { elements } => {
-            // Tuple is useful if any element pattern adds new coverage
-            is_tuple_useful(elements, previous_patterns, ty)
-        }
-
-        PatternKind::Error => {
-            // Error patterns are always considered useful to avoid cascading errors
-            true
-        }
-    }
+    // Run the usefulness algorithm
+    let result = is_useful_impl(&matrix, &query_row);
+    result.is_useful
 }
 
-/// Check if a pattern is a "catch-all" that matches any value.
-fn is_catch_all(pattern: &Pattern) -> bool {
-    matches!(
-        &pattern.kind,
-        PatternKind::Wildcard | PatternKind::Local { .. }
-    )
-}
-
-/// Check if a wildcard/binding pattern is useful.
+/// Check if a pattern row is useful with respect to a matrix.
 ///
-/// A wildcard is useful if the previous patterns don't cover all possible
-/// constructors of the type. For example:
-/// - For Bool: need both `true` and `false` to cover
-/// - For enum: need all cases
-/// - For Int/String: infinite constructors, always need wildcard
-fn is_wildcard_useful(previous_patterns: &[&Pattern], ty: &Ty) -> bool {
-    use semantic_tree::symbol::Symbol;
-
-    match ty.kind() {
-        TyKind::Bool => {
-            // Check if both true and false are covered
-            let has_true = previous_patterns.iter().any(|p| {
-                matches!(
-                    &p.kind,
-                    PatternKind::Literal {
-                        value: LiteralValue::Bool(true)
-                    }
-                )
-            });
-            let has_false = previous_patterns.iter().any(|p| {
-                matches!(
-                    &p.kind,
-                    PatternKind::Literal {
-                        value: LiteralValue::Bool(false)
-                    }
-                )
-            });
-            !(has_true && has_false)
-        }
-
-        TyKind::Enum { symbol, .. } => {
-            // Get all cases from the enum symbol
-            let cases = symbol.cases();
-
-            // Check if all cases are covered
-            let covered_cases: Vec<&str> = previous_patterns
-                .iter()
-                .filter_map(|p| match &p.kind {
-                    PatternKind::EnumVariant { case_name, .. } => Some(case_name.as_str()),
-                    _ => None,
-                })
-                .collect();
-
-            // Wildcard is useful if any case is not covered
-            cases.iter().any(|case| {
-                let name = case.metadata().name();
-                let case_name = name.value.as_str();
-                !covered_cases.contains(&case_name)
-            })
-        }
-
-        TyKind::Tuple(elements) => {
-            // For tuples, check if the combination of patterns covers all possibilities
-            // Simplified: if all elements have catch-all patterns, tuple is covered
-            // This is a conservative approximation
-            if previous_patterns.is_empty() {
-                return true;
-            }
-
-            // Check if any previous pattern is a tuple that fully covers
-            for prev in previous_patterns {
-                if let PatternKind::Tuple {
-                    elements: prev_elements,
-                } = &prev.kind
-                {
-                    if prev_elements.len() == elements.len() {
-                        // Check if all elements in this tuple pattern are catch-alls
-                        let all_catch_alls = prev_elements.iter().all(|e| is_catch_all(e));
-                        if all_catch_alls {
-                            return false; // This tuple covers everything
-                        }
-                    }
-                }
-            }
-            true
-        }
-
-        // Types with infinite constructors (Int, String, Float)
-        // A wildcard is always useful unless there's already a catch-all
-        TyKind::Int(_) | TyKind::Float(_) | TyKind::String => {
-            // We already checked for catch-alls above, so if we're here,
-            // the wildcard can match values not covered by literals
-            true
-        }
-
-        // Unit type has only one value
-        TyKind::Unit => {
-            // Unit is covered if there's any pattern (since all patterns match ())
-            previous_patterns.is_empty()
-        }
-
-        // Never type has no values - patterns are never useful
-        TyKind::Never => false,
-
-        // For other types, be conservative and say wildcard is useful
-        _ => true,
-    }
-}
-
-/// Check if a literal pattern is useful.
-fn is_literal_useful(value: &LiteralValue, previous_patterns: &[&Pattern]) -> bool {
-    // Literal is useful if no previous pattern matches this exact value
-    !previous_patterns.iter().any(|p| {
-        match &p.kind {
-            PatternKind::Literal { value: prev_value } => value == prev_value,
-            // Wildcards/bindings would catch this, but we already checked for those
-            _ => false,
-        }
-    })
-}
-
-/// Check if an enum variant pattern is useful.
-fn is_enum_variant_useful(
-    case_name: &str,
-    bindings: &[kestrel_semantic_tree::pattern::EnumPatternBinding],
-    previous_patterns: &[&Pattern],
-    _ty: &Ty,
-) -> bool {
-    // Collect all previous patterns that match this case
-    let matching_patterns: Vec<&[kestrel_semantic_tree::pattern::EnumPatternBinding]> =
-        previous_patterns
-            .iter()
-            .filter_map(|p| match &p.kind {
-                PatternKind::EnumVariant {
-                    case_name: prev_name,
-                    bindings: prev_bindings,
-                    ..
-                } if prev_name == case_name => Some(prev_bindings.as_slice()),
-                _ => None,
-            })
-            .collect();
-
-    // If no previous pattern matches this case, it's useful
-    if matching_patterns.is_empty() {
-        return true;
+/// This is the core implementation of Maranget's usefulness algorithm.
+pub fn is_useful_impl(matrix: &PatternMatrix, query: &PatternRow) -> UsefulnessResult {
+    // Base case 1: If the matrix is empty, the query is useful
+    // (it matches values that "fall through" all existing patterns)
+    if matrix.is_empty() {
+        return UsefulnessResult::useful(Witness::any());
     }
 
-    // If this pattern has no bindings (simple case), check if it's already covered
-    if bindings.is_empty() {
-        return false; // Already covered by a previous pattern for this case
+    // Base case 2: If the matrix has no columns (unit width)
+    if matrix.is_unit() || query.is_empty() {
+        // Check if any existing row (without guard) would catch the value
+        let has_unguarded_catch = matrix.rows.iter().any(|row| !row.has_guard);
+        return if has_unguarded_catch {
+            UsefulnessResult::not_useful()
+        } else {
+            // All rows have guards, so they might fail
+            UsefulnessResult::useful(Witness::any())
+        };
     }
 
-    // For patterns with bindings, check if the bindings add coverage
-    // This is a simplified check - full implementation would recurse into bindings
-    for prev_bindings in &matching_patterns {
-        if prev_bindings.is_empty() {
-            // Previous pattern with no bindings means it catches all instances of this case
-            // But wait - if this case HAS associated values, an empty binding list means
-            // we're ignoring them, which should still match everything
-            return false;
-        }
-
-        // Check if all previous bindings are catch-alls
-        let all_catch_alls = prev_bindings.iter().all(|b| is_catch_all(&b.pattern));
-
-        if all_catch_alls {
-            return false; // Previous pattern catches all instances of this case
-        }
-    }
-
-    // If we get here, the bindings might add new coverage
-    true
-}
-
-/// Check if a tuple pattern is useful.
-fn is_tuple_useful(elements: &[Pattern], previous_patterns: &[&Pattern], ty: &Ty) -> bool {
-    // Get the tuple element types
-    let element_types = match ty.kind() {
-        TyKind::Tuple(elements) => elements.clone(),
-        _ => return true, // Type mismatch - be conservative
+    // Get the first column type
+    let first_type = match matrix.first_column_type() {
+        Some(ty) => ty.clone(),
+        None => return UsefulnessResult::useful(Witness::any()),
     };
 
-    // Collect previous tuple patterns
-    let prev_tuples: Vec<&[Pattern]> = previous_patterns
-        .iter()
-        .filter_map(|p| match &p.kind {
-            PatternKind::Tuple {
-                elements: prev_elements,
-            } => Some(prev_elements.as_slice()),
-            _ => None,
-        })
-        .collect();
+    // Get the first pattern in the query
+    let first_pattern = match query.first() {
+        Some(p) => p,
+        None => return UsefulnessResult::useful(Witness::any()),
+    };
 
-    if prev_tuples.is_empty() {
-        return true;
+    let query_ctor = Constructor::from_pattern(first_pattern);
+
+    if query_ctor.is_wildcard() {
+        // Wildcard case: need to check all constructors
+        is_wildcard_useful(matrix, query, &first_type)
+    } else {
+        // Constructor case: specialize and recurse
+        is_constructor_useful(matrix, query, &query_ctor, &first_type)
+    }
+}
+
+/// Check if a wildcard pattern (at the head) is useful.
+fn is_wildcard_useful(
+    matrix: &PatternMatrix,
+    query: &PatternRow,
+    ty: &Ty,
+) -> UsefulnessResult {
+    // Check if any row in the matrix starts with a catch-all (wildcard/binding)
+    // If so, this wildcard is not useful for the first column
+    let has_catch_all = matrix.rows.iter().any(|row| {
+        if let Some(first) = row.first() {
+            is_catch_all_pattern(first)
+        } else {
+            false
+        }
+    });
+
+    if has_catch_all {
+        // There's already a wildcard covering the first column
+        // We need to check if the query is useful in the default matrix
+        let default = matrix.default_matrix();
+        let default_query = PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
+        return is_useful_impl(&default, &default_query);
     }
 
-    // Check each element position
-    for (i, element) in elements.iter().enumerate() {
-        // Get previous patterns for this position
-        let prev_at_position: Vec<&Pattern> = prev_tuples.iter().filter_map(|t| t.get(i)).collect();
+    // Get all constructors covered by the matrix's first column
+    let covered_ctors: HashSet<Constructor> = matrix.unique_head_constructors().into_iter().collect();
 
-        let element_ty = element_types.get(i).cloned().unwrap_or_else(|| ty.clone());
+    // Get all constructors for the type
+    match Constructor::all_constructors(ty) {
+        Some(all_ctors) => {
+            // Finite constructor set: check each uncovered constructor
+            for ctor in &all_ctors {
+                if !covered_ctors.contains(ctor) {
+                    // Found an uncovered constructor - query is useful!
+                    let witness = ctor_to_witness(ctor, ty);
+                    return UsefulnessResult::useful(witness);
+                }
+            }
 
-        // If this element is useful given the previous patterns at this position,
-        // then the whole tuple might be useful
-        // This is a simplified heuristic - full analysis would be more complex
-        if is_useful(element, &prev_at_position, &element_ty) {
-            // But we need to also check that the other positions don't exclude this
-            // For now, use a conservative approximation
-            return true;
+            // All constructors covered: check if wildcard is useful within each
+            for ctor in &all_ctors {
+                let result = is_constructor_useful(matrix, query, ctor, ty);
+                if result.is_useful {
+                    return result;
+                }
+            }
+
+            UsefulnessResult::not_useful()
+        }
+        None => {
+            // Infinite constructor set: use default matrix
+            let default = matrix.default_matrix();
+            let default_query = PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
+
+            if default.is_unit() && default.is_empty() {
+                // No wildcards in matrix and infinite constructors
+                // Query is definitely useful
+                UsefulnessResult::useful(Witness::any())
+            } else {
+                is_useful_impl(&default, &default_query)
+            }
         }
     }
+}
 
-    // All elements are covered by previous patterns
-    false
+/// Check if a specific constructor is useful.
+fn is_constructor_useful(
+    matrix: &PatternMatrix,
+    query: &PatternRow,
+    ctor: &Constructor,
+    ty: &Ty,
+) -> UsefulnessResult {
+    // Get field types for the constructor
+    let field_types = get_constructor_field_types(ctor, ty);
+
+    // Specialize matrix and query for this constructor
+    let specialized_matrix = matrix.specialize(ctor, &field_types);
+    let specialized_query = specialize_query(query, ctor, ty);
+
+    // Recurse
+    let result = is_useful_impl(&specialized_matrix, &specialized_query);
+
+    if result.is_useful {
+        // Wrap the witness with this constructor
+        let inner_witness = result.witness.unwrap_or(Witness::any());
+        let wrapped = wrap_witness_with_constructor(inner_witness, ctor, ty);
+        UsefulnessResult::useful(wrapped)
+    } else {
+        UsefulnessResult::not_useful()
+    }
+}
+
+/// Specialize a query row for a constructor.
+fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternRow {
+    let first = query.first().expect("Query should have at least one pattern");
+    let field_types = get_constructor_field_types(ctor, ty);
+
+    // Extract sub-patterns from the first pattern
+    let sub_patterns: Vec<Pattern> = match &first.kind {
+        kestrel_semantic_tree::pattern::PatternKind::Wildcard
+        | kestrel_semantic_tree::pattern::PatternKind::Local { .. }
+        | kestrel_semantic_tree::pattern::PatternKind::Rest => {
+            // Generate wildcards for constructor's fields
+            field_types
+                .iter()
+                .map(|field_ty| Pattern::wildcard(field_ty.clone(), first.span.clone()))
+                .collect()
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::Tuple { elements } => {
+            elements.clone()
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::EnumVariant { bindings, .. } => {
+            bindings.iter().map(|b| (*b.pattern).clone()).collect()
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::Struct { fields, .. } => {
+            fields.iter().map(|f| f.pattern.clone()).collect()
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::Array { prefix, rest, suffix } => {
+            let mut result = prefix.clone();
+            if rest.is_some() {
+                result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
+            }
+            result.extend(suffix.clone());
+            result
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::At { subpattern, .. } => {
+            // Recurse into the subpattern
+            let sub_query = PatternRow::new(
+                vec![(**subpattern).clone()],
+                query.arm_index,
+                query.has_guard,
+            );
+            return specialize_query(&sub_query, ctor, ty);
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::Or { alternatives } => {
+            // Use first matching alternative
+            // TODO: This is a simplification; proper handling would try all
+            if let Some(first_alt) = alternatives.first() {
+                let alt_query = PatternRow::new(
+                    vec![first_alt.clone()],
+                    query.arm_index,
+                    query.has_guard,
+                );
+                return specialize_query(&alt_query, ctor, ty);
+            }
+            vec![]
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::Literal { .. }
+        | kestrel_semantic_tree::pattern::PatternKind::Range { .. } => {
+            // No sub-patterns for literals and ranges
+            vec![]
+        }
+
+        kestrel_semantic_tree::pattern::PatternKind::Error => {
+            vec![]
+        }
+    };
+
+    // Combine sub-patterns with rest of query
+    let mut new_patterns = sub_patterns;
+    new_patterns.extend(query.rest().iter().cloned());
+
+    PatternRow::new(new_patterns, query.arm_index, query.has_guard)
+}
+
+/// Get field types for a constructor.
+fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
+    use semantic_tree::symbol::Symbol;
+
+    match (ctor, ty.kind()) {
+        (Constructor::Tuple { arity }, TyKind::Tuple(elements)) => {
+            if elements.len() == *arity {
+                elements.clone()
+            } else {
+                vec![ty.clone(); *arity]
+            }
+        }
+
+        (Constructor::Variant { name, arity }, TyKind::Enum { symbol, substitutions }) => {
+            if let Some(case) = symbol
+                .cases()
+                .iter()
+                .find(|c| c.metadata().name().value == *name)
+            {
+                if let Some(cb) = case.callable_behavior() {
+                    // Apply type substitutions to get concrete types
+                    return cb.parameters().iter().map(|p| {
+                        substitutions.apply(&p.ty)
+                    }).collect();
+                }
+            }
+            vec![ty.clone(); *arity]
+        }
+
+        (Constructor::Struct { arity, .. }, TyKind::Struct { symbol, .. }) => {
+            // Get Field children and their types
+            let fields: Vec<_> = symbol
+                .metadata()
+                .children()
+                .iter()
+                .filter_map(|c| {
+                    if c.metadata().kind() == KestrelSymbolKind::Field {
+                        c.clone().downcast_arc::<FieldSymbol>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            
+            if fields.len() == *arity {
+                fields.iter().map(|f| f.field_type().clone()).collect()
+            } else {
+                vec![ty.clone(); *arity]
+            }
+        }
+
+        (Constructor::Array { prefix_len, suffix_len, has_rest }, TyKind::Array(element_type)) => {
+            let elem_ty = (**element_type).clone();
+            let mut types = vec![elem_ty.clone(); *prefix_len];
+            if *has_rest {
+                types.push(ty.clone()); // Rest is an array/slice
+            }
+            types.extend(vec![elem_ty; *suffix_len]);
+            types
+        }
+
+        _ => vec![ty.clone(); ctor.arity()],
+    }
+}
+
+/// Convert a constructor to a witness.
+fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
+    match ctor {
+        Constructor::True => Witness::bool(true),
+        Constructor::False => Witness::bool(false),
+        Constructor::Variant { name, arity } => {
+            if *arity == 0 {
+                Witness::enum_case(name)
+            } else {
+                let args = vec![Witness::any(); *arity];
+                Witness::enum_case_with_args(name, args)
+            }
+        }
+        Constructor::Tuple { arity } => {
+            Witness::tuple(vec![Witness::any(); *arity])
+        }
+        Constructor::Struct { name, .. } => {
+            Witness::EnumCase {
+                name: name.clone(),
+                args: vec![],
+            }
+        }
+        Constructor::IntLiteral(n) => Witness::integer(*n),
+        Constructor::IntRange { start, .. } => {
+            // For ranges, pick the start value as witness
+            Witness::integer(*start)
+        }
+        Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
+        Constructor::CharRange { start, .. } => {
+            Witness::Literal(format!("'{}'", start))
+        }
+        Constructor::StringLiteral(s) => Witness::string(s),
+        Constructor::Unit => Witness::tuple(vec![]),
+        Constructor::Wildcard => Witness::any(),
+        Constructor::Array { prefix_len, suffix_len, has_rest } => {
+            let mut elements = vec![Witness::any(); *prefix_len + *suffix_len];
+            if *has_rest {
+                elements.push(Witness::any()); // Simplified
+            }
+            Witness::Array(elements)
+        }
+        Constructor::NonExhaustive | Constructor::Missing => Witness::any(),
+    }
+}
+
+/// Wrap a witness with a constructor.
+fn wrap_witness_with_constructor(inner: Witness, ctor: &Constructor, _ty: &Ty) -> Witness {
+    match ctor {
+        Constructor::True => Witness::bool(true),
+        Constructor::False => Witness::bool(false),
+        Constructor::Variant { name, .. } => {
+            // Extract inner witnesses from tuple-like witness
+            let args = match inner {
+                Witness::Tuple(elems) => elems,
+                Witness::Any => vec![Witness::any()],
+                other => vec![other],
+            };
+            if args.is_empty() || (args.len() == 1 && matches!(args[0], Witness::Any)) {
+                Witness::enum_case(name)
+            } else {
+                Witness::enum_case_with_args(name, args)
+            }
+        }
+        Constructor::Tuple { .. } => {
+            // Inner should already be the right shape
+            match inner {
+                Witness::Tuple(_) => inner,
+                Witness::Any => Witness::any(),
+                other => Witness::tuple(vec![other]),
+            }
+        }
+        Constructor::Struct { name, .. } => {
+            Witness::EnumCase {
+                name: format!("{} {{ .. }}", name),
+                args: vec![],
+            }
+        }
+        _ => inner,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_semantic_tree::expr::LiteralValue;
     use kestrel_semantic_tree::pattern::Mutability;
     use kestrel_semantic_tree::symbol::local::LocalId;
     use kestrel_semantic_tree::ty::IntBits;
@@ -425,5 +584,55 @@ mod tests {
 
         let previous = vec![&pat1];
         assert!(is_useful(&pat2, &previous, &tuple_ty));
+    }
+
+    #[test]
+    fn test_tuple_wildcard_after_partial_coverage() {
+        let tuple_ty = Ty::tuple(vec![bool_ty(), bool_ty()], test_span());
+
+        // Pattern: (true, _)
+        let pat1 = Pattern::tuple(
+            vec![
+                Pattern::literal(LiteralValue::Bool(true), bool_ty(), test_span()),
+                Pattern::wildcard(bool_ty(), test_span()),
+            ],
+            tuple_ty.clone(),
+            test_span(),
+        );
+
+        // Wildcard should be useful because (false, _) is uncovered
+        let wildcard = Pattern::wildcard(tuple_ty.clone(), test_span());
+        let previous = vec![&pat1];
+        assert!(is_useful(&wildcard, &previous, &tuple_ty));
+    }
+
+    #[test]
+    fn test_tuple_fully_covered() {
+        let tuple_ty = Ty::tuple(vec![bool_ty(), bool_ty()], test_span());
+
+        // (true, _)
+        let pat1 = Pattern::tuple(
+            vec![
+                Pattern::literal(LiteralValue::Bool(true), bool_ty(), test_span()),
+                Pattern::wildcard(bool_ty(), test_span()),
+            ],
+            tuple_ty.clone(),
+            test_span(),
+        );
+
+        // (false, _)
+        let pat2 = Pattern::tuple(
+            vec![
+                Pattern::literal(LiteralValue::Bool(false), bool_ty(), test_span()),
+                Pattern::wildcard(bool_ty(), test_span()),
+            ],
+            tuple_ty.clone(),
+            test_span(),
+        );
+
+        // Wildcard should NOT be useful - both bool cases covered
+        let wildcard = Pattern::wildcard(tuple_ty.clone(), test_span());
+        let previous = vec![&pat1, &pat2];
+        assert!(!is_useful(&wildcard, &previous, &tuple_ty));
     }
 }

@@ -122,6 +122,7 @@ fn validate_assignment_target(
         | ExprKind::Continue { .. }
         | ExprKind::Return { .. }
         | ExprKind::Closure { .. }
+        | ExprKind::Match { .. }
         | ExprKind::Error => {
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {

@@ -321,6 +321,14 @@ pub enum ExprVariant {
         /// Optional argument list for enum cases with associated values
         arguments: Option<ArgumentListData>,
     },
+    /// Match expression: match scrutinee { pattern => expr, ... }
+    Match {
+        match_span: Span,
+        scrutinee: Box<ExprVariant>,
+        lbrace: Span,
+        arms: Vec<MatchArmData>,
+        rbrace: Span,
+    },
 }
 
 /// Argument list data for implicit member access
@@ -330,6 +338,22 @@ pub struct ArgumentListData {
     pub arguments: Vec<CallArg>,
     pub commas: Vec<Span>,
     pub rparen: Span,
+}
+
+/// Match arm data: pattern [if guard] => expression
+#[derive(Debug, Clone)]
+pub struct MatchArmData {
+    pub pattern: crate::pattern::PatternVariant,
+    pub guard: Option<MatchGuardData>,
+    pub fat_arrow: Span,
+    pub body: Box<ExprVariant>,
+}
+
+/// Match guard data: if condition
+#[derive(Debug, Clone)]
+pub struct MatchGuardData {
+    pub if_span: Span,
+    pub condition: Box<ExprVariant>,
 }
 
 /// Loop label data: label:
@@ -434,13 +458,14 @@ enum ConditionPostfixOp {
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon).
 /// This is used in inline code blocks within the expression parser to allow
-/// if/while/loop expressions to be followed by more statements without semicolons.
+/// if/while/loop/match expressions to be followed by more statements without semicolons.
 fn is_inline_statement_like(expr: &ExprVariant) -> bool {
     matches!(
         expr,
         ExprVariant::If { .. }
             | ExprVariant::While { .. }
             | ExprVariant::Loop { .. }
+            | ExprVariant::Match { .. }
             | ExprVariant::Return { .. }
     )
 }
@@ -950,6 +975,52 @@ pub fn expr_parser<'tokens>(
             .then(expr.clone().map(Box::new).or_not())
             .map(|(return_span, value)| ExprVariant::Return { return_span, value });
 
+        // Match expression: match scrutinee { pattern => expr, ... }
+        let match_expr = {
+            use crate::pattern::pattern_parser;
+
+            // Match arm: pattern [if guard] => expression
+            let match_arm = pattern_parser()
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::If).map_with(|_, e| to_kestrel_span(e.span())))
+                        .then(condition_binary.clone())
+                        .map(|(if_span, condition)| MatchGuardData {
+                            if_span,
+                            condition: Box::new(condition),
+                        })
+                        .or_not()
+                )
+                .then(skip_trivia().ignore_then(just(Token::FatArrow).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(expr.clone())
+                .map(|(((pattern, guard), fat_arrow), body)| MatchArmData {
+                    pattern,
+                    guard,
+                    fat_arrow,
+                    body: Box::new(body),
+                });
+
+            skip_trivia()
+                .ignore_then(just(Token::Match).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(condition_binary.clone())
+                .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(
+                    match_arm
+                        .separated_by(skip_trivia().ignore_then(just(Token::Comma).map_with(|_, _| ())))
+                        .allow_trailing()
+                        .collect::<Vec<_>>()
+                )
+                .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+                .map(|((((match_span, scrutinee), lbrace), arms), rbrace)| ExprVariant::Match {
+                    match_span,
+                    scrutinee: Box::new(scrutinee),
+                    lbrace,
+                    arms,
+                    rbrace,
+                })
+                .boxed()
+        };
+
         // Closure expression
         let closure_expr = {
             let closure_param = skip_trivia()
@@ -1094,6 +1165,7 @@ pub fn expr_parser<'tokens>(
             .or(break_expr)
             .or(continue_expr)
             .or(return_expr)
+            .or(match_expr)
             .or(closure_expr)
             .or(implicit_member_access)
             .or(path)
@@ -1233,6 +1305,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::ImplicitMemberAccess { dot, member, arguments } => {
             emit_implicit_member_access_expr(sink, dot.clone(), member.clone(), arguments.as_ref());
+        }
+        ExprVariant::Match { match_span, scrutinee, lbrace, arms, rbrace } => {
+            emit_match_expr(sink, match_span.clone(), scrutinee, lbrace.clone(), arms, rbrace.clone());
         }
     }
 }
@@ -1492,6 +1567,37 @@ fn emit_if_expr(sink: &mut EventSink, if_span: Span, condition: &ExprVariant, th
         }
         sink.finish_node();
     }
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_match_expr(
+    sink: &mut EventSink,
+    match_span: Span,
+    scrutinee: &ExprVariant,
+    lbrace: Span,
+    arms: &[MatchArmData],
+    rbrace: Span,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprMatch);
+    sink.add_token(SyntaxKind::Match, match_span);
+    emit_expr_variant(sink, scrutinee);
+    sink.add_token(SyntaxKind::LBrace, lbrace);
+    for arm in arms {
+        sink.start_node(SyntaxKind::MatchArm);
+        crate::pattern::emit_pattern_variant(sink, &arm.pattern);
+        if let Some(guard) = &arm.guard {
+            sink.start_node(SyntaxKind::MatchArmGuard);
+            sink.add_token(SyntaxKind::If, guard.if_span.clone());
+            emit_expr_variant(sink, &guard.condition);
+            sink.finish_node();
+        }
+        sink.add_token(SyntaxKind::FatArrow, arm.fat_arrow.clone());
+        emit_expr_variant(sink, &arm.body);
+        sink.finish_node();
+    }
+    sink.add_token(SyntaxKind::RBrace, rbrace);
     sink.finish_node();
     sink.finish_node();
 }

@@ -105,10 +105,22 @@ impl Statement {
                             "let"
                         }
                     }
+                    PatternKind::At { mutability, .. } => {
+                        if *mutability == Mutability::Mutable {
+                            "var"
+                        } else {
+                            "let"
+                        }
+                    }
                     PatternKind::Wildcard
                     | PatternKind::Tuple { .. }
                     | PatternKind::Literal { .. }
                     | PatternKind::EnumVariant { .. }
+                    | PatternKind::Range { .. }
+                    | PatternKind::Struct { .. }
+                    | PatternKind::Array { .. }
+                    | PatternKind::Or { .. }
+                    | PatternKind::Rest
                     | PatternKind::Error => "let",
                 };
                 let name = pattern.name().unwrap_or("<error>");

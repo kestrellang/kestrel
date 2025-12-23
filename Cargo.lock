@@ -310,6 +310,7 @@ version = "0.8.0"
 dependencies = [
  "kestrel-reporting",
  "kestrel-semantic-model",
+ "kestrel-semantic-pattern-matching",
  "kestrel-semantic-tree",
  "kestrel-semantic-tree-binder",
  "kestrel-semantic-type-inference",

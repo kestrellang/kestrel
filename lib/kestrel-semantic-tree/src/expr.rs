@@ -536,6 +536,17 @@ pub enum ExprKind {
         arguments: Option<Vec<CallArgument>>,
     },
 
+    /// Match expression: `match scrutinee { pattern => body, ... }`
+    ///
+    /// Type is the common type of all arm bodies.
+    /// Must be exhaustive - all possible values of the scrutinee must be covered.
+    Match {
+        /// The expression being matched against
+        scrutinee: Box<Expression>,
+        /// The match arms (pattern => body pairs)
+        arms: Vec<MatchArm>,
+    },
+
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
@@ -595,6 +606,48 @@ pub enum ElseBranch {
     },
     /// else if condition { ... } else { ... }
     ElseIf(Box<Expression>),
+}
+
+/// A match arm in a match expression.
+///
+/// Represents `pattern [if guard] => body` in a match expression.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    /// The pattern to match against
+    pub pattern: crate::pattern::Pattern,
+    /// Optional guard condition (the `if expr` part)
+    pub guard: Option<Expression>,
+    /// The body expression to evaluate if the pattern matches
+    pub body: Expression,
+    /// The span of the entire arm
+    pub span: Span,
+}
+
+impl MatchArm {
+    /// Create a new match arm without a guard.
+    pub fn new(pattern: crate::pattern::Pattern, body: Expression, span: Span) -> Self {
+        MatchArm {
+            pattern,
+            guard: None,
+            body,
+            span,
+        }
+    }
+
+    /// Create a new match arm with a guard.
+    pub fn with_guard(
+        pattern: crate::pattern::Pattern,
+        guard: Expression,
+        body: Expression,
+        span: Span,
+    ) -> Self {
+        MatchArm {
+            pattern,
+            guard: Some(guard),
+            body,
+            span,
+        }
+    }
 }
 
 impl ElseBranch {
@@ -849,6 +902,9 @@ impl Expression {
                 } else {
                     format!(".{}", member_name)
                 }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                format!("match {} {{ {} arms }}", scrutinee.debug_compact(), arms.len())
             }
             ExprKind::Error => "<error>".to_string(),
         }
@@ -1383,6 +1439,35 @@ impl Expression {
                 value: value.map(Box::new),
             },
             ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a match expression.
+    ///
+    /// Type is computed from the arm bodies - they should all have compatible types.
+    /// If all arms have Never type, the match expression has Never type.
+    /// Otherwise, the type is inferred and will be resolved during type inference.
+    pub fn match_expr(scrutinee: Expression, arms: Vec<MatchArm>, span: Span) -> Self {
+        // Compute the type by joining all arm body types
+        // This handles Never propagation correctly
+        let ty = if arms.is_empty() {
+            Ty::never(span.clone())
+        } else {
+            arms.iter()
+                .map(|arm| arm.body.ty.clone())
+                .reduce(|a, b| a.join(&b))
+                .unwrap_or_else(|| Ty::infer(span.clone()))
+        };
+
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            ty,
             span,
             mutable: false,
         }

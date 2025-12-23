@@ -6,9 +6,10 @@
 //! # Algorithm Overview
 //!
 //! The algorithm works by:
-//! 1. Building a "pattern matrix" where each row is a match arm
+//! 1. Building a pattern matrix where each row is a match arm
 //! 2. Checking if the wildcard pattern `_` is "useful" with respect to this matrix
 //! 3. If `_` is useful, the match is non-exhaustive (some values are not covered)
+//! 4. Also checking each arm for redundancy by testing if it's useful against prior arms
 //!
 //! # Guards and Exhaustiveness
 //!
@@ -26,11 +27,13 @@
 //! # References
 //!
 //! - Luc Maranget, "Warnings for pattern matching" (JFP 2007)
-//! - Rust's pattern exhaustiveness checking
+//! - Rust's pattern exhaustiveness checking (`rustc_pattern_analysis`)
 
-use crate::usefulness::is_useful;
+use crate::constructor::Constructor;
+use crate::matrix::{PatternMatrix, PatternRow};
+use crate::usefulness::is_useful_impl;
 use crate::witness::Witness;
-use kestrel_semantic_tree::pattern::Pattern;
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::ty::Ty;
 
 /// Result of exhaustiveness checking.
@@ -112,40 +115,46 @@ impl<'a> ExhaustivenessChecker<'a> {
             return ExhaustivenessResult::non_exhaustive(vec![Witness::any()]);
         }
 
-        // Check for redundant patterns and build the effective pattern list
+        // Build the pattern matrix and check for redundancy
+        let mut matrix = PatternMatrix::single_column(self.scrutinee_type.clone());
         let mut redundant_arms = Vec::new();
-        let mut effective_patterns: Vec<&Pattern> = Vec::new();
 
         for (i, (pattern, &has_guard)) in patterns.iter().zip(has_guards.iter()).enumerate() {
             // Check if this pattern is useful given the previous patterns
-            if !effective_patterns.is_empty()
-                && !is_useful(pattern, &effective_patterns, self.scrutinee_type)
-            {
-                // Pattern is not useful (redundant) - but only if it doesn't have a guard
+            // For or-patterns, we check usefulness of the whole or-pattern
+            let query = PatternRow::new(vec![(*pattern).clone()], i, has_guard);
+            let usefulness = is_useful_impl(&matrix, &query);
+
+            if !usefulness.is_useful && !has_guard {
+                // Pattern is not useful (redundant)
                 // Guarded patterns might still be useful even if structurally redundant
-                if !has_guard {
-                    redundant_arms.push(i);
-                }
+                redundant_arms.push(i);
             }
 
-            // Add pattern to effective list (guards don't cover cases for exhaustiveness)
+            // Add pattern to matrix (guards don't cover cases for exhaustiveness)
+            // For or-patterns, we expand them to multiple rows
             if !has_guard {
-                effective_patterns.push(pattern);
+                let expanded = expand_or_patterns(pattern);
+                for alt in expanded {
+                    let row = PatternRow::new(vec![alt], i, has_guard);
+                    matrix.push(row);
+                }
             }
         }
 
-        // Check if the patterns are exhaustive
-        // We do this by checking if a wildcard pattern would be useful
+        // Check exhaustiveness: is a wildcard useful?
         let wildcard =
             Pattern::wildcard(self.scrutinee_type.clone(), self.scrutinee_type.span().clone());
+        let wildcard_row = PatternRow::new(vec![wildcard.clone()], patterns.len(), false);
 
-        let is_exhaustive = !is_useful(&wildcard, &effective_patterns, self.scrutinee_type);
+        let exhaustiveness_result = is_useful_impl(&matrix, &wildcard_row);
+        let is_exhaustive = !exhaustiveness_result.is_useful;
 
         let mut result = if is_exhaustive {
             ExhaustivenessResult::exhaustive()
         } else {
             // Generate witnesses for missing patterns
-            let witnesses = self.generate_witnesses(&effective_patterns);
+            let witnesses = self.generate_witnesses(&matrix, &wildcard);
             ExhaustivenessResult::non_exhaustive(witnesses)
         };
 
@@ -155,118 +164,91 @@ impl<'a> ExhaustivenessChecker<'a> {
 
     /// Generate witnesses for missing patterns.
     ///
-    /// This is a simplified implementation that generates basic witnesses.
-    /// A full implementation would use Maranget's witness generation algorithm.
-    fn generate_witnesses(&self, patterns: &[&Pattern]) -> Vec<Witness> {
-        use kestrel_semantic_tree::pattern::PatternKind;
-        use kestrel_semantic_tree::ty::TyKind;
-        use semantic_tree::symbol::Symbol;
+    /// Uses the constructor-based approach to find uncovered constructors.
+    fn generate_witnesses(&self, matrix: &PatternMatrix, _wildcard: &Pattern) -> Vec<Witness> {
+        use std::collections::HashSet;
 
-        // Simple witness generation based on type
-        match self.scrutinee_type.kind() {
-            TyKind::Bool => {
-                // Check which boolean values are covered
-                let has_true = patterns.iter().any(|p| {
-                    matches!(
-                        &p.kind,
-                        PatternKind::Literal { value }
-                            if matches!(
-                                value,
-                                kestrel_semantic_tree::expr::LiteralValue::Bool(true)
-                            )
-                    ) || matches!(
-                        &p.kind,
-                        PatternKind::Wildcard | PatternKind::Local { .. }
-                    )
-                });
-                let has_false = patterns.iter().any(|p| {
-                    matches!(
-                        &p.kind,
-                        PatternKind::Literal { value }
-                            if matches!(
-                                value,
-                                kestrel_semantic_tree::expr::LiteralValue::Bool(false)
-                            )
-                    ) || matches!(
-                        &p.kind,
-                        PatternKind::Wildcard | PatternKind::Local { .. }
-                    )
-                });
+        // Get covered constructors from the matrix
+        let covered: HashSet<Constructor> =
+            matrix.unique_head_constructors().into_iter().collect();
 
-                let mut witnesses = Vec::new();
-                if !has_true {
-                    witnesses.push(Witness::bool(true));
-                }
-                if !has_false {
-                    witnesses.push(Witness::bool(false));
-                }
-                if witnesses.is_empty() {
-                    // Should be exhaustive, but we're here so something's wrong
-                    witnesses.push(Witness::any());
-                }
-                witnesses
-            }
-
-            TyKind::Enum { symbol, .. } => {
-                // Get all cases from the enum symbol
-                let cases = symbol.cases();
-
-                // Check which enum cases are covered
-                let covered_cases: Vec<&str> = patterns
-                    .iter()
-                    .filter_map(|p| match &p.kind {
-                        PatternKind::EnumVariant { case_name, .. } => Some(case_name.as_str()),
-                        _ => None,
-                    })
+        // Get all constructors for the type
+        match Constructor::all_constructors(self.scrutinee_type) {
+            Some(all_ctors) => {
+                // Find uncovered constructors
+                let missing: Vec<_> = all_ctors
+                    .into_iter()
+                    .filter(|c| !covered.contains(c))
                     .collect();
 
-                // If any pattern is a wildcard/binding, all cases are covered
-                let has_catch_all = patterns.iter().any(|p| {
-                    matches!(
-                        &p.kind,
-                        PatternKind::Wildcard | PatternKind::Local { .. }
-                    )
-                });
-
-                if has_catch_all {
-                    return vec![Witness::any()];
+                if missing.is_empty() {
+                    // All top-level constructors covered, but there might be
+                    // uncovered nested patterns. For now, return generic witness.
+                    vec![Witness::any()]
+                } else {
+                    // Convert missing constructors to witnesses
+                    missing
+                        .iter()
+                        .map(|c| self.constructor_to_witness(c))
+                        .collect()
                 }
-
-                // Generate witnesses for uncovered cases
-                let mut witnesses = Vec::new();
-                for case in &cases {
-                    let name = case.metadata().name();
-                    let case_name = name.value.as_str();
-                    if !covered_cases.contains(&case_name) {
-                        // TODO: Include associated value witnesses if the case has them
-                        witnesses.push(Witness::enum_case(case_name));
-                    }
-                }
-
-                if witnesses.is_empty() {
-                    witnesses.push(Witness::any());
-                }
-                witnesses
             }
-
-            TyKind::Tuple(elements) => {
-                // For tuples, we'd need to recursively check each position
-                // Simplified: just return a tuple of wildcards
-                let witnesses: Vec<Witness> = (0..elements.len()).map(|_| Witness::any()).collect();
-                vec![Witness::tuple(witnesses)]
-            }
-
-            // For types with infinite constructors (Int, String, etc.),
-            // we need a wildcard to be exhaustive
-            TyKind::Int(_) | TyKind::Float(_) | TyKind::String => {
-                vec![Witness::any()]
-            }
-
-            _ => {
-                // Default: return a generic witness
+            None => {
+                // Infinite constructor type - need a wildcard
                 vec![Witness::any()]
             }
         }
+    }
+
+    /// Convert a constructor to a witness.
+    fn constructor_to_witness(&self, ctor: &Constructor) -> Witness {
+        match ctor {
+            Constructor::True => Witness::bool(true),
+            Constructor::False => Witness::bool(false),
+            Constructor::Unit => Witness::tuple(vec![]),
+            Constructor::Variant { name, arity } => {
+                if *arity == 0 {
+                    Witness::enum_case(name)
+                } else {
+                    Witness::enum_case_with_args(name, vec![Witness::any(); *arity])
+                }
+            }
+            Constructor::Tuple { arity } => Witness::tuple(vec![Witness::any(); *arity]),
+            Constructor::Struct { name, .. } => {
+                Witness::struct_witness(name, vec![])
+            }
+            Constructor::IntLiteral(n) => Witness::integer(*n),
+            Constructor::IntRange { start, end } => {
+                Witness::range(start.to_string(), end.to_string(), true)
+            }
+            Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
+            Constructor::CharRange { start, end } => {
+                Witness::range(format!("'{}'", start), format!("'{}'", end), true)
+            }
+            Constructor::StringLiteral(s) => Witness::string(s),
+            Constructor::Array { prefix_len, suffix_len, .. } => {
+                Witness::array(vec![Witness::any(); prefix_len + suffix_len])
+            }
+            Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => {
+                Witness::any()
+            }
+        }
+    }
+}
+
+/// Expand or-patterns into a list of alternative patterns.
+///
+/// For a pattern like `.Red or .Green`, this returns `[.Red, .Green]`.
+/// For a non-or-pattern, this returns the pattern itself.
+fn expand_or_patterns(pattern: &Pattern) -> Vec<Pattern> {
+    match &pattern.kind {
+        PatternKind::Or { alternatives } => {
+            // Recursively expand nested or-patterns
+            alternatives.iter()
+                .flat_map(expand_or_patterns)
+                .collect()
+        }
+        _ => vec![pattern.clone()],
     }
 }
 
@@ -358,7 +340,7 @@ mod tests {
         assert!(result
             .missing_patterns
             .iter()
-            .any(|w| { matches!(w, Witness::Bool(false)) }));
+            .any(|w| matches!(w, Witness::Bool(false))));
     }
 
     #[test]
@@ -414,6 +396,54 @@ mod tests {
         let result = checker.check(&patterns, &has_guards);
 
         // Non-exhaustive: true case has guard so doesn't count
+        assert!(!result.is_exhaustive);
+    }
+
+    #[test]
+    fn test_tuple_exhaustive() {
+        let tuple_ty = Ty::tuple(vec![bool_ty(), bool_ty()], test_span());
+
+        // (true, _)
+        let pat1 = Pattern::tuple(
+            vec![
+                Pattern::literal(LiteralValue::Bool(true), bool_ty(), test_span()),
+                Pattern::wildcard(bool_ty(), test_span()),
+            ],
+            tuple_ty.clone(),
+            test_span(),
+        );
+
+        // (false, _)
+        let pat2 = Pattern::tuple(
+            vec![
+                Pattern::literal(LiteralValue::Bool(false), bool_ty(), test_span()),
+                Pattern::wildcard(bool_ty(), test_span()),
+            ],
+            tuple_ty.clone(),
+            test_span(),
+        );
+
+        let patterns = vec![&pat1, &pat2];
+        let result = check_exhaustiveness(&patterns, &tuple_ty);
+        assert!(result.is_exhaustive);
+    }
+
+    #[test]
+    fn test_tuple_non_exhaustive() {
+        let tuple_ty = Ty::tuple(vec![bool_ty(), bool_ty()], test_span());
+
+        // (true, _) - only covers true case
+        let pat1 = Pattern::tuple(
+            vec![
+                Pattern::literal(LiteralValue::Bool(true), bool_ty(), test_span()),
+                Pattern::wildcard(bool_ty(), test_span()),
+            ],
+            tuple_ty.clone(),
+            test_span(),
+        );
+
+        let patterns = vec![&pat1];
+        let result = check_exhaustiveness(&patterns, &tuple_ty);
         assert!(!result.is_exhaustive);
     }
 }

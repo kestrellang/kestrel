@@ -296,6 +296,22 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
+        ExprKind::Match { scrutinee, arms } => {
+            // Analyze scrutinee
+            state = analyze_expression(scrutinee, state, false, ctx);
+            // For match arms, we'd need to intersect states from all arms
+            // For now, just analyze each arm
+            for arm in arms {
+                let mut arm_state = state.clone();
+                // Pattern bindings are local to the arm
+                mark_pattern_locals_assigned(&arm.pattern, &mut arm_state);
+                if let Some(guard) = &arm.guard {
+                    arm_state = analyze_expression(guard, arm_state, false, ctx);
+                }
+                arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
+                // Note: proper handling would merge states from all arms
+            }
+        }
     }
     state
 }
@@ -327,6 +343,39 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
             for binding in bindings {
                 mark_pattern_locals_assigned(&binding.pattern, state);
             }
+        }
+        PatternKind::Range { .. } => {
+            // Range patterns don't bind anything
+        }
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                mark_pattern_locals_assigned(&field.pattern, state);
+            }
+        }
+        PatternKind::Array { prefix, suffix, .. } => {
+            for elem in prefix {
+                mark_pattern_locals_assigned(elem, state);
+            }
+            for elem in suffix {
+                mark_pattern_locals_assigned(elem, state);
+            }
+            // Note: named rest patterns (..rest) would need handling here if we track them
+        }
+        PatternKind::Or { alternatives } => {
+            // For or-patterns, all alternatives must bind the same names
+            // We can mark from the first alternative since they're all the same
+            if let Some(first) = alternatives.first() {
+                mark_pattern_locals_assigned(first, state);
+            }
+        }
+        PatternKind::At { local_id, subpattern, .. } => {
+            // Mark the binding from the @ pattern
+            state.assigned.insert(*local_id);
+            // Also mark any bindings from the subpattern
+            mark_pattern_locals_assigned(subpattern, state);
+        }
+        PatternKind::Rest => {
+            // Rest patterns don't bind anything (the named variant is tracked elsewhere)
         }
         PatternKind::Error => {
             // Error patterns don't bind anything

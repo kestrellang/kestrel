@@ -104,6 +104,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprImplicitMemberAccess => resolve_implicit_member_access(expr_node, ctx),
 
+        SyntaxKind::ExprMatch => resolve_match_expression(expr_node, ctx),
+
         _ => Expression::error(span),
     }
 }
@@ -853,6 +855,17 @@ fn expression_references_local(
             }
         }
 
+        ExprKind::Match { scrutinee, arms } => {
+            expression_references_local(scrutinee, local_id)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .map(|g| expression_references_local(g, local_id))
+                        .unwrap_or(false)
+                        || expression_references_local(&arm.body, local_id)
+                })
+        }
+
         // Leaf expressions - no references
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -1306,6 +1319,18 @@ where
             }
         }
 
+        // Match expression - walk scrutinee and all arms
+        ExprKind::Match { scrutinee, arms } => {
+            collect_captures_from_expression(scrutinee, process);
+            for arm in arms {
+                // Pattern bindings don't capture, but guard and body expressions do
+                if let Some(guard) = &arm.guard {
+                    collect_captures_from_expression(guard, process);
+                }
+                collect_captures_from_expression(&arm.body, process);
+            }
+        }
+
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -1336,6 +1361,83 @@ where
             collect_captures_from_expression(expr, process);
         }
     }
+}
+
+/// Resolve a match expression: `match scrutinee { pattern => body, ... }`
+fn resolve_match_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the scrutinee expression (first Expression child)
+    let scrutinee_node = match node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+    {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let scrutinee = resolve_expression(&scrutinee_node, ctx);
+    let scrutinee_ty = &scrutinee.ty;
+
+    // Collect all match arms
+    let mut arms = Vec::new();
+    for child in node.children() {
+        if child.kind() == SyntaxKind::MatchArm {
+            if let Some(arm) = resolve_match_arm(&child, scrutinee_ty, ctx) {
+                arms.push(arm);
+            }
+        }
+    }
+
+    Expression::match_expr(scrutinee, arms, span)
+}
+
+/// Resolve a single match arm: `pattern [if guard] => body`
+fn resolve_match_arm(
+    node: &SyntaxNode,
+    scrutinee_ty: &kestrel_semantic_tree::ty::Ty,
+    ctx: &mut BodyResolutionContext,
+) -> Option<kestrel_semantic_tree::expr::MatchArm> {
+    use kestrel_semantic_tree::expr::MatchArm;
+    use super::patterns::resolve_pattern;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Push a new scope for the arm (pattern bindings are local to the arm)
+    ctx.local_scope.push_scope();
+
+    // Find and resolve the pattern with the scrutinee type as expected type
+    let pattern_node = node.children().find(|c| super::patterns::is_pattern_kind(c.kind()))?;
+    let pattern = resolve_pattern(&pattern_node, ctx, Some(scrutinee_ty));
+
+    // Find optional guard (MatchArmGuard node containing an expression)
+    let guard = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::MatchArmGuard)
+        .and_then(|guard_node| {
+            guard_node
+                .children()
+                .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+                .map(|expr_node| resolve_expression(&expr_node, ctx))
+        });
+
+    // Find the body expression (after the fat arrow =>)
+    // The body is the Expression child that comes after the pattern and optional guard
+    let body_node = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+        .last()?;
+
+    let body = resolve_expression(&body_node, ctx);
+
+    // Pop the arm scope
+    ctx.local_scope.pop_scope();
+
+    Some(if guard.is_some() {
+        MatchArm::with_guard(pattern, guard.unwrap(), body, span)
+    } else {
+        MatchArm::new(pattern, body, span)
+    })
 }
 
 #[cfg(test)]

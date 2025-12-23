@@ -324,6 +324,33 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::Error => Divergence::None,
+
+        // Match expressions - all arms must diverge for the match to diverge
+        ExprKind::Match { scrutinee, arms } => {
+            // Analyze scrutinee for any errors
+            let _ = analyze_expression(scrutinee, errors);
+            
+            if arms.is_empty() {
+                Divergence::None
+            } else {
+                // Check if all arms diverge
+                let mut all_diverge = true;
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        let _ = analyze_expression(guard, errors);
+                    }
+                    let body_divergence = analyze_expression(&arm.body, errors);
+                    if !body_divergence.diverges() {
+                        all_diverge = false;
+                    }
+                }
+                if all_diverge {
+                    Divergence::Returns
+                } else {
+                    Divergence::None
+                }
+            }
+        }
     }
 }
 

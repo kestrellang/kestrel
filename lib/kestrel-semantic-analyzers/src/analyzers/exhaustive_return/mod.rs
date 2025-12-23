@@ -277,6 +277,20 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         | ExprKind::EnumCase { .. }
         | ExprKind::Closure { .. }
         | ExprKind::Error => ReturnState::MayFallThrough,
+
+        // Match expression - all arms must return for the match to be exhaustive
+        ExprKind::Match { arms, .. } => {
+            if arms.is_empty() {
+                ReturnState::MayFallThrough
+            } else if arms.iter().all(|arm| {
+                let body_state = analyze_expression(&arm.body);
+                body_state.definitely_returns()
+            }) {
+                ReturnState::Returns
+            } else {
+                ReturnState::MayFallThrough
+            }
+        }
     }
 }
 

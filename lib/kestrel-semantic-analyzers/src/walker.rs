@@ -292,6 +292,16 @@ fn walk_expression(
             ExprKind::Return { value: Some(v) } => {
                 walk_expression(v, analyzers, model, ctx);
             }
+            ExprKind::Match { scrutinee, arms } => {
+                walk_expression(scrutinee, analyzers, model, ctx);
+                for arm in arms {
+                    walk_pattern(&arm.pattern, analyzers, model, ctx);
+                    if let Some(guard) = &arm.guard {
+                        walk_expression(guard, analyzers, model, ctx);
+                    }
+                    walk_expression(&arm.body, analyzers, model, ctx);
+                }
+            }
         }
     }
 

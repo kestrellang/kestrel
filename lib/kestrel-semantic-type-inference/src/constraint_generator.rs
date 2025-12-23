@@ -124,6 +124,44 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             }
         }
 
+        PatternKind::Range { .. } => {
+            // Range patterns have concrete types (Int or Char) - type is already set
+        }
+
+        PatternKind::Struct { fields, .. } => {
+            // For struct patterns, generate constraints for each field pattern
+            for field in fields {
+                generate_pattern_constraints(ctx, &field.pattern);
+            }
+        }
+
+        PatternKind::Array { prefix, suffix, .. } => {
+            // For array patterns, generate constraints for prefix and suffix patterns
+            for elem in prefix {
+                generate_pattern_constraints(ctx, elem);
+            }
+            for elem in suffix {
+                generate_pattern_constraints(ctx, elem);
+            }
+            // The rest pattern (.. or ..name) is just a marker/binding - no pattern constraints needed
+        }
+
+        PatternKind::Or { alternatives } => {
+            // For or-patterns, generate constraints for each alternative
+            for alt in alternatives {
+                generate_pattern_constraints(ctx, alt);
+            }
+        }
+
+        PatternKind::At { subpattern, .. } => {
+            // For at-patterns, generate constraints for the subpattern
+            generate_pattern_constraints(ctx, subpattern);
+        }
+
+        PatternKind::Rest => {
+            // Rest patterns are just markers - no additional constraints needed
+        }
+
         PatternKind::Error => {
             // Error patterns are poison values - don't generate constraints
         }
@@ -515,6 +553,45 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.id,
                 expr.span.clone(),
             );
+        }
+
+        ExprKind::Match { scrutinee, arms } => {
+            // Generate constraints for the scrutinee
+            generate_expression_constraints(ctx, scrutinee);
+            ctx.register_type(&scrutinee.ty);
+
+            // Generate constraints for each arm
+            for arm in arms {
+                // Generate constraints for the pattern
+                generate_pattern_constraints(ctx, &arm.pattern);
+                ctx.register_type(&arm.pattern.ty);
+
+                // Pattern type must match scrutinee type
+                ctx.equate(
+                    arm.pattern.ty.id(),
+                    scrutinee.ty.id(),
+                    arm.pattern.span.clone(),
+                );
+
+                // Generate constraints for the guard if present
+                if let Some(guard) = &arm.guard {
+                    generate_expression_constraints(ctx, guard);
+                    ctx.register_type(&guard.ty);
+                    // Guard must be Bool - we'll handle this in the solver
+                }
+
+                // Generate constraints for the body
+                generate_expression_constraints(ctx, &arm.body);
+                ctx.register_type(&arm.body.ty);
+
+                // Body type contributes to match expression type
+                // All arms should have compatible types
+                ctx.equate(
+                    expr.ty.id(),
+                    arm.body.ty.id(),
+                    arm.body.span.clone(),
+                );
+            }
         }
 
         ExprKind::Error => {}

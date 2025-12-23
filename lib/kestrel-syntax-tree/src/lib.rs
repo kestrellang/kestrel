@@ -141,6 +141,9 @@ pub enum SyntaxKind {
     ArgumentList,           // (arg1, label: arg2, ...)
     Argument,               // Single argument: expr or label: expr
     ExprImplicitMemberAccess, // .Case or .Case(args)
+    ExprMatch,              // match scrutinee { arms }
+    MatchArm,               // pattern => expression
+    MatchArmGuard,          // if condition (guard clause in match arm)
 
     // Pattern nodes
     Pattern,             // Root pattern wrapper
@@ -149,8 +152,18 @@ pub enum SyntaxKind {
     TuplePattern,        // (p1, p2, ...)
     TuplePatternElement, // Single element in tuple pattern
     LiteralPattern,      // 42, "hello", 'c', true
+    RangePattern,        // 0..=9 or 0..<10 (range pattern)
     EnumPattern,         // .Case or .Case(args)
     EnumPatternArg,      // Single arg in enum pattern: label or label: pattern
+    StructPattern,       // Point { x, y } or Point { x: a, y: b }
+    StructPatternField,  // Single field: name or name: pattern
+    StructPatternRest,   // .. (ignore remaining fields)
+    ArrayPattern,        // [a, b, ..rest]
+    ArrayPatternElement, // Single element in array pattern
+    ArrayPatternRest,    // ..rest or .. (rest pattern in arrays)
+    AtPattern,           // name @ pattern (binds name while matching pattern)
+    RestPattern,         // .. (rest pattern in tuples)
+    OrPattern,           // p1 or p2 or ... (or-pattern)
     ErrorPattern,        // Error recovery
 
     // ===== Tokens (Terminals) =====
@@ -222,6 +235,7 @@ pub enum SyntaxKind {
     // Multi-character
     DotDotEquals,
     DotDotLess,
+    DotDot,
     LessLess,
     GreaterGreater,
     LessEquals,
@@ -243,6 +257,7 @@ pub enum SyntaxKind {
     Caret,
     Less,
     Greater,
+    At,
 
     // Trivia (whitespace and comments)
     Whitespace,
@@ -328,6 +343,7 @@ impl From<Token> for SyntaxKind {
             // Operators
             Token::DotDotEquals => SyntaxKind::DotDotEquals,
             Token::DotDotLess => SyntaxKind::DotDotLess,
+            Token::DotDot => SyntaxKind::DotDot,
             Token::LessLess => SyntaxKind::LessLess,
             Token::GreaterGreater => SyntaxKind::GreaterGreater,
             Token::LessEquals => SyntaxKind::LessEquals,
@@ -348,6 +364,7 @@ impl From<Token> for SyntaxKind {
             Token::Caret => SyntaxKind::Caret,
             Token::Less => SyntaxKind::Less,
             Token::Greater => SyntaxKind::Greater,
+            Token::At => SyntaxKind::At,
         }
     }
 }
@@ -448,6 +465,9 @@ impl Language for KestrelLanguage {
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
         const EXPR_IMPLICIT_MEMBER_ACCESS: u16 = SyntaxKind::ExprImplicitMemberAccess as u16;
+        const EXPR_MATCH: u16 = SyntaxKind::ExprMatch as u16;
+        const MATCH_ARM: u16 = SyntaxKind::MatchArm as u16;
+        const MATCH_ARM_GUARD: u16 = SyntaxKind::MatchArmGuard as u16;
         // Pattern nodes
         const PATTERN: u16 = SyntaxKind::Pattern as u16;
         const WILDCARD_PATTERN: u16 = SyntaxKind::WildcardPattern as u16;
@@ -455,8 +475,18 @@ impl Language for KestrelLanguage {
         const TUPLE_PATTERN: u16 = SyntaxKind::TuplePattern as u16;
         const TUPLE_PATTERN_ELEMENT: u16 = SyntaxKind::TuplePatternElement as u16;
         const LITERAL_PATTERN: u16 = SyntaxKind::LiteralPattern as u16;
+        const RANGE_PATTERN: u16 = SyntaxKind::RangePattern as u16;
         const ENUM_PATTERN: u16 = SyntaxKind::EnumPattern as u16;
         const ENUM_PATTERN_ARG: u16 = SyntaxKind::EnumPatternArg as u16;
+        const STRUCT_PATTERN: u16 = SyntaxKind::StructPattern as u16;
+        const STRUCT_PATTERN_FIELD: u16 = SyntaxKind::StructPatternField as u16;
+        const STRUCT_PATTERN_REST: u16 = SyntaxKind::StructPatternRest as u16;
+        const ARRAY_PATTERN: u16 = SyntaxKind::ArrayPattern as u16;
+        const ARRAY_PATTERN_ELEMENT: u16 = SyntaxKind::ArrayPatternElement as u16;
+        const ARRAY_PATTERN_REST: u16 = SyntaxKind::ArrayPatternRest as u16;
+        const AT_PATTERN: u16 = SyntaxKind::AtPattern as u16;
+        const REST_PATTERN: u16 = SyntaxKind::RestPattern as u16;
+        const OR_PATTERN: u16 = SyntaxKind::OrPattern as u16;
         const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
@@ -629,6 +659,9 @@ impl Language for KestrelLanguage {
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
             EXPR_IMPLICIT_MEMBER_ACCESS => SyntaxKind::ExprImplicitMemberAccess,
+            EXPR_MATCH => SyntaxKind::ExprMatch,
+            MATCH_ARM => SyntaxKind::MatchArm,
+            MATCH_ARM_GUARD => SyntaxKind::MatchArmGuard,
             // Pattern nodes
             PATTERN => SyntaxKind::Pattern,
             WILDCARD_PATTERN => SyntaxKind::WildcardPattern,
@@ -636,8 +669,18 @@ impl Language for KestrelLanguage {
             TUPLE_PATTERN => SyntaxKind::TuplePattern,
             TUPLE_PATTERN_ELEMENT => SyntaxKind::TuplePatternElement,
             LITERAL_PATTERN => SyntaxKind::LiteralPattern,
+            RANGE_PATTERN => SyntaxKind::RangePattern,
             ENUM_PATTERN => SyntaxKind::EnumPattern,
             ENUM_PATTERN_ARG => SyntaxKind::EnumPatternArg,
+            STRUCT_PATTERN => SyntaxKind::StructPattern,
+            STRUCT_PATTERN_FIELD => SyntaxKind::StructPatternField,
+            STRUCT_PATTERN_REST => SyntaxKind::StructPatternRest,
+            ARRAY_PATTERN => SyntaxKind::ArrayPattern,
+            ARRAY_PATTERN_ELEMENT => SyntaxKind::ArrayPatternElement,
+            ARRAY_PATTERN_REST => SyntaxKind::ArrayPatternRest,
+            AT_PATTERN => SyntaxKind::AtPattern,
+            REST_PATTERN => SyntaxKind::RestPattern,
+            OR_PATTERN => SyntaxKind::OrPattern,
             ERROR_PATTERN => SyntaxKind::ErrorPattern,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,

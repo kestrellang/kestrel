@@ -12,6 +12,7 @@
 //! - `operators` - Operator resolution errors
 //! - `struct_init` - Struct initialization errors
 //! - `control_flow` - Break/continue/label errors
+//! - `pattern` - Pattern matching errors
 
 mod call;
 mod control_flow;
@@ -19,6 +20,7 @@ mod declaration;
 mod member_access;
 mod module;
 mod operators;
+mod pattern;
 mod protocol;
 mod struct_init;
 mod type_resolution;
@@ -29,6 +31,7 @@ pub use declaration::*;
 pub use member_access::*;
 pub use module::*;
 pub use operators::*;
+pub use pattern::*;
 pub use protocol::*;
 pub use struct_init::*;
 pub use type_resolution::*;

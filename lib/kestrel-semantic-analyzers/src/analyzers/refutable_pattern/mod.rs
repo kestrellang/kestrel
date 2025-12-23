@@ -94,6 +94,26 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
             false
         }
 
+        // Range patterns are REFUTABLE - they don't cover all values
+        PatternKind::Range { .. } => false,
+
+        // Struct patterns are irrefutable if all field patterns are irrefutable
+        PatternKind::Struct { fields, .. } => {
+            fields.iter().all(|f| is_pattern_irrefutable(&f.pattern))
+        }
+
+        // Array patterns are REFUTABLE - they check array length
+        PatternKind::Array { .. } => false,
+
+        // Or-patterns are irrefutable if ANY alternative is irrefutable
+        PatternKind::Or { alternatives } => alternatives.iter().any(is_pattern_irrefutable),
+
+        // At-patterns are irrefutable if the subpattern is irrefutable
+        PatternKind::At { subpattern, .. } => is_pattern_irrefutable(subpattern),
+
+        // Rest patterns are always irrefutable (they match any remaining elements)
+        PatternKind::Rest => true,
+
         // Error patterns are treated as irrefutable to avoid cascading errors
         PatternKind::Error => true,
     }
@@ -141,6 +161,56 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 format!(".{}({})", case_name, inner.join(", "))
             }
         }
+        PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } => {
+            use kestrel_semantic_tree::pattern::RangeBound;
+            let start_str = match start {
+                RangeBound::Integer(i) => i.to_string(),
+                RangeBound::Char(c) => format!("'{}'", c),
+            };
+            let end_str = match end {
+                RangeBound::Integer(i) => i.to_string(),
+                RangeBound::Char(c) => format!("'{}'", c),
+            };
+            let op = if *inclusive { "..=" } else { "..<" };
+            format!("{}{}{}", start_str, op, end_str)
+        }
+        PatternKind::Struct {
+            struct_name,
+            fields,
+            ..
+        } => {
+            let inner: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}: {}", f.field_name, describe_pattern(&f.pattern)))
+                .collect();
+            format!("{} {{ {} }}", struct_name, inner.join(", "))
+        }
+        PatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            let mut parts: Vec<String> = prefix.iter().map(describe_pattern).collect();
+            if rest.is_some() {
+                parts.push("..".to_string());
+            }
+            parts.extend(suffix.iter().map(describe_pattern));
+            format!("[{}]", parts.join(", "))
+        }
+        PatternKind::Or { alternatives } => {
+            let parts: Vec<String> = alternatives.iter().map(describe_pattern).collect();
+            parts.join(" | ")
+        }
+        PatternKind::At {
+            name, subpattern, ..
+        } => {
+            format!("{} @ {}", name, describe_pattern(subpattern))
+        }
+        PatternKind::Rest => "..".to_string(),
         PatternKind::Error => "<error>".to_string(),
     }
 }
