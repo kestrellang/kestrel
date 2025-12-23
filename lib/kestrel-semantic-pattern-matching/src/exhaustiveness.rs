@@ -304,12 +304,31 @@ fn ranges_overlap(start1: i64, end1: i64, start2: i64, end2: i64) -> bool {
 ///
 /// For a pattern like `.Red or .Green`, this returns `[.Red, .Green]`.
 /// For a non-or-pattern, this returns the pattern itself.
+/// For an @-pattern like `x @ (.Some(_) or .None)`, this expands the subpattern
+/// and wraps each alternative in a new @-pattern.
 fn expand_or_patterns(pattern: &Pattern) -> Vec<Pattern> {
     match &pattern.kind {
         PatternKind::Or { alternatives } => {
             // Recursively expand nested or-patterns
             alternatives.iter()
                 .flat_map(expand_or_patterns)
+                .collect()
+        }
+        PatternKind::At { name, local_id, mutability, subpattern } => {
+            // Expand the subpattern and wrap each alternative in a new @-pattern
+            let expanded_subpatterns = expand_or_patterns(subpattern);
+            expanded_subpatterns
+                .into_iter()
+                .map(|sub| {
+                    Pattern::at_pattern(
+                        name.clone(),
+                        *local_id,
+                        *mutability,
+                        sub,
+                        pattern.ty.clone(),
+                        pattern.span.clone(),
+                    )
+                })
                 .collect()
         }
         _ => vec![pattern.clone()],

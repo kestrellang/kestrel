@@ -195,14 +195,19 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
 
         PatternKind::Or { alternatives } => {
             // For or-patterns, generate constraints for each alternative
+            // and equate their types with the or-pattern's type
             for alt in alternatives {
                 generate_pattern_constraints(ctx, alt);
+                // Each alternative's type must equal the or-pattern's type
+                ctx.equate(pattern.ty.id(), alt.ty.id(), alt.span.clone());
             }
         }
 
         PatternKind::At { subpattern, .. } => {
             // For at-patterns, generate constraints for the subpattern
             generate_pattern_constraints(ctx, subpattern);
+            // The @ pattern's type must equal the subpattern's type
+            ctx.equate(pattern.ty.id(), subpattern.ty.id(), pattern.span.clone());
         }
 
         PatternKind::Rest => {

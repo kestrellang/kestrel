@@ -211,3 +211,22 @@ impl IntoDiagnostic for MultipleRestPatternsError {
             ])
     }
 }
+
+/// Error when @-patterns are nested
+pub struct NestedAtPatternError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for NestedAtPatternError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("nested @ patterns are not allowed")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("cannot nest @ patterns"),
+            ])
+            .with_notes(vec![
+                "use a single @ pattern with the outermost binding".to_string(),
+            ])
+    }
+}

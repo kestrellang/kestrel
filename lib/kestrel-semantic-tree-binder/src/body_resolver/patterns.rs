@@ -192,6 +192,30 @@ fn resolve_tuple_pattern(
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
+    // First pass: collect all elements and find rest patterns
+    let element_nodes: Vec<_> = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::TuplePatternElement)
+        .collect();
+    
+    // Check if this is a single-element pattern in parentheses (grouping, not a tuple)
+    // A single-element tuple requires a trailing comma like (x,), while (x) is grouping
+    // Since the parser doesn't distinguish, we check: if there's exactly one element
+    // and the expected type is NOT a tuple, treat it as grouping.
+    if element_nodes.len() == 1 {
+        // Check if the expected type is a single-element tuple
+        let is_expected_single_tuple = expected_ty
+            .map(|ty| matches!(ty.kind(), kestrel_semantic_tree::ty::TyKind::Tuple(elems) if elems.len() == 1))
+            .unwrap_or(false);
+        
+        if !is_expected_single_tuple {
+            // This is grouping, not a tuple. Unwrap the inner pattern.
+            if let Some(inner_pattern) = element_nodes[0].children().next() {
+                return resolve_pattern_inner(&inner_pattern, ctx, expected_ty, span, force_mutable);
+            }
+        }
+    }
+
     // Get expected element types if we have a tuple type
     let expected_element_types: Option<Vec<Ty>> = expected_ty.and_then(|ty| {
         if let kestrel_semantic_tree::ty::TyKind::Tuple(element_types) = ty.kind() {
@@ -200,12 +224,6 @@ fn resolve_tuple_pattern(
             None
         }
     });
-
-    // First pass: collect all elements and find rest patterns
-    let element_nodes: Vec<_> = node
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::TuplePatternElement)
-        .collect();
 
     // Find rest pattern indices
     let mut rest_indices: Vec<usize> = Vec::new();
@@ -914,6 +932,14 @@ fn resolve_at_pattern(
         .find(|c| is_pattern_kind(c.kind()))
         .map(|p| resolve_pattern_with_mutability(&p, ctx, expected_ty, force_mutable))
         .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    // Check for nested @ patterns - these are not allowed
+    if subpattern.is_at() {
+        use crate::diagnostics::NestedAtPatternError;
+        let error = NestedAtPatternError { span: span.clone() };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Pattern::error(span);
+    }
 
     // Determine type from expected type or subpattern's type
     let ty = expected_ty.cloned().unwrap_or_else(|| subpattern.ty.clone());

@@ -871,7 +871,7 @@ mod at_pattern {
             r#"
 module Main
 
-enum List[T] {
+indirect enum List[T] {
     case Cons(head: T, tail: List[T])
     case Nil
 }
@@ -945,7 +945,7 @@ func test(x: Int) -> Int {
 "#,
         )
         .expect(Fails)
-        .expect(HasError("@"));
+        .expect(HasError("At"));  // Parser error reports token name 'At' for the @ symbol
     }
 
     #[test]
