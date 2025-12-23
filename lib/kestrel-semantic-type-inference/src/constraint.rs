@@ -122,6 +122,23 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// Struct pattern binding constraint: binds pattern types to struct field types.
+    ///
+    /// When matching `Point { x, y }`, the types of `x` and `y` bindings must match
+    /// the `Point` struct's field types. This constraint defers until the struct type is known.
+    StructPatternBinding {
+        /// The struct type (pattern's type, which equals the scrutinee type)
+        struct_ty: TyId,
+        /// The struct name as written in the pattern
+        struct_name: String,
+        /// Field bindings: each entry is (field_name, binding pattern's TyId)
+        field_bindings: Vec<(String, TyId)>,
+        /// Whether the pattern has a rest pattern (`..`) to ignore extra fields
+        has_rest: bool,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -173,6 +190,7 @@ impl Constraint {
             Constraint::MemberAccess { span, .. } => span,
             Constraint::ImplicitMember { span, .. } => span,
             Constraint::EnumPatternBinding { span, .. } => span,
+            Constraint::StructPatternBinding { span, .. } => span,
         }
     }
 
@@ -204,6 +222,23 @@ impl Constraint {
             enum_ty,
             case_name,
             binding_tys,
+            span,
+        }
+    }
+
+    /// Create a struct pattern binding constraint.
+    pub fn struct_pattern_binding(
+        struct_ty: TyId,
+        struct_name: String,
+        field_bindings: Vec<(String, TyId)>,
+        has_rest: bool,
+        span: Span,
+    ) -> Self {
+        Constraint::StructPatternBinding {
+            struct_ty,
+            struct_name,
+            field_bindings,
+            has_rest,
             span,
         }
     }

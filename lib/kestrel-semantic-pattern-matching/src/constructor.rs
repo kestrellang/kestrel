@@ -156,11 +156,28 @@ impl Constructor {
             PatternKind::Struct {
                 struct_name,
                 fields,
+                has_rest,
                 ..
-            } => Constructor::Struct {
-                name: struct_name.clone(),
-                arity: fields.len(),
-            },
+            } => {
+                // For struct patterns, we need to get the actual field count from the type
+                // The pattern may only match some fields (with `..` for rest)
+                // We use the pattern's type to get the full field count for proper matching
+                let full_arity = match pattern.ty.kind() {
+                    TyKind::Struct { symbol, .. } => {
+                        symbol
+                            .metadata()
+                            .children()
+                            .iter()
+                            .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                            .count()
+                    }
+                    _ => fields.len(), // Fallback if type isn't resolved
+                };
+                Constructor::Struct {
+                    name: struct_name.clone(),
+                    arity: full_arity,
+                }
+            }
 
             PatternKind::Range {
                 start,

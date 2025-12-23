@@ -147,11 +147,29 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             // Range patterns have concrete types (Int or Char) - type is already set
         }
 
-        PatternKind::Struct { fields, .. } => {
+        PatternKind::Struct { struct_name, fields, has_rest, .. } => {
             // For struct patterns, generate constraints for each field pattern
             for field in fields {
                 generate_pattern_constraints(ctx, &field.pattern);
             }
+            
+            // Generate struct pattern binding constraint to connect field types
+            // to the struct's field types
+            let field_bindings: Vec<(String, _)> = fields
+                .iter()
+                .map(|f| {
+                    ctx.register_type(&f.pattern.ty);
+                    (f.field_name.clone(), f.pattern.ty.id())
+                })
+                .collect();
+            
+            ctx.struct_pattern_binding(
+                pattern.ty.id(),
+                struct_name.clone(),
+                field_bindings,
+                *has_rest,
+                pattern.span.clone(),
+            );
         }
 
         PatternKind::Array { prefix, suffix, .. } => {

@@ -100,6 +100,13 @@ fn try_solve(
             binding_tys,
             span,
         } => resolve_enum_pattern_binding(ctx, *enum_ty, case_name, binding_tys, span),
+        Constraint::StructPatternBinding {
+            struct_ty,
+            struct_name,
+            field_bindings,
+            has_rest,
+            span,
+        } => resolve_struct_pattern_binding(ctx, *struct_ty, struct_name, field_bindings, *has_rest, span),
     }
 }
 
@@ -955,6 +962,106 @@ fn resolve_enum_pattern_binding(
     Ok(SolveResult::Solved)
 }
 
+/// Resolve a struct pattern binding constraint.
+///
+/// This connects the types of bindings in a struct pattern (like `Point { x, y }`)
+/// to the corresponding field types of the struct.
+fn resolve_struct_pattern_binding(
+    ctx: &mut InferenceContext<'_>,
+    struct_ty: TyId,
+    struct_name: &str,
+    field_bindings: &[(String, TyId)],
+    has_rest: bool,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use semantic_tree::symbol::Symbol;
+
+    let resolved_ty = resolve_type(ctx, struct_ty);
+
+    // If still Infer, defer until the struct type is known
+    if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Must be a struct type
+    let TyKind::Struct {
+        symbol: struct_symbol,
+        substitutions,
+    } = resolved_ty.kind()
+    else {
+        // Not a struct type - this shouldn't happen in well-formed code,
+        // but we can just skip the constraint (type mismatch will be caught elsewhere)
+        return Ok(SolveResult::Solved);
+    };
+
+    // Get field symbols from struct
+    let fields: Vec<_> = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+        .collect();
+    
+    // Collect field names from the struct
+    let struct_field_names: std::collections::HashSet<_> = fields
+        .iter()
+        .map(|f| f.metadata().name().value.clone())
+        .collect();
+
+    // Match bindings to fields by name
+    for (field_name, binding_ty_id) in field_bindings {
+        let field = fields.iter().find(|f| &f.metadata().name().value == field_name);
+
+        if let Some(field) = field {
+            // Get field type from TypedBehavior (resolved type) or fallback to field_type
+            let raw_field_ty = field
+                .metadata()
+                .get_behavior::<TypedBehavior>()
+                .map(|typed| typed.ty().clone())
+                .unwrap_or_else(|| field.field_type().clone());
+            
+            // Apply substitutions to handle generic structs
+            let field_ty = raw_field_ty.apply_substitutions(substitutions);
+            ctx.register_type(&field_ty);
+            ctx.equate(*binding_ty_id, field_ty.id(), span.clone());
+        } else {
+            // Unknown field error
+            return Err(InferenceError::unknown_struct_field(
+                struct_name.to_string(),
+                field_name.clone(),
+                span.clone(),
+            ));
+        }
+    }
+    
+    // Check for missing fields if no rest pattern
+    if !has_rest {
+        let matched_field_names: std::collections::HashSet<_> = field_bindings
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        
+        let missing: Vec<_> = struct_field_names
+            .difference(&matched_field_names)
+            .cloned()
+            .collect();
+        
+        if !missing.is_empty() {
+            return Err(InferenceError::missing_struct_fields(
+                struct_name.to_string(),
+                missing,
+                span.clone(),
+            ));
+        }
+    }
+
+    Ok(SolveResult::Solved)
+}
+
 /// Follow the substitution chain to get the current resolved type for an ID.
 fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // Follow substitution chain
@@ -1144,6 +1251,16 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             } => {
                 check_resolved_id(*enum_ty, ctx, &mut unresolved);
                 for (_, binding_ty) in binding_tys {
+                    check_resolved_id(*binding_ty, ctx, &mut unresolved);
+                }
+            }
+            Constraint::StructPatternBinding {
+                struct_ty,
+                field_bindings,
+                ..
+            } => {
+                check_resolved_id(*struct_ty, ctx, &mut unresolved);
+                for (_, binding_ty) in field_bindings {
                     check_resolved_id(*binding_ty, ctx, &mut unresolved);
                 }
             }

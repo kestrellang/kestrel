@@ -223,7 +223,7 @@ fn is_constructor_useful(
 ) -> UsefulnessResult {
     // Get field types for the constructor
     let field_types = get_constructor_field_types(ctor, ty);
-
+    
     // Specialize matrix and query for this constructor
     let specialized_matrix = matrix.specialize(ctor, &field_types);
     let specialized_query = specialize_query(query, ctor, ty);
@@ -267,7 +267,47 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
         }
 
         kestrel_semantic_tree::pattern::PatternKind::Struct { fields, .. } => {
-            fields.iter().map(|f| f.pattern.clone()).collect()
+            // For struct patterns, we need to return patterns for ALL fields
+            // in the order they appear in the struct, not just the ones matched
+            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+            use semantic_tree::symbol::Symbol;
+            
+            if let TyKind::Struct { symbol, substitutions } = first.ty.kind() {
+                // Get all field names from the struct in order
+                let struct_fields: Vec<_> = symbol
+                    .metadata()
+                    .children()
+                    .into_iter()
+                    .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                    .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+                    .collect();
+                
+                // Build the result by matching pattern fields to struct fields
+                let mut result = Vec::with_capacity(struct_fields.len());
+                for struct_field in &struct_fields {
+                    let field_name = &struct_field.metadata().name().value;
+                    // Find the pattern field for this struct field
+                    let matched_field = fields.iter().find(|f| &f.field_name == field_name);
+                    
+                    if let Some(pf) = matched_field {
+                        result.push(pf.pattern.clone());
+                    } else {
+                        // Field not matched in pattern - use a wildcard
+                        // Get the field type for the wildcard
+                        let raw_field_ty = struct_field
+                            .metadata()
+                            .get_behavior::<TypedBehavior>()
+                            .map(|typed| typed.ty().clone())
+                            .unwrap_or_else(|| struct_field.field_type().clone());
+                        let field_ty = raw_field_ty.apply_substitutions(substitutions);
+                        result.push(Pattern::wildcard(field_ty, first.span.clone()));
+                    }
+                }
+                result
+            } else {
+                // Fallback: just return the fields from the pattern
+                fields.iter().map(|f| f.pattern.clone()).collect()
+            }
         }
 
         kestrel_semantic_tree::pattern::PatternKind::Array { prefix, rest, suffix } => {
@@ -350,7 +390,9 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             vec![ty.clone(); *arity]
         }
 
-        (Constructor::Struct { arity, .. }, TyKind::Struct { symbol, .. }) => {
+        (Constructor::Struct { arity, .. }, TyKind::Struct { symbol, substitutions }) => {
+            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+            
             // Get Field children and their types
             let fields: Vec<_> = symbol
                 .metadata()
@@ -366,7 +408,16 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                 .collect();
             
             if fields.len() == *arity {
-                fields.iter().map(|f| f.field_type().clone()).collect()
+                // Get the resolved type from TypedBehavior, falling back to field_type
+                // Then apply substitutions for generic structs
+                fields.iter().map(|f| {
+                    let raw_field_ty = f
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|typed| typed.ty().clone())
+                        .unwrap_or_else(|| f.field_type().clone());
+                    raw_field_ty.apply_substitutions(substitutions)
+                }).collect()
             } else {
                 vec![ty.clone(); *arity]
             }

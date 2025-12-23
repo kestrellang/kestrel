@@ -247,6 +247,23 @@ impl<'a> InferenceContext<'a> {
         ));
     }
 
+    /// Add a struct pattern binding constraint.
+    ///
+    /// This is used when matching struct patterns like `Point { x, y }` to connect
+    /// the binding's type to the struct's field types.
+    pub fn struct_pattern_binding(
+        &mut self,
+        struct_ty: TyId,
+        struct_name: String,
+        field_bindings: Vec<(String, TyId)>,
+        has_rest: bool,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::struct_pattern_binding(
+            struct_ty, struct_name, field_bindings, has_rest, span,
+        ));
+    }
+
     /// Register metadata for a closure expression.
     ///
     /// This should be called during constraint generation for closures

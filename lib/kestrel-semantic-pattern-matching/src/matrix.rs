@@ -299,6 +299,32 @@ impl PatternMatrix {
                 }
                 parent_ty.clone()
             }
+            (TyKind::Struct { symbol, substitutions }, Constructor::Struct { .. }) => {
+                // Get field type at the given index
+                use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+                use semantic_tree::symbol::Symbol;
+                
+                let fields: Vec<_> = symbol
+                    .metadata()
+                    .children()
+                    .into_iter()
+                    .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                    .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+                    .collect();
+                
+                if let Some(field) = fields.get(index) {
+                    let raw_field_ty = field
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|typed| typed.ty().clone())
+                        .unwrap_or_else(|| field.field_type().clone());
+                    raw_field_ty.apply_substitutions(substitutions)
+                } else {
+                    parent_ty.clone()
+                }
+            }
             _ => parent_ty.clone(),
         }
     }
@@ -310,8 +336,51 @@ impl PatternMatrix {
             PatternKind::EnumVariant { bindings, .. } => {
                 bindings.iter().map(|b| (*b.pattern).clone()).collect()
             }
-            PatternKind::Struct { fields, .. } => {
-                fields.iter().map(|f| f.pattern.clone()).collect()
+            PatternKind::Struct { fields, has_rest, .. } => {
+                // For struct patterns, we need to return patterns for ALL fields
+                // in the order they appear in the struct, not just the ones matched
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+                use kestrel_semantic_tree::ty::TyKind;
+                use semantic_tree::symbol::Symbol;
+                
+                if let TyKind::Struct { symbol, substitutions } = pattern.ty.kind() {
+                    // Get all field names from the struct in order
+                    let struct_fields: Vec<_> = symbol
+                        .metadata()
+                        .children()
+                        .into_iter()
+                        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                        .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+                        .collect();
+                    
+                    // Build the result by matching pattern fields to struct fields
+                    let mut result = Vec::with_capacity(struct_fields.len());
+                    for struct_field in &struct_fields {
+                        let field_name = &struct_field.metadata().name().value;
+                        // Find the pattern field for this struct field
+                        let matched_field = fields.iter().find(|f| &f.field_name == field_name);
+                        
+                        if let Some(pf) = matched_field {
+                            result.push(pf.pattern.clone());
+                        } else {
+                            // Field not matched in pattern - use a wildcard
+                            // Get the field type for the wildcard
+                            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                            let raw_field_ty = struct_field
+                                .metadata()
+                                .get_behavior::<TypedBehavior>()
+                                .map(|typed| typed.ty().clone())
+                                .unwrap_or_else(|| struct_field.field_type().clone());
+                            let field_ty = raw_field_ty.apply_substitutions(substitutions);
+                            result.push(Pattern::wildcard(field_ty, pattern.span.clone()));
+                        }
+                    }
+                    result
+                } else {
+                    // Fallback: just return the fields from the pattern
+                    fields.iter().map(|f| f.pattern.clone()).collect()
+                }
             }
             PatternKind::Array {
                 prefix,

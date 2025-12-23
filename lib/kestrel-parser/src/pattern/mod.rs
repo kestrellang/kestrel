@@ -406,9 +406,7 @@ pub fn pattern_parser<'tokens>(
 
         // Rest pattern in struct: `..`
         let struct_rest = skip_trivia()
-            .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
-            .then(skip_trivia().ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span()))))
-            .map(|(dot1, dot2)| Span::new(dot1.file_id, dot1.start..dot2.end));
+            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())));
 
         // Either a field or rest pattern
         let struct_field_or_rest = struct_rest.clone().map(|span| (None, Some(span)))
@@ -727,8 +725,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             }
             if let Some(rest_span) = rest {
                 sink.start_node(SyntaxKind::StructPatternRest);
-                sink.add_token(SyntaxKind::Dot, Span::new(rest_span.file_id, rest_span.start..rest_span.start + 1));
-                sink.add_token(SyntaxKind::Dot, Span::new(rest_span.file_id, rest_span.start + 1..rest_span.end));
+                sink.add_token(SyntaxKind::DotDot, rest_span.clone());
                 sink.finish_node();
             }
             sink.add_token(SyntaxKind::RBrace, rbrace.clone());
@@ -955,8 +952,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             }
             if let Some(rest_span) = rest {
                 sink.start_node(SyntaxKind::StructPatternRest);
-                sink.add_token(SyntaxKind::Dot, Span::new(rest_span.file_id, rest_span.start..rest_span.start + 1));
-                sink.add_token(SyntaxKind::Dot, Span::new(rest_span.file_id, rest_span.start + 1..rest_span.end));
+                sink.add_token(SyntaxKind::DotDot, rest_span.clone());
                 sink.finish_node();
             }
             sink.add_token(SyntaxKind::RBrace, rbrace.clone());

@@ -140,6 +140,26 @@ pub enum InferenceError {
         /// Where the shorthand was used
         span: Span,
     },
+
+    /// Unknown field in struct pattern.
+    UnknownStructField {
+        /// The struct name
+        struct_name: String,
+        /// The unknown field name
+        field_name: String,
+        /// Where the pattern is
+        span: Span,
+    },
+
+    /// Missing fields in struct pattern (without rest pattern).
+    MissingStructFields {
+        /// The struct name
+        struct_name: String,
+        /// The missing field names
+        missing_fields: Vec<String>,
+        /// Where the pattern is
+        span: Span,
+    },
 }
 
 impl InferenceError {
@@ -259,6 +279,24 @@ impl InferenceError {
         InferenceError::CannotInferEnumType { member_name, span }
     }
 
+    /// Create an unknown struct field error.
+    pub fn unknown_struct_field(struct_name: String, field_name: String, span: Span) -> Self {
+        InferenceError::UnknownStructField {
+            struct_name,
+            field_name,
+            span,
+        }
+    }
+
+    /// Create a missing struct fields error.
+    pub fn missing_struct_fields(struct_name: String, missing_fields: Vec<String>, span: Span) -> Self {
+        InferenceError::MissingStructFields {
+            struct_name,
+            missing_fields,
+            span,
+        }
+    }
+
     /// Get the span associated with this error, if any.
     pub fn span(&self) -> Option<&Span> {
         match self {
@@ -275,6 +313,8 @@ impl InferenceError {
             InferenceError::ItUsedWithWrongArity { span, .. } => Some(span),
             InferenceError::NoMatchingOverload { span, .. } => Some(span),
             InferenceError::CannotInferEnumType { span, .. } => Some(span),
+            InferenceError::UnknownStructField { span, .. } => Some(span),
+            InferenceError::MissingStructFields { span, .. } => Some(span),
         }
     }
 }
@@ -376,6 +416,29 @@ impl std::fmt::Display for InferenceError {
                     f,
                     "cannot infer enum type for shorthand '.{}'",
                     member_name
+                )
+            }
+            InferenceError::UnknownStructField {
+                struct_name,
+                field_name,
+                ..
+            } => {
+                write!(
+                    f,
+                    "struct `{}` has no field `{}`",
+                    struct_name, field_name
+                )
+            }
+            InferenceError::MissingStructFields {
+                struct_name,
+                missing_fields,
+                ..
+            } => {
+                write!(
+                    f,
+                    "pattern does not mention fields {} of `{}`",
+                    missing_fields.join(", "),
+                    struct_name
                 )
             }
         }

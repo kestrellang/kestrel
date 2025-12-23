@@ -165,6 +165,42 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                         "add a type annotation or use the full type path (e.g., `EnumType.Case`)".to_string()
                     ])
             }
+
+            InferenceError::UnknownStructField {
+                struct_name,
+                field_name,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "struct `{}` has no field `{}`",
+                        struct_name, field_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("unknown field")
+                    ])
+            }
+
+            InferenceError::MissingStructFields {
+                struct_name,
+                missing_fields,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "pattern does not mention fields {} of `{}`",
+                        missing_fields.join(", "),
+                        struct_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("missing fields in pattern")
+                    ])
+                    .with_notes(vec![
+                        "use `..` to ignore the remaining fields".to_string()
+                    ])
+            }
         }
     }
 }
