@@ -274,7 +274,7 @@ impl PatternMatrix {
         }
 
         // Extract actual sub-patterns based on pattern kind
-        Some(self.extract_pattern_children(pattern))
+        Some(self.extract_pattern_children(pattern, ctor))
     }
 
     /// Get the type for a sub-pattern at the given index.
@@ -330,13 +330,39 @@ impl PatternMatrix {
     }
 
     /// Extract child patterns from a pattern.
-    fn extract_pattern_children(&self, pattern: &Pattern) -> Vec<Pattern> {
+    /// 
+    /// The `target_ctor` parameter is used to determine how many sub-patterns to extract
+    /// when the pattern has a rest element (like `[a, ..]` or `(x, ..)`).
+    fn extract_pattern_children(&self, pattern: &Pattern, target_ctor: &Constructor) -> Vec<Pattern> {
         match &pattern.kind {
-            PatternKind::Tuple { elements } => elements.clone(),
+            PatternKind::Tuple { prefix, has_rest, suffix } => {
+                // For tuple patterns with rest, we need to produce the right number of sub-patterns
+                // based on the tuple type arity
+                if *has_rest {
+                    if let kestrel_semantic_tree::ty::TyKind::Tuple(elem_tys) = pattern.ty.kind() {
+                        // Generate patterns: prefix + wildcards for rest + suffix
+                        let rest_count = elem_tys.len().saturating_sub(prefix.len() + suffix.len());
+                        let mut result = prefix.clone();
+                        for i in 0..rest_count {
+                            let ty_idx = prefix.len() + i;
+                            let ty = elem_tys.get(ty_idx).cloned().unwrap_or(pattern.ty.clone());
+                            result.push(Pattern::wildcard(ty, pattern.span.clone()));
+                        }
+                        result.extend(suffix.clone());
+                        result
+                    } else {
+                        // Fallback: just return prefix + suffix
+                        prefix.iter().chain(suffix.iter()).cloned().collect()
+                    }
+                } else {
+                    // No rest pattern - just return prefix (suffix should be empty)
+                    prefix.clone()
+                }
+            }
             PatternKind::EnumVariant { bindings, .. } => {
                 bindings.iter().map(|b| (*b.pattern).clone()).collect()
             }
-            PatternKind::Struct { fields, has_rest, .. } => {
+            PatternKind::Struct { fields, has_rest: _, .. } => {
                 // For struct patterns, we need to return patterns for ALL fields
                 // in the order they appear in the struct, not just the ones matched
                 use kestrel_semantic_tree::symbol::field::FieldSymbol;
@@ -387,13 +413,120 @@ impl PatternMatrix {
                 rest,
                 suffix,
             } => {
-                let mut children = prefix.clone();
-                // If there's a rest pattern with binding, include a wildcard for it
-                if rest.is_some() {
-                    children.push(Pattern::wildcard(pattern.ty.clone(), pattern.span.clone()));
+                // Array pattern specialization needs to match the target constructor's arity.
+                // This is complex because we need to handle several cases:
+                //
+                // 1. Pattern with rest, target without rest (expansion):
+                //    Pattern `[0, ..]` with target `Array{3, 0, false}` → `[0, _, _]`
+                //
+                // 2. Pattern without rest, target with rest (compression):
+                //    Pattern `[1, 2, 3]` with target `Array{1, 0, true}` → `[1, _]`
+                //    where _ is a wildcard for the rest (an array/slice)
+                //
+                // 3. Both have rest, or neither has rest (direct mapping)
+                if let Constructor::Array { prefix_len: target_prefix, suffix_len: target_suffix, has_rest: target_has_rest } = target_ctor {
+                    let target_arity = target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
+                    
+                    // Get element type from array type
+                    let elem_ty = if let kestrel_semantic_tree::ty::TyKind::Array(elem_ty) = pattern.ty.kind() {
+                        (**elem_ty).clone()
+                    } else {
+                        pattern.ty.clone()
+                    };
+                    
+                    if rest.is_some() && !target_has_rest {
+                        // Case 1: Pattern has rest, target doesn't - expand rest to wildcards
+                        let mut result = Vec::with_capacity(target_arity);
+                        
+                        // Take prefix elements (up to target_prefix)
+                        for i in 0..*target_prefix {
+                            if i < prefix.len() {
+                                result.push(prefix[i].clone());
+                            } else {
+                                result.push(Pattern::wildcard(elem_ty.clone(), pattern.span.clone()));
+                            }
+                        }
+                        
+                        // Take suffix elements (from the end)
+                        for i in 0..*target_suffix {
+                            let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
+                            if suffix_idx < suffix.len() {
+                                result.push(suffix[suffix_idx].clone());
+                            } else {
+                                result.push(Pattern::wildcard(elem_ty.clone(), pattern.span.clone()));
+                            }
+                        }
+                        
+                        result
+                    } else if rest.is_none() && *target_has_rest {
+                        // Case 2: Pattern doesn't have rest, target does - compress to target arity
+                        let mut result = Vec::with_capacity(target_arity);
+                        
+                        // Take the first target_prefix elements from prefix
+                        for i in 0..*target_prefix {
+                            if i < prefix.len() {
+                                result.push(prefix[i].clone());
+                            } else {
+                                result.push(Pattern::wildcard(elem_ty.clone(), pattern.span.clone()));
+                            }
+                        }
+                        
+                        // Add a wildcard for the rest slot (represents remaining elements)
+                        result.push(Pattern::wildcard(pattern.ty.clone(), pattern.span.clone()));
+                        
+                        // Take the last target_suffix elements from suffix
+                        for i in 0..*target_suffix {
+                            let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
+                            if suffix_idx < suffix.len() {
+                                result.push(suffix[suffix_idx].clone());
+                            } else {
+                                result.push(Pattern::wildcard(elem_ty.clone(), pattern.span.clone()));
+                            }
+                        }
+                        
+                        result
+                    } else if rest.is_some() && *target_has_rest {
+                        // Case 3: Both have rest - map prefix, rest, suffix
+                        let mut result = Vec::with_capacity(target_arity);
+                        
+                        // Map prefix elements
+                        for i in 0..*target_prefix {
+                            if i < prefix.len() {
+                                result.push(prefix[i].clone());
+                            } else {
+                                result.push(Pattern::wildcard(elem_ty.clone(), pattern.span.clone()));
+                            }
+                        }
+                        
+                        // Add a wildcard for the rest slot
+                        result.push(Pattern::wildcard(pattern.ty.clone(), pattern.span.clone()));
+                        
+                        // Map suffix elements
+                        for i in 0..*target_suffix {
+                            let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
+                            if suffix_idx < suffix.len() {
+                                result.push(suffix[suffix_idx].clone());
+                            } else {
+                                result.push(Pattern::wildcard(elem_ty.clone(), pattern.span.clone()));
+                            }
+                        }
+                        
+                        result
+                    } else {
+                        // Case 4: Neither has rest - direct mapping
+                        let mut result = prefix.clone();
+                        result.extend(suffix.clone());
+                        result
+                    }
+                } else {
+                    // Fallback if not an array constructor
+                    let mut children = prefix.clone();
+                    if rest.is_some() {
+                        children.push(Pattern::wildcard(pattern.ty.clone(), pattern.span.clone()));
+                    }
+                    children.extend(suffix.clone());
+                    children
                 }
-                children.extend(suffix.clone());
-                children
             }
             _ => vec![], // Literals, wildcards, etc. have no children
         }
@@ -478,13 +611,32 @@ fn constructors_match(pattern_ctor: &Constructor, target_ctor: &Constructor) -> 
 
         (Constructor::Array { prefix_len: p1, suffix_len: s1, has_rest: r1 },
          Constructor::Array { prefix_len: p2, suffix_len: s2, has_rest: r2 }) => {
-            // Array patterns match if they're compatible length-wise
-            if *r1 || *r2 {
-                // If either has rest, they can match
-                true
-            } else {
-                // Fixed length must match exactly
-                p1 + s1 == p2 + s2
+            // Array patterns match if they're compatible length-wise.
+            // - A pattern with rest matches arrays of length >= min_len (prefix + suffix)
+            // - A pattern without rest matches exactly one length
+            let min_len_1 = p1 + s1;
+            let min_len_2 = p2 + s2;
+            
+            match (*r1, *r2) {
+                (true, true) => {
+                    // Both have rest: compatible if their length ranges overlap
+                    // Pattern with rest can match >= min_len, so they always overlap
+                    true
+                }
+                (true, false) => {
+                    // Pattern 1 has rest, pattern 2 is exact length
+                    // Pattern 1 can match min_len_2 only if min_len_1 <= min_len_2
+                    min_len_1 <= min_len_2
+                }
+                (false, true) => {
+                    // Pattern 2 has rest, pattern 1 is exact length
+                    // Pattern 2 can match min_len_1 only if min_len_2 <= min_len_1
+                    min_len_2 <= min_len_1
+                }
+                (false, false) => {
+                    // Both are fixed length: must match exactly
+                    min_len_1 == min_len_2
+                }
             }
         }
 

@@ -341,8 +341,10 @@ fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
         PatternKind::Error => PatternKind::Error,
 
         // Compound patterns - recurse
-        PatternKind::Tuple { elements } => PatternKind::Tuple {
-            elements: elements.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+        PatternKind::Tuple { prefix, has_rest, suffix } => PatternKind::Tuple {
+            prefix: prefix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+            has_rest: *has_rest,
+            suffix: suffix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
         },
         PatternKind::EnumVariant { case_id, case_name, bindings } => PatternKind::EnumVariant {
             case_id: *case_id,

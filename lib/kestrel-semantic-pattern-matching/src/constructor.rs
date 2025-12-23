@@ -149,14 +149,23 @@ impl Constructor {
                 arity: bindings.len(),
             },
 
-            PatternKind::Tuple { elements } => Constructor::Tuple {
-                arity: elements.len(),
-            },
+            PatternKind::Tuple { prefix, has_rest, suffix } => {
+                // For tuple patterns with rest, get arity from the type
+                let arity = if *has_rest {
+                    match pattern.ty.kind() {
+                        TyKind::Tuple(elems) => elems.len(),
+                        _ => prefix.len() + suffix.len(),  // Fallback
+                    }
+                } else {
+                    prefix.len()  // No rest, suffix should be empty
+                };
+                Constructor::Tuple { arity }
+            }
 
             PatternKind::Struct {
                 struct_name,
                 fields,
-                has_rest,
+                has_rest: _,
                 ..
             } => {
                 // For struct patterns, we need to get the actual field count from the type
@@ -331,10 +340,65 @@ impl Constructor {
                 Some(missing)
             }
             None => {
-                // Infinite constructors - we need a wildcard to be exhaustive
+                // Infinite constructors case
+                // For arrays, check if patterns cover all possible lengths
+                if matches!(ty.kind(), TyKind::Array(_)) {
+                    return Self::missing_array_constructors(covered);
+                }
+                
+                // Other infinite constructor types need a wildcard to be exhaustive
                 // Return NonExhaustive marker to indicate uncovered values exist
                 Some(vec![Constructor::NonExhaustive])
             }
+        }
+    }
+
+    /// Check if array patterns cover all possible lengths.
+    /// 
+    /// Array patterns can have:
+    /// - Fixed length: `[a, b]` matches only length 2
+    /// - Rest at end: `[a, ..]` matches length >= 1
+    /// - Rest at beginning: `[.., a]` matches length >= 1
+    /// - Rest in middle: `[a, .., b]` matches length >= 2
+    /// 
+    /// To be exhaustive, we need to cover all lengths from 0 to infinity.
+    fn missing_array_constructors(covered: &HashSet<Constructor>) -> Option<Vec<Constructor>> {
+        // Collect information about covered lengths
+        let mut has_rest_pattern = false;
+        let mut min_len_for_rest = usize::MAX;
+        let mut fixed_lengths: HashSet<usize> = HashSet::new();
+        
+        for ctor in covered {
+            if let Constructor::Array { prefix_len, suffix_len, has_rest } = ctor {
+                let min_len = prefix_len + suffix_len;
+                if *has_rest {
+                    has_rest_pattern = true;
+                    min_len_for_rest = min_len_for_rest.min(min_len);
+                } else {
+                    fixed_lengths.insert(min_len);
+                }
+            }
+        }
+        
+        // If we have a rest pattern with min_len N, it covers all lengths >= N
+        // We need fixed patterns to cover lengths 0, 1, ..., N-1
+        if has_rest_pattern {
+            let mut missing = Vec::new();
+            for len in 0..min_len_for_rest {
+                if !fixed_lengths.contains(&len) {
+                    // Missing a pattern for this length
+                    // Return a representative constructor
+                    missing.push(Constructor::Array {
+                        prefix_len: len,
+                        suffix_len: 0,
+                        has_rest: false,
+                    });
+                }
+            }
+            Some(missing)
+        } else {
+            // No rest pattern - we can't cover infinite lengths
+            Some(vec![Constructor::NonExhaustive])
         }
     }
 

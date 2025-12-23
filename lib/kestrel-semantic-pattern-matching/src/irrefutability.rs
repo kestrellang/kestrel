@@ -68,8 +68,10 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
         // Local binding always matches (binds any value to a name)
         PatternKind::Local { .. } => true,
 
-        // Tuple is irrefutable if ALL elements are irrefutable
-        PatternKind::Tuple { elements } => elements.iter().all(is_irrefutable),
+        // Tuple is irrefutable if ALL elements (prefix + suffix) are irrefutable
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix.iter()).all(is_irrefutable)
+        }
 
         // Literal patterns are REFUTABLE - they only match one specific value
         // e.g., `42` doesn't match `43`

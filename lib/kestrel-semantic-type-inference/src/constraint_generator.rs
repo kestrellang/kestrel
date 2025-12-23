@@ -94,18 +94,31 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             // Wildcard patterns match anything - type is already registered
         }
 
-        PatternKind::Tuple { elements } => {
+        PatternKind::Tuple { prefix, has_rest, suffix } => {
             // For tuple patterns, generate constraints for each element
             // and ensure the tuple type matches
             if let TyKind::Tuple(elem_tys) = pattern.ty.kind() {
-                for (elem, elem_ty) in elements.iter().zip(elem_tys.iter()) {
+                // Handle prefix elements (matched from the start)
+                for (i, elem) in prefix.iter().enumerate() {
                     generate_pattern_constraints(ctx, elem);
-                    ctx.register_type(elem_ty);
-                    ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                    if let Some(elem_ty) = elem_tys.get(i) {
+                        ctx.register_type(elem_ty);
+                        ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                    }
+                }
+
+                // Handle suffix elements (matched from the end)
+                let suffix_start = elem_tys.len().saturating_sub(suffix.len());
+                for (i, elem) in suffix.iter().enumerate() {
+                    generate_pattern_constraints(ctx, elem);
+                    if let Some(elem_ty) = elem_tys.get(suffix_start + i) {
+                        ctx.register_type(elem_ty);
+                        ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                    }
                 }
             } else {
-                // Pattern type is not a tuple - still process elements
-                for elem in elements {
+                // Pattern type is not a tuple - still process all elements
+                for elem in prefix.iter().chain(suffix.iter()) {
                     generate_pattern_constraints(ctx, elem);
                 }
             }

@@ -191,3 +191,23 @@ impl IntoDiagnostic for TuplePatternArityMismatchError {
             ])
     }
 }
+
+/// Error when a pattern contains multiple rest patterns (`..`)
+pub struct MultipleRestPatternsError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for MultipleRestPatternsError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("multiple rest patterns in a single pattern")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("only one `..` rest pattern is allowed"),
+            ])
+            .with_notes(vec![
+                "a pattern can have at most one rest pattern (`..`) to match remaining elements"
+                    .to_string(),
+            ])
+    }
+}

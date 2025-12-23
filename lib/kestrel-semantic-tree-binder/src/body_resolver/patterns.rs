@@ -201,30 +201,103 @@ fn resolve_tuple_pattern(
         }
     });
 
-    // Collect tuple pattern elements
-    let elements: Vec<Pattern> = node
+    // First pass: collect all elements and find rest patterns
+    let element_nodes: Vec<_> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::TuplePatternElement)
+        .collect();
+
+    // Find rest pattern indices
+    let mut rest_indices: Vec<usize> = Vec::new();
+    for (i, elem_node) in element_nodes.iter().enumerate() {
+        if let Some(inner) = elem_node.children().next() {
+            if inner.kind() == SyntaxKind::RestPattern {
+                rest_indices.push(i);
+            }
+        }
+    }
+
+    // Check for multiple rest patterns
+    if rest_indices.len() > 1 {
+        use crate::diagnostics::MultipleRestPatternsError;
+        let error = MultipleRestPatternsError { span: span.clone() };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Pattern::error(span);
+    }
+
+    let has_rest = !rest_indices.is_empty();
+    let rest_index = rest_indices.first().copied();
+
+    // Calculate expected types for prefix and suffix
+    let expected_tuple_len = expected_element_types.as_ref().map(|t| t.len());
+
+    // Split elements into prefix and suffix based on rest pattern position
+    let (prefix_nodes, suffix_nodes): (Vec<_>, Vec<_>) = if let Some(rest_idx) = rest_index {
+        let prefix = element_nodes[..rest_idx].to_vec();
+        let suffix = element_nodes[rest_idx + 1..].to_vec();
+        (prefix, suffix)
+    } else {
+        (element_nodes, vec![])
+    };
+
+    // Resolve prefix patterns
+    let prefix: Vec<Pattern> = prefix_nodes
+        .iter()
         .enumerate()
         .map(|(i, elem_node)| {
             let expected_elem_ty = expected_element_types
                 .as_ref()
                 .and_then(|tys| tys.get(i));
             
-            // The element node contains the actual pattern
             if let Some(inner_pattern) = elem_node.children().next() {
-                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(&elem_node, ctx.file_id), force_mutable)
+                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(elem_node, ctx.file_id), force_mutable)
             } else {
-                Pattern::error(get_node_span(&elem_node, ctx.file_id))
+                Pattern::error(get_node_span(elem_node, ctx.file_id))
             }
         })
         .collect();
 
-    // Build tuple type from element types
-    let element_types: Vec<Ty> = elements.iter().map(|p| p.ty.clone()).collect();
-    let ty = Ty::tuple(element_types, span.clone());
+    // Resolve suffix patterns
+    // Suffix patterns are matched from the END of the expected type
+    let suffix: Vec<Pattern> = suffix_nodes
+        .iter()
+        .enumerate()
+        .map(|(i, elem_node)| {
+            // Calculate index from end: for suffix elements, we need to index from the end
+            let expected_elem_ty = expected_element_types.as_ref().and_then(|tys| {
+                // Suffix index from end: suffix[0] matches tys[len - suffix_len], etc.
+                let suffix_start = tys.len().saturating_sub(suffix_nodes.len());
+                tys.get(suffix_start + i)
+            });
+            
+            if let Some(inner_pattern) = elem_node.children().next() {
+                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(elem_node, ctx.file_id), force_mutable)
+            } else {
+                Pattern::error(get_node_span(elem_node, ctx.file_id))
+            }
+        })
+        .collect();
 
-    Pattern::tuple(elements, ty, span)
+    // Build tuple type
+    // For patterns with rest, use the expected type if available
+    // Otherwise, build from prefix + suffix (which may be incomplete)
+    let ty = if has_rest {
+        expected_ty.cloned().unwrap_or_else(|| {
+            // Fallback: create a tuple type from prefix + suffix
+            // This may be wrong but type inference will catch it
+            let element_types: Vec<Ty> = prefix.iter()
+                .chain(suffix.iter())
+                .map(|p| p.ty.clone())
+                .collect();
+            Ty::tuple(element_types, span.clone())
+        })
+    } else {
+        // No rest pattern - build type from all elements
+        let element_types: Vec<Ty> = prefix.iter().map(|p| p.ty.clone()).collect();
+        Ty::tuple(element_types, span.clone())
+    };
+
+    Pattern::tuple_with_rest(prefix, has_rest, suffix, ty, span)
 }
 
 /// Resolve a literal pattern (`42`, `"hello"`, `true`).
@@ -649,8 +722,8 @@ fn resolve_or_pattern(
             PatternKind::Local { name, .. } => {
                 bindings.insert(name.clone(), pattern.ty.clone());
             }
-            PatternKind::Tuple { elements } => {
-                for elem in elements {
+            PatternKind::Tuple { prefix, suffix, .. } => {
+                for elem in prefix.iter().chain(suffix.iter()) {
                     collect_bindings_inner(elem, bindings);
                 }
             }
@@ -719,7 +792,7 @@ fn resolve_array_pattern(
 
     let mut prefix: Vec<Pattern> = Vec::new();
     let mut suffix: Vec<Pattern> = Vec::new();
-    let mut rest: Option<Option<String>> = None;
+    let mut rest: Option<(Option<String>, Option<kestrel_semantic_tree::symbol::local::LocalId>)> = None;
     let mut in_suffix = false;
 
     for child in node.children() {
@@ -762,16 +835,16 @@ fn resolve_array_pattern(
                         .unwrap_or_else(|| Ty::infer(span.clone()));
                     
                     let is_mutable = force_mutable;
-                    ctx.local_scope.bind(
+                    let local_id = ctx.local_scope.bind(
                         name.clone(),
                         rest_ty,
                         is_mutable,
                         name_span,
                     );
-                    rest = Some(Some(name));
+                    rest = Some((Some(name), Some(local_id)));
                 } else {
                     // Anonymous rest: `..` - just ignore remaining elements
-                    rest = Some(None);
+                    rest = Some((None, None));
                 }
             }
             _ => {}
@@ -914,8 +987,8 @@ fn collect_bindings_for_duplicate_check(
                 bindings.insert(name.clone(), pattern.span.clone());
             }
         }
-        PatternKind::Tuple { elements } => {
-            for elem in elements {
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            for elem in prefix.iter().chain(suffix.iter()) {
                 collect_bindings_for_duplicate_check(elem, bindings, ctx);
             }
         }

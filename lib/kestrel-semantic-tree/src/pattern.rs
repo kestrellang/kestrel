@@ -131,13 +131,18 @@ pub enum PatternKind {
     /// in pattern matching or tuple destructuring.
     Wildcard,
 
-    /// Tuple pattern: `(a, b, c)`
+    /// Tuple pattern: `(a, b, c)` or `(first, .., last)`
     ///
     /// Destructures a tuple into its elements. Each element can be
     /// any pattern, including nested tuples or wildcards.
+    /// Supports rest patterns (`..`) to match remaining elements.
     Tuple {
-        /// The element patterns
-        elements: Vec<Pattern>,
+        /// Patterns before the rest pattern (or all patterns if no rest)
+        prefix: Vec<Pattern>,
+        /// Whether there's a rest pattern (`..`)
+        has_rest: bool,
+        /// Patterns after the rest pattern (empty if no rest or rest is at end)
+        suffix: Vec<Pattern>,
     },
 
     /// Literal pattern: `42`, `"hello"`, `true`
@@ -198,8 +203,8 @@ pub enum PatternKind {
     Array {
         /// Patterns before the rest pattern (if any)
         prefix: Vec<Pattern>,
-        /// Rest pattern: None = no rest, Some(None) = `..`, Some(Some(name)) = `..name`
-        rest: Option<Option<String>>,
+        /// Rest pattern binding: None = no rest, Some((None, _)) = `..`, Some((Some(name), local_id)) = `..name`
+        rest: Option<(Option<String>, Option<LocalId>)>,
         /// Patterns after the rest pattern (if any)
         suffix: Vec<Pattern>,
     },
@@ -290,12 +295,42 @@ impl Pattern {
         }
     }
 
-    /// Create a tuple pattern.
+    /// Create a tuple pattern without rest.
     ///
     /// The type should be a tuple type with the same arity as the elements.
     pub fn tuple(elements: Vec<Pattern>, ty: Ty, span: Span) -> Self {
         Pattern {
-            kind: PatternKind::Tuple { elements },
+            kind: PatternKind::Tuple {
+                prefix: elements,
+                has_rest: false,
+                suffix: vec![],
+            },
+            ty,
+            span,
+        }
+    }
+
+    /// Create a tuple pattern with optional rest.
+    ///
+    /// # Arguments
+    /// * `prefix` - Patterns before the rest pattern
+    /// * `has_rest` - Whether there's a rest pattern (`..`)
+    /// * `suffix` - Patterns after the rest pattern
+    /// * `ty` - The tuple type
+    /// * `span` - The source span
+    pub fn tuple_with_rest(
+        prefix: Vec<Pattern>,
+        has_rest: bool,
+        suffix: Vec<Pattern>,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
+        Pattern {
+            kind: PatternKind::Tuple {
+                prefix,
+                has_rest,
+                suffix,
+            },
             ty,
             span,
         }
@@ -498,9 +533,36 @@ impl Pattern {
     }
 
     /// Get the tuple elements if this is a tuple pattern.
-    pub fn tuple_elements(&self) -> Option<&[Pattern]> {
+    /// For patterns with rest, returns all non-rest elements (prefix + suffix).
+    pub fn tuple_elements(&self) -> Option<Vec<&Pattern>> {
         match &self.kind {
-            PatternKind::Tuple { elements } => Some(elements),
+            PatternKind::Tuple { prefix, suffix, .. } => {
+                Some(prefix.iter().chain(suffix.iter()).collect())
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the tuple prefix elements if this is a tuple pattern.
+    pub fn tuple_prefix(&self) -> Option<&[Pattern]> {
+        match &self.kind {
+            PatternKind::Tuple { prefix, .. } => Some(prefix),
+            _ => None,
+        }
+    }
+
+    /// Get the tuple suffix elements if this is a tuple pattern.
+    pub fn tuple_suffix(&self) -> Option<&[Pattern]> {
+        match &self.kind {
+            PatternKind::Tuple { suffix, .. } => Some(suffix),
+            _ => None,
+        }
+    }
+
+    /// Check if this tuple pattern has a rest pattern.
+    pub fn tuple_has_rest(&self) -> Option<bool> {
+        match &self.kind {
+            PatternKind::Tuple { has_rest, .. } => Some(*has_rest),
             _ => None,
         }
     }
@@ -553,7 +615,9 @@ impl Pattern {
         match &self.kind {
             PatternKind::Local { .. } => true,
             PatternKind::Wildcard => true,
-            PatternKind::Tuple { elements } => elements.iter().all(|e| e.is_irrefutable()),
+            PatternKind::Tuple { prefix, suffix, .. } => {
+                prefix.iter().chain(suffix.iter()).all(|e| e.is_irrefutable())
+            }
             PatternKind::Struct { fields, .. } => {
                 // A struct pattern is irrefutable if all field patterns are irrefutable
                 fields.iter().all(|f| f.pattern.is_irrefutable())
@@ -600,13 +664,13 @@ impl Pattern {
     ///
     /// # Arguments
     /// * `prefix` - Patterns before the rest pattern
-    /// * `rest` - Rest pattern: None = no rest, Some(None) = `..`, Some(Some(name)) = `..name`
+    /// * `rest` - Rest pattern binding: None = no rest, Some((None, _)) = `..`, Some((Some(name), local_id)) = `..name`
     /// * `suffix` - Patterns after the rest pattern
     /// * `ty` - The array type
     /// * `span` - The source span
     pub fn array(
         prefix: Vec<Pattern>,
-        rest: Option<Option<String>>,
+        rest: Option<(Option<String>, Option<LocalId>)>,
         suffix: Vec<Pattern>,
         ty: Ty,
         span: Span,
@@ -626,13 +690,13 @@ impl Pattern {
     ///
     /// # Arguments
     /// * `prefix` - Patterns before the rest pattern (if any)
-    /// * `rest` - Rest pattern: None = no rest, Some(None) = `..`, Some(Some(name)) = `..name`
+    /// * `rest` - Rest pattern binding: None = no rest, Some((None, _)) = `..`, Some((Some(name), local_id)) = `..name`
     /// * `suffix` - Patterns after the rest pattern (if any)
     /// * `ty` - The type of the pattern
     /// * `span` - The source span
     pub fn array_pattern(
         prefix: Vec<Pattern>,
-        rest: Option<Option<String>>,
+        rest: Option<(Option<String>, Option<LocalId>)>,
         suffix: Vec<Pattern>,
         ty: Ty,
         span: Span,

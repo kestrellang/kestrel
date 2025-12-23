@@ -331,8 +331,8 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
         PatternKind::Wildcard => {
             // Wildcards don't bind anything
         }
-        PatternKind::Tuple { elements } => {
-            for elem in elements {
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            for elem in prefix.iter().chain(suffix.iter()) {
                 mark_pattern_locals_assigned(elem, state);
             }
         }
@@ -352,14 +352,17 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
                 mark_pattern_locals_assigned(&field.pattern, state);
             }
         }
-        PatternKind::Array { prefix, suffix, .. } => {
+        PatternKind::Array { prefix, suffix, rest } => {
             for elem in prefix {
                 mark_pattern_locals_assigned(elem, state);
             }
             for elem in suffix {
                 mark_pattern_locals_assigned(elem, state);
             }
-            // Note: named rest patterns (..rest) would need handling here if we track them
+            // Mark the rest binding as assigned if it has a LocalId
+            if let Some((Some(_name), Some(local_id))) = rest {
+                state.assigned.insert(*local_id);
+            }
         }
         PatternKind::Or { alternatives } => {
             // For or-patterns, all alternatives must bind the same names

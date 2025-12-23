@@ -199,7 +199,27 @@ fn is_wildcard_useful(
             UsefulnessResult::not_useful()
         }
         None => {
-            // Infinite constructor set: use default matrix
+            // Infinite constructor set: first check if missing_constructors can determine exhaustiveness
+            // This handles arrays with rest patterns specially
+            if let Some(missing) = Constructor::missing_constructors(ty, &covered_ctors) {
+                if missing.is_empty() {
+                    // All patterns are covered! Check if we need to recurse for sub-patterns
+                    // For each covered constructor, check if wildcard is useful within it
+                    for ctor in &covered_ctors {
+                        let result = is_constructor_useful(matrix, query, ctor, ty);
+                        if result.is_useful {
+                            return result;
+                        }
+                    }
+                    return UsefulnessResult::not_useful();
+                } else if !missing.contains(&Constructor::NonExhaustive) {
+                    // There are specific missing constructors
+                    let witness = ctor_to_witness(&missing[0], ty);
+                    return UsefulnessResult::useful(witness);
+                }
+            }
+            
+            // Fall back to default matrix approach
             let default = matrix.default_matrix();
             let default_query = PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
 
@@ -258,8 +278,25 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 .collect()
         }
 
-        kestrel_semantic_tree::pattern::PatternKind::Tuple { elements } => {
-            elements.clone()
+        kestrel_semantic_tree::pattern::PatternKind::Tuple { prefix, has_rest, suffix } => {
+            // For tuple patterns with rest, expand to full tuple arity
+            if *has_rest {
+                if let TyKind::Tuple(elem_tys) = first.ty.kind() {
+                    let rest_count = elem_tys.len().saturating_sub(prefix.len() + suffix.len());
+                    let mut result = prefix.clone();
+                    for i in 0..rest_count {
+                        let ty_idx = prefix.len() + i;
+                        let ty = elem_tys.get(ty_idx).cloned().unwrap_or(first.ty.clone());
+                        result.push(Pattern::wildcard(ty, first.span.clone()));
+                    }
+                    result.extend(suffix.clone());
+                    result
+                } else {
+                    prefix.iter().chain(suffix.iter()).cloned().collect()
+                }
+            } else {
+                prefix.clone()
+            }
         }
 
         kestrel_semantic_tree::pattern::PatternKind::EnumVariant { bindings, .. } => {
@@ -311,12 +348,103 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
         }
 
         kestrel_semantic_tree::pattern::PatternKind::Array { prefix, rest, suffix } => {
-            let mut result = prefix.clone();
-            if rest.is_some() {
-                result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
+            // Array pattern specialization - same logic as extract_pattern_children
+            if let Constructor::Array { prefix_len: target_prefix, suffix_len: target_suffix, has_rest: target_has_rest } = ctor {
+                let target_arity = target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
+                
+                // Get element type from array type
+                let elem_ty = if let TyKind::Array(elem_ty) = first.ty.kind() {
+                    (**elem_ty).clone()
+                } else {
+                    first.ty.clone()
+                };
+                
+                if rest.is_some() && !target_has_rest {
+                    // Pattern has rest, target doesn't - expand rest to wildcards
+                    let mut result = Vec::with_capacity(target_arity);
+                    
+                    for i in 0..*target_prefix {
+                        if i < prefix.len() {
+                            result.push(prefix[i].clone());
+                        } else {
+                            result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
+                        }
+                    }
+                    
+                    for i in 0..*target_suffix {
+                        let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
+                        if suffix_idx < suffix.len() {
+                            result.push(suffix[suffix_idx].clone());
+                        } else {
+                            result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
+                        }
+                    }
+                    
+                    result
+                } else if rest.is_none() && *target_has_rest {
+                    // Pattern doesn't have rest, target does - compress to target arity
+                    let mut result = Vec::with_capacity(target_arity);
+                    
+                    for i in 0..*target_prefix {
+                        if i < prefix.len() {
+                            result.push(prefix[i].clone());
+                        } else {
+                            result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
+                        }
+                    }
+                    
+                    // Add a wildcard for the rest slot
+                    result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
+                    
+                    for i in 0..*target_suffix {
+                        let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
+                        if suffix_idx < suffix.len() {
+                            result.push(suffix[suffix_idx].clone());
+                        } else {
+                            result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
+                        }
+                    }
+                    
+                    result
+                } else if rest.is_some() && *target_has_rest {
+                    // Both have rest - map prefix, rest, suffix
+                    let mut result = Vec::with_capacity(target_arity);
+                    
+                    for i in 0..*target_prefix {
+                        if i < prefix.len() {
+                            result.push(prefix[i].clone());
+                        } else {
+                            result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
+                        }
+                    }
+                    
+                    result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
+                    
+                    for i in 0..*target_suffix {
+                        let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
+                        if suffix_idx < suffix.len() {
+                            result.push(suffix[suffix_idx].clone());
+                        } else {
+                            result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
+                        }
+                    }
+                    
+                    result
+                } else {
+                    // Neither has rest - direct mapping
+                    let mut result = prefix.clone();
+                    result.extend(suffix.clone());
+                    result
+                }
+            } else {
+                // Fallback if not an array constructor
+                let mut result = prefix.clone();
+                if rest.is_some() {
+                    result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
+                }
+                result.extend(suffix.clone());
+                result
             }
-            result.extend(suffix.clone());
-            result
         }
 
         kestrel_semantic_tree::pattern::PatternKind::At { subpattern, .. } => {

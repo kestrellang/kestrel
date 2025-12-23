@@ -72,8 +72,10 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
         // Local binding always matches (binds any value to a name)
         PatternKind::Local { .. } => true,
 
-        // Tuple is irrefutable if ALL elements are irrefutable
-        PatternKind::Tuple { elements } => elements.iter().all(is_pattern_irrefutable),
+        // Tuple is irrefutable if ALL elements (prefix + suffix) are irrefutable
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix.iter()).all(is_pattern_irrefutable)
+        }
 
         // Literal patterns are REFUTABLE - they only match one specific value
         PatternKind::Literal { .. } => false,
@@ -135,9 +137,13 @@ fn describe_pattern(pattern: &Pattern) -> String {
     match &pattern.kind {
         PatternKind::Wildcard => "_".to_string(),
         PatternKind::Local { name, .. } => name.clone(),
-        PatternKind::Tuple { elements } => {
-            let inner: Vec<String> = elements.iter().map(describe_pattern).collect();
-            format!("({})", inner.join(", "))
+        PatternKind::Tuple { prefix, has_rest, suffix } => {
+            let mut parts: Vec<String> = prefix.iter().map(describe_pattern).collect();
+            if *has_rest {
+                parts.push("..".to_string());
+            }
+            parts.extend(suffix.iter().map(describe_pattern));
+            format!("({})", parts.join(", "))
         }
         PatternKind::Literal { value } => format_literal_value(value),
         PatternKind::EnumVariant {
