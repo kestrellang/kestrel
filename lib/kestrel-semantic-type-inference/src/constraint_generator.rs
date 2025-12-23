@@ -122,25 +122,22 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 generate_pattern_constraints(ctx, &binding.pattern);
             }
             
-            // If there are bindings, generate a constraint to connect their types
-            // to the enum case's parameter types. This is deferred until the enum
-            // type is resolved.
-            if !bindings.is_empty() {
-                let binding_tys: Vec<(Option<String>, _)> = bindings
-                    .iter()
-                    .map(|b| {
-                        ctx.register_type(&b.pattern.ty);
-                        (b.label.clone(), b.pattern.ty.id())
-                    })
-                    .collect();
-                
-                ctx.enum_pattern_binding(
-                    pattern.ty.id(),
-                    case_name.clone(),
-                    binding_tys,
-                    pattern.span.clone(),
-                );
-            }
+            // Generate a constraint to validate the enum case exists and connect
+            // binding types to the enum case's parameter types.
+            let binding_tys: Vec<(Option<String>, _)> = bindings
+                .iter()
+                .map(|b| {
+                    ctx.register_type(&b.pattern.ty);
+                    (b.label.clone(), b.pattern.ty.id())
+                })
+                .collect();
+            
+            ctx.enum_pattern_binding(
+                pattern.ty.id(),
+                case_name.clone(),
+                binding_tys,
+                pattern.span.clone(),
+            );
         }
 
         PatternKind::Range { .. } => {
@@ -614,7 +611,10 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 if let Some(guard) = &arm.guard {
                     generate_expression_constraints(ctx, guard);
                     ctx.register_type(&guard.ty);
-                    // Guard must be Bool - we'll handle this in the solver
+                    // Guard must be Bool
+                    let bool_ty = Ty::bool(guard.span.clone());
+                    ctx.register_type(&bool_ty);
+                    ctx.equate(guard.ty.id(), bool_ty.id(), guard.span.clone());
                 }
 
                 // Generate constraints for the body

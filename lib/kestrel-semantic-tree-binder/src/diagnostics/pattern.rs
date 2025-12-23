@@ -110,3 +110,84 @@ impl IntoDiagnostic for InvalidRangeBoundsError {
             ])
     }
 }
+
+/// Error when a binding name appears multiple times in the same pattern
+pub struct DuplicateBindingInPatternError {
+    pub span: Span,
+    pub name: String,
+    pub first_span: Span,
+}
+
+impl IntoDiagnostic for DuplicateBindingInPatternError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("duplicate binding `{}` in pattern", self.name))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("bound again here"),
+                Label::secondary(self.first_span.file_id, self.first_span.range())
+                    .with_message("first binding"),
+            ])
+            .with_notes(vec![
+                "each binding in a pattern must have a unique name".to_string(),
+            ])
+    }
+}
+
+/// Error when a float literal is used in a pattern
+pub struct FloatLiteralInPatternError {
+    pub span: Span,
+}
+
+impl IntoDiagnostic for FloatLiteralInPatternError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("float literals are not allowed in patterns")
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("cannot use float literal in pattern"),
+            ])
+            .with_notes(vec![
+                "patterns can only match exact values, but floating point comparison is imprecise".to_string(),
+            ])
+    }
+}
+
+/// Error when an enum pattern uses an unknown case name
+pub struct UnknownEnumCaseError {
+    pub span: Span,
+    pub case_name: String,
+    pub enum_name: String,
+}
+
+impl IntoDiagnostic for UnknownEnumCaseError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("enum `{}` has no case `{}`", self.enum_name, self.case_name))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("unknown case"),
+            ])
+    }
+}
+
+/// Error when a tuple pattern has the wrong number of elements
+pub struct TuplePatternArityMismatchError {
+    pub span: Span,
+    pub expected: usize,
+    pub found: usize,
+}
+
+impl IntoDiagnostic for TuplePatternArityMismatchError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "tuple pattern has wrong arity: expected {} elements, found {}",
+                self.expected, self.found
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected {} elements", self.expected)),
+            ])
+    }
+}

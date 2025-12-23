@@ -160,6 +160,26 @@ pub enum InferenceError {
         /// Where the pattern is
         span: Span,
     },
+
+    /// Unknown enum case in pattern.
+    UnknownEnumCase {
+        /// The enum name
+        enum_name: String,
+        /// The unknown case name
+        case_name: String,
+        /// Where the pattern is
+        span: Span,
+    },
+
+    /// Tuple pattern has wrong arity.
+    TupleArityMismatch {
+        /// The expected number of elements
+        expected: usize,
+        /// The found number of elements
+        found: usize,
+        /// Where the pattern is
+        span: Span,
+    },
 }
 
 impl InferenceError {
@@ -315,6 +335,28 @@ impl InferenceError {
             InferenceError::CannotInferEnumType { span, .. } => Some(span),
             InferenceError::UnknownStructField { span, .. } => Some(span),
             InferenceError::MissingStructFields { span, .. } => Some(span),
+            InferenceError::UnknownEnumCase { span, .. } => Some(span),
+            InferenceError::TupleArityMismatch { span, .. } => Some(span),
+        }
+    }
+}
+
+impl InferenceError {
+    /// Create an unknown enum case error.
+    pub fn unknown_enum_case(enum_name: String, case_name: String, span: Span) -> Self {
+        InferenceError::UnknownEnumCase {
+            enum_name,
+            case_name,
+            span,
+        }
+    }
+
+    /// Create a tuple arity mismatch error.
+    pub fn tuple_arity_mismatch(expected: usize, found: usize, span: Span) -> Self {
+        InferenceError::TupleArityMismatch {
+            expected,
+            found,
+            span,
         }
     }
 }
@@ -439,6 +481,28 @@ impl std::fmt::Display for InferenceError {
                     "pattern does not mention fields {} of `{}`",
                     missing_fields.join(", "),
                     struct_name
+                )
+            }
+            InferenceError::UnknownEnumCase {
+                enum_name,
+                case_name,
+                ..
+            } => {
+                write!(
+                    f,
+                    "enum `{}` has no case `{}`",
+                    enum_name, case_name
+                )
+            }
+            InferenceError::TupleArityMismatch {
+                expected,
+                found,
+                ..
+            } => {
+                write!(
+                    f,
+                    "tuple pattern arity mismatch: expected {} elements, found {}",
+                    expected, found
                 )
             }
         }

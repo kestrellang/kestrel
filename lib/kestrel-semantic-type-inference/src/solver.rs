@@ -300,9 +300,9 @@ fn unify(
         // Structural unification for compound types
         (TyKind::Tuple(elems_a), TyKind::Tuple(elems_b)) => {
             if elems_a.len() != elems_b.len() {
-                return Err(InferenceError::type_mismatch(
-                    ty_a.clone(),
-                    ty_b.clone(),
+                return Err(InferenceError::tuple_arity_mismatch(
+                    elems_b.len(),  // expected (the scrutinee type)
+                    elems_a.len(),  // found (the pattern)
                     span.clone(),
                 ));
             }
@@ -923,8 +923,13 @@ fn resolve_enum_pattern_binding(
     let case = cases.iter().find(|c| c.metadata().name().value == case_name);
 
     let Some(case) = case else {
-        // Case not found - this will be caught by other validation
-        return Ok(SolveResult::Solved);
+        // Case not found - emit an error
+        let enum_name = enum_symbol.metadata().name().value.clone();
+        return Err(InferenceError::unknown_enum_case(
+            enum_name,
+            case_name.to_string(),
+            span.clone(),
+        ));
     };
 
     // Get the callable behavior (parameter types) if the case has associated values

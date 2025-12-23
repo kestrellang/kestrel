@@ -1428,7 +1428,11 @@ fn resolve_match_arm(
         .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
         .last()?;
 
-    let body = resolve_expression(&body_node, ctx);
+    // Special handling for closure bodies in match arms:
+    // If the body is a closure without explicit parameters, we treat it as an inline block
+    // rather than a closure. This ensures outer variables are accessible without being
+    // treated as captures (which would prevent assignment).
+    let body = resolve_match_arm_body(&body_node, ctx);
 
     // Pop the arm scope
     ctx.local_scope.pop_scope();
@@ -1438,6 +1442,67 @@ fn resolve_match_arm(
     } else {
         MatchArm::new(pattern, body, span)
     })
+}
+
+/// Resolve a match arm body, handling closures specially.
+///
+/// When the body is a closure expression without explicit parameters (i.e., just `{ ... }`),
+/// we resolve it as an inline block rather than a closure. This prevents outer variables
+/// from being treated as captures (which would disallow assignment).
+fn resolve_match_arm_body(
+    body_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Unwrap Expression wrapper if present
+    let inner_node = if body_node.kind() == SyntaxKind::Expression {
+        body_node.children().next().unwrap_or(body_node.clone())
+    } else {
+        body_node.clone()
+    };
+
+    // Check if it's a closure without explicit parameters
+    if inner_node.kind() == SyntaxKind::ExprClosure {
+        // Check if it has ClosureParams - if so, it's a real closure with explicit params
+        let has_explicit_params = inner_node
+            .children()
+            .any(|c| c.kind() == SyntaxKind::ClosureParams);
+
+        if !has_explicit_params {
+            // It's a block-like closure (no params). Resolve the body inline.
+            // Don't push a new scope - we're already in the match arm's scope.
+            let (statements, tail_expr) = resolve_closure_body(&inner_node, ctx);
+            let body_span = get_node_span(&inner_node, ctx.file_id);
+
+            // If there are no statements and just a tail expression, return it directly
+            if statements.is_empty() {
+                if let Some(expr) = tail_expr {
+                    return expr;
+                }
+                // Empty closure body - return unit
+                return Expression::unit(body_span);
+            }
+
+            // If there are statements, wrap them in a closure without captures.
+            // This maintains the semantic structure while avoiding capture issues.
+            let result_ty = tail_expr.as_ref()
+                .map(|e| e.ty.clone())
+                .unwrap_or_else(|| Ty::unit(body_span.clone()));
+            return Expression::closure(
+                None,           // no params
+                statements,
+                tail_expr,
+                Vec::new(),     // no captures - this is the key fix!
+                false,          // doesn't use `it`
+                None,           // no implicit param
+                result_ty,
+                body_span,
+            );
+        }
+    }
+
+    // For all other cases (non-closure, or closure with explicit params),
+    // resolve normally using the exact same code path as before
+    resolve_expression(body_node, ctx)
 }
 
 #[cfg(test)]

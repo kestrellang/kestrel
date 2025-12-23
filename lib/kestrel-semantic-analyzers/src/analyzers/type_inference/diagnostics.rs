@@ -201,6 +201,38 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                         "use `..` to ignore the remaining fields".to_string()
                     ])
             }
+
+            InferenceError::UnknownEnumCase {
+                enum_name,
+                case_name,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "enum `{}` has no case `{}`",
+                        enum_name, case_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message(format!("`{}` is not a case of `{}`", case_name, enum_name))
+                    ])
+            }
+
+            InferenceError::TupleArityMismatch {
+                expected,
+                found,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "tuple pattern arity mismatch: expected {} elements, found {}",
+                        expected, found
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message(format!("expected {} elements", expected))
+                    ])
+            }
         }
     }
 }

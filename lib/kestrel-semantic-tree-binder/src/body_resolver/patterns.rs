@@ -12,6 +12,8 @@
 //! - Literal (`42`, `"hello"`, `true`): Matches a specific value
 //! - Enum (`.Case` or `.Case(args)`): Matches an enum variant
 
+use std::collections::HashMap;
+
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::LiteralValue;
 use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern, PatternKind, RangeBound, StructPatternField};
@@ -69,14 +71,20 @@ pub fn resolve_pattern_with_mutability(
     let span = get_node_span(pattern_node, ctx.file_id);
 
     // Handle Pattern wrapper node
-    if pattern_node.kind() == SyntaxKind::Pattern {
+    let pattern = if pattern_node.kind() == SyntaxKind::Pattern {
         if let Some(inner) = pattern_node.children().next() {
-            return resolve_pattern_inner(&inner, ctx, expected_ty, span, force_mutable);
+            resolve_pattern_inner(&inner, ctx, expected_ty, span, force_mutable)
+        } else {
+            Pattern::error(span)
         }
-        return Pattern::error(span);
-    }
+    } else {
+        resolve_pattern_inner(pattern_node, ctx, expected_ty, span, force_mutable)
+    };
 
-    resolve_pattern_inner(pattern_node, ctx, expected_ty, span, force_mutable)
+    // Check for duplicate bindings within the pattern
+    check_duplicate_bindings(&pattern, ctx);
+
+    pattern
 }
 
 /// Resolve the inner pattern node (unwrapped from Pattern wrapper).
@@ -238,9 +246,11 @@ fn resolve_literal_pattern(
                     return Pattern::literal(LiteralValue::Integer(value), ty, span);
                 }
                 SyntaxKind::Float => {
-                    let value = text.parse::<f64>().unwrap_or(0.0);
-                    let ty = Ty::float(kestrel_semantic_tree::ty::FloatBits::F64, span.clone());
-                    return Pattern::literal(LiteralValue::Float(value), ty, span);
+                    // Float literals are not allowed in patterns
+                    use crate::diagnostics::FloatLiteralInPatternError;
+                    let error = FloatLiteralInPatternError { span: span.clone() };
+                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                    return Pattern::error(span);
                 }
                 SyntaxKind::String => {
                     // Remove quotes
@@ -580,20 +590,53 @@ fn resolve_or_pattern(
     
     let span = get_node_span(node, ctx.file_id);
 
-    // Collect all child patterns (filter out the `or` keywords)
-    let alternatives: Vec<Pattern> = node
+    // Collect all child pattern nodes (filter out the `or` keywords)
+    let alt_nodes: Vec<_> = node
         .children()
         .filter(|c| is_pattern_kind(c.kind()))
-        .map(|alt_node| resolve_pattern_inner(&alt_node, ctx, expected_ty, get_node_span(&alt_node, ctx.file_id), force_mutable))
         .collect();
 
-    if alternatives.len() < 2 {
+    if alt_nodes.len() < 2 {
         // Or-patterns need at least 2 alternatives
         return Pattern::error(span);
     }
 
+    // Snapshot bindings before resolving any alternatives
+    let pre_or_bindings = ctx.local_scope.snapshot_bindings();
+
+    // Resolve the first alternative (this creates the "canonical" bindings)
+    let first_alt = resolve_pattern_inner(
+        &alt_nodes[0],
+        ctx,
+        expected_ty,
+        get_node_span(&alt_nodes[0], ctx.file_id),
+        force_mutable,
+    );
+
+    // Snapshot the first alternative's bindings (these are what the arm body should see)
+    let first_alt_bindings = ctx.local_scope.snapshot_bindings();
+
+    let mut alternatives = vec![first_alt];
+
+    // Resolve remaining alternatives, restoring bindings before each
+    for alt_node in alt_nodes.iter().skip(1) {
+        // Restore to pre-or-pattern state before resolving this alternative
+        ctx.local_scope.restore_bindings(pre_or_bindings.clone());
+        
+        let alt = resolve_pattern_inner(
+            alt_node,
+            ctx,
+            expected_ty,
+            get_node_span(alt_node, ctx.file_id),
+            force_mutable,
+        );
+        alternatives.push(alt);
+    }
+
+    // Restore the first alternative's bindings so the arm body sees the correct LocalIds
+    ctx.local_scope.restore_bindings(first_alt_bindings);
+
     // Validate that all alternatives bind the same names
-    // For simplicity, we'll collect bindings from each alternative and compare
     fn collect_bindings(pattern: &Pattern) -> HashMap<String, Ty> {
         let mut bindings = HashMap::new();
         collect_bindings_inner(pattern, &mut bindings);
@@ -843,4 +886,79 @@ pub fn is_pattern_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::RestPattern
             | SyntaxKind::ErrorPattern
     )
+}
+
+/// Check for duplicate binding names within a pattern and report errors.
+fn check_duplicate_bindings(pattern: &Pattern, ctx: &mut BodyResolutionContext) {
+    let mut bindings: HashMap<String, Span> = HashMap::new();
+    collect_bindings_for_duplicate_check(pattern, &mut bindings, ctx);
+}
+
+/// Recursively collect binding names and check for duplicates.
+fn collect_bindings_for_duplicate_check(
+    pattern: &Pattern,
+    bindings: &mut HashMap<String, Span>,
+    ctx: &mut BodyResolutionContext,
+) {
+    match &pattern.kind {
+        PatternKind::Local { name, .. } => {
+            if let Some(first_span) = bindings.get(name) {
+                use crate::diagnostics::DuplicateBindingInPatternError;
+                let error = DuplicateBindingInPatternError {
+                    span: pattern.span.clone(),
+                    name: name.clone(),
+                    first_span: first_span.clone(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            } else {
+                bindings.insert(name.clone(), pattern.span.clone());
+            }
+        }
+        PatternKind::Tuple { elements } => {
+            for elem in elements {
+                collect_bindings_for_duplicate_check(elem, bindings, ctx);
+            }
+        }
+        PatternKind::EnumVariant { bindings: enum_bindings, .. } => {
+            for binding in enum_bindings {
+                collect_bindings_for_duplicate_check(&binding.pattern, bindings, ctx);
+            }
+        }
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                collect_bindings_for_duplicate_check(&field.pattern, bindings, ctx);
+            }
+        }
+        PatternKind::Array { prefix, suffix, .. } => {
+            for elem in prefix {
+                collect_bindings_for_duplicate_check(elem, bindings, ctx);
+            }
+            for elem in suffix {
+                collect_bindings_for_duplicate_check(elem, bindings, ctx);
+            }
+        }
+        PatternKind::Or { .. } => {
+            // For or-patterns, each alternative can have the same bindings
+            // (they should have the same set of names). Don't check across alternatives.
+        }
+        PatternKind::At { name, subpattern, .. } => {
+            if let Some(first_span) = bindings.get(name) {
+                use crate::diagnostics::DuplicateBindingInPatternError;
+                let error = DuplicateBindingInPatternError {
+                    span: pattern.span.clone(),
+                    name: name.clone(),
+                    first_span: first_span.clone(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            } else {
+                bindings.insert(name.clone(), pattern.span.clone());
+            }
+            collect_bindings_for_duplicate_check(subpattern, bindings, ctx);
+        }
+        PatternKind::Wildcard
+        | PatternKind::Literal { .. }
+        | PatternKind::Range { .. }
+        | PatternKind::Rest
+        | PatternKind::Error => {}
+    }
 }
