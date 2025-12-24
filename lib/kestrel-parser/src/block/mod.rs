@@ -14,7 +14,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
-use crate::stmt::{StmtVariant, emit_stmt_variant, stmt_parser};
+use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
+use crate::stmt::{StmtVariant, emit_stmt_variant};
 
 /// Parser that skips trivia tokens (whitespace and comments)
 fn skip_trivia<'tokens>(
@@ -67,6 +68,40 @@ impl CodeBlock {
     }
 }
 
+/// Raw parsed data for a guard-let statement
+#[derive(Debug, Clone)]
+pub struct GuardLetData {
+    /// Span of 'guard' keyword
+    pub guard_span: Span,
+    /// Span of 'let' keyword
+    pub let_span: Span,
+    /// The pattern being matched
+    pub pattern: PatternVariant,
+    /// Span of '=' token
+    pub equals_span: Span,
+    /// The expression being matched against
+    pub value: ExprVariant,
+    /// Span of 'else' keyword
+    pub else_span: Span,
+    /// The else block braces and items (must diverge)
+    pub else_lbrace: Span,
+    /// Items in the else block
+    pub else_items: Vec<ElseBlockItem>,
+    /// Right brace of the else block
+    pub else_rbrace: Span,
+}
+
+/// An item in a guard-let else block (simplified - no nested guard-let allowed)
+#[derive(Debug, Clone)]
+pub enum ElseBlockItem {
+    /// A statement (variable declaration or expression with semicolon)
+    Statement(StmtVariant),
+    /// A statement-like expression (if, while, etc. - no semicolon required)
+    StatementExpr(ExprVariant),
+    /// A trailing expression
+    TrailingExpression(ExprVariant),
+}
+
 /// An item in a code block - either a statement or a trailing expression
 #[derive(Debug, Clone)]
 pub enum BlockItem {
@@ -76,6 +111,8 @@ pub enum BlockItem {
     StatementExpr(ExprVariant),
     /// A trailing expression (no semicolon, determines block value)
     TrailingExpression(ExprVariant),
+    /// A guard-let statement (no semicolon required)
+    GuardLet(GuardLetData),
 }
 
 /// Raw parsed data for a code block
@@ -116,25 +153,131 @@ pub fn code_block_parser<'tokens>(
 fn is_statement_like_expr(expr: &ExprVariant) -> bool {
     matches!(
         expr,
-        ExprVariant::If { .. } | ExprVariant::While { .. } | ExprVariant::Loop { .. }
+        ExprVariant::If { .. } | ExprVariant::While { .. } | ExprVariant::WhileLet { .. } | ExprVariant::Loop { .. }
     )
+}
+
+/// Parser for items inside a guard-let else block.
+/// This is a simplified version that doesn't allow nested guard-let statements
+/// to avoid recursive parser types.
+fn guard_let_else_items_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ElseBlockItem>, ParserExtra<'tokens>> + Clone {
+    // Variable declaration: let/var pattern: Type = expr;
+    let var_decl = skip_trivia()
+        .ignore_then(
+            just(Token::Let)
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
+        )
+        .then(pattern_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(crate::ty::ty_parser())
+                .or_not(),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(expr_parser())
+                .or_not(),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(
+            |(((((mutability_span, is_mutable), pattern), type_annotation), initializer), semicolon)| {
+                ElseBlockItem::Statement(StmtVariant::VariableDeclaration(
+                    crate::stmt::VariableDeclarationData {
+                        mutability_span,
+                        is_mutable,
+                        pattern,
+                        type_annotation,
+                        initializer,
+                        semicolon,
+                    },
+                ))
+            },
+        );
+
+    // Expression-based item: parse expression first, then check for semicolon
+    let expr_item = expr_parser()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .or(empty().to(None)),
+        )
+        .try_map(|(expr, maybe_semi), span| {
+            if let Some(semi) = maybe_semi {
+                Ok(ElseBlockItem::Statement(StmtVariant::Expression(expr, semi)))
+            } else if is_statement_like_expr(&expr) {
+                Ok(ElseBlockItem::StatementExpr(expr))
+            } else {
+                Err(Rich::custom(span, "expected semicolon"))
+            }
+        });
+
+    let block_item = var_decl.or(expr_item);
+
+    block_item
+        .repeated()
+        .collect::<Vec<_>>()
+        .then(
+            expr_parser().map(ElseBlockItem::TrailingExpression).or_not(),
+        )
+        .map(|(mut items, trailing)| {
+            if let Some(expr) = trailing {
+                items.push(expr);
+            }
+            items
+        })
 }
 
 /// Parser for the items inside a code block
 fn code_block_items_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<BlockItem>, ParserExtra<'tokens>> + Clone {
     // We need to handle:
-    // 1. Variable declarations (let/var name: Type = expr;)
-    // 2. Expression statements (expr;)
-    // 3. Statement-like expressions (if, while, loop - no semicolon needed)
-    // 4. A final trailing expression (determines the block's value)
+    // 1. Guard-let statements (guard let pattern = expr else { block })
+    // 2. Variable declarations (let/var name: Type = expr;)
+    // 3. Expression statements (expr;)
+    // 4. Statement-like expressions (if, while, loop - no semicolon needed)
+    // 5. A final trailing expression (determines the block's value)
     //
     // Strategy:
-    // - First try to parse variable declarations (starts with let/var)
+    // - First try guard-let (starts with 'guard')
+    // - Then try variable declarations (starts with let/var)
     // - Otherwise parse an expression, then decide based on what follows:
     //   - If semicolon: expression statement
     //   - If statement-like: statement expression (no semicolon needed)
     //   - Otherwise: fail (will be retried as trailing expression)
+
+    // Guard-let statement: guard let pattern = expr else { block }
+    // The else block is parsed inline to avoid recursive parser types
+    let guard_let = skip_trivia()
+        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(skip_trivia().ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(pattern_parser())
+        .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(expr_parser())
+        .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(guard_let_else_items_parser())
+        .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .map(|((((((((guard_span, let_span), pattern), equals_span), value), else_span), else_lbrace), else_items), else_rbrace)| {
+            BlockItem::GuardLet(GuardLetData {
+                guard_span,
+                let_span,
+                pattern,
+                equals_span,
+                value,
+                else_span,
+                else_lbrace,
+                else_items,
+                else_rbrace,
+            })
+        });
 
     // Variable declaration: let/var pattern: Type = expr;
     let var_decl = skip_trivia()
@@ -143,7 +286,7 @@ fn code_block_items_parser<'tokens>(
                 .map_with(|_, e| (to_kestrel_span(e.span()), false))
                 .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
-        .then(crate::pattern::pattern_parser())
+        .then(pattern_parser())
         .then(
             // Optional type annotation: : Type
             skip_trivia()
@@ -199,8 +342,10 @@ fn code_block_items_parser<'tokens>(
             }
         });
 
-    // A block item is either a variable declaration or an expression-based item
-    let block_item = var_decl.or(expr_item);
+    // A block item is a guard-let, variable declaration, or expression-based item
+    // Guard-let must come first since it starts with a keyword (guard) that's not
+    // valid as the start of a variable declaration or expression
+    let block_item = guard_let.or(var_decl).or(expr_item);
 
     block_item
         .repeated()
@@ -239,11 +384,58 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
             BlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);
             }
+            BlockItem::GuardLet(guard_data) => {
+                emit_guard_let(sink, guard_data);
+            }
         }
     }
 
     sink.add_token(SyntaxKind::RBrace, data.rbrace.clone());
     sink.finish_node();
+}
+
+/// Emit events for a guard-let statement
+fn emit_guard_let(sink: &mut EventSink, data: &GuardLetData) {
+    sink.start_node(SyntaxKind::Statement);
+    sink.start_node(SyntaxKind::GuardLetStatement);
+
+    // guard keyword
+    sink.add_token(SyntaxKind::Guard, data.guard_span.clone());
+    // let keyword
+    sink.add_token(SyntaxKind::Let, data.let_span.clone());
+    // Pattern
+    emit_pattern_variant(sink, &data.pattern);
+    // = token
+    sink.add_token(SyntaxKind::Equals, data.equals_span.clone());
+    // Value expression
+    emit_expr_variant(sink, &data.value);
+    // else keyword
+    sink.add_token(SyntaxKind::Else, data.else_span.clone());
+    // Else block - emit inline
+    sink.start_node(SyntaxKind::CodeBlock);
+    sink.add_token(SyntaxKind::LBrace, data.else_lbrace.clone());
+    for item in &data.else_items {
+        match item {
+            ElseBlockItem::Statement(stmt) => {
+                emit_stmt_variant(sink, stmt);
+            }
+            ElseBlockItem::StatementExpr(expr) => {
+                sink.start_node(SyntaxKind::Statement);
+                sink.start_node(SyntaxKind::ExpressionStatement);
+                emit_expr_variant(sink, expr);
+                sink.finish_node();
+                sink.finish_node();
+            }
+            ElseBlockItem::TrailingExpression(expr) => {
+                emit_expr_variant(sink, expr);
+            }
+        }
+    }
+    sink.add_token(SyntaxKind::RBrace, data.else_rbrace.clone());
+    sink.finish_node(); // CodeBlock
+
+    sink.finish_node(); // GuardLetStatement
+    sink.finish_node(); // Statement
 }
 
 /// Parse a code block and emit events

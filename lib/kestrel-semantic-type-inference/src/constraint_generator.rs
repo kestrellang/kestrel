@@ -68,6 +68,26 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
         StatementKind::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
         }
+        StatementKind::GuardLet { pattern, value, else_block } => {
+            // Generate constraints for the value expression
+            generate_expression_constraints(ctx, value);
+            ctx.register_type(&value.ty);
+
+            // Generate constraints for the pattern
+            generate_pattern_constraints(ctx, pattern);
+
+            // Equate pattern type with value type
+            ctx.equate(pattern.ty.id(), value.ty.id(), stmt.span.clone());
+
+            // Generate constraints for the else block statements
+            for else_stmt in &else_block.statements {
+                generate_statement_constraints(ctx, else_stmt);
+            }
+            // The else block's yield expression (if any)
+            if let Some(yield_expr) = else_block.yield_expr() {
+                generate_expression_constraints(ctx, yield_expr);
+            }
+        }
     }
 }
 
@@ -427,6 +447,26 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             ctx.register_type(&bool_ty);
             ctx.equate(condition.ty.id(), bool_ty.id(), condition.span.clone());
 
+            for stmt in body {
+                generate_statement_constraints(ctx, stmt);
+            }
+        }
+
+        ExprKind::WhileLet {
+            pattern, value, body, ..
+        } => {
+            // Generate constraints for the value expression
+            generate_expression_constraints(ctx, value);
+
+            // Generate pattern constraints
+            generate_pattern_constraints(ctx, pattern);
+
+            // Pattern type must match value type
+            ctx.register_type(&pattern.ty);
+            ctx.register_type(&value.ty);
+            ctx.equate(pattern.ty.id(), value.ty.id(), pattern.span.clone());
+
+            // Generate constraints for body statements
             for stmt in body {
                 generate_statement_constraints(ctx, stmt);
             }

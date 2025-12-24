@@ -463,6 +463,24 @@ pub enum ExprKind {
         body: Vec<crate::stmt::Statement>,
     },
 
+    /// While-let loop expression: `label: while let pattern = expr { body }`
+    ///
+    /// Loops while the pattern matches the value expression.
+    /// Pattern bindings are visible only in the loop body.
+    /// Type is `()` (unit) - while-let loops never produce a value.
+    WhileLet {
+        /// Unique identifier for this loop (for break/continue resolution)
+        loop_id: LoopId,
+        /// Optional label for named break/continue
+        label: Option<LabelInfo>,
+        /// The pattern to match against
+        pattern: crate::pattern::Pattern,
+        /// The expression to match the pattern against (the scrutinee)
+        value: Box<Expression>,
+        /// Statements in the loop body
+        body: Vec<crate::stmt::Statement>,
+    },
+
     /// Infinite loop expression: `label: loop { body }`
     ///
     /// Type is `()` (unit) when it has a break, or Never if it loops forever.
@@ -870,6 +888,9 @@ impl Expression {
             }
             ExprKind::While { condition, .. } => {
                 format!("while {} {{ ... }}", condition.debug_compact())
+            }
+            ExprKind::WhileLet { pattern, value, .. } => {
+                format!("while let {:?} = {} {{ ... }}", pattern, value.debug_compact())
             }
             ExprKind::Loop { .. } => "loop { ... }".to_string(),
             ExprKind::Break { label, .. } => {
@@ -1430,6 +1451,33 @@ impl Expression {
                 loop_id,
                 label,
                 condition: Box::new(condition),
+                body,
+            },
+            ty: Ty::unit(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a while-let loop expression.
+    ///
+    /// Loops while the pattern matches the value expression.
+    /// Type is always `()` (unit).
+    pub fn while_let(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        pattern: crate::pattern::Pattern,
+        value: Expression,
+        body: Vec<crate::stmt::Statement>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::WhileLet {
+                loop_id,
+                label,
+                pattern,
+                value: Box::new(value),
                 body,
             },
             ty: Ty::unit(span.clone()),

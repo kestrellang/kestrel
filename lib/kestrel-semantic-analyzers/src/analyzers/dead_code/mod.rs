@@ -125,6 +125,17 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
         } => analyze_expression(expr, errors),
         StatementKind::Binding { value: None, .. } => Divergence::None,
         StatementKind::Expr(expr) => analyze_expression(expr, errors),
+        StatementKind::GuardLet { value, else_block, .. } => {
+            // Analyze the value expression
+            let value_div = analyze_expression(value, errors);
+            if value_div != Divergence::None {
+                return value_div;
+            }
+            // The else block must diverge, but the guard-let itself doesn't diverge
+            // (control continues after guard-let if the pattern matches)
+            let _ = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), errors);
+            Divergence::None
+        }
     }
 }
 
@@ -179,6 +190,28 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             let cond_div = analyze_expression(condition, errors);
             if cond_div.diverges() {
                 return cond_div;
+            }
+            let mut body_div = Divergence::None;
+            for stmt in body {
+                if body_div.diverges() {
+                    if let Some(reason) = body_div.to_reason() {
+                        errors.push(UnreachableCodeWarning {
+                            span: stmt.span.clone(),
+                            reason,
+                        });
+                    }
+                    break;
+                }
+                body_div = analyze_statement(stmt, errors);
+            }
+            Divergence::None
+        }
+        ExprKind::WhileLet {
+            value, body, ..
+        } => {
+            let value_div = analyze_expression(value, errors);
+            if value_div.diverges() {
+                return value_div;
             }
             let mut body_div = Divergence::None;
             for stmt in body {
@@ -392,7 +425,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
                     })
                     .unwrap_or(false)
         }
-        ExprKind::While { body, .. } | ExprKind::Loop { body, .. } => {
+        ExprKind::While { body, .. } | ExprKind::WhileLet { body, .. } | ExprKind::Loop { body, .. } => {
             body.iter().any(|s| statement_contains_break(&s.kind))
         }
         ExprKind::Grouping(inner) => expression_contains_break(inner),

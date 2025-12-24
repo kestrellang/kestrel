@@ -17,10 +17,11 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer, ConstraintCycleAnalyzer,
         DeadCodeAnalyzer, DefiniteAssignmentAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
         DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-        ExtensionConflictAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer, ImportAnalyzer,
-        InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
-        RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer, StructCycleAnalyzer,
-        TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer, VisibilityConsistencyAnalyzer,
+        ExtensionConflictAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer,
+        ImportAnalyzer, InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer,
+        ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
+        StructCycleAnalyzer, TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
+        VisibilityConsistencyAnalyzer,
     };
 
     // Match historical order from builder ValidationRunner where possible
@@ -35,6 +36,7 @@ pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(DefiniteAssignmentAnalyzer::new()),
         Box::new(DeadCodeAnalyzer::new()),
         Box::new(ExhaustiveReturnAnalyzer::new()),
+        Box::new(GuardLetDivergenceAnalyzer::new()),
         // Closure analyzer runs before type inference to see original closure structure
         Box::new(ClosureAnalyzer::new()),
         // Type inference runs before type checking to resolve inference placeholders

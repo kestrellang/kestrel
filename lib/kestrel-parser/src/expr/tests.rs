@@ -568,6 +568,49 @@ fn test_while_with_label() {
     assert!(expr.is_while());
 }
 
+#[test]
+fn test_while_let_basic() {
+    let source = "while let x = opt { 1 }";
+    let expr = parse_expr_from_source(source);
+    
+    assert!(expr.is_while());
+    let expr_while = expr.syntax.children()
+        .find(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::ExprWhile);
+    let has_while_let_condition = expr_while.as_ref()
+        .map(|w| w.children().any(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::WhileLetCondition))
+        .unwrap_or(false);
+    assert!(has_while_let_condition, "Expected WhileLetCondition in ExprWhile");
+}
+
+#[test]
+fn test_while_let_enum_pattern() {
+    let source = "while let .Some(x) = opt { 1 }";
+    let expr = parse_expr_from_source(source);
+    
+    assert!(expr.is_while());
+    let expr_while = expr.syntax.children()
+        .find(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::ExprWhile);
+    let has_while_let_condition = expr_while.as_ref()
+        .map(|w| w.children().any(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::WhileLetCondition))
+        .unwrap_or(false);
+    assert!(has_while_let_condition, "Expected WhileLetCondition in ExprWhile, got children: {:?}", 
+        expr_while.map(|w| w.children().map(|c| c.kind()).collect::<Vec<_>>()));
+}
+
+#[test]
+fn test_while_let_with_label() {
+    let source = "outer: while let .Some(x) = opt { 1 }";
+    let expr = parse_expr_from_source(source);
+    assert!(expr.is_while());
+    // Look for WhileLetCondition inside ExprWhile (which is inside Expression wrapper)
+    let expr_while = expr.syntax.children()
+        .find(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::ExprWhile);
+    let has_while_let_condition = expr_while.as_ref()
+        .map(|w| w.children().any(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::WhileLetCondition))
+        .unwrap_or(false);
+    assert!(has_while_let_condition, "Expected WhileLetCondition in ExprWhile");
+}
+
 // ===== Loop Expression Tests =====
 
 #[test]

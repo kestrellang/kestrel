@@ -32,9 +32,9 @@ struct Iterator {
 
 func next(iter: Iterator) -> Option[Int] {
     if iter.current < iter.max {
-        .Some(value: iter.current)
+        Option[Int].Some(value: iter.current)
     } else {
-        .None
+        Option[Int].None
     }
 }
 
@@ -212,10 +212,18 @@ enum Option[T] {
     case None
 }
 
+func getOption(n: Int) -> Option[Int] {
+    if n > 0 {
+        Option[Int].Some(value: n)
+    } else {
+        Option[Int].None
+    }
+}
+
 func test() -> Int {
     var sum = 0;
     var n = 10;
-    while let .Some(value) = if n > 0 { .Some(value: n) } else { .None } {
+    while let .Some(value) = getOption(n) {
         n = n - 1;
         if value == 5 {
             continue

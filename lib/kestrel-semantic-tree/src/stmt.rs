@@ -6,6 +6,7 @@
 
 use kestrel_span::Span;
 
+use crate::behavior::executable::CodeBlock;
 use crate::expr::Expression;
 use crate::pattern::Pattern;
 
@@ -21,6 +22,18 @@ pub enum StatementKind {
     },
     /// Expression statement: `foo();`
     Expr(Expression),
+    /// Guard-let statement: `guard let pattern = expr else { block }`
+    ///
+    /// Pattern bindings are visible AFTER the guard statement, but NOT in the else block.
+    /// The else block MUST diverge (return, break, continue, or panic).
+    GuardLet {
+        /// The pattern to match against (bindings become visible after guard)
+        pattern: Pattern,
+        /// The value expression to match
+        value: Expression,
+        /// The else block (must diverge)
+        else_block: CodeBlock,
+    },
 }
 
 /// A resolved statement in the semantic tree.
@@ -57,6 +70,18 @@ impl Statement {
         }
     }
 
+    /// Create a guard-let statement.
+    pub fn guard_let(pattern: Pattern, value: Expression, else_block: CodeBlock, span: Span) -> Self {
+        Statement {
+            kind: StatementKind::GuardLet {
+                pattern,
+                value,
+                else_block,
+            },
+            span,
+        }
+    }
+
     /// Check if this is a binding statement.
     pub fn is_binding(&self) -> bool {
         matches!(self.kind, StatementKind::Binding { .. })
@@ -65,6 +90,11 @@ impl Statement {
     /// Check if this is an expression statement.
     pub fn is_expr(&self) -> bool {
         matches!(self.kind, StatementKind::Expr(_))
+    }
+
+    /// Check if this is a guard-let statement.
+    pub fn is_guard_let(&self) -> bool {
+        matches!(self.kind, StatementKind::GuardLet { .. })
     }
 
     /// Get the pattern if this is a binding statement.
@@ -131,6 +161,10 @@ impl Statement {
                 format!("{} {}{};", keyword, name, value_str)
             }
             StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
+            StatementKind::GuardLet { pattern, value, .. } => {
+                let name = pattern.name().unwrap_or("<pattern>");
+                format!("guard let {} = {} else {{ ... }}", name, value.debug_compact())
+            }
         }
     }
 }

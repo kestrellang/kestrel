@@ -126,6 +126,23 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
         } => analyze_expression(expr),
         StatementKind::Binding { value: None, .. } => ReturnState::MayFallThrough,
         StatementKind::Expr(expr) => analyze_expression(expr),
+        StatementKind::GuardLet { value, else_block, .. } => {
+            // Check if value expression diverges
+            let value_state = analyze_expression(value);
+            if value_state.definitely_returns() {
+                return value_state;
+            }
+            // The else block must diverge - if it does, control continues after guard-let
+            let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref());
+            if else_state.definitely_returns() {
+                // The else block diverges, so control continues after guard-let
+                ReturnState::MayFallThrough
+            } else {
+                // If the else block doesn't diverge, that's an error (reported elsewhere)
+                // but for return analysis, we still may fall through
+                ReturnState::MayFallThrough
+            }
+        }
     }
 }
 
@@ -167,6 +184,16 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             let cond_state = analyze_expression(condition);
             if cond_state.definitely_returns() {
                 return cond_state;
+            }
+            let _ = analyze_block(body, None);
+            ReturnState::MayFallThrough
+        }
+        ExprKind::WhileLet {
+            value, body, ..
+        } => {
+            let value_state = analyze_expression(value);
+            if value_state.definitely_returns() {
+                return value_state;
             }
             let _ = analyze_block(body, None);
             ReturnState::MayFallThrough
@@ -306,6 +333,22 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
             value: Some(expr), ..
         } => expr_contains_break(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
+        StatementKind::GuardLet { value, else_block, .. } => {
+            if expr_contains_break(&value.kind) {
+                return true;
+            }
+            for stmt in &else_block.statements {
+                if statement_contains_break(&stmt.kind) {
+                    return true;
+                }
+            }
+            if let Some(yield_expr) = &else_block.yield_expr {
+                if expr_contains_break(&yield_expr.kind) {
+                    return true;
+                }
+            }
+            false
+        }
     }
 }
 
@@ -352,7 +395,7 @@ fn expr_contains_break(kind: &ExprKind) -> bool {
             false
         }
         // Don't recurse into nested loops
-        ExprKind::While { .. } | ExprKind::Loop { .. } => false,
+        ExprKind::While { .. } | ExprKind::WhileLet { .. } | ExprKind::Loop { .. } => false,
         _ => false,
     }
 }

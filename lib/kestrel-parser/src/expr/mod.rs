@@ -9,7 +9,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::block::{emit_code_block, BlockItem, CodeBlockData};
+use crate::block::{emit_code_block, BlockItem, CodeBlockData, ElseBlockItem, GuardLetData};
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
@@ -289,6 +289,16 @@ pub enum ExprVariant {
         condition: Box<ExprVariant>,
         body: CodeBlockData,
     },
+    /// While-let expression: label: while let pattern = expr { body }
+    WhileLet {
+        label: Option<LabelData>,
+        while_span: Span,
+        let_span: Span,
+        pattern: crate::pattern::PatternVariant,
+        equals_span: Span,
+        value: Box<ExprVariant>,
+        body: CodeBlockData,
+    },
     /// Loop expression: label: loop { body }
     Loop {
         label: Option<LabelData>,
@@ -483,6 +493,7 @@ fn is_inline_statement_like(expr: &ExprVariant) -> bool {
         expr,
         ExprVariant::If { .. }
             | ExprVariant::While { .. }
+            | ExprVariant::WhileLet { .. }
             | ExprVariant::Loop { .. }
             | ExprVariant::Match { .. }
             | ExprVariant::Return { .. }
@@ -812,10 +823,71 @@ pub fn expr_parser<'tokens>(
         let inline_code_block = {
             let expr_for_block = expr.clone();
             let expr_for_stmt_like = expr.clone();
+            let expr_for_guard = expr.clone();
+            let expr_for_else = expr.clone();
 
-            let inline_block_item = inline_var_decl
+            // Inline else block items parser (for guard-let else blocks)
+            let inline_else_item = inline_var_decl
                 .clone()
-                .map(BlockItem::Statement)
+                .map(ElseBlockItem::Statement)
+                .or(expr_for_else
+                    .clone()
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                            .map(Some)
+                            .or(empty().to(None)),
+                    )
+                    .try_map(|(e, maybe_semi), _extra| {
+                        if let Some(semi) = maybe_semi {
+                            Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
+                        } else if is_inline_statement_like(&e) {
+                            Ok(ElseBlockItem::StatementExpr(e))
+                        } else {
+                            Err(Rich::custom(chumsky::span::Span::new((), 0..0), "expected semicolon"))
+                        }
+                    }));
+
+            let inline_else_items = inline_else_item
+                .repeated()
+                .collect::<Vec<_>>()
+                .then(expr_for_else.map(ElseBlockItem::TrailingExpression).or_not())
+                .map(|(mut items, trailing)| {
+                    if let Some(e) = trailing {
+                        items.push(e);
+                    }
+                    items
+                });
+
+            // Inline guard-let parser
+            let inline_guard_let = skip_trivia()
+                .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(skip_trivia().ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(crate::pattern::pattern_parser())
+                .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(expr_for_guard)
+                .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(inline_else_items)
+                .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+                .map(|((((((((guard_span, let_span), pattern), equals_span), value), else_span), else_lbrace), else_items), else_rbrace)| {
+                    BlockItem::GuardLet(GuardLetData {
+                        guard_span,
+                        let_span,
+                        pattern,
+                        equals_span,
+                        value,
+                        else_span,
+                        else_lbrace,
+                        else_items,
+                        else_rbrace,
+                    })
+                });
+
+            let inline_block_item = inline_guard_let
+                .or(inline_var_decl
+                    .clone()
+                    .map(BlockItem::Statement))
                 .or(expr_for_stmt_like
                     .then(
                         skip_trivia()
@@ -963,8 +1035,32 @@ pub fn expr_parser<'tokens>(
             .then(skip_trivia().ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
             .map(|(name, colon)| LabelData { name, colon });
 
+        // While-let condition parser: let pattern = expr
+        let while_let_condition = skip_trivia()
+            .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(crate::pattern::pattern_parser())
+            .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
+            .then(condition_binary.clone());
+
         // While expression with optional label
         // Use separate parsers for labeled and unlabeled to avoid partial-match issues
+        // Also handle while-let: while let pattern = expr { body }
+        let labeled_while_let = label_parser.clone()
+            .then(skip_trivia().ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span()))))
+            .then(while_let_condition.clone())
+            .then(inline_code_block.clone())
+            .map(|(((label, while_span), (((let_span, pattern), equals_span), value)), body)| ExprVariant::WhileLet {
+                label: Some(label), while_span, let_span, pattern, equals_span, value: Box::new(value), body,
+            });
+
+        let unlabeled_while_let = skip_trivia()
+            .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(while_let_condition.clone())
+            .then(inline_code_block.clone())
+            .map(|((while_span, (((let_span, pattern), equals_span), value)), body)| ExprVariant::WhileLet {
+                label: None, while_span, let_span, pattern, equals_span, value: Box::new(value), body,
+            });
+
         let labeled_while = label_parser.clone()
             .then(skip_trivia().ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span()))))
             .then(condition_binary.clone())
@@ -981,7 +1077,8 @@ pub fn expr_parser<'tokens>(
                 label: None, while_span, condition: Box::new(condition), body,
             });
 
-        let while_expr = labeled_while.or(unlabeled_while).boxed();
+        // Try while-let first (more specific), then regular while
+        let while_expr = labeled_while_let.or(unlabeled_while_let).or(labeled_while).or(unlabeled_while).boxed();
 
         // Loop expression with optional label
         let labeled_loop = label_parser
@@ -1095,9 +1192,71 @@ pub fn expr_parser<'tokens>(
                 });
 
             let expr_for_closure = expr.clone();
-            let closure_block_item = inline_var_decl
+            let expr_for_closure_guard = expr.clone();
+            let expr_for_closure_else = expr.clone();
+
+            // Inline else block items parser for guard-let in closures
+            let closure_else_item = inline_var_decl
                 .clone()
-                .map(BlockItem::Statement)
+                .map(ElseBlockItem::Statement)
+                .or(expr_for_closure_else
+                    .clone()
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                            .map(Some)
+                            .or(empty().to(None)),
+                    )
+                    .try_map(|(e, maybe_semi), _extra| {
+                        if let Some(semi) = maybe_semi {
+                            Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
+                        } else if is_inline_statement_like(&e) {
+                            Ok(ElseBlockItem::StatementExpr(e))
+                        } else {
+                            Err(Rich::custom(chumsky::span::Span::new((), 0..0), "expected semicolon"))
+                        }
+                    }));
+
+            let closure_else_items = closure_else_item
+                .repeated()
+                .collect::<Vec<_>>()
+                .then(expr_for_closure_else.map(ElseBlockItem::TrailingExpression).or_not())
+                .map(|(mut items, trailing)| {
+                    if let Some(e) = trailing {
+                        items.push(e);
+                    }
+                    items
+                });
+
+            // Inline guard-let parser for closures
+            let closure_guard_let = skip_trivia()
+                .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(skip_trivia().ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(crate::pattern::pattern_parser())
+                .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(expr_for_closure_guard)
+                .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+                .then(closure_else_items)
+                .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+                .map(|((((((((guard_span, let_span), pattern), equals_span), value), else_span), else_lbrace), else_items), else_rbrace)| {
+                    BlockItem::GuardLet(GuardLetData {
+                        guard_span,
+                        let_span,
+                        pattern,
+                        equals_span,
+                        value,
+                        else_span,
+                        else_lbrace,
+                        else_items,
+                        else_rbrace,
+                    })
+                });
+
+            let closure_block_item = closure_guard_let
+                .or(inline_var_decl
+                    .clone()
+                    .map(BlockItem::Statement))
                 .or(expr_for_closure
                     .clone()
                     .then(
@@ -1326,6 +1485,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::While { label, while_span, condition, body } => {
             emit_while_expr(sink, label.as_ref(), while_span.clone(), condition, body);
+        }
+        ExprVariant::WhileLet { label, while_span, let_span, pattern, equals_span, value, body } => {
+            emit_while_let_expr(sink, label.as_ref(), while_span.clone(), let_span.clone(), pattern, equals_span.clone(), value, body);
         }
         ExprVariant::Loop { label, loop_span, body } => {
             emit_loop_expr(sink, label.as_ref(), loop_span.clone(), body);
@@ -1677,6 +1839,37 @@ fn emit_while_expr(sink: &mut EventSink, label: Option<&LabelData>, while_span: 
     sink.finish_node();
 }
 
+fn emit_while_let_expr(
+    sink: &mut EventSink,
+    label: Option<&LabelData>,
+    while_span: Span,
+    let_span: Span,
+    pattern: &crate::pattern::PatternVariant,
+    equals_span: Span,
+    value: &ExprVariant,
+    body: &CodeBlockData,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprWhile);
+    if let Some(label_data) = label {
+        sink.start_node(SyntaxKind::LoopLabel);
+        sink.add_token(SyntaxKind::Identifier, label_data.name.clone());
+        sink.add_token(SyntaxKind::Colon, label_data.colon.clone());
+        sink.finish_node();
+    }
+    sink.add_token(SyntaxKind::While, while_span);
+    // Emit the while-let condition
+    sink.start_node(SyntaxKind::WhileLetCondition);
+    sink.add_token(SyntaxKind::Let, let_span);
+    crate::pattern::emit_pattern_variant(sink, pattern);
+    sink.add_token(SyntaxKind::Equals, equals_span);
+    emit_expr_variant(sink, value);
+    sink.finish_node();
+    emit_code_block(sink, body);
+    sink.finish_node();
+    sink.finish_node();
+}
+
 fn emit_loop_expr(sink: &mut EventSink, label: Option<&LabelData>, loop_span: Span, body: &CodeBlockData) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprLoop);
@@ -1771,6 +1964,45 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
         }
         BlockItem::TrailingExpression(expr) => {
             emit_expr_variant(sink, expr);
+        }
+        BlockItem::GuardLet(guard_data) => {
+            // Guard-let in a closure/expression context
+            use crate::block::ElseBlockItem;
+            use crate::stmt::emit_stmt_variant;
+            
+            sink.start_node(SyntaxKind::Statement);
+            sink.start_node(SyntaxKind::GuardLetStatement);
+            sink.add_token(SyntaxKind::Guard, guard_data.guard_span.clone());
+            sink.add_token(SyntaxKind::Let, guard_data.let_span.clone());
+            crate::pattern::emit_pattern_variant(sink, &guard_data.pattern);
+            sink.add_token(SyntaxKind::Equals, guard_data.equals_span.clone());
+            emit_expr_variant(sink, &guard_data.value);
+            sink.add_token(SyntaxKind::Else, guard_data.else_span.clone());
+            
+            sink.start_node(SyntaxKind::CodeBlock);
+            sink.add_token(SyntaxKind::LBrace, guard_data.else_lbrace.clone());
+            for else_item in &guard_data.else_items {
+                match else_item {
+                    ElseBlockItem::Statement(stmt) => {
+                        emit_stmt_variant(sink, stmt);
+                    }
+                    ElseBlockItem::StatementExpr(expr) => {
+                        sink.start_node(SyntaxKind::Statement);
+                        sink.start_node(SyntaxKind::ExpressionStatement);
+                        emit_expr_variant(sink, expr);
+                        sink.finish_node();
+                        sink.finish_node();
+                    }
+                    ElseBlockItem::TrailingExpression(expr) => {
+                        emit_expr_variant(sink, expr);
+                    }
+                }
+            }
+            sink.add_token(SyntaxKind::RBrace, guard_data.else_rbrace.clone());
+            sink.finish_node(); // CodeBlock
+            
+            sink.finish_node(); // GuardLetStatement
+            sink.finish_node(); // Statement
         }
     }
 }

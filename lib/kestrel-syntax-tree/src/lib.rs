@@ -108,6 +108,7 @@ pub enum SyntaxKind {
     Statement,           // Wrapper for statement variants
     ExpressionStatement, // expression;
     VariableDeclaration, // let/var name: Type = expr;
+    GuardLetStatement,   // guard let pattern = expr else { block }
 
     // Expression nodes
     Expression,     // Wrapper for expression variants
@@ -130,6 +131,7 @@ pub enum SyntaxKind {
     IfLetCondition, // let pattern = expr (in if-let condition)
     ElseClause,     // else { ... } or else if ...
     ExprWhile,      // while condition { body }
+    WhileLetCondition, // let pattern = expr (in while-let condition)
     ExprLoop,       // loop { body }
     ExprBreak,      // break or break label
     ExprContinue,   // continue or continue label
@@ -435,6 +437,7 @@ impl Language for KestrelLanguage {
         const STATEMENT: u16 = SyntaxKind::Statement as u16;
         const EXPRESSION_STATEMENT: u16 = SyntaxKind::ExpressionStatement as u16;
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
+        const GUARD_LET_STATEMENT: u16 = SyntaxKind::GuardLetStatement as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
@@ -455,6 +458,7 @@ impl Language for KestrelLanguage {
         const IF_LET_CONDITION: u16 = SyntaxKind::IfLetCondition as u16;
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
         const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
+        const WHILE_LET_CONDITION: u16 = SyntaxKind::WhileLetCondition as u16;
         const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
@@ -630,6 +634,7 @@ impl Language for KestrelLanguage {
             STATEMENT => SyntaxKind::Statement,
             EXPRESSION_STATEMENT => SyntaxKind::ExpressionStatement,
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
+            GUARD_LET_STATEMENT => SyntaxKind::GuardLetStatement,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,
             EXPR_INTEGER => SyntaxKind::ExprInteger,
@@ -650,6 +655,7 @@ impl Language for KestrelLanguage {
             IF_LET_CONDITION => SyntaxKind::IfLetCondition,
             ELSE_CLAUSE => SyntaxKind::ElseClause,
             EXPR_WHILE => SyntaxKind::ExprWhile,
+            WHILE_LET_CONDITION => SyntaxKind::WhileLetCondition,
             EXPR_LOOP => SyntaxKind::ExprLoop,
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,

@@ -214,6 +214,13 @@ fn analyze_statement(
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
         }
+        StatementKind::GuardLet { value, else_block, .. } => {
+            // Analyze the value expression
+            state = analyze_expression(value, state, false, ctx);
+            // Analyze the else block (it diverges so we don't merge state)
+            let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), ctx);
+            let _ = else_state;
+        }
     }
     state
 }
@@ -397,6 +404,20 @@ fn analyze_expression(
             }
             // Ignore yield for while
         }
+        ExprKind::WhileLet {
+            value, body, ..
+        } => {
+            state = analyze_expression(value, state, false, ctx);
+            // Body may execute zero times; so it doesn't contribute guaranteed initialization
+            let mut body_state = state.clone();
+            for stmt in body {
+                if body_state.diverged {
+                    break;
+                }
+                body_state = analyze_statement(stmt, body_state, ctx);
+            }
+            // Ignore yield for while-let
+        }
         ExprKind::Loop { body, .. } => {
             let mut break_states: Vec<InitState> = Vec::new();
             let mut body_state = state.clone();
@@ -487,6 +508,22 @@ fn contains_break_at_top_level(kind: &StatementKind) -> bool {
             value: Some(expr), ..
         } => expr_contains_break_at_top_level(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
+        StatementKind::GuardLet { value, else_block, .. } => {
+            if expr_contains_break_at_top_level(&value.kind) {
+                return true;
+            }
+            for stmt in &else_block.statements {
+                if contains_break_at_top_level(&stmt.kind) {
+                    return true;
+                }
+            }
+            if let Some(yield_expr) = &else_block.yield_expr {
+                if expr_contains_break_at_top_level(&yield_expr.kind) {
+                    return true;
+                }
+            }
+            false
+        }
     }
 }
 
@@ -532,7 +569,7 @@ fn expr_contains_break_at_top_level(kind: &ExprKind) -> bool {
             }
             false
         }
-        ExprKind::While { .. } | ExprKind::Loop { .. } => false,
+        ExprKind::While { .. } | ExprKind::WhileLet { .. } | ExprKind::Loop { .. } => false,
         _ => false,
     }
 }

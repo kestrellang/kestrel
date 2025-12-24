@@ -3,10 +3,12 @@
 //! This module handles resolving statements from syntax nodes into semantic
 //! Statement representations, including variable declarations and expression statements.
 
+use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use super::context::resolve_code_block;
 
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -28,6 +30,9 @@ pub fn resolve_statement(
             }
             SyntaxKind::ExpressionStatement => {
                 return resolve_expression_statement(&child, ctx);
+            }
+            SyntaxKind::GuardLetStatement => {
+                return resolve_guard_let_statement(&child, ctx);
             }
             SyntaxKind::Expression => {
                 let expr = resolve_expression(&child, ctx);
@@ -154,4 +159,50 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
             );
             resolver.resolve(&ty_node)
         })
+}
+
+/// Resolve a guard-let statement: `guard let pattern = expr else { block }`
+///
+/// Guard-let has special scoping rules:
+/// - Pattern bindings are NOT visible in the else block
+/// - Pattern bindings ARE visible after the guard statement (in subsequent statements)
+pub fn resolve_guard_let_statement(
+    guard_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Statement> {
+    let span = get_node_span(guard_node, ctx.file_id);
+
+    // Find the value expression first (before the pattern, to get expected type)
+    let value_node = guard_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let value = value_node
+        .map(|n| resolve_expression(&n, ctx))
+        .unwrap_or_else(|| kestrel_semantic_tree::expr::Expression::error(span.clone()));
+
+    // Find and resolve the pattern
+    // Pattern bindings will be added to the current scope
+    let pattern_node = guard_node
+        .children()
+        .find(|c| is_pattern_kind(c.kind()));
+
+    // Resolve else block BEFORE the pattern, so pattern bindings are not visible
+    // We parse it here but need to execute it in a scope that doesn't have the pattern bindings
+    let else_block = guard_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::CodeBlock)
+        .map(|block_node| {
+            // Resolve the else block before adding pattern bindings
+            // Pattern bindings from THIS guard are not visible, but earlier bindings are
+            resolve_code_block(&block_node, ctx)
+        })
+        .unwrap_or_else(CodeBlock::empty);
+
+    // NOW resolve the pattern (adding bindings for subsequent statements)
+    let pattern = pattern_node
+        .map(|n| resolve_pattern_with_mutability(&n, ctx, Some(&value.ty), false))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    Some(Statement::guard_let(pattern, value, else_block, span))
 }

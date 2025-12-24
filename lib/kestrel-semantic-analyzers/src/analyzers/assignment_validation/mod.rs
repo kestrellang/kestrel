@@ -117,6 +117,7 @@ fn validate_assignment_target(
         | ExprKind::Assignment { .. }
         | ExprKind::If { .. }
         | ExprKind::While { .. }
+        | ExprKind::WhileLet { .. }
         | ExprKind::Loop { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }

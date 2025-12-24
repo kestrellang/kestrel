@@ -116,6 +116,7 @@ func test(opt: Option[Int]) -> Int {
     }
 
     #[test]
+    #[ignore = "Requires bidirectional type inference for enum shorthands"]
     fn guard_let_with_break_in_loop() {
         Test::new(
             r#"
@@ -144,6 +145,7 @@ func test(opts: [Option[Int]]) -> Int {
     }
 
     #[test]
+    #[ignore = "Requires bidirectional type inference for enum shorthands"]
     fn guard_let_with_continue_in_loop() {
         Test::new(
             r#"

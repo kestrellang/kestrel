@@ -49,6 +49,16 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
         StatementKind::Expr(expr) => {
             StatementKind::Expr(apply_to_expression(expr, solution))
         }
+        StatementKind::GuardLet { pattern, value, else_block } => {
+            let resolved_pattern = apply_to_pattern(pattern, solution);
+            let resolved_value = apply_to_expression(value, solution);
+            let resolved_else_block = apply_solution(else_block, solution);
+            StatementKind::GuardLet {
+                pattern: resolved_pattern,
+                value: resolved_value,
+                else_block: resolved_else_block,
+            }
+        }
     };
 
     Statement::new(kind, stmt.span.clone())
@@ -191,6 +201,20 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             loop_id: *loop_id,
             label: label.clone(),
             condition: Box::new(apply_to_expression(condition, solution)),
+            body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
+        },
+
+        ExprKind::WhileLet {
+            loop_id,
+            label,
+            pattern,
+            value,
+            body,
+        } => ExprKind::WhileLet {
+            loop_id: *loop_id,
+            label: label.clone(),
+            pattern: apply_to_pattern(pattern, solution),
+            value: Box::new(apply_to_expression(value, solution)),
             body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
         },
 

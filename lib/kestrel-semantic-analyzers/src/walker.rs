@@ -108,6 +108,17 @@ fn walk_statement(
             StatementKind::Expr(expr) => {
                 walk_expression(expr, analyzers, model, ctx);
             }
+            StatementKind::GuardLet { pattern, value, else_block } => {
+                walk_pattern(pattern, analyzers, model, ctx);
+                walk_expression(value, analyzers, model, ctx);
+                // Walk the else block statements
+                for else_stmt in &else_block.statements {
+                    walk_statement(else_stmt, analyzers, model, ctx);
+                }
+                if let Some(yield_expr) = &else_block.yield_expr {
+                    walk_expression(yield_expr, analyzers, model, ctx);
+                }
+            }
         }
     }
 
@@ -266,6 +277,17 @@ fn walk_expression(
                 condition, body, ..
             } => {
                 walk_expression(condition, analyzers, model, ctx);
+                for stmt in body {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            }
+            ExprKind::WhileLet {
+                value, body, ..
+            } => {
+                walk_expression(value, analyzers, model, ctx);
                 for stmt in body {
                     walk_statement(stmt, analyzers, model, ctx);
                     if ctx.stopped {
