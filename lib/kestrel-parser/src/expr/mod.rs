@@ -271,9 +271,14 @@ pub enum ExprVariant {
         rhs: Box<ExprVariant>,
     },
     /// If expression: if condition { then } else { else }
+    /// Also supports if-let: if let pattern = expr { then } else { else }
+    /// And if-let chains: if let .Some(x) = a, let .Some(y) = b { ... }
     If {
         if_span: Span,
-        condition: Box<ExprVariant>,
+        /// List of conditions (at least one). Each is either:
+        /// - A boolean expression
+        /// - A let-binding (pattern + expression)
+        conditions: Vec<IfCondition>,
         then_block: CodeBlockData,
         else_clause: Option<ElseClause>,
     },
@@ -392,6 +397,20 @@ pub enum ElseClause {
     ElseIf {
         else_span: Span,
         if_expr: Box<ExprVariant>,
+    },
+}
+
+/// A single condition in an if or if-let expression
+#[derive(Debug, Clone)]
+pub enum IfCondition {
+    /// Boolean expression condition
+    Expr(ExprVariant),
+    /// Let binding condition: let pattern = expr
+    Let {
+        let_span: Span,
+        pattern: crate::pattern::PatternVariant,
+        equals_span: Span,
+        value: ExprVariant,
     },
 }
 
@@ -890,10 +909,30 @@ pub fn expr_parser<'tokens>(
             })
             .boxed();
 
-        // If expression
+        // If-let condition: let pattern = expr
+        let if_let_condition = skip_trivia()
+            .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(crate::pattern::pattern_parser())
+            .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
+            .then(condition_binary.clone())
+            .map(|(((let_span, pattern), equals_span), value)| {
+                IfCondition::Let { let_span, pattern, equals_span, value }
+            });
+
+        // Single condition: either if-let or boolean expression
+        let single_condition = if_let_condition.clone()
+            .or(condition_binary.clone().map(IfCondition::Expr));
+
+        // Condition list: comma-separated conditions (for if-let chains)
+        let condition_list = single_condition
+            .separated_by(skip_trivia().ignore_then(just(Token::Comma).map_with(|_, _| ())))
+            .at_least(1)
+            .collect::<Vec<_>>();
+
+        // If expression (including if-let)
         let if_expr = skip_trivia()
             .ignore_then(just(Token::If).map_with(|_, e| to_kestrel_span(e.span())))
-            .then(condition_binary.clone())
+            .then(condition_list)
             .then(inline_code_block.clone())
             .then(
                 skip_trivia()
@@ -908,12 +947,12 @@ pub fn expr_parser<'tokens>(
                     )
                     .or_not(),
             )
-            .map(|(((if_span, condition), then_block), else_opt)| {
+            .map(|(((if_span, conditions), then_block), else_opt)| {
                 let else_clause = else_opt.map(|(else_span, else_variant)| match else_variant {
                     ElseClauseVariant::Block(block) => ElseClause::Block { else_span, block },
                     ElseClauseVariant::ElseIf(if_expr) => ElseClause::ElseIf { else_span, if_expr: Box::new(if_expr) },
                 });
-                ExprVariant::If { if_span, condition: Box::new(condition), then_block, else_clause }
+                ExprVariant::If { if_span, conditions, then_block, else_clause }
             })
             .boxed();
 
@@ -1282,8 +1321,8 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::Binary { lhs, operator, operator_span, rhs } => {
             emit_binary_expr(sink, lhs, operator.clone(), operator_span.clone(), rhs);
         }
-        ExprVariant::If { if_span, condition, then_block, else_clause } => {
-            emit_if_expr(sink, if_span.clone(), condition, then_block, else_clause.as_ref());
+        ExprVariant::If { if_span, conditions, then_block, else_clause } => {
+            emit_if_expr(sink, if_span.clone(), conditions, then_block, else_clause.as_ref());
         }
         ExprVariant::While { label, while_span, condition, body } => {
             emit_while_expr(sink, label.as_ref(), while_span.clone(), condition, body);
@@ -1547,11 +1586,31 @@ fn emit_binary_expr(sink: &mut EventSink, lhs: &ExprVariant, operator: Token, op
     sink.finish_node();
 }
 
-fn emit_if_expr(sink: &mut EventSink, if_span: Span, condition: &ExprVariant, then_block: &CodeBlockData, else_clause: Option<&ElseClause>) {
+fn emit_if_expr(sink: &mut EventSink, if_span: Span, conditions: &[IfCondition], then_block: &CodeBlockData, else_clause: Option<&ElseClause>) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprIf);
     sink.add_token(SyntaxKind::If, if_span);
-    emit_expr_variant(sink, condition);
+    // Emit each condition
+    for (i, condition) in conditions.iter().enumerate() {
+        match condition {
+            IfCondition::Expr(expr) => {
+                emit_expr_variant(sink, expr);
+            }
+            IfCondition::Let { let_span, pattern, equals_span, value } => {
+                sink.start_node(SyntaxKind::IfLetCondition);
+                sink.add_token(SyntaxKind::Let, let_span.clone());
+                crate::pattern::emit_pattern_variant(sink, pattern);
+                sink.add_token(SyntaxKind::Equals, equals_span.clone());
+                emit_expr_variant(sink, value);
+                sink.finish_node();
+            }
+        }
+        // Add comma between conditions (but not after last)
+        if i < conditions.len() - 1 {
+            // Note: We don't track comma spans in the parsed data, 
+            // so we skip emitting commas. The tree structure is still correct.
+        }
+    }
     emit_code_block(sink, then_block);
     if let Some(else_clause) = else_clause {
         sink.start_node(SyntaxKind::ElseClause);

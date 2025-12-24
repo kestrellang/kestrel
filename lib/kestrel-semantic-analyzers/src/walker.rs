@@ -209,12 +209,31 @@ fn walk_expression(
                 walk_expression(value, analyzers, model, ctx);
             }
             ExprKind::If {
-                condition,
+                conditions,
                 then_branch,
                 then_value,
                 else_branch,
             } => {
-                walk_expression(condition, analyzers, model, ctx);
+                for cond in conditions {
+                    match cond {
+                        kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                            walk_expression(e, analyzers, model, ctx);
+                            if ctx.stopped {
+                                return;
+                            }
+                        }
+                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                            walk_pattern(pattern, analyzers, model, ctx);
+                            if ctx.stopped {
+                                return;
+                            }
+                            walk_expression(value, analyzers, model, ctx);
+                            if ctx.stopped {
+                                return;
+                            }
+                        }
+                    }
+                }
                 for stmt in then_branch {
                     walk_statement(stmt, analyzers, model, ctx);
                     if ctx.stopped {

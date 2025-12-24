@@ -5,7 +5,7 @@
 //! like calls, operators, and paths.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_tree::expr::{ElseBranch, Expression, LabelInfo};
+use kestrel_semantic_tree::expr::{ElseBranch, Expression, IfCondition, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
@@ -247,38 +247,162 @@ fn resolve_assignment_expression(node: &SyntaxNode, ctx: &mut BodyResolutionCont
 }
 
 /// Resolve an if expression: if condition { then } else { else }
+/// Also handles if-let: if let pattern = expr { then } else { else }
+/// And if-let chains: if let .Some(x) = a, let .Some(y) = b { ... }
 fn resolve_if_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.file_id);
 
     // ExprIf structure:
     // - If token
-    // - Expression (condition)
+    // - One or more conditions:
+    //   - Expression (bool condition), or
+    //   - IfLetCondition (let pattern = expr)
     // - CodeBlock (then branch)
     // - Optional: ElseClause
     //   - Else token
     //   - Either CodeBlock or Expression (for else-if)
 
-    let mut children = node.children().peekable();
+    // Push a new scope for pattern bindings from if-let conditions.
+    // Bindings in if-let are visible in subsequent conditions and the then branch,
+    // but NOT in the else branch.
+    ctx.local_scope.push_scope();
 
-    // Find condition expression (first Expression child)
-    let condition = children
-        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
-        .map(|c| resolve_expression(&c, ctx))
-        .unwrap_or_else(|| Expression::error(span.clone()));
+    // Collect all conditions (Expression or IfLetCondition children before CodeBlock)
+    let mut conditions: Vec<IfCondition> = Vec::new();
+    for child in node.children() {
+        if child.kind() == SyntaxKind::CodeBlock {
+            break;
+        }
+        if child.kind() == SyntaxKind::Expression || is_expression_kind(child.kind()) {
+            // Boolean condition
+            let cond_expr = resolve_expression(&child, ctx);
+            conditions.push(IfCondition::Expr(cond_expr));
+        } else if child.kind() == SyntaxKind::IfLetCondition {
+            // If-let condition: let pattern = expr
+            let cond = resolve_if_let_condition(&child, ctx);
+            conditions.push(cond);
+        }
+    }
+
+    // Ensure we have at least one condition
+    if conditions.is_empty() {
+        conditions.push(IfCondition::Expr(Expression::error(span.clone())));
+    }
 
     // Find then block (first CodeBlock child)
-    let (then_statements, then_value) = children
+    // The then block is resolved with the pattern bindings in scope
+    let (then_statements, then_value) = node
+        .children()
         .find(|c| c.kind() == SyntaxKind::CodeBlock)
-        .map(|c| resolve_if_block(&c, ctx))
+        .map(|c| resolve_if_then_block(&c, ctx))
         .unwrap_or_else(|| (vec![], None));
 
-    // Find optional else clause
+    // Pop the scope before resolving the else branch
+    // Pattern bindings are NOT visible in the else branch
+    ctx.local_scope.pop_scope();
+
+    // Find optional else clause (resolved without the if-let bindings)
     let else_branch = node
         .children()
         .find(|c| c.kind() == SyntaxKind::ElseClause)
         .and_then(|else_clause| resolve_else_clause(&else_clause, ctx));
 
-    Expression::if_expr(condition, then_statements, then_value, else_branch, span)
+    Expression::if_expr_with_conditions(conditions, then_statements, then_value, else_branch, span)
+}
+
+/// Resolve a single if-let condition: let pattern = expr
+fn resolve_if_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> IfCondition {
+    use super::patterns::resolve_pattern;
+    use kestrel_semantic_tree::pattern::Pattern;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the pattern
+    let pattern_node = node
+        .children()
+        .find(|c| super::patterns::is_pattern_kind(c.kind()));
+
+    // Find the value expression (the scrutinee)
+    let value_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let value = value_node
+        .map(|n| resolve_expression(&n, ctx))
+        .unwrap_or_else(|| Expression::error(span.clone()));
+
+    // Resolve the pattern with the value type as expected type
+    let pattern = pattern_node
+        .map(|n| resolve_pattern(&n, ctx, Some(&value.ty)))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    IfCondition::Let {
+        pattern,
+        value,
+        span,
+    }
+}
+
+/// Resolve the then-block of an if expression (without pushing a new scope).
+/// The pattern bindings from if-let conditions are already in scope.
+fn resolve_if_then_block(
+    block_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> (Vec<Statement>, Option<Expression>) {
+    // Note: We do NOT push a new scope here because the if-let bindings
+    // need to be visible. The scope was already pushed in resolve_if_expression.
+    // However, we do want local variables declared in the then block to be scoped,
+    // so we push a nested scope.
+    ctx.local_scope.push_scope();
+
+    let mut statements = Vec::new();
+    let mut trailing_expr = None;
+
+    let children: Vec<_> = block_node.children().collect();
+
+    for (i, child) in children.iter().enumerate() {
+        let is_last = i == children.len() - 1;
+
+        match child.kind() {
+            SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                if let Some(stmt) = resolve_statement(child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::VariableDeclaration => {
+                if let Some(stmt) = super::statements::resolve_variable_declaration(child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::Expression => {
+                // If last child and no semicolon, it's the trailing expression
+                if is_last && !has_trailing_semicolon(child) {
+                    trailing_expr = Some(resolve_expression(child, ctx));
+                } else {
+                    let expr = resolve_expression(child, ctx);
+                    let stmt_span = get_node_span(child, ctx.file_id);
+                    statements.push(Statement::expr(expr, stmt_span));
+                }
+            }
+            _ if is_expression_kind(child.kind()) => {
+                // Handle bare expression kinds (not wrapped in Expression)
+                if is_last {
+                    trailing_expr = Some(resolve_expression(child, ctx));
+                } else {
+                    let expr = resolve_expression(child, ctx);
+                    let stmt_span = get_node_span(child, ctx.file_id);
+                    statements.push(Statement::expr(expr, stmt_span));
+                }
+            }
+            // Skip tokens like braces
+            _ => {}
+        }
+    }
+
+    // Pop the block scope
+    ctx.local_scope.pop_scope();
+
+    (statements, trailing_expr)
 }
 
 /// Resolve the body of an if/else block, returning statements and optional trailing expression.
@@ -722,7 +846,7 @@ fn expression_references_local(
     expr: &Expression,
     local_id: kestrel_semantic_tree::symbol::local::LocalId,
 ) -> bool {
-    use kestrel_semantic_tree::expr::{ExprKind, ElseBranch};
+    use kestrel_semantic_tree::expr::{ExprKind, ElseBranch, IfCondition};
 
     match &expr.kind {
         // Direct reference to the local
@@ -760,9 +884,21 @@ fn expression_references_local(
                 || expression_references_local(value, local_id)
         }
 
-        ExprKind::If { condition, then_branch, then_value, else_branch } => {
-            if expression_references_local(condition, local_id) {
-                return true;
+        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+            // Check conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        if expression_references_local(expr, local_id) {
+                            return true;
+                        }
+                    }
+                    IfCondition::Let { value, .. } => {
+                        if expression_references_local(value, local_id) {
+                            return true;
+                        }
+                    }
+                }
             }
 
             for stmt in then_branch {
@@ -1267,8 +1403,18 @@ where
                 collect_captures_from_expression(elem, process);
             }
         }
-        ExprKind::If { condition, then_branch, then_value, else_branch } => {
-            collect_captures_from_expression(condition, process);
+        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+            // Collect from conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        collect_captures_from_expression(expr, process);
+                    }
+                    IfCondition::Let { value, .. } => {
+                        collect_captures_from_expression(value, process);
+                    }
+                }
+            }
             for stmt in then_branch {
                 collect_captures_from_statement(stmt, process);
             }

@@ -431,13 +431,17 @@ pub enum ExprKind {
     },
 
     /// If expression: `if condition { then } else { else }`
+    /// Also supports if-let: `if let pattern = expr { then } else { else }`
+    /// And if-let chains: `if let .Some(x) = a, let .Some(y) = b { ... }`
     ///
     /// Type is:
     /// - `()` if there's no else branch
     /// - The common type of both branches if there's an else branch
     ///   (type checking deferred - currently just uses then_branch type)
     If {
-        condition: Box<Expression>,
+        /// List of conditions (at least one). Each is either a boolean expression
+        /// or a let-binding pattern match.
+        conditions: Vec<IfCondition>,
         then_branch: Vec<crate::stmt::Statement>,
         /// Optional trailing expression in then branch (determines its value)
         then_value: Option<Box<Expression>>,
@@ -606,6 +610,26 @@ pub enum ElseBranch {
     },
     /// else if condition { ... } else { ... }
     ElseIf(Box<Expression>),
+}
+
+/// A single condition in an if or if-let expression.
+///
+/// In an if-let chain like `if let .Some(x) = a, let .Some(y) = b, x > 0 { ... }`,
+/// each part is an IfCondition.
+#[derive(Debug, Clone)]
+pub enum IfCondition {
+    /// Boolean expression condition: `x > 0`
+    Expr(Expression),
+    /// Let binding condition: `let pattern = expr`
+    /// Pattern bindings are visible in subsequent conditions and the then-branch.
+    Let {
+        /// The pattern to match against
+        pattern: crate::pattern::Pattern,
+        /// The expression to match the pattern against (the scrutinee)
+        value: Expression,
+        /// The span of the entire condition
+        span: Span,
+    },
 }
 
 /// A match arm in a match expression.
@@ -806,11 +830,18 @@ impl Expression {
                 format!("{} = {}", target.debug_compact(), value.debug_compact())
             }
             ExprKind::If {
-                condition,
+                conditions,
                 then_value,
                 else_branch,
                 ..
             } => {
+                let cond_strs: Vec<String> = conditions.iter().map(|c| match c {
+                    IfCondition::Expr(e) => e.debug_compact(),
+                    IfCondition::Let { pattern, value, .. } => {
+                        format!("let {:?} = {}", pattern, value.debug_compact())
+                    }
+                }).collect();
+                let cond_str = cond_strs.join(", ");
                 let then_str = if let Some(v) = then_value {
                     v.debug_compact()
                 } else {
@@ -832,7 +863,7 @@ impl Expression {
                 };
                 format!(
                     "if {} {{ {} }}{}",
-                    condition.debug_compact(),
+                    cond_str,
                     then_str,
                     else_str
                 )
@@ -1312,7 +1343,7 @@ impl Expression {
         }
     }
 
-    /// Create an if expression.
+    /// Create an if expression with a single boolean condition.
     ///
     /// Type computation with Never propagation:
     /// - No else branch: type is `()`
@@ -1324,6 +1355,32 @@ impl Expression {
     /// If expressions are not mutable lvalues.
     pub fn if_expr(
         condition: Expression,
+        then_branch: Vec<crate::stmt::Statement>,
+        then_value: Option<Expression>,
+        else_branch: Option<ElseBranch>,
+        span: Span,
+    ) -> Self {
+        Self::if_expr_with_conditions(
+            vec![IfCondition::Expr(condition)],
+            then_branch,
+            then_value,
+            else_branch,
+            span,
+        )
+    }
+
+    /// Create an if expression with multiple conditions (if-let chains).
+    ///
+    /// Type computation with Never propagation:
+    /// - No else branch: type is `()`
+    /// - With else branch: join the types of both branches
+    ///   - If one branch is Never (return, break, etc.), use the other branch's type
+    ///   - If both branches are Never, the type is Never
+    ///   - Otherwise, use the then branch's type (type checking validates compatibility)
+    ///
+    /// If expressions are not mutable lvalues.
+    pub fn if_expr_with_conditions(
+        conditions: Vec<IfCondition>,
         then_branch: Vec<crate::stmt::Statement>,
         then_value: Option<Expression>,
         else_branch: Option<ElseBranch>,
@@ -1346,7 +1403,7 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::If {
-                condition: Box::new(condition),
+                conditions,
                 then_branch,
                 then_value: then_value.map(Box::new),
                 else_branch,

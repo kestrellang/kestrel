@@ -5,7 +5,7 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 use kestrel_semantic_model::ExecutableBodyFor;
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
-use kestrel_semantic_tree::expr::{ExprKind, Expression, ElseBranch};
+use kestrel_semantic_tree::expr::{ExprKind, Expression, ElseBranch, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
@@ -158,15 +158,27 @@ fn analyze_expression(
             state = analyze_expression(target, state, true, ctx);
         }
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            state = analyze_expression(condition, state, false, ctx);
+            // Analyze conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        state = analyze_expression(expr, state, false, ctx);
+                    }
+                    IfCondition::Let { value, pattern, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                        // Mark pattern bindings as assigned for subsequent conditions
+                        mark_pattern_locals_assigned(pattern, &mut state);
+                    }
+                }
+            }
             let pre_if_assigned = state.assigned.clone();
 
-            // Analyze then branch
+            // Analyze then branch - pattern bindings are visible here
             let mut then_state = State {
                 assigned: pre_if_assigned.clone(),
                 diverged: false,

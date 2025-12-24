@@ -358,16 +358,30 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // Control flow
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            generate_expression_constraints(ctx, condition);
-            // Condition must be Bool
-            let bool_ty = Ty::bool(condition.span.clone());
-            ctx.register_type(&bool_ty);
-            ctx.equate(condition.ty.id(), bool_ty.id(), condition.span.clone());
+            // Process each condition
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        generate_expression_constraints(ctx, expr);
+                        // Boolean condition must be Bool
+                        let bool_ty = Ty::bool(expr.span.clone());
+                        ctx.register_type(&bool_ty);
+                        ctx.equate(expr.ty.id(), bool_ty.id(), expr.span.clone());
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        // Generate constraints for the scrutinee expression
+                        generate_expression_constraints(ctx, value);
+                        // Generate constraints for the pattern (pattern type == scrutinee type)
+                        generate_pattern_constraints(ctx, pattern);
+                        ctx.equate(pattern.ty.id(), value.ty.id(), value.span.clone());
+                    }
+                }
+            }
 
             // Process then branch
             for stmt in then_branch {
@@ -375,6 +389,11 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
             if let Some(then_val) = then_value {
                 generate_expression_constraints(ctx, then_val);
+                // Only equate then value type with expression type when there's an else branch.
+                // Without else, the if expression type is () and the then value is discarded.
+                if else_branch.is_some() {
+                    ctx.equate(expr.ty.id(), then_val.ty.id(), then_val.span.clone());
+                }
             }
 
             // Process else branch
@@ -386,10 +405,14 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         }
                         if let Some(else_val) = value {
                             generate_expression_constraints(ctx, else_val);
+                            // Else branch value type equals expression type
+                            ctx.equate(expr.ty.id(), else_val.ty.id(), else_val.span.clone());
                         }
                     }
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(else_if) => {
                         generate_expression_constraints(ctx, else_if);
+                        // Else-if expression type equals this expression type
+                        ctx.equate(expr.ty.id(), else_if.ty.id(), else_if.span.clone());
                     }
                 }
             }

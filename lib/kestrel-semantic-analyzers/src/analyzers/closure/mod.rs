@@ -207,8 +207,18 @@ fn find_assignments_to_locals(
         }
 
         // Recursively check other expression kinds
-        ExprKind::If { condition, then_branch, then_value, else_branch } => {
-            find_assignments_to_locals(condition, target_locals, container_id, ctx);
+        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+            // Process conditions
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        find_assignments_to_locals(expr, target_locals, container_id, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        find_assignments_to_locals(value, target_locals, container_id, ctx);
+                    }
+                }
+            }
 
             for stmt in then_branch {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);

@@ -127,6 +127,7 @@ pub enum SyntaxKind {
     ExprCall,       // foo(1, 2) or expr(args)
     ExprAssignment, // lhs = rhs
     ExprIf,         // if condition { then } else { else }
+    IfLetCondition, // let pattern = expr (in if-let condition)
     ElseClause,     // else { ... } or else if ...
     ExprWhile,      // while condition { body }
     ExprLoop,       // loop { body }
@@ -451,6 +452,7 @@ impl Language for KestrelLanguage {
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
         const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
+        const IF_LET_CONDITION: u16 = SyntaxKind::IfLetCondition as u16;
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
         const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
         const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
@@ -645,6 +647,7 @@ impl Language for KestrelLanguage {
             EXPR_CALL => SyntaxKind::ExprCall,
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
             EXPR_IF => SyntaxKind::ExprIf,
+            IF_LET_CONDITION => SyntaxKind::IfLetCondition,
             ELSE_CLAUSE => SyntaxKind::ElseClause,
             EXPR_WHILE => SyntaxKind::ExprWhile,
             EXPR_LOOP => SyntaxKind::ExprLoop,

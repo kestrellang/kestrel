@@ -163,12 +163,15 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         },
 
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => ExprKind::If {
-            condition: Box::new(apply_to_expression(condition, solution)),
+            conditions: conditions
+                .iter()
+                .map(|c| apply_to_if_condition(c, solution))
+                .collect(),
             then_branch: then_branch
                 .iter()
                 .map(|s| apply_to_statement(s, solution))
@@ -302,6 +305,23 @@ fn apply_to_else_branch(branch: &ElseBranch, solution: &Solution) -> ElseBranch 
         ElseBranch::ElseIf(if_expr) => {
             ElseBranch::ElseIf(Box::new(apply_to_expression(if_expr, solution)))
         }
+    }
+}
+
+/// Apply solution to an if condition.
+fn apply_to_if_condition(
+    condition: &kestrel_semantic_tree::expr::IfCondition,
+    solution: &Solution,
+) -> kestrel_semantic_tree::expr::IfCondition {
+    use kestrel_semantic_tree::expr::IfCondition;
+
+    match condition {
+        IfCondition::Expr(expr) => IfCondition::Expr(apply_to_expression(expr, solution)),
+        IfCondition::Let { pattern, value, span } => IfCondition::Let {
+            pattern: apply_to_pattern(pattern, solution),
+            value: apply_to_expression(value, solution),
+            span: span.clone(),
+        },
     }
 }
 

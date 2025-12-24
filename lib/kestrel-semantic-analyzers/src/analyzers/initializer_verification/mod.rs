@@ -324,12 +324,22 @@ fn analyze_expression(
             state = analyze_expression(target, state, true, ctx);
         }
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            state = analyze_expression(condition, state, false, ctx);
+            // Analyze all conditions
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                        state = analyze_expression(e, state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                    }
+                }
+            }
             let pre = state.clone();
             // then
             ctx.state = pre.clone();

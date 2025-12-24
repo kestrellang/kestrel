@@ -4,7 +4,7 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::ExecutableBodyFor;
-use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -134,14 +134,19 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         ExprKind::Return { .. } => ReturnState::Returns,
         ExprKind::Break { .. } | ExprKind::Continue { .. } => ReturnState::Diverges,
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            let cond_state = analyze_expression(condition);
-            if cond_state.definitely_returns() {
-                return cond_state;
+            for cond in conditions {
+                let cond_state = match cond {
+                    IfCondition::Expr(e) => analyze_expression(e),
+                    IfCondition::Let { value, .. } => analyze_expression(value),
+                };
+                if cond_state.definitely_returns() {
+                    return cond_state;
+                }
             }
             let then_state = analyze_block(then_branch, then_value.as_deref());
             let else_state = if let Some(else_b) = else_branch {

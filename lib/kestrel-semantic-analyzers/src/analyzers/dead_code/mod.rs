@@ -4,7 +4,7 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::ExecutableBodyFor;
-use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -139,14 +139,20 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         ExprKind::Break { .. } => Divergence::Breaks,
         ExprKind::Continue { .. } => Divergence::Continues,
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            let cond_div = analyze_expression(condition, errors);
-            if cond_div.diverges() {
-                return cond_div;
+            // Analyze all conditions
+            for condition in conditions {
+                let cond_div = match condition {
+                    IfCondition::Expr(expr) => analyze_expression(expr, errors),
+                    IfCondition::Let { value, .. } => analyze_expression(value, errors),
+                };
+                if cond_div.diverges() {
+                    return cond_div;
+                }
             }
 
             let then_div = analyze_block(then_branch, then_value.as_deref(), errors);
@@ -360,36 +366,7 @@ fn statement_contains_break(stmt: &StatementKind) -> bool {
             kind: ExprKind::Break { .. },
             ..
         }) => true,
-        StatementKind::Expr(Expression {
-            kind:
-                ExprKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                },
-            ..
-        }) => {
-            then_branch
-                .iter()
-                .any(|s| statement_contains_break(&s.kind))
-                || else_branch
-                    .as_ref()
-                    .map(|b| match b {
-                        ElseBranch::Block { statements, .. } => {
-                            statements.iter().any(|s| statement_contains_break(&s.kind))
-                        }
-                        ElseBranch::ElseIf(e) => expression_contains_break(e),
-                    })
-                    .unwrap_or(false)
-        }
-        StatementKind::Expr(Expression {
-            kind: ExprKind::While { body, .. },
-            ..
-        })
-        | StatementKind::Expr(Expression {
-            kind: ExprKind::Loop { body, .. },
-            ..
-        }) => body.iter().any(|s| statement_contains_break(&s.kind)),
+        StatementKind::Expr(e) => expression_contains_break(e),
         _ => false,
     }
 }
