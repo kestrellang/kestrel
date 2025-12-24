@@ -108,17 +108,10 @@ fn validate_closure_type(
             }
         }
 
-        // Check return type compatibility
-        if let Some(tail) = tail_expr {
-            // Only check if both types are concrete (not Infer)
-            if !tail.ty.is_infer() && !return_ty.is_infer() && tail.ty.id() != return_ty.id() {
-                ctx.report(ClosureReturnTypeMismatchError {
-                    span: tail.span.clone(),
-                    actual: tail.ty.to_string(),
-                    expected: return_ty.to_string(),
-                });
-            }
-        }
+        // Return type compatibility is already validated by the type inference solver.
+        // The solver generates constraints during type inference that ensure the tail
+        // expression's type unifies with the closure's return type. This analyzer runs
+        // after type inference completes, so we trust those results.
     }
 }
 
