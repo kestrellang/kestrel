@@ -126,11 +126,23 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
         } => analyze_expression(expr),
         StatementKind::Binding { value: None, .. } => ReturnState::MayFallThrough,
         StatementKind::Expr(expr) => analyze_expression(expr),
-        StatementKind::GuardLet { value, else_block, .. } => {
-            // Check if value expression diverges
-            let value_state = analyze_expression(value);
-            if value_state.definitely_returns() {
-                return value_state;
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Check if any condition expression diverges
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        let state = analyze_expression(expr);
+                        if state.definitely_returns() {
+                            return state;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        let state = analyze_expression(value);
+                        if state.definitely_returns() {
+                            return state;
+                        }
+                    }
+                }
             }
             // The else block must diverge - if it does, control continues after guard-let
             let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref());
@@ -189,11 +201,23 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             ReturnState::MayFallThrough
         }
         ExprKind::WhileLet {
-            value, body, ..
+            conditions, body, ..
         } => {
-            let value_state = analyze_expression(value);
-            if value_state.definitely_returns() {
-                return value_state;
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        let state = analyze_expression(expr);
+                        if state.definitely_returns() {
+                            return state;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        let state = analyze_expression(value);
+                        if state.definitely_returns() {
+                            return state;
+                        }
+                    }
+                }
             }
             let _ = analyze_block(body, None);
             ReturnState::MayFallThrough
@@ -333,9 +357,20 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
             value: Some(expr), ..
         } => expr_contains_break(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
-        StatementKind::GuardLet { value, else_block, .. } => {
-            if expr_contains_break(&value.kind) {
-                return true;
+        StatementKind::GuardLet { conditions, else_block } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        if expr_contains_break(&expr.kind) {
+                            return true;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        if expr_contains_break(&value.kind) {
+                            return true;
+                        }
+                    }
+                }
             }
             for stmt in &else_block.statements {
                 if statement_contains_break(&stmt.kind) {

@@ -290,13 +290,12 @@ pub enum ExprVariant {
         body: CodeBlockData,
     },
     /// While-let expression: label: while let pattern = expr { body }
+    /// Supports chains: while let .Some(x) = a, let .Some(y) = b, x > 0 { }
     WhileLet {
         label: Option<LabelData>,
         while_span: Span,
-        let_span: Span,
-        pattern: crate::pattern::PatternVariant,
-        equals_span: Span,
-        value: Box<ExprVariant>,
+        /// List of conditions (at least one let-binding, possibly followed by more let-bindings or bool conditions)
+        conditions: Vec<IfCondition>,
         body: CodeBlockData,
     },
     /// Loop expression: label: loop { body }
@@ -859,24 +858,47 @@ pub fn expr_parser<'tokens>(
                     items
                 });
 
-            // Inline guard-let parser
-            let inline_guard_let = skip_trivia()
-                .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
-                .then(skip_trivia().ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span()))))
+            // Inline guard-let parser with chain support
+            // Single let condition: let pattern = expr
+            let inline_guard_let_condition = skip_trivia()
+                .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(crate::pattern::pattern_parser())
                 .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
-                .then(expr_for_guard)
+                .then(expr_for_guard.clone())
+                .map(|(((let_span, pattern), equals_span), value)| {
+                    IfCondition::Let { let_span, pattern, equals_span, value }
+                });
+            
+            // Single condition: either let-binding or boolean expression
+            let inline_guard_single_condition = inline_guard_let_condition.clone()
+                .or(expr_for_guard.clone().map(IfCondition::Expr));
+            
+            // Condition list: first must be let, followed by comma-separated conditions
+            let inline_guard_conditions = inline_guard_let_condition
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::Comma))
+                        .ignore_then(inline_guard_single_condition)
+                        .repeated()
+                        .collect::<Vec<_>>()
+                )
+                .map(|(first, rest)| {
+                    let mut conditions = vec![first];
+                    conditions.extend(rest);
+                    conditions
+                });
+            
+            let inline_guard_let = skip_trivia()
+                .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(inline_guard_conditions)
                 .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
                 .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
                 .then(inline_else_items)
                 .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
-                .map(|((((((((guard_span, let_span), pattern), equals_span), value), else_span), else_lbrace), else_items), else_rbrace)| {
+                .map(|(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
                     BlockItem::GuardLet(GuardLetData {
                         guard_span,
-                        let_span,
-                        pattern,
-                        equals_span,
-                        value,
+                        conditions,
                         else_span,
                         else_lbrace,
                         else_items,
@@ -996,7 +1018,7 @@ pub fn expr_parser<'tokens>(
             .or(condition_binary.clone().map(IfCondition::Expr));
 
         // Condition list: comma-separated conditions (for if-let chains)
-        let condition_list = single_condition
+        let condition_list = single_condition.clone()
             .separated_by(skip_trivia().ignore_then(just(Token::Comma).map_with(|_, _| ())))
             .at_least(1)
             .collect::<Vec<_>>();
@@ -1035,30 +1057,40 @@ pub fn expr_parser<'tokens>(
             .then(skip_trivia().ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
             .map(|(name, colon)| LabelData { name, colon });
 
-        // While-let condition parser: let pattern = expr
-        let while_let_condition = skip_trivia()
-            .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
-            .then(crate::pattern::pattern_parser())
-            .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
-            .then(condition_binary.clone());
+        // While-let condition list: starts with let, followed by more let or bool conditions
+        // Example: while let .Some(x) = a, let .Some(y) = b, x > 0 { }
+        let while_let_first_condition = if_let_condition.clone();
+        let while_let_rest_conditions = skip_trivia()
+            .ignore_then(just(Token::Comma))
+            .ignore_then(single_condition.clone())
+            .repeated()
+            .collect::<Vec<_>>();
+        
+        let while_let_conditions = while_let_first_condition
+            .then(while_let_rest_conditions)
+            .map(|(first, rest)| {
+                let mut conditions = vec![first];
+                conditions.extend(rest);
+                conditions
+            });
 
         // While expression with optional label
         // Use separate parsers for labeled and unlabeled to avoid partial-match issues
         // Also handle while-let: while let pattern = expr { body }
         let labeled_while_let = label_parser.clone()
             .then(skip_trivia().ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span()))))
-            .then(while_let_condition.clone())
+            .then(while_let_conditions.clone())
             .then(inline_code_block.clone())
-            .map(|(((label, while_span), (((let_span, pattern), equals_span), value)), body)| ExprVariant::WhileLet {
-                label: Some(label), while_span, let_span, pattern, equals_span, value: Box::new(value), body,
+            .map(|(((label, while_span), conditions), body)| ExprVariant::WhileLet {
+                label: Some(label), while_span, conditions, body,
             });
 
         let unlabeled_while_let = skip_trivia()
             .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span())))
-            .then(while_let_condition.clone())
+            .then(while_let_conditions.clone())
             .then(inline_code_block.clone())
-            .map(|((while_span, (((let_span, pattern), equals_span), value)), body)| ExprVariant::WhileLet {
-                label: None, while_span, let_span, pattern, equals_span, value: Box::new(value), body,
+            .map(|((while_span, conditions), body)| ExprVariant::WhileLet {
+                label: None, while_span, conditions, body,
             });
 
         let labeled_while = label_parser.clone()
@@ -1228,24 +1260,47 @@ pub fn expr_parser<'tokens>(
                     items
                 });
 
-            // Inline guard-let parser for closures
-            let closure_guard_let = skip_trivia()
-                .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
-                .then(skip_trivia().ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span()))))
+            // Inline guard-let parser for closures with chain support
+            // Single let condition: let pattern = expr
+            let closure_guard_let_condition = skip_trivia()
+                .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(crate::pattern::pattern_parser())
                 .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
-                .then(expr_for_closure_guard)
+                .then(expr_for_closure_guard.clone())
+                .map(|(((let_span, pattern), equals_span), value)| {
+                    IfCondition::Let { let_span, pattern, equals_span, value }
+                });
+            
+            // Single condition: either let-binding or boolean expression
+            let closure_guard_single_condition = closure_guard_let_condition.clone()
+                .or(expr_for_closure_guard.clone().map(IfCondition::Expr));
+            
+            // Condition list: first must be let, followed by comma-separated conditions
+            let closure_guard_conditions = closure_guard_let_condition
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::Comma))
+                        .ignore_then(closure_guard_single_condition)
+                        .repeated()
+                        .collect::<Vec<_>>()
+                )
+                .map(|(first, rest)| {
+                    let mut conditions = vec![first];
+                    conditions.extend(rest);
+                    conditions
+                });
+            
+            let closure_guard_let = skip_trivia()
+                .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(closure_guard_conditions)
                 .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
                 .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
                 .then(closure_else_items)
                 .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
-                .map(|((((((((guard_span, let_span), pattern), equals_span), value), else_span), else_lbrace), else_items), else_rbrace)| {
+                .map(|(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
                     BlockItem::GuardLet(GuardLetData {
                         guard_span,
-                        let_span,
-                        pattern,
-                        equals_span,
-                        value,
+                        conditions,
                         else_span,
                         else_lbrace,
                         else_items,
@@ -1486,8 +1541,8 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::While { label, while_span, condition, body } => {
             emit_while_expr(sink, label.as_ref(), while_span.clone(), condition, body);
         }
-        ExprVariant::WhileLet { label, while_span, let_span, pattern, equals_span, value, body } => {
-            emit_while_let_expr(sink, label.as_ref(), while_span.clone(), let_span.clone(), pattern, equals_span.clone(), value, body);
+        ExprVariant::WhileLet { label, while_span, conditions, body } => {
+            emit_while_let_expr(sink, label.as_ref(), while_span.clone(), conditions, body);
         }
         ExprVariant::Loop { label, loop_span, body } => {
             emit_loop_expr(sink, label.as_ref(), loop_span.clone(), body);
@@ -1748,25 +1803,33 @@ fn emit_binary_expr(sink: &mut EventSink, lhs: &ExprVariant, operator: Token, op
     sink.finish_node();
 }
 
+/// Emit a single condition (either a let-binding or a boolean expression)
+/// Used by if-let, while-let, and guard-let chains.
+/// The `condition_node_kind` parameter specifies the syntax kind for let conditions
+/// (e.g., IfLetCondition, WhileLetCondition, GuardLetCondition).
+pub fn emit_if_condition(sink: &mut EventSink, condition: &IfCondition, condition_node_kind: SyntaxKind) {
+    match condition {
+        IfCondition::Expr(expr) => {
+            emit_expr_variant(sink, expr);
+        }
+        IfCondition::Let { let_span, pattern, equals_span, value } => {
+            sink.start_node(condition_node_kind);
+            sink.add_token(SyntaxKind::Let, let_span.clone());
+            crate::pattern::emit_pattern_variant(sink, pattern);
+            sink.add_token(SyntaxKind::Equals, equals_span.clone());
+            emit_expr_variant(sink, value);
+            sink.finish_node();
+        }
+    }
+}
+
 fn emit_if_expr(sink: &mut EventSink, if_span: Span, conditions: &[IfCondition], then_block: &CodeBlockData, else_clause: Option<&ElseClause>) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprIf);
     sink.add_token(SyntaxKind::If, if_span);
     // Emit each condition
     for (i, condition) in conditions.iter().enumerate() {
-        match condition {
-            IfCondition::Expr(expr) => {
-                emit_expr_variant(sink, expr);
-            }
-            IfCondition::Let { let_span, pattern, equals_span, value } => {
-                sink.start_node(SyntaxKind::IfLetCondition);
-                sink.add_token(SyntaxKind::Let, let_span.clone());
-                crate::pattern::emit_pattern_variant(sink, pattern);
-                sink.add_token(SyntaxKind::Equals, equals_span.clone());
-                emit_expr_variant(sink, value);
-                sink.finish_node();
-            }
-        }
+        emit_if_condition(sink, condition, SyntaxKind::IfLetCondition);
         // Add comma between conditions (but not after last)
         if i < conditions.len() - 1 {
             // Note: We don't track comma spans in the parsed data, 
@@ -1843,10 +1906,7 @@ fn emit_while_let_expr(
     sink: &mut EventSink,
     label: Option<&LabelData>,
     while_span: Span,
-    let_span: Span,
-    pattern: &crate::pattern::PatternVariant,
-    equals_span: Span,
-    value: &ExprVariant,
+    conditions: &[IfCondition],
     body: &CodeBlockData,
 ) {
     sink.start_node(SyntaxKind::Expression);
@@ -1858,13 +1918,10 @@ fn emit_while_let_expr(
         sink.finish_node();
     }
     sink.add_token(SyntaxKind::While, while_span);
-    // Emit the while-let condition
-    sink.start_node(SyntaxKind::WhileLetCondition);
-    sink.add_token(SyntaxKind::Let, let_span);
-    crate::pattern::emit_pattern_variant(sink, pattern);
-    sink.add_token(SyntaxKind::Equals, equals_span);
-    emit_expr_variant(sink, value);
-    sink.finish_node();
+    // Emit each condition in the chain
+    for condition in conditions {
+        emit_if_condition(sink, condition, SyntaxKind::WhileLetCondition);
+    }
     emit_code_block(sink, body);
     sink.finish_node();
     sink.finish_node();
@@ -1973,10 +2030,10 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
             sink.start_node(SyntaxKind::Statement);
             sink.start_node(SyntaxKind::GuardLetStatement);
             sink.add_token(SyntaxKind::Guard, guard_data.guard_span.clone());
-            sink.add_token(SyntaxKind::Let, guard_data.let_span.clone());
-            crate::pattern::emit_pattern_variant(sink, &guard_data.pattern);
-            sink.add_token(SyntaxKind::Equals, guard_data.equals_span.clone());
-            emit_expr_variant(sink, &guard_data.value);
+            // Emit each condition in the chain
+            for condition in &guard_data.conditions {
+                emit_if_condition(sink, condition, SyntaxKind::GuardLetCondition);
+            }
             sink.add_token(SyntaxKind::Else, guard_data.else_span.clone());
             
             sink.start_node(SyntaxKind::CodeBlock);

@@ -174,10 +174,21 @@ fn statement_diverges(stmt: &Statement) -> bool {
         StatementKind::Expr(expr) => expression_diverges(expr),
         StatementKind::Binding { value: Some(expr), .. } => expression_diverges(expr),
         StatementKind::Binding { value: None, .. } => false,
-        StatementKind::GuardLet { value, else_block, .. } => {
-            // The value might diverge
-            if expression_diverges(value) {
-                return true;
+        StatementKind::GuardLet { conditions, .. } => {
+            // Any condition might diverge
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        if expression_diverges(expr) {
+                            return true;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        if expression_diverges(value) {
+                            return true;
+                        }
+                    }
+                }
             }
             // The else block must diverge (but the guard-let as a whole doesn't diverge
             // because control continues after it if the pattern matches)

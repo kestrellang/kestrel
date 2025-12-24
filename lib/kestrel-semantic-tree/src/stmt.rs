@@ -7,7 +7,7 @@
 use kestrel_span::Span;
 
 use crate::behavior::executable::CodeBlock;
-use crate::expr::Expression;
+use crate::expr::{Expression, IfCondition};
 use crate::pattern::Pattern;
 
 /// Represents the kind of statement.
@@ -22,15 +22,14 @@ pub enum StatementKind {
     },
     /// Expression statement: `foo();`
     Expr(Expression),
-    /// Guard-let statement: `guard let pattern = expr else { block }`
+    /// Guard-let statement: `guard let pattern = expr, ... else { block }`
     ///
+    /// Supports chains: `guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }`
     /// Pattern bindings are visible AFTER the guard statement, but NOT in the else block.
     /// The else block MUST diverge (return, break, continue, or panic).
     GuardLet {
-        /// The pattern to match against (bindings become visible after guard)
-        pattern: Pattern,
-        /// The value expression to match
-        value: Expression,
+        /// The conditions to check (at least one must be a Let condition)
+        conditions: Vec<IfCondition>,
         /// The else block (must diverge)
         else_block: CodeBlock,
     },
@@ -71,11 +70,10 @@ impl Statement {
     }
 
     /// Create a guard-let statement.
-    pub fn guard_let(pattern: Pattern, value: Expression, else_block: CodeBlock, span: Span) -> Self {
+    pub fn guard_let(conditions: Vec<IfCondition>, else_block: CodeBlock, span: Span) -> Self {
         Statement {
             kind: StatementKind::GuardLet {
-                pattern,
-                value,
+                conditions,
                 else_block,
             },
             span,
@@ -161,9 +159,15 @@ impl Statement {
                 format!("{} {}{};", keyword, name, value_str)
             }
             StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
-            StatementKind::GuardLet { pattern, value, .. } => {
-                let name = pattern.name().unwrap_or("<pattern>");
-                format!("guard let {} = {} else {{ ... }}", name, value.debug_compact())
+            StatementKind::GuardLet { conditions, .. } => {
+                let conds: Vec<_> = conditions.iter().map(|c| match c {
+                    IfCondition::Let { pattern, value, .. } => {
+                        let name = pattern.name().unwrap_or("<pattern>");
+                        format!("let {} = {}", name, value.debug_compact())
+                    }
+                    IfCondition::Expr(e) => e.debug_compact(),
+                }).collect();
+                format!("guard {} else {{ ... }}", conds.join(", "))
             }
         }
     }

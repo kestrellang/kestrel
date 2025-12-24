@@ -161,34 +161,23 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
         })
 }
 
-/// Resolve a guard-let statement: `guard let pattern = expr else { block }`
+/// Resolve a guard-let statement with chain support:
+/// - Single: `guard let pattern = expr else { block }`
+/// - Chain: `guard let .Some(x) = a, let .Some(y) = b, x > 0 else { block }`
 ///
 /// Guard-let has special scoping rules:
 /// - Pattern bindings are NOT visible in the else block
 /// - Pattern bindings ARE visible after the guard statement (in subsequent statements)
+/// - In chains, pattern bindings from earlier conditions are visible in later conditions
 pub fn resolve_guard_let_statement(
     guard_node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Option<Statement> {
+    use kestrel_semantic_tree::expr::IfCondition;
+
     let span = get_node_span(guard_node, ctx.file_id);
 
-    // Find the value expression first (before the pattern, to get expected type)
-    let value_node = guard_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
-
-    let value = value_node
-        .map(|n| resolve_expression(&n, ctx))
-        .unwrap_or_else(|| kestrel_semantic_tree::expr::Expression::error(span.clone()));
-
-    // Find and resolve the pattern
-    // Pattern bindings will be added to the current scope
-    let pattern_node = guard_node
-        .children()
-        .find(|c| is_pattern_kind(c.kind()));
-
-    // Resolve else block BEFORE the pattern, so pattern bindings are not visible
-    // We parse it here but need to execute it in a scope that doesn't have the pattern bindings
+    // Resolve else block BEFORE the pattern bindings, so pattern bindings are not visible
     let else_block = guard_node
         .children()
         .find(|c| c.kind() == SyntaxKind::CodeBlock)
@@ -199,10 +188,59 @@ pub fn resolve_guard_let_statement(
         })
         .unwrap_or_else(CodeBlock::empty);
 
-    // NOW resolve the pattern (adding bindings for subsequent statements)
+    // Collect all conditions (GuardLetCondition or Expression children before CodeBlock)
+    let mut conditions: Vec<IfCondition> = Vec::new();
+    for child in guard_node.children() {
+        if child.kind() == SyntaxKind::CodeBlock {
+            break;
+        }
+        if child.kind() == SyntaxKind::Expression || is_expression_kind(child.kind()) {
+            // Boolean condition
+            let cond_expr = resolve_expression(&child, ctx);
+            conditions.push(IfCondition::Expr(cond_expr));
+        } else if child.kind() == SyntaxKind::GuardLetCondition {
+            // Guard-let condition: let pattern = expr
+            let cond = resolve_guard_let_condition(&child, ctx);
+            conditions.push(cond);
+        }
+    }
+
+    // Ensure we have at least one condition
+    if conditions.is_empty() {
+        conditions.push(IfCondition::Expr(kestrel_semantic_tree::expr::Expression::error(span.clone())));
+    }
+
+    Some(Statement::guard_let(conditions, else_block, span))
+}
+
+/// Resolve a single guard-let condition: let pattern = expr
+fn resolve_guard_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> kestrel_semantic_tree::expr::IfCondition {
+    use kestrel_semantic_tree::expr::IfCondition;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the value expression (the scrutinee)
+    let value_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let value = value_node
+        .map(|n| resolve_expression(&n, ctx))
+        .unwrap_or_else(|| kestrel_semantic_tree::expr::Expression::error(span.clone()));
+
+    // Find and resolve the pattern
+    // Pattern bindings will be added to the current scope for subsequent conditions
+    let pattern_node = node
+        .children()
+        .find(|c| is_pattern_kind(c.kind()));
+
     let pattern = pattern_node
         .map(|n| resolve_pattern_with_mutability(&n, ctx, Some(&value.ty), false))
         .unwrap_or_else(|| Pattern::error(span.clone()));
 
-    Some(Statement::guard_let(pattern, value, else_block, span))
+    IfCondition::Let {
+        pattern,
+        value,
+        span,
+    }
 }

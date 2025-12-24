@@ -546,45 +546,46 @@ fn resolve_while_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
     Expression::while_loop(loop_id, label_info, condition, body, span)
 }
 
-/// Resolve a while-let expression: label: while let pattern = expr { body }
+/// Resolve a while-let expression with chain support:
+/// - Single: `label: while let pattern = expr { body }`
+/// - Chain: `label: while let .Some(x) = a, let .Some(y) = b, x > 0 { body }`
 fn resolve_while_let_expression(
     node: &SyntaxNode,
-    condition_node: &SyntaxNode,
+    _first_condition_node: &SyntaxNode,
     label_info: Option<LabelInfo>,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    use super::patterns::resolve_pattern;
-    use kestrel_semantic_tree::pattern::Pattern;
-
     let span = get_node_span(node, ctx.file_id);
-
-    // Find the pattern in the WhileLetCondition
-    let pattern_node = condition_node
-        .children()
-        .find(|c| super::patterns::is_pattern_kind(c.kind()));
-
-    // Find the value expression in the WhileLetCondition
-    let value_node = condition_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
-
-    // Resolve the value expression first (before entering pattern scope)
-    let value = value_node
-        .map(|n| resolve_expression(&n, ctx))
-        .unwrap_or_else(|| Expression::error(span.clone()));
 
     // Enter the loop context with the label
     let label_name = label_info.as_ref().map(|l| l.name.clone());
     let label_span = label_info.as_ref().map(|l| l.span.clone());
     let loop_id = ctx.enter_loop(label_name.clone(), label_span.clone());
 
-    // Push a new scope for pattern bindings (visible only in loop body)
+    // Push a new scope for pattern bindings (visible in subsequent conditions and loop body)
     ctx.local_scope.push_scope();
 
-    // Resolve the pattern with the value type as expected type
-    let pattern = pattern_node
-        .map(|n| resolve_pattern(&n, ctx, Some(&value.ty)))
-        .unwrap_or_else(|| Pattern::error(span.clone()));
+    // Collect all conditions (WhileLetCondition or Expression children before CodeBlock)
+    let mut conditions: Vec<IfCondition> = Vec::new();
+    for child in node.children() {
+        if child.kind() == SyntaxKind::CodeBlock {
+            break;
+        }
+        if child.kind() == SyntaxKind::Expression || is_expression_kind(child.kind()) {
+            // Boolean condition
+            let cond_expr = resolve_expression(&child, ctx);
+            conditions.push(IfCondition::Expr(cond_expr));
+        } else if child.kind() == SyntaxKind::WhileLetCondition {
+            // While-let condition: let pattern = expr
+            let cond = resolve_while_let_condition(&child, ctx);
+            conditions.push(cond);
+        }
+    }
+
+    // Ensure we have at least one condition
+    if conditions.is_empty() {
+        conditions.push(IfCondition::Expr(Expression::error(span.clone())));
+    }
 
     // Resolve the body (pattern bindings are now in scope)
     let body = node
@@ -599,7 +600,40 @@ fn resolve_while_let_expression(
     // Exit the loop context
     ctx.exit_loop();
 
-    Expression::while_let(loop_id, label_info, pattern, value, body, span)
+    Expression::while_let(loop_id, label_info, conditions, body, span)
+}
+
+/// Resolve a single while-let condition: let pattern = expr
+fn resolve_while_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> IfCondition {
+    use super::patterns::resolve_pattern;
+    use kestrel_semantic_tree::pattern::Pattern;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the pattern
+    let pattern_node = node
+        .children()
+        .find(|c| super::patterns::is_pattern_kind(c.kind()));
+
+    // Find the value expression (the scrutinee)
+    let value_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let value = value_node
+        .map(|n| resolve_expression(&n, ctx))
+        .unwrap_or_else(|| Expression::error(span.clone()));
+
+    // Resolve the pattern with the value type as expected type
+    let pattern = pattern_node
+        .map(|n| resolve_pattern(&n, ctx, Some(&value.ty)))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    IfCondition::Let {
+        pattern,
+        value,
+        span,
+    }
 }
 
 /// Resolve the body of a while-let loop.
@@ -946,11 +980,23 @@ fn statement_references_local(
             }
         }
         StatementKind::Expr(expr) => expression_references_local(expr, local_id),
-        StatementKind::GuardLet { value, else_block, .. } => {
-            // Check the value expression and else block statements
-            if expression_references_local(value, local_id) {
-                return true;
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Check all conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        if expression_references_local(expr, local_id) {
+                            return true;
+                        }
+                    }
+                    IfCondition::Let { value, .. } => {
+                        if expression_references_local(value, local_id) {
+                            return true;
+                        }
+                    }
+                }
             }
+            // Check else block statements
             for else_stmt in &else_block.statements {
                 if statement_references_local(else_stmt, local_id) {
                     return true;
@@ -1075,9 +1121,21 @@ fn expression_references_local(
             false
         }
 
-        ExprKind::WhileLet { value, body, .. } => {
-            if expression_references_local(value, local_id) {
-                return true;
+        ExprKind::WhileLet { conditions, body, .. } => {
+            // Check all conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        if expression_references_local(expr, local_id) {
+                            return true;
+                        }
+                    }
+                    IfCondition::Let { value, .. } => {
+                        if expression_references_local(value, local_id) {
+                            return true;
+                        }
+                    }
+                }
             }
             for stmt in body {
                 if statement_references_local(stmt, local_id) {
@@ -1476,9 +1534,19 @@ where
                 collect_captures_from_expression(expr, process);
             }
         }
-        StatementKind::GuardLet { value, else_block, .. } => {
-            // Walk the value expression and else block
-            collect_captures_from_expression(value, process);
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Walk all conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        collect_captures_from_expression(expr, process);
+                    }
+                    IfCondition::Let { value, .. } => {
+                        collect_captures_from_expression(value, process);
+                    }
+                }
+            }
+            // Walk else block
             for else_stmt in &else_block.statements {
                 collect_captures_from_statement(else_stmt, process);
             }
@@ -1578,8 +1646,18 @@ where
                 collect_captures_from_statement(stmt, process);
             }
         }
-        ExprKind::WhileLet { value, body: while_body, .. } => {
-            collect_captures_from_expression(value, process);
+        ExprKind::WhileLet { conditions, body: while_body, .. } => {
+            // Walk all conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        collect_captures_from_expression(expr, process);
+                    }
+                    IfCondition::Let { value, .. } => {
+                        collect_captures_from_expression(value, process);
+                    }
+                }
+            }
             for stmt in while_body {
                 collect_captures_from_statement(stmt, process);
             }

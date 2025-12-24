@@ -463,20 +463,19 @@ pub enum ExprKind {
         body: Vec<crate::stmt::Statement>,
     },
 
-    /// While-let loop expression: `label: while let pattern = expr { body }`
+    /// While-let loop expression: `label: while let pattern = expr, ... { body }`
     ///
-    /// Loops while the pattern matches the value expression.
-    /// Pattern bindings are visible only in the loop body.
+    /// Loops while all conditions are true (patterns match and bool conditions are true).
+    /// Supports chains: `while let .Some(x) = a, let .Some(y) = b, x > 0 { ... }`
+    /// Pattern bindings are visible in subsequent conditions and the loop body.
     /// Type is `()` (unit) - while-let loops never produce a value.
     WhileLet {
         /// Unique identifier for this loop (for break/continue resolution)
         loop_id: LoopId,
         /// Optional label for named break/continue
         label: Option<LabelInfo>,
-        /// The pattern to match against
-        pattern: crate::pattern::Pattern,
-        /// The expression to match the pattern against (the scrutinee)
-        value: Box<Expression>,
+        /// The conditions to check (at least one must be a Let condition)
+        conditions: Vec<IfCondition>,
         /// Statements in the loop body
         body: Vec<crate::stmt::Statement>,
     },
@@ -889,8 +888,12 @@ impl Expression {
             ExprKind::While { condition, .. } => {
                 format!("while {} {{ ... }}", condition.debug_compact())
             }
-            ExprKind::WhileLet { pattern, value, .. } => {
-                format!("while let {:?} = {} {{ ... }}", pattern, value.debug_compact())
+            ExprKind::WhileLet { conditions, .. } => {
+                let conds: Vec<_> = conditions.iter().map(|c| match c {
+                    IfCondition::Let { pattern, value, .. } => format!("let {:?} = {}", pattern, value.debug_compact()),
+                    IfCondition::Expr(e) => e.debug_compact(),
+                }).collect();
+                format!("while {} {{ ... }}", conds.join(", "))
             }
             ExprKind::Loop { .. } => "loop { ... }".to_string(),
             ExprKind::Break { label, .. } => {
@@ -1461,13 +1464,12 @@ impl Expression {
 
     /// Create a while-let loop expression.
     ///
-    /// Loops while the pattern matches the value expression.
+    /// Loops while all conditions are true.
     /// Type is always `()` (unit).
     pub fn while_let(
         loop_id: LoopId,
         label: Option<LabelInfo>,
-        pattern: crate::pattern::Pattern,
-        value: Expression,
+        conditions: Vec<IfCondition>,
         body: Vec<crate::stmt::Statement>,
         span: Span,
     ) -> Self {
@@ -1476,8 +1478,7 @@ impl Expression {
             kind: ExprKind::WhileLet {
                 loop_id,
                 label,
-                pattern,
-                value: Box::new(value),
+                conditions,
                 body,
             },
             ty: Ty::unit(span.clone()),

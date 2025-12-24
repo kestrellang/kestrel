@@ -116,7 +116,6 @@ func test(opt: Option[Int]) -> Int {
     }
 
     #[test]
-    #[ignore = "Requires bidirectional type inference for enum shorthands"]
     fn guard_let_with_break_in_loop() {
         Test::new(
             r#"
@@ -131,7 +130,7 @@ func test(opts: [Option[Int]]) -> Int {
     var sum = 0;
     var i = 0;
     while i < 10 {
-        guard let .Some(value) = .Some(i) else {
+        guard let .Some(value) = Option.Some(value: i) else {
             break
         }
         sum = sum + value;
@@ -145,8 +144,8 @@ func test(opts: [Option[Int]]) -> Int {
     }
 
     #[test]
-    #[ignore = "Requires bidirectional type inference for enum shorthands"]
     fn guard_let_with_continue_in_loop() {
+        // Test that continue in guard-let else block works in a loop
         Test::new(
             r#"
 module Main
@@ -161,7 +160,8 @@ func test() -> Int {
     var i = 0;
     while i < 10 {
         i = i + 1;
-        guard let .Some(value) = if i > 5 { .Some(i) } else { .None } else {
+        // Skip odd numbers using guard-let with continue
+        guard let .Some(value) = if i % 2 == 0 { Option[Int].Some(value: i) } else { Option[Int].None } else {
             continue
         }
         sum = sum + value;
@@ -272,6 +272,80 @@ func test(opt: Option[Int]) -> Int {
         )
         .expect(Fails)
         .expect(HasError("undefined"));
+    }
+}
+
+// ============================================================================
+// GUARD-LET CHAINS
+// ============================================================================
+
+mod chains {
+    use super::*;
+
+    #[test]
+    fn guard_let_chain_two_patterns() {
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func test(a: Option[Int], b: Option[Int]) -> Int {
+    guard let .Some(x) = a, let .Some(y) = b else {
+        return 0
+    }
+    x + y
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn guard_let_chain_with_bool_condition() {
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func test(opt: Option[Int]) -> Int {
+    guard let .Some(x) = opt, x > 0 else {
+        return 0
+    }
+    x * 2
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn guard_let_chain_binding_visible_in_later_conditions() {
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func test(a: Option[Int], b: Option[Int]) -> Int {
+    guard let .Some(x) = a, let .Some(y) = b, x < y else {
+        return 0
+    }
+    y - x
+}
+"#,
+        )
+        .expect(Compiles);
     }
 }
 

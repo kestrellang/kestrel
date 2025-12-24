@@ -125,11 +125,23 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
         } => analyze_expression(expr, errors),
         StatementKind::Binding { value: None, .. } => Divergence::None,
         StatementKind::Expr(expr) => analyze_expression(expr, errors),
-        StatementKind::GuardLet { value, else_block, .. } => {
-            // Analyze the value expression
-            let value_div = analyze_expression(value, errors);
-            if value_div != Divergence::None {
-                return value_div;
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Analyze each condition
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        let div = analyze_expression(expr, errors);
+                        if div != Divergence::None {
+                            return div;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        let div = analyze_expression(value, errors);
+                        if div != Divergence::None {
+                            return div;
+                        }
+                    }
+                }
             }
             // The else block must diverge, but the guard-let itself doesn't diverge
             // (control continues after guard-let if the pattern matches)
@@ -207,11 +219,23 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             Divergence::None
         }
         ExprKind::WhileLet {
-            value, body, ..
+            conditions, body, ..
         } => {
-            let value_div = analyze_expression(value, errors);
-            if value_div.diverges() {
-                return value_div;
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        let div = analyze_expression(expr, errors);
+                        if div.diverges() {
+                            return div;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        let div = analyze_expression(value, errors);
+                        if div.diverges() {
+                            return div;
+                        }
+                    }
+                }
             }
             let mut body_div = Divergence::None;
             for stmt in body {

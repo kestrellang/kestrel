@@ -108,9 +108,19 @@ fn walk_statement(
             StatementKind::Expr(expr) => {
                 walk_expression(expr, analyzers, model, ctx);
             }
-            StatementKind::GuardLet { pattern, value, else_block } => {
-                walk_pattern(pattern, analyzers, model, ctx);
-                walk_expression(value, analyzers, model, ctx);
+            StatementKind::GuardLet { conditions, else_block } => {
+                // Walk each condition
+                for condition in conditions {
+                    match condition {
+                        kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                            walk_expression(expr, analyzers, model, ctx);
+                        }
+                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                            walk_pattern(pattern, analyzers, model, ctx);
+                            walk_expression(value, analyzers, model, ctx);
+                        }
+                    }
+                }
                 // Walk the else block statements
                 for else_stmt in &else_block.statements {
                     walk_statement(else_stmt, analyzers, model, ctx);
@@ -285,9 +295,19 @@ fn walk_expression(
                 }
             }
             ExprKind::WhileLet {
-                value, body, ..
+                conditions, body, ..
             } => {
-                walk_expression(value, analyzers, model, ctx);
+                for condition in conditions {
+                    match condition {
+                        kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                            walk_expression(expr, analyzers, model, ctx);
+                        }
+                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                            walk_pattern(pattern, analyzers, model, ctx);
+                            walk_expression(value, analyzers, model, ctx);
+                        }
+                    }
+                }
                 for stmt in body {
                     walk_statement(stmt, analyzers, model, ctx);
                     if ctx.stopped {

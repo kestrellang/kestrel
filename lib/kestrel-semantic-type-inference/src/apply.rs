@@ -49,13 +49,13 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
         StatementKind::Expr(expr) => {
             StatementKind::Expr(apply_to_expression(expr, solution))
         }
-        StatementKind::GuardLet { pattern, value, else_block } => {
-            let resolved_pattern = apply_to_pattern(pattern, solution);
-            let resolved_value = apply_to_expression(value, solution);
+        StatementKind::GuardLet { conditions, else_block } => {
+            let resolved_conditions = conditions.iter().map(|cond| {
+                apply_to_if_condition(cond, solution)
+            }).collect();
             let resolved_else_block = apply_solution(else_block, solution);
             StatementKind::GuardLet {
-                pattern: resolved_pattern,
-                value: resolved_value,
+                conditions: resolved_conditions,
                 else_block: resolved_else_block,
             }
         }
@@ -207,14 +207,12 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         ExprKind::WhileLet {
             loop_id,
             label,
-            pattern,
-            value,
+            conditions,
             body,
         } => ExprKind::WhileLet {
             loop_id: *loop_id,
             label: label.clone(),
-            pattern: apply_to_pattern(pattern, solution),
-            value: Box::new(apply_to_expression(value, solution)),
+            conditions: conditions.iter().map(|c| apply_to_if_condition(c, solution)).collect(),
             body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
         },
 

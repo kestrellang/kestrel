@@ -12,7 +12,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
+use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
 use crate::stmt::{StmtVariant, emit_stmt_variant};
@@ -69,18 +69,13 @@ impl CodeBlock {
 }
 
 /// Raw parsed data for a guard-let statement
+/// Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
 #[derive(Debug, Clone)]
 pub struct GuardLetData {
     /// Span of 'guard' keyword
     pub guard_span: Span,
-    /// Span of 'let' keyword
-    pub let_span: Span,
-    /// The pattern being matched
-    pub pattern: PatternVariant,
-    /// Span of '=' token
-    pub equals_span: Span,
-    /// The expression being matched against
-    pub value: ExprVariant,
+    /// List of conditions (at least one let-binding, possibly followed by more let-bindings or bool conditions)
+    pub conditions: Vec<IfCondition>,
     /// Span of 'else' keyword
     pub else_span: Span,
     /// The else block braces and items (must diverge)
@@ -253,25 +248,50 @@ fn code_block_items_parser<'tokens>(
     //   - If statement-like: statement expression (no semicolon needed)
     //   - Otherwise: fail (will be retried as trailing expression)
 
-    // Guard-let statement: guard let pattern = expr else { block }
+    // Guard-let statement: guard let pattern = expr, ... else { block }
+    // Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
     // The else block is parsed inline to avoid recursive parser types
-    let guard_let = skip_trivia()
-        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
-        .then(skip_trivia().ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span()))))
+    
+    // Single let condition: let pattern = expr
+    let guard_let_condition = skip_trivia()
+        .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
         .then(pattern_parser())
         .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(expr_parser())
+        .map(|(((let_span, pattern), equals_span), value)| {
+            IfCondition::Let { let_span, pattern, equals_span, value }
+        });
+    
+    // Single condition: either let-binding or boolean expression
+    let guard_single_condition = guard_let_condition.clone()
+        .or(expr_parser().map(IfCondition::Expr));
+    
+    // Condition list: first must be let, followed by comma-separated conditions
+    let guard_conditions = guard_let_condition
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Comma))
+                .ignore_then(guard_single_condition)
+                .repeated()
+                .collect::<Vec<_>>()
+        )
+        .map(|(first, rest)| {
+            let mut conditions = vec![first];
+            conditions.extend(rest);
+            conditions
+        });
+    
+    let guard_let = skip_trivia()
+        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(guard_conditions)
         .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(guard_let_else_items_parser())
         .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
-        .map(|((((((((guard_span, let_span), pattern), equals_span), value), else_span), else_lbrace), else_items), else_rbrace)| {
+        .map(|(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
             BlockItem::GuardLet(GuardLetData {
                 guard_span,
-                let_span,
-                pattern,
-                equals_span,
-                value,
+                conditions,
                 else_span,
                 else_lbrace,
                 else_items,
@@ -401,14 +421,10 @@ fn emit_guard_let(sink: &mut EventSink, data: &GuardLetData) {
 
     // guard keyword
     sink.add_token(SyntaxKind::Guard, data.guard_span.clone());
-    // let keyword
-    sink.add_token(SyntaxKind::Let, data.let_span.clone());
-    // Pattern
-    emit_pattern_variant(sink, &data.pattern);
-    // = token
-    sink.add_token(SyntaxKind::Equals, data.equals_span.clone());
-    // Value expression
-    emit_expr_variant(sink, &data.value);
+    // Emit each condition in the chain
+    for condition in &data.conditions {
+        emit_if_condition(sink, condition, SyntaxKind::GuardLetCondition);
+    }
     // else keyword
     sink.add_token(SyntaxKind::Else, data.else_span.clone());
     // Else block - emit inline

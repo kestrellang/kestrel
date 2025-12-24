@@ -252,8 +252,17 @@ fn find_assignments_to_locals(
             }
         }
 
-        ExprKind::WhileLet { value, body, .. } => {
-            find_assignments_to_locals(value, target_locals, container_id, ctx);
+        ExprKind::WhileLet { conditions, body, .. } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        find_assignments_to_locals(expr, target_locals, container_id, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        find_assignments_to_locals(value, target_locals, container_id, ctx);
+                    }
+                }
+            }
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
             }
@@ -374,8 +383,17 @@ fn walk_statement_for_assignments(
         kestrel_semantic_tree::stmt::StatementKind::Expr(expr) => {
             find_assignments_to_locals(expr, target_locals, container_id, ctx);
         }
-        kestrel_semantic_tree::stmt::StatementKind::GuardLet { value, else_block, .. } => {
-            find_assignments_to_locals(value, target_locals, container_id, ctx);
+        kestrel_semantic_tree::stmt::StatementKind::GuardLet { conditions, else_block } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        find_assignments_to_locals(expr, target_locals, container_id, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        find_assignments_to_locals(value, target_locals, container_id, ctx);
+                    }
+                }
+            }
             for else_stmt in &else_block.statements {
                 walk_statement_for_assignments(else_stmt, target_locals, container_id, ctx);
             }

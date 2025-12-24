@@ -302,6 +302,84 @@ func test() -> Int {
 }
 
 // ============================================================================
+// WHILE-LET CHAINS
+// ============================================================================
+
+mod chains {
+    use super::*;
+
+    #[test]
+    fn while_let_chain_two_patterns() {
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func test() {
+    var a: Option[Int] = Option.Some(value: 1);
+    var b: Option[Int] = Option.Some(value: 2);
+    while let .Some(x) = a, let .Some(y) = b {
+        let _ = x + y;
+        a = Option[Int].None;
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn while_let_chain_with_bool_condition() {
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func test() {
+    var opt: Option[Int] = Option.Some(value: 5);
+    while let .Some(x) = opt, x > 0 {
+        opt = Option.Some(value: x - 1);
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn while_let_chain_binding_visible_in_later_conditions() {
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func test() {
+    var a: Option[Int] = Option.Some(value: 10);
+    var b: Option[Int] = Option.Some(value: 5);
+    while let .Some(x) = a, let .Some(y) = b, x > y {
+        let _ = x - y;
+        a = Option.Some(value: x - 1);
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+// ============================================================================
 // TYPE INFERENCE
 // ============================================================================
 

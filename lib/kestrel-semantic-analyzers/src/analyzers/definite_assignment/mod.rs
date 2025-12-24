@@ -125,9 +125,20 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
         }
-        StatementKind::GuardLet { pattern, value, else_block } => {
-            // Analyze the value expression
-            state = analyze_expression(value, state, false, ctx);
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Analyze each condition
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        state = analyze_expression(expr, state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                        // Pattern bindings become assigned for subsequent conditions
+                        mark_pattern_locals_assigned(pattern, &mut state);
+                    }
+                }
+            }
             
             // The else block is analyzed with current state (bindings from earlier statements are visible)
             // but the pattern bindings from THIS guard-let are NOT visible in the else block
@@ -141,10 +152,6 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
             // Collect any errors from the else block
             ctx.errors.extend(else_ctx.errors);
             // Else block diverges, we don't merge its state
-            
-            // After guard-let, the pattern bindings are definitely assigned
-            // (because the else block must have diverged if we reach here)
-            mark_pattern_locals_assigned(pattern, &mut state);
         }
     }
     state
@@ -267,15 +274,24 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
         }
-        ExprKind::WhileLet { pattern, value, body, .. } => {
-            state = analyze_expression(value, state, false, ctx);
-            // Pattern bindings are considered assigned within the loop body
+        ExprKind::WhileLet { conditions, body, .. } => {
+            // Analyze each condition
             let mut body_state = State {
                 assigned: state.assigned.clone(),
                 diverged: false,
             };
-            // Mark pattern bindings as assigned for the loop body
-            mark_pattern_locals_assigned(pattern, &mut body_state);
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        body_state = analyze_expression(expr, body_state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        body_state = analyze_expression(value, body_state, false, ctx);
+                        // Mark pattern bindings as assigned for subsequent conditions and body
+                        mark_pattern_locals_assigned(pattern, &mut body_state);
+                    }
+                }
+            }
             for stmt in body {
                 if body_state.diverged { break; }
                 body_state = analyze_statement(stmt, body_state, ctx);

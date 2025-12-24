@@ -68,16 +68,11 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
         StatementKind::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
         }
-        StatementKind::GuardLet { pattern, value, else_block } => {
-            // Generate constraints for the value expression
-            generate_expression_constraints(ctx, value);
-            ctx.register_type(&value.ty);
-
-            // Generate constraints for the pattern
-            generate_pattern_constraints(ctx, pattern);
-
-            // Equate pattern type with value type
-            ctx.equate(pattern.ty.id(), value.ty.id(), stmt.span.clone());
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Generate constraints for each condition in the chain
+            for condition in conditions {
+                generate_if_condition_constraints(ctx, condition);
+            }
 
             // Generate constraints for the else block statements
             for else_stmt in &else_block.statements {
@@ -240,6 +235,30 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
     }
 }
 
+/// Generate constraints for an if condition (used by if-let, while-let, guard-let chains).
+fn generate_if_condition_constraints(
+    ctx: &mut InferenceContext<'_>,
+    condition: &kestrel_semantic_tree::expr::IfCondition,
+) {
+    use kestrel_semantic_tree::expr::IfCondition;
+    match condition {
+        IfCondition::Expr(expr) => {
+            generate_expression_constraints(ctx, expr);
+            // Boolean condition must be Bool
+            let bool_ty = Ty::bool(expr.span.clone());
+            ctx.register_type(&bool_ty);
+            ctx.equate(expr.ty.id(), bool_ty.id(), expr.span.clone());
+        }
+        IfCondition::Let { pattern, value, .. } => {
+            // Generate constraints for the scrutinee expression
+            generate_expression_constraints(ctx, value);
+            // Generate constraints for the pattern (pattern type == scrutinee type)
+            generate_pattern_constraints(ctx, pattern);
+            ctx.equate(pattern.ty.id(), value.ty.id(), value.span.clone());
+        }
+    }
+}
+
 /// Generate constraints for an expression.
 fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expression) {
     // Register this expression's type
@@ -385,22 +404,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         } => {
             // Process each condition
             for condition in conditions {
-                match condition {
-                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
-                        generate_expression_constraints(ctx, expr);
-                        // Boolean condition must be Bool
-                        let bool_ty = Ty::bool(expr.span.clone());
-                        ctx.register_type(&bool_ty);
-                        ctx.equate(expr.ty.id(), bool_ty.id(), expr.span.clone());
-                    }
-                    kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
-                        // Generate constraints for the scrutinee expression
-                        generate_expression_constraints(ctx, value);
-                        // Generate constraints for the pattern (pattern type == scrutinee type)
-                        generate_pattern_constraints(ctx, pattern);
-                        ctx.equate(pattern.ty.id(), value.ty.id(), value.span.clone());
-                    }
-                }
+                generate_if_condition_constraints(ctx, condition);
             }
 
             // Process then branch
@@ -453,18 +457,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         }
 
         ExprKind::WhileLet {
-            pattern, value, body, ..
+            conditions, body, ..
         } => {
-            // Generate constraints for the value expression
-            generate_expression_constraints(ctx, value);
-
-            // Generate pattern constraints
-            generate_pattern_constraints(ctx, pattern);
-
-            // Pattern type must match value type
-            ctx.register_type(&pattern.ty);
-            ctx.register_type(&value.ty);
-            ctx.equate(pattern.ty.id(), value.ty.id(), pattern.span.clone());
+            // Generate constraints for each condition in the chain
+            for condition in conditions {
+                generate_if_condition_constraints(ctx, condition);
+            }
 
             // Generate constraints for body statements
             for stmt in body {
