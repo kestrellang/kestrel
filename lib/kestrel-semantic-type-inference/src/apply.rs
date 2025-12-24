@@ -7,6 +7,7 @@ use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, ExprKind, Expression};
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyKind};
 
 use crate::solution::Solution;
@@ -494,6 +495,25 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
         // Nominal types with substitutions would need recursive resolution too,
         // but for now just return the original type
         _ => ty.clone(),
+    }
+}
+
+/// Update all locals in the container with their resolved types from the solution.
+///
+/// This is necessary because pattern-bound variables are initially created with
+/// `Ty::infer()` placeholder types. After type inference solves the constraints,
+/// the actual types are known but the `Local` entries in the container still have
+/// the old placeholder types. When subsequent code references these locals via
+/// `LocalRef`, it reads the type from the container, so we must update it.
+pub fn apply_solution_to_locals(container: &dyn LocalContainer, solution: &Solution) {
+    for local in container.locals() {
+        let ty = local.ty();
+        if matches!(ty.kind(), TyKind::Infer) {
+            if let Some(resolved) = solution.get_type(ty.id()) {
+                let fully_resolved = resolve_type(resolved, solution);
+                container.update_local_type(local.id(), fully_resolved);
+            }
+        }
     }
 }
 

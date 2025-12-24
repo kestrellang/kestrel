@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::expr::LiteralValue;
 use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern, PatternKind, RangeBound, StructPatternField};
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree::utils::get_node_span;
+use semantic_tree::symbol::Symbol;
 
 use super::context::BodyResolutionContext;
 
@@ -396,11 +398,25 @@ fn resolve_enum_pattern(
         None => return Pattern::error(span),
     };
 
-    // Extract bindings from EnumPatternArg nodes
-    let bindings: Vec<EnumPatternBinding> = node
+    // Try to get expected types for bindings from the enum case definition.
+    // This allows pattern-bound variables to have concrete types immediately,
+    // which enables member access in conditions like `if let .Some(value: p) = opt, p.x > 0`.
+    let binding_expected_types = get_enum_case_binding_types(expected_ty, &case_name);
+
+    // Collect EnumPatternArg nodes
+    let arg_nodes: Vec<_> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::EnumPatternArg)
-        .map(|arg_node| resolve_enum_pattern_arg(&arg_node, ctx, force_mutable))
+        .collect();
+
+    // Extract bindings from EnumPatternArg nodes with expected types
+    let bindings: Vec<EnumPatternBinding> = arg_nodes
+        .iter()
+        .enumerate()
+        .map(|(i, arg_node)| {
+            let expected_binding_ty = binding_expected_types.as_ref().and_then(|tys| tys.get(i));
+            resolve_enum_pattern_arg(arg_node, ctx, force_mutable, expected_binding_ty)
+        })
         .collect();
 
     // Type is inferred from context - will be resolved during type inference
@@ -410,11 +426,52 @@ fn resolve_enum_pattern(
     Pattern::enum_variant(None, case_name, bindings, ty, span)
 }
 
+/// Get the expected types for enum case bindings from the expected enum type.
+///
+/// If `expected_ty` is an enum type and we can find the case, returns the
+/// parameter types from the case's CallableBehavior, with substitutions applied.
+fn get_enum_case_binding_types(expected_ty: Option<&Ty>, case_name: &str) -> Option<Vec<Ty>> {
+    let ty = expected_ty?;
+
+    // Check if the expected type is an enum
+    let (enum_sym, substitutions) = match ty.kind() {
+        TyKind::Enum { symbol, substitutions } => (symbol, substitutions),
+        _ => return None,
+    };
+
+    // Find the case by name
+    let case = enum_sym.cases().into_iter().find(|c| {
+        c.metadata().name().value == case_name
+    })?;
+
+    // Get the CallableBehavior (contains parameter types)
+    let callable: CallableBehavior = (*case.callable_behavior()?).clone();
+
+    // Get parameter types and apply substitutions
+    let param_types: Vec<Ty> = callable
+        .parameters()
+        .iter()
+        .map(|param| {
+            let ty = param.ty.clone();
+            // Apply substitutions to handle generic enums like Option[Point]
+            // where the case Some(value: T) should yield Point for the binding
+            substitutions.apply(&ty)
+        })
+        .collect();
+
+    Some(param_types)
+}
+
 /// Resolve a single enum pattern argument.
+///
+/// The `expected_ty` parameter is the expected type for this binding position,
+/// derived from the enum case's parameter types. This allows pattern-bound
+/// variables to have concrete types immediately.
 fn resolve_enum_pattern_arg(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
     force_mutable: bool,
+    expected_ty: Option<&Ty>,
 ) -> EnumPatternBinding {
     let span = get_node_span(node, ctx.file_id);
 
@@ -435,9 +492,9 @@ fn resolve_enum_pattern_arg(
 
     if has_colon {
         // Labeled binding: `label: pattern`
-        // Find the nested pattern
+        // Find the nested pattern and pass the expected type
         let pattern = nested_pattern
-            .map(|p| resolve_pattern_with_mutability(&p, ctx, None, force_mutable))
+            .map(|p| resolve_pattern_with_mutability(&p, ctx, expected_ty, force_mutable))
             .unwrap_or_else(|| Pattern::error(span.clone()));
 
         EnumPatternBinding::new(label, pattern, span)
@@ -446,7 +503,7 @@ fn resolve_enum_pattern_arg(
         let pattern = resolve_pattern_with_mutability(
             &nested_pattern.unwrap(),
             ctx,
-            None,
+            expected_ty,
             force_mutable,
         );
 
@@ -454,9 +511,10 @@ fn resolve_enum_pattern_arg(
     } else {
         // Simple binding: just an identifier that becomes a binding pattern
         let label_str = label.unwrap_or_else(|| "_".to_string());
-        
-        // Create a binding pattern for this label
-        let binding_ty = Ty::infer(span.clone());
+
+        // Create a binding pattern for this label.
+        // Use expected type if available, otherwise create inference placeholder.
+        let binding_ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
         let is_mutable = force_mutable;
         let mutability = if is_mutable { Mutability::Mutable } else { Mutability::Immutable };
         let local_id = ctx.local_scope.bind(

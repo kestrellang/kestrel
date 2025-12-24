@@ -68,6 +68,13 @@ impl LocalContainer for InitializerSymbol {
     fn local_count(&self) -> usize {
         self.read_locals().len()
     }
+
+    fn update_local_type(&self, id: LocalId, ty: Ty) {
+        let mut locals = self.locals.write().unwrap();
+        if let Some(local) = locals.get_mut(id.index()) {
+            *local.ty_mut() = ty;
+        }
+    }
 }
 
 impl InitializerSymbol {

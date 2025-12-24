@@ -411,6 +411,12 @@ fn walk_type(
 fn get_executable_body(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
+    // Prefer ResolvedExecutableBehavior if available (after type inference).
+    // This ensures analyzers running after type inference see resolved types.
+    if let Some(resolved) = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+        return Some(resolved.body().clone());
+    }
+    // Fall back to unresolved ExecutableBehavior.
     symbol
         .metadata()
         .get_behavior::<ExecutableBehavior>()

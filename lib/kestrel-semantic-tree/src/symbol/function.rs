@@ -78,6 +78,13 @@ impl LocalContainer for FunctionSymbol {
     fn local_count(&self) -> usize {
         self.locals.read().unwrap().len()
     }
+
+    fn update_local_type(&self, id: LocalId, ty: Ty) {
+        let mut locals = self.locals.write().unwrap();
+        if let Some(local) = locals.get_mut(id.index()) {
+            *local.ty_mut() = ty;
+        }
+    }
 }
 
 impl FunctionSymbol {

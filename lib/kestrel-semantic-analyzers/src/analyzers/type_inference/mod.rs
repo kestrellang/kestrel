@@ -8,8 +8,11 @@ use std::sync::Arc;
 use kestrel_semantic_model::InferenceResultFor;
 use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedExecutableBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_type_inference::apply_solution;
+use kestrel_semantic_tree::symbol::local::LocalContainer;
+use kestrel_semantic_type_inference::{apply_solution, apply_solution_to_locals};
 use semantic_tree::symbol::Symbol;
 
 use crate::analyzer::Analyzer;
@@ -77,6 +80,15 @@ impl Analyzer for TypeInferenceAnalyzer {
 
         // Apply solution to create resolved body (even if there are errors)
         let resolved_body = apply_solution(executable.body(), &solution);
+
+        // Update local variables in the container with resolved types.
+        // This is necessary because pattern-bound locals are created with Ty::infer()
+        // placeholder types, and subsequent code reads the type from the LocalContainer.
+        if let Some(func) = symbol.as_ref().downcast_ref::<FunctionSymbol>() {
+            apply_solution_to_locals(func as &dyn LocalContainer, &solution);
+        } else if let Some(init) = symbol.as_ref().downcast_ref::<InitializerSymbol>() {
+            apply_solution_to_locals(init as &dyn LocalContainer, &solution);
+        }
 
         // Add ResolvedExecutableBehavior to the symbol
         symbol
