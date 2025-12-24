@@ -589,6 +589,48 @@ func test(x: Int) -> String {
         )
         .expect(HasWarning("overlap"));
     }
+
+    #[test]
+    fn unreachable_overlap_nested() {
+        Test::new(
+            r#"
+module Main
+
+enum E {
+    case A(x: Int, y: Int)
+}
+
+func test(e: E) -> Int {
+    match e {
+        .A(x: 1, y: _) => 1,
+        .A(x: _, y: 1) => 2,
+        .A(x: 1, y: 1) => 3, // UNREACHABLE
+        .A(x: _, y: _) => 4
+    }
+}
+"#,
+        )
+        .expect(HasWarning("unreachable"));
+    }
+
+    #[test]
+    fn unreachable_array_rest() {
+        Test::new(
+            r#"
+module Main
+
+func test(arr: [Int]) -> Int {
+    match arr {
+        [] => 0,
+        [x] => x,
+        [first, ..rest, last] => first + last,
+        [..] => -1 // UNREACHABLE
+    }
+}
+"#,
+        )
+        .expect(HasWarning("unreachable"));
+    }
 }
 
 // ============================================================================

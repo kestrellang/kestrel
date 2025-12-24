@@ -361,14 +361,30 @@
   - [x] Instance methods in enums
   - [x] Static methods in enums
   - [x] Enum extensions (`extend Color { ... }`)
-- [ ] Pattern Matching
-  - [ ] `match` expressions
-  - [ ] Exhaustiveness checking
-  - [ ] Patterns: literals, bindings, enum variants, wildcards
-  - [ ] Guard clauses in patterns
-  - [ ] `if let` / `guard let`
+- [x] Pattern Matching
+  - [x] `match` expressions
+  - [x] Exhaustiveness checking
+  - [x] Patterns: literals, bindings, enum variants, wildcards
+  - [x] Guard clauses in patterns
+  - [x] `if let` / `guard let`
 
-## Phase 10: Memory Model
+## Phase 10: Execution Graph
+
+- [ ] Execution Graph IR
+  - [ ] Basic block representation
+  - [ ] Control flow graph structure
+  - [ ] Lower semantic-tree to execution-graph
+- [ ] Operations
+  - [ ] Primitive operations (arithmetic, comparisons)
+  - [ ] Memory operations (load, store, alloc)
+  - [ ] Control flow operations (branch, jump, return)
+  - [ ] Call operations (direct, indirect, method)
+- [ ] Analysis Infrastructure
+  - [ ] CFG traversal utilities
+  - [ ] Dataflow analysis framework
+  - [ ] SSA form (optional)
+
+## Phase 11: Memory Model
 
 - [ ] Value vs Reference Semantics
   - [ ] Structs as value types (copy semantics)
@@ -378,7 +394,7 @@
   - [ ] Ownership/borrowing, or
   - [ ] Garbage collection
 
-## Phase 11: Code Generation
+## Phase 12: Code Generation
 
 - [ ] IR Generation
   - [ ] Choose target: LLVM, WASM, bytecode, or transpile
@@ -388,7 +404,7 @@
 - [ ] Executable Output
   - [ ] Binary or interpreted execution
 
-## Phase 12: Standard Library & Syntactic Sugar
+## Phase 13: Standard Library & Syntactic Sugar
 
 - [ ] Standard Library
   - [ ] Option[T], Result[T, E] (as regular enums)

@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
@@ -185,11 +187,17 @@ impl TypeOracle for SemanticModel {
         }
 
         // Also check extensions for conformances
+        // Get actual type's substitutions for filtering applicable extensions
+        let actual_subs = get_type_substitutions(ty);
+
         let extensions = self.query(ExtensionsFor {
             target_id: type_symbol_id,
         });
 
-        for extension in extensions {
+        // Filter to only applicable extensions based on type arguments
+        let applicable_extensions = filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
+
+        for extension in applicable_extensions {
             let ext_conformances = self.query(ConformancesForSymbol {
                 symbol_id: extension.metadata().id(),
             });
@@ -398,6 +406,188 @@ fn combine_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substi
         result.insert(*id, ty.clone());
     }
     result
+}
+
+/// Get the substitutions from a type (struct or enum).
+fn get_type_substitutions(ty: &Ty) -> Option<Substitutions> {
+    match ty.kind() {
+        TyKind::Struct { substitutions, .. } => Some(substitutions.clone()),
+        TyKind::Enum { substitutions, .. } => Some(substitutions.clone()),
+        _ => None,
+    }
+}
+
+/// Filter extensions to find those applicable to the given type's substitutions.
+///
+/// This is similar to `filter_applicable_extensions` in members.rs but simplified
+/// for the conformance checking use case.
+fn filter_applicable_extensions_for_conformance<'a>(
+    extensions: &'a [Arc<ExtensionSymbol>],
+    actual_subs: &Option<Substitutions>,
+) -> Vec<&'a Arc<ExtensionSymbol>> {
+    extensions
+        .iter()
+        .filter(|ext| {
+            // Get the extension's target type behavior
+            let behaviors = ext.metadata().behaviors();
+            let target_behavior = behaviors
+                .iter()
+                .find(|b| b.kind() == KestrelBehaviorKind::ExtensionTarget);
+
+            let Some(target_behavior) = target_behavior else {
+                // No target behavior - include extension (shouldn't happen)
+                return true;
+            };
+
+            let Some(target_behavior) = target_behavior
+                .as_ref()
+                .downcast_ref::<ExtensionTargetBehavior>()
+            else {
+                return true;
+            };
+
+            let target_ty = target_behavior.target_type();
+
+            // Get substitutions from extension's target type
+            let extension_subs = match target_ty.kind() {
+                TyKind::Struct { substitutions, .. } => Some(substitutions),
+                TyKind::Enum { substitutions, .. } => Some(substitutions),
+                _ => None,
+            };
+
+            // If extension has no type arguments, it applies to all instances
+            let Some(extension_subs) = extension_subs else {
+                return true;
+            };
+
+            // If actual type has no substitutions but extension does, check if extension is fully generic
+            let Some(actual_subs) = actual_subs else {
+                // No actual subs - extension is applicable if it's fully generic
+                return extension_subs.iter().all(|(_, ty)| ty.is_type_parameter());
+            };
+
+            // Check if extension's type arguments are applicable
+            is_extension_applicable_for_conformance(extension_subs, actual_subs)
+        })
+        .collect()
+}
+
+/// Check if an extension's type arguments are applicable to an actual type's substitutions.
+///
+/// - Type parameters in the extension match any concrete type
+/// - Concrete types in the extension must match exactly
+fn is_extension_applicable_for_conformance(
+    extension_subs: &Substitutions,
+    actual_subs: &Substitutions,
+) -> bool {
+    // Must have same number of type arguments
+    if extension_subs.len() != actual_subs.len() {
+        return false;
+    }
+
+    // If both have no type arguments, they match
+    if extension_subs.is_empty() && actual_subs.is_empty() {
+        return true;
+    }
+
+    // Check each type argument by parameter ID
+    for (param_id, ext_ty) in extension_subs.iter() {
+        // Get the corresponding actual type for this parameter
+        let Some(actual_ty) = actual_subs.get(*param_id) else {
+            return false; // Extension has a param that actual doesn't
+        };
+
+        if ext_ty.is_type_parameter() {
+            // Extension has a type parameter here - matches anything
+            continue;
+        } else {
+            // Extension has a concrete type - must match exactly
+            if !types_match_for_conformance(ext_ty, actual_ty) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// Simple type matching for conformance checking.
+///
+/// Compares types structurally at the top level.
+fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
+    match (a.kind(), b.kind()) {
+        // Primitives
+        (TyKind::Unit, TyKind::Unit) => true,
+        (TyKind::Never, TyKind::Never) => true,
+        (TyKind::Bool, TyKind::Bool) => true,
+        (TyKind::String, TyKind::String) => true,
+        (TyKind::Int(a_bits), TyKind::Int(b_bits)) => a_bits == b_bits,
+        (TyKind::Float(a_bits), TyKind::Float(b_bits)) => a_bits == b_bits,
+
+        // Structs - compare by symbol ID and recursively check substitutions
+        (
+            TyKind::Struct {
+                symbol: a_sym,
+                substitutions: a_subs,
+            },
+            TyKind::Struct {
+                symbol: b_sym,
+                substitutions: b_subs,
+            },
+        ) => {
+            if a_sym.metadata().id() != b_sym.metadata().id() {
+                return false;
+            }
+            // Recursively check substitutions
+            for (param_id, a_ty) in a_subs.iter() {
+                if let Some(b_ty) = b_subs.get(*param_id) {
+                    if !types_match_for_conformance(a_ty, b_ty) {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            true
+        }
+
+        // Enums - compare by symbol ID and recursively check substitutions
+        (
+            TyKind::Enum {
+                symbol: a_sym,
+                substitutions: a_subs,
+            },
+            TyKind::Enum {
+                symbol: b_sym,
+                substitutions: b_subs,
+            },
+        ) => {
+            if a_sym.metadata().id() != b_sym.metadata().id() {
+                return false;
+            }
+            for (param_id, a_ty) in a_subs.iter() {
+                if let Some(b_ty) = b_subs.get(*param_id) {
+                    if !types_match_for_conformance(a_ty, b_ty) {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            true
+        }
+
+        // Type parameters - compare by symbol ID
+        (TyKind::TypeParameter(a_param), TyKind::TypeParameter(b_param)) => {
+            a_param.metadata().id() == b_param.metadata().id()
+        }
+
+        // Error types match anything
+        (TyKind::Error, _) | (_, TyKind::Error) => true,
+
+        // Different kinds don't match
+        _ => false,
+    }
 }
 
 #[cfg(test)]

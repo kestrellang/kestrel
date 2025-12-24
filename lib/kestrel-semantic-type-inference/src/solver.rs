@@ -614,6 +614,70 @@ fn unify(
             Ok(SolveResult::Solved)
         }
 
+        // Struct to Protocol - check conformance
+        (TyKind::Struct { .. }, TyKind::Protocol { symbol, .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_a, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+        (TyKind::Protocol { symbol, .. }, TyKind::Struct { .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_b, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+
+        // Enum to Protocol - check conformance
+        (TyKind::Enum { .. }, TyKind::Protocol { symbol, .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_a, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+        (TyKind::Protocol { symbol, .. }, TyKind::Enum { .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_b, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+
         // Primitive types - exact match required
         (TyKind::Unit, TyKind::Unit) => Ok(SolveResult::Solved),
         (TyKind::Bool, TyKind::Bool) => Ok(SolveResult::Solved),

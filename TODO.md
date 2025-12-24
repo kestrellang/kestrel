@@ -30,9 +30,9 @@
   - [x] Instance methods in enums
   - [x] Static methods in enums
   - [x] Enum extensions (`extend Color { ... }`)
-- [ ] Pattern Matching
-  - [ ] `match` expressions
-  - [ ] Exhaustiveness checking
-  - [ ] Patterns: literals, bindings, enum variants, wildcards
-  - [ ] Guard clauses in patterns
-  - [ ] `if let` / `guard let`
+- [xr] Pattern Matching
+  - [x] `match` expressions
+  - [x] Exhaustiveness checking
+  - [x] Patterns: literals, bindings, enum variants, wildcards
+  - [x] Guard clauses in patterns
+  - [x] `if let` / `guard let`
