@@ -282,6 +282,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-execution-graph-lowering"
+version = "0.9.0"
+dependencies = [
+ "kestrel-execution-graph",
+ "kestrel-reporting",
+ "kestrel-semantic-model",
+ "kestrel-semantic-tree",
+ "kestrel-span",
+ "semantic-tree",
+]
+
+[[package]]
 name = "kestrel-lexer"
 version = "0.9.0"
 dependencies = [
