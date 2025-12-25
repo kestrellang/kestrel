@@ -246,6 +246,8 @@ version = "0.9.0"
 dependencies = [
  "clap",
  "kestrel-compiler",
+ "kestrel-execution-graph",
+ "kestrel-execution-graph-lowering",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",

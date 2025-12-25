@@ -24,6 +24,10 @@ struct Cli {
     #[arg(long, global = true)]
     symbols: bool,
 
+    /// Show MIR (Mid-level Intermediate Representation) after lowering
+    #[arg(long, global = true)]
+    mir: bool,
+
     /// Verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -58,7 +62,7 @@ fn read_source(path: &str) -> Option<String> {
     }
 }
 
-fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: bool) -> ExitCode {
+fn run_check(files: &[String], show_tree: bool, show_symbols: bool, show_mir: bool, verbose: bool) -> ExitCode {
     use kestrel_compiler::Compilation;
 
     if files.is_empty() {
@@ -100,6 +104,28 @@ fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: boo
             model.print_model_symbols();
             println!();
         }
+    }
+
+    // Lower to MIR and display
+    if show_mir {
+        println!("--- MIR (Execution Graph) ---");
+        if let Some(model) = compilation.semantic_model() {
+            let root = model.root();
+            let result = kestrel_execution_graph_lowering::lower_module(model, &root);
+            
+            // Show lowering diagnostics if any
+            if !result.diagnostics.is_empty() {
+                println!("Lowering warnings/errors:");
+                for diag in &result.diagnostics {
+                    println!("  - {:?}", diag);
+                }
+                println!();
+            }
+            
+            // Display the MIR
+            println!("{}", result.mir.display());
+        }
+        println!();
     }
 
     // Emit diagnostics
@@ -169,6 +195,7 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     use kestrel_compiler::Compilation;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    #[allow(unused_imports)]
     use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
     use semantic_tree::symbol::Symbol;
@@ -302,7 +329,7 @@ fn main() -> ExitCode {
     match cli.command {
         Some(Commands::Check { files }) => {
             // Use subcommand files only (cli.files is redundant due to global arg)
-            run_check(&files, cli.tree, cli.symbols, cli.verbose)
+            run_check(&files, cli.tree, cli.symbols, cli.mir, cli.verbose)
         }
         Some(Commands::Parse { files }) => {
             // Use subcommand files only
@@ -316,7 +343,7 @@ fn main() -> ExitCode {
                 eprintln!("Run 'kestrel --help' for usage.");
                 ExitCode::from(1)
             } else {
-                run_check(&cli.files, cli.tree, cli.symbols, cli.verbose)
+                run_check(&cli.files, cli.tree, cli.symbols, cli.mir, cli.verbose)
             }
         }
     }

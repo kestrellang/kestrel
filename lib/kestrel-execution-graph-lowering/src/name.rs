@@ -33,6 +33,13 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
 
     // Then add this symbol's name (if it has one that should appear in the path)
     let kind = symbol.metadata().kind();
+    
+    // Skip the root symbol (named "<root>")
+    let name_value = &symbol.metadata().name().value;
+    if name_value == "<root>" {
+        return;
+    }
+    
     match kind {
         // Skip source files - they don't contribute to the qualified name
         KestrelSymbolKind::SourceFile => {}
