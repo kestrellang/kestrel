@@ -274,6 +274,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-execution-graph"
+version = "0.9.0"
+dependencies = [
+ "kestrel-reporting",
+ "kestrel-span",
+]
+
+[[package]]
 name = "kestrel-lexer"
 version = "0.9.0"
 dependencies = [

@@ -48,5 +48,6 @@ members = [
     "lib/kestrel-semantic-pattern-matching",
     "lib/kestrel-reporting",
     "lib/kestrel-compiler",
+    "lib/kestrel-execution-graph",
     "lib/kestrel-test-suite"
 ]
