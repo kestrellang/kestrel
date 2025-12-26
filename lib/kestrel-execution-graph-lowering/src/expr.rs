@@ -144,18 +144,11 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         } => lower_loop(ctx, *loop_id, body, expr),
 
         ExprKind::WhileLet {
-            loop_id: _,
+            loop_id,
             label: _,
-            conditions: _,
-            body: _,
-        } => {
-            // TODO: Implement while-let loops
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "while let expression",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
-        }
+            conditions,
+            body,
+        } => lower_while_let(ctx, *loop_id, conditions, body),
 
         ExprKind::Break { loop_id, label: _ } => {
             // Find the target loop and jump to its exit block
@@ -855,6 +848,21 @@ fn collect_symbol_name_parts(
 }
 
 /// Lower an if expression.
+///
+/// Handles both regular `if` and `if let` conditions, including condition chains.
+///
+/// # If-Let Lowering Strategy
+///
+/// An `if let pattern = expr { then } else { else }` is lowered by:
+/// 1. Compiling the pattern into a decision tree with 2 arms:
+///    - Arm 0: the pattern → then block
+///    - Arm 1: wildcard → else block
+/// 2. The decision tree handles all the pattern matching logic
+///
+/// For condition chains like `if let .Some(x) = a, x > 0 { ... }`:
+/// 1. First evaluate all let-conditions, checking patterns
+/// 2. If all patterns match, evaluate boolean conditions
+/// 3. If all pass, execute then-branch; otherwise else-branch
 fn lower_if(
     ctx: &mut LoweringContext,
     conditions: &[IfCondition],
@@ -868,37 +876,21 @@ fn lower_if(
     let result_local = ctx.create_temp("if_result", result_ty);
     let result_place = Place::local(result_local);
 
-    // For now, only handle single boolean conditions
-    if conditions.len() != 1 {
-        ctx.emit_error(LoweringError::unsupported_expr(
-            "if-let or condition chain",
-            expr.span.clone(),
-        ));
-        return Value::Place(result_place);
-    }
-
-    let condition = match &conditions[0] {
-        IfCondition::Expr(e) => e,
-        IfCondition::Let { .. } => {
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "if-let condition",
-                expr.span.clone(),
-            ));
-            return Value::Place(result_place);
-        }
-    };
-
-    // Create blocks
-    let then_block = ctx.create_block();
-    let else_block = ctx.create_block();
+    // Create the join block where both branches converge
     let join_block = ctx.create_block();
+    
+    // Create the else block
+    let else_block = ctx.create_block();
 
-    // Lower condition and emit branch
-    let cond_value = lower_expression(ctx, condition);
-    ctx.emit_branch(cond_value, then_block, else_block);
+    // Lower the condition chain
+    // This will emit all pattern tests and boolean conditions, eventually
+    // jumping to either then_block_start or else_block
+    let then_block_start = ctx.create_block();
+    
+    lower_condition_chain(ctx, conditions, 0, then_block_start, else_block);
 
     // Lower then branch
-    ctx.set_current_block(then_block);
+    ctx.set_current_block(then_block_start);
     for stmt in then_branch {
         lower_statement(ctx, stmt);
         if ctx.is_block_terminated() {
@@ -964,6 +956,482 @@ fn lower_if(
     ctx.set_current_block(join_block);
 
     Value::Place(result_place)
+}
+
+/// Lower a chain of conditions for if/if-let.
+///
+/// This recursively processes each condition:
+/// - For `Expr` conditions: emit a boolean branch
+/// - For `Let` conditions: emit pattern matching via decision tree
+///
+/// If all conditions pass, jumps to `then_block`.
+/// If any condition fails, jumps to `else_block`.
+fn lower_condition_chain(
+    ctx: &mut LoweringContext,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    // Base case: all conditions processed, jump to then block
+    if index >= conditions.len() {
+        ctx.emit_jump(then_block);
+        return;
+    }
+
+    match &conditions[index] {
+        IfCondition::Expr(condition_expr) => {
+            // Boolean condition: emit branch
+            let cond_value = lower_expression(ctx, condition_expr);
+            
+            // If this is the last condition, branch directly to then/else
+            if index == conditions.len() - 1 {
+                ctx.emit_branch(cond_value, then_block, else_block);
+            } else {
+                // More conditions to check: create a block for the next condition
+                let next_block = ctx.create_block();
+                ctx.emit_branch(cond_value, next_block, else_block);
+                ctx.set_current_block(next_block);
+                lower_condition_chain(ctx, conditions, index + 1, then_block, else_block);
+            }
+        }
+
+        IfCondition::Let { pattern, value, .. } => {
+            // If-let condition: use pattern matching
+            lower_if_let_condition(ctx, pattern, value, conditions, index, then_block, else_block);
+        }
+    }
+}
+
+/// Lower a single if-let condition using decision tree compilation.
+///
+/// This compiles the pattern into a decision tree and emits:
+/// - Pattern match tests
+/// - Bindings (which are visible in subsequent conditions and the then branch)
+/// - Branches to either the next condition or else block
+fn lower_if_let_condition(
+    ctx: &mut LoweringContext,
+    pattern: &kestrel_semantic_tree::pattern::Pattern,
+    scrutinee_expr: &Expression,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::compile;
+
+    // Lower the scrutinee
+    let scrutinee_value = lower_expression(ctx, scrutinee_expr);
+
+    // We need the scrutinee in a place for pattern matching
+    let scrutinee_place = match scrutinee_value {
+        Value::Place(p) => p,
+        Value::Immediate(imm) => {
+            // Store the immediate in a temporary
+            let scrutinee_ty = lower_type(ctx, &scrutinee_expr.ty);
+            let scrutinee_local = ctx.create_temp("scrutinee", scrutinee_ty);
+            let place = Place::local(scrutinee_local);
+            ctx.emit_assign(place.clone(), Rvalue::Use(imm));
+            place
+        }
+    };
+
+    // Compile the pattern into a decision tree
+    // For if-let, we have just one pattern (no guards in if-let itself)
+    let patterns = vec![pattern.clone()];
+    let has_guards = vec![false];
+    let decision_tree = compile(&patterns, &scrutinee_expr.ty, &has_guards);
+
+    // Emit the decision tree for if-let
+    // Success means pattern matched → continue to next condition or then block
+    // Failure means pattern didn't match → go to else block
+    emit_if_let_decision_tree(
+        ctx,
+        &decision_tree,
+        &scrutinee_place,
+        conditions,
+        index,
+        then_block,
+        else_block,
+    );
+}
+
+/// Emit MIR for an if-let decision tree.
+///
+/// Unlike match expressions, if-let has only one pattern (plus implicit wildcard),
+/// so the decision tree emission is simpler:
+/// - Success: emit bindings and continue to next condition
+/// - Failure: jump to else block
+/// - Switch: test constructors and recurse
+fn emit_if_let_decision_tree(
+    ctx: &mut LoweringContext,
+    tree: &kestrel_semantic_pattern_matching::DecisionTree,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::DecisionTree;
+
+    match tree {
+        DecisionTree::Success { bindings, .. } => {
+            // Pattern matched! Emit bindings and continue to next condition
+            crate::match_lowering::emit_bindings(ctx, bindings, scrutinee);
+            
+            // Continue with the rest of the condition chain
+            lower_condition_chain(ctx, conditions, index + 1, then_block, else_block);
+        }
+
+        DecisionTree::Switch { path, ty, cases, default } => {
+            emit_if_let_switch(ctx, path, ty, cases, default, scrutinee, conditions, index, then_block, else_block);
+        }
+
+        DecisionTree::Guard { .. } => {
+            // Guards shouldn't appear in if-let (guards are a match-specific feature)
+            // If they do, treat as failure
+            ctx.emit_jump(else_block);
+        }
+
+        DecisionTree::Failure => {
+            // Pattern didn't match, go to else block
+            ctx.emit_jump(else_block);
+        }
+    }
+}
+
+/// Emit MIR for a switch node in an if-let decision tree.
+fn emit_if_let_switch(
+    ctx: &mut LoweringContext,
+    path: &kestrel_semantic_pattern_matching::AccessPath,
+    ty: &kestrel_semantic_tree::ty::Ty,
+    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    // Get the place to switch on
+    let switch_place = crate::match_lowering::apply_path(scrutinee, path);
+
+    match ty.kind() {
+        TyKind::Bool => {
+            emit_if_let_bool_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+        }
+
+        TyKind::Enum { .. } => {
+            emit_if_let_enum_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+        }
+
+        TyKind::Int(_) => {
+            emit_if_let_int_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+        }
+
+        TyKind::String => {
+            emit_if_let_string_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+        }
+
+        TyKind::Tuple(_) | TyKind::Struct { .. } => {
+            // Single constructor types - just recurse into the case
+            if let Some((_, subtree)) = cases.first() {
+                emit_if_let_decision_tree(ctx, subtree, scrutinee, conditions, index, then_block, else_block);
+            } else if let Some(default_tree) = default {
+                emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+            } else {
+                ctx.emit_jump(else_block);
+            }
+        }
+
+        _ => {
+            // For other types, try the default or first case
+            if let Some(default_tree) = default {
+                emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+            } else if let Some((_, tree)) = cases.first() {
+                emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+            } else {
+                ctx.emit_jump(else_block);
+            }
+        }
+    }
+}
+
+/// Emit boolean switch for if-let.
+fn emit_if_let_bool_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // Find true and false cases
+    let true_tree = cases.iter().find(|(c, _)| matches!(c, Constructor::True)).map(|(_, t)| t);
+    let false_tree = cases.iter().find(|(c, _)| matches!(c, Constructor::False)).map(|(_, t)| t);
+
+    // Create blocks for each case
+    let true_block = ctx.create_block();
+    let false_block = ctx.create_block();
+
+    // Emit branch
+    ctx.emit_branch(Value::Place(switch_place.clone()), true_block, false_block);
+
+    // Emit true case
+    ctx.set_current_block(true_block);
+    if let Some(tree) = true_tree {
+        emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+    } else if let Some(default_tree) = default {
+        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+    } else {
+        ctx.emit_jump(else_block);
+    }
+
+    // Emit false case
+    ctx.set_current_block(false_block);
+    if let Some(tree) = false_tree {
+        emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+    } else if let Some(default_tree) = default {
+        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+    } else {
+        ctx.emit_jump(else_block);
+    }
+}
+
+/// Emit enum switch for if-let.
+fn emit_if_let_enum_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // Build switch cases: (variant_name, block)
+    let mut switch_cases = Vec::with_capacity(cases.len() + 1);
+    let mut case_trees = Vec::with_capacity(cases.len());
+
+    for (ctor, tree) in cases {
+        if let Constructor::Variant { name, .. } = ctor {
+            let case_block = ctx.create_block();
+            switch_cases.push((name.clone(), case_block));
+            case_trees.push((case_block, tree));
+        }
+    }
+
+    // Add default case (for unmatched variants → else block)
+    // This is the key difference from match: unmatched variants go to else_block
+    let default_case_block = ctx.create_block();
+    switch_cases.push(("_".to_string(), default_case_block));
+
+    // Emit the switch terminator
+    ctx.emit_switch(switch_place.clone(), switch_cases);
+
+    // Emit each matched variant's body
+    for (block, tree) in case_trees {
+        ctx.set_current_block(block);
+        emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+    }
+
+    // Emit default case: if there's a default tree use it, otherwise go to else
+    ctx.set_current_block(default_case_block);
+    if let Some(default_tree) = default {
+        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+    } else {
+        ctx.emit_jump(else_block);
+    }
+}
+
+/// Emit integer comparison chain for if-let.
+fn emit_if_let_int_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_execution_graph::BinOp;
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // If no cases, check default
+    if cases.is_empty() {
+        if let Some(default_tree) = default {
+            emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        } else {
+            ctx.emit_jump(else_block);
+        }
+        return;
+    }
+
+    // Build a chain of comparisons
+    for (ctor, tree) in cases.iter() {
+        match ctor {
+            Constructor::IntLiteral(value) => {
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Compare: switch_place == value
+                let cmp_ty = ctx.mir.ty_bool();
+                let cmp_local = ctx.create_temp("cmp", cmp_ty);
+                let cmp_place = Place::local(cmp_local);
+                ctx.emit_assign(
+                    cmp_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::Eq,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(Immediate::i64(*value)),
+                    },
+                );
+
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            }
+
+            Constructor::IntRange { start, end } => {
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Range check: start <= value && value <= end
+                let cmp1_ty = ctx.mir.ty_bool();
+                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                let cmp1_place = Place::local(cmp1_local);
+                ctx.emit_assign(
+                    cmp1_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::LeSigned,
+                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        rhs: Value::Place(switch_place.clone()),
+                    },
+                );
+
+                let cmp2_ty = ctx.mir.ty_bool();
+                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                let cmp2_place = Place::local(cmp2_local);
+                ctx.emit_assign(
+                    cmp2_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::LeSigned,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(Immediate::i64(*end)),
+                    },
+                );
+
+                let cmp_ty = ctx.mir.ty_bool();
+                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                let cmp_place = Place::local(cmp_local);
+                ctx.emit_assign(
+                    cmp_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::BoolAnd,
+                        lhs: Value::Place(cmp1_place),
+                        rhs: Value::Place(cmp2_place),
+                    },
+                );
+
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                ctx.set_current_block(match_block);
+                emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+
+                ctx.set_current_block(next_block);
+            }
+
+            _ => {
+                // Skip unsupported constructors
+                continue;
+            }
+        }
+    }
+
+    // After all cases, check default or go to else
+    if let Some(default_tree) = default {
+        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+    } else {
+        ctx.emit_jump(else_block);
+    }
+}
+
+/// Emit string comparison chain for if-let.
+fn emit_if_let_string_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    then_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    else_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_execution_graph::BinOp;
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // If no cases, check default
+    if cases.is_empty() {
+        if let Some(default_tree) = default {
+            emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        } else {
+            ctx.emit_jump(else_block);
+        }
+        return;
+    }
+
+    // Build a chain of string comparisons
+    for (ctor, tree) in cases {
+        if let Constructor::StringLiteral(value) = ctor {
+            let match_block = ctx.create_block();
+            let next_block = ctx.create_block();
+
+            // Compare: switch_place == value
+            let cmp_ty = ctx.mir.ty_bool();
+            let cmp_local = ctx.create_temp("cmp", cmp_ty);
+            let cmp_place = Place::local(cmp_local);
+            ctx.emit_assign(
+                cmp_place.clone(),
+                Rvalue::BinaryOp {
+                    op: BinOp::Eq,
+                    lhs: Value::Place(switch_place.clone()),
+                    rhs: Value::Immediate(Immediate::string(value.clone())),
+                },
+            );
+
+            ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+            ctx.set_current_block(match_block);
+            emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+
+            ctx.set_current_block(next_block);
+        }
+    }
+
+    // After all cases, check default or go to else
+    if let Some(default_tree) = default {
+        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+    } else {
+        ctx.emit_jump(else_block);
+    }
 }
 
 /// Lower a while loop.
@@ -1066,4 +1534,771 @@ fn lower_loop(
 
     // Loop expressions return unit
     Value::Immediate(Immediate::unit())
+}
+
+/// Lower a while-let loop.
+///
+/// `while let pattern = expr { body }` is like a while loop where:
+/// - The condition is a pattern match
+/// - If the pattern matches, bindings are available in the body
+/// - If the pattern doesn't match, the loop exits
+///
+/// # MIR Structure
+///
+/// ```text
+/// entry_block:
+///     jump header_block
+///
+/// header_block:
+///     <evaluate scrutinee>
+///     <emit pattern matching decision tree>
+///     -> match: jump to body_block (with bindings)
+///     -> no match: jump to exit_block
+///
+/// body_block:
+///     <bindings in scope>
+///     <lower body statements>
+///     jump header_block
+///
+/// exit_block:
+///     // loop finished
+/// ```
+fn lower_while_let(
+    ctx: &mut LoweringContext,
+    loop_id: kestrel_semantic_tree::expr::LoopId,
+    conditions: &[IfCondition],
+    body: &[kestrel_semantic_tree::stmt::Statement],
+) -> Value {
+    use crate::context::LoopInfo;
+
+    // Create blocks
+    let header_block = ctx.create_block();
+    let body_block = ctx.create_block();
+    let exit_block = ctx.create_block();
+
+    // Push loop info for break/continue
+    // Note: continue should jump to header_block to re-evaluate the condition
+    ctx.push_loop(LoopInfo {
+        loop_id,
+        header_block,
+        exit_block,
+    });
+
+    // Jump to header
+    ctx.emit_jump(header_block);
+
+    // Header: evaluate conditions
+    // This is where we emit the pattern matching logic
+    // If all conditions pass → body_block
+    // If any condition fails → exit_block
+    ctx.set_current_block(header_block);
+    lower_while_let_condition_chain(ctx, conditions, 0, body_block, exit_block);
+
+    // Body
+    ctx.set_current_block(body_block);
+    for stmt in body {
+        lower_statement(ctx, stmt);
+        if ctx.is_block_terminated() {
+            break;
+        }
+    }
+
+    // Jump back to header (if not terminated by break/return)
+    if !ctx.is_block_terminated() {
+        ctx.emit_jump(header_block);
+    }
+
+    // Pop loop info
+    ctx.pop_loop();
+
+    // Continue with exit block
+    ctx.set_current_block(exit_block);
+
+    // While-let loops always return unit
+    Value::Immediate(Immediate::unit())
+}
+
+/// Lower a chain of conditions for while-let.
+///
+/// Similar to if-let condition chains:
+/// - For `Expr` conditions: emit a boolean branch
+/// - For `Let` conditions: emit pattern matching via decision tree
+///
+/// If all conditions pass, jumps to `body_block`.
+/// If any condition fails, jumps to `exit_block`.
+fn lower_while_let_condition_chain(
+    ctx: &mut LoweringContext,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    // Base case: all conditions processed, jump to body block
+    if index >= conditions.len() {
+        ctx.emit_jump(body_block);
+        return;
+    }
+
+    match &conditions[index] {
+        IfCondition::Expr(condition_expr) => {
+            // Boolean condition: emit branch
+            let cond_value = lower_expression(ctx, condition_expr);
+
+            // If this is the last condition, branch directly to body/exit
+            if index == conditions.len() - 1 {
+                ctx.emit_branch(cond_value, body_block, exit_block);
+            } else {
+                // More conditions to check: create a block for the next condition
+                let next_block = ctx.create_block();
+                ctx.emit_branch(cond_value, next_block, exit_block);
+                ctx.set_current_block(next_block);
+                lower_while_let_condition_chain(ctx, conditions, index + 1, body_block, exit_block);
+            }
+        }
+
+        IfCondition::Let { pattern, value, .. } => {
+            // While-let condition: use pattern matching
+            lower_while_let_pattern_condition(
+                ctx,
+                pattern,
+                value,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        }
+    }
+}
+
+/// Lower a single while-let pattern condition using decision tree compilation.
+fn lower_while_let_pattern_condition(
+    ctx: &mut LoweringContext,
+    pattern: &kestrel_semantic_tree::pattern::Pattern,
+    scrutinee_expr: &Expression,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::compile;
+
+    // Lower the scrutinee
+    let scrutinee_value = lower_expression(ctx, scrutinee_expr);
+
+    // We need the scrutinee in a place for pattern matching
+    let scrutinee_place = match scrutinee_value {
+        Value::Place(p) => p,
+        Value::Immediate(imm) => {
+            // Store the immediate in a temporary
+            let scrutinee_ty = lower_type(ctx, &scrutinee_expr.ty);
+            let scrutinee_local = ctx.create_temp("scrutinee", scrutinee_ty);
+            let place = Place::local(scrutinee_local);
+            ctx.emit_assign(place.clone(), Rvalue::Use(imm));
+            place
+        }
+    };
+
+    // Compile the pattern into a decision tree
+    let patterns = vec![pattern.clone()];
+    let has_guards = vec![false];
+    let decision_tree = compile(&patterns, &scrutinee_expr.ty, &has_guards);
+
+    // Emit the decision tree for while-let
+    emit_while_let_decision_tree(
+        ctx,
+        &decision_tree,
+        &scrutinee_place,
+        conditions,
+        index,
+        body_block,
+        exit_block,
+    );
+}
+
+/// Emit MIR for a while-let decision tree.
+///
+/// Similar to if-let:
+/// - Success: emit bindings and continue to next condition (or body_block)
+/// - Failure: jump to exit_block (loop terminates)
+fn emit_while_let_decision_tree(
+    ctx: &mut LoweringContext,
+    tree: &kestrel_semantic_pattern_matching::DecisionTree,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::DecisionTree;
+
+    match tree {
+        DecisionTree::Success { bindings, .. } => {
+            // Pattern matched! Emit bindings and continue to next condition
+            crate::match_lowering::emit_bindings(ctx, bindings, scrutinee);
+
+            // Continue with the rest of the condition chain
+            lower_while_let_condition_chain(ctx, conditions, index + 1, body_block, exit_block);
+        }
+
+        DecisionTree::Switch {
+            path,
+            ty,
+            cases,
+            default,
+        } => {
+            emit_while_let_switch(
+                ctx,
+                path,
+                ty,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        }
+
+        DecisionTree::Guard { .. } => {
+            // Guards shouldn't appear in while-let patterns
+            ctx.emit_jump(exit_block);
+        }
+
+        DecisionTree::Failure => {
+            // Pattern didn't match, exit the loop
+            ctx.emit_jump(exit_block);
+        }
+    }
+}
+
+/// Emit MIR for a switch node in a while-let decision tree.
+fn emit_while_let_switch(
+    ctx: &mut LoweringContext,
+    path: &kestrel_semantic_pattern_matching::AccessPath,
+    ty: &kestrel_semantic_tree::ty::Ty,
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    // Get the place to switch on
+    let switch_place = crate::match_lowering::apply_path(scrutinee, path);
+
+    match ty.kind() {
+        TyKind::Bool => {
+            emit_while_let_bool_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        }
+
+        TyKind::Enum { .. } => {
+            emit_while_let_enum_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        }
+
+        TyKind::Int(_) => {
+            emit_while_let_int_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        }
+
+        TyKind::String => {
+            emit_while_let_string_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        }
+
+        TyKind::Tuple(_) | TyKind::Struct { .. } => {
+            // Single constructor types - just recurse into the case
+            if let Some((_, subtree)) = cases.first() {
+                emit_while_let_decision_tree(
+                    ctx,
+                    subtree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    body_block,
+                    exit_block,
+                );
+            } else if let Some(default_tree) = default {
+                emit_while_let_decision_tree(
+                    ctx,
+                    default_tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    body_block,
+                    exit_block,
+                );
+            } else {
+                ctx.emit_jump(exit_block);
+            }
+        }
+
+        _ => {
+            // For other types, try the default or first case
+            if let Some(default_tree) = default {
+                emit_while_let_decision_tree(
+                    ctx,
+                    default_tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    body_block,
+                    exit_block,
+                );
+            } else if let Some((_, tree)) = cases.first() {
+                emit_while_let_decision_tree(
+                    ctx,
+                    tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    body_block,
+                    exit_block,
+                );
+            } else {
+                ctx.emit_jump(exit_block);
+            }
+        }
+    }
+}
+
+/// Emit boolean switch for while-let.
+fn emit_while_let_bool_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // Find true and false cases
+    let true_tree = cases
+        .iter()
+        .find(|(c, _)| matches!(c, Constructor::True))
+        .map(|(_, t)| t);
+    let false_tree = cases
+        .iter()
+        .find(|(c, _)| matches!(c, Constructor::False))
+        .map(|(_, t)| t);
+
+    // Create blocks for each case
+    let true_block = ctx.create_block();
+    let false_block = ctx.create_block();
+
+    // Emit branch
+    ctx.emit_branch(Value::Place(switch_place.clone()), true_block, false_block);
+
+    // Emit true case
+    ctx.set_current_block(true_block);
+    if let Some(tree) = true_tree {
+        emit_while_let_decision_tree(
+            ctx,
+            tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else if let Some(default_tree) = default {
+        emit_while_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else {
+        ctx.emit_jump(exit_block);
+    }
+
+    // Emit false case
+    ctx.set_current_block(false_block);
+    if let Some(tree) = false_tree {
+        emit_while_let_decision_tree(
+            ctx,
+            tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else if let Some(default_tree) = default {
+        emit_while_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else {
+        ctx.emit_jump(exit_block);
+    }
+}
+
+/// Emit enum switch for while-let.
+fn emit_while_let_enum_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // Build switch cases: (variant_name, block)
+    let mut switch_cases = Vec::with_capacity(cases.len() + 1);
+    let mut case_trees = Vec::with_capacity(cases.len());
+
+    for (ctor, tree) in cases {
+        if let Constructor::Variant { name, .. } = ctor {
+            let case_block = ctx.create_block();
+            switch_cases.push((name.clone(), case_block));
+            case_trees.push((case_block, tree));
+        }
+    }
+
+    // Add default case (for unmatched variants → exit_block)
+    let default_case_block = ctx.create_block();
+    switch_cases.push(("_".to_string(), default_case_block));
+
+    // Emit the switch terminator
+    ctx.emit_switch(switch_place.clone(), switch_cases);
+
+    // Emit each matched variant's body
+    for (block, tree) in case_trees {
+        ctx.set_current_block(block);
+        emit_while_let_decision_tree(
+            ctx,
+            tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    }
+
+    // Emit default case: if there's a default tree use it, otherwise exit loop
+    ctx.set_current_block(default_case_block);
+    if let Some(default_tree) = default {
+        emit_while_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else {
+        ctx.emit_jump(exit_block);
+    }
+}
+
+/// Emit integer comparison chain for while-let.
+fn emit_while_let_int_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_execution_graph::BinOp;
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // If no cases, check default
+    if cases.is_empty() {
+        if let Some(default_tree) = default {
+            emit_while_let_decision_tree(
+                ctx,
+                default_tree,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        } else {
+            ctx.emit_jump(exit_block);
+        }
+        return;
+    }
+
+    // Build a chain of comparisons
+    for (ctor, tree) in cases.iter() {
+        match ctor {
+            Constructor::IntLiteral(value) => {
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Compare: switch_place == value
+                let cmp_ty = ctx.mir.ty_bool();
+                let cmp_local = ctx.create_temp("cmp", cmp_ty);
+                let cmp_place = Place::local(cmp_local);
+                ctx.emit_assign(
+                    cmp_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::Eq,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(Immediate::i64(*value)),
+                    },
+                );
+
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                // Emit match body
+                ctx.set_current_block(match_block);
+                emit_while_let_decision_tree(
+                    ctx,
+                    tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    body_block,
+                    exit_block,
+                );
+
+                // Continue with next comparison
+                ctx.set_current_block(next_block);
+            }
+
+            Constructor::IntRange { start, end } => {
+                let match_block = ctx.create_block();
+                let next_block = ctx.create_block();
+
+                // Range check: start <= value && value <= end
+                let cmp1_ty = ctx.mir.ty_bool();
+                let cmp1_local = ctx.create_temp("cmp_lo", cmp1_ty);
+                let cmp1_place = Place::local(cmp1_local);
+                ctx.emit_assign(
+                    cmp1_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::LeSigned,
+                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        rhs: Value::Place(switch_place.clone()),
+                    },
+                );
+
+                let cmp2_ty = ctx.mir.ty_bool();
+                let cmp2_local = ctx.create_temp("cmp_hi", cmp2_ty);
+                let cmp2_place = Place::local(cmp2_local);
+                ctx.emit_assign(
+                    cmp2_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::LeSigned,
+                        lhs: Value::Place(switch_place.clone()),
+                        rhs: Value::Immediate(Immediate::i64(*end)),
+                    },
+                );
+
+                let cmp_ty = ctx.mir.ty_bool();
+                let cmp_local = ctx.create_temp("cmp_range", cmp_ty);
+                let cmp_place = Place::local(cmp_local);
+                ctx.emit_assign(
+                    cmp_place.clone(),
+                    Rvalue::BinaryOp {
+                        op: BinOp::BoolAnd,
+                        lhs: Value::Place(cmp1_place),
+                        rhs: Value::Place(cmp2_place),
+                    },
+                );
+
+                ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+                ctx.set_current_block(match_block);
+                emit_while_let_decision_tree(
+                    ctx,
+                    tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    body_block,
+                    exit_block,
+                );
+
+                ctx.set_current_block(next_block);
+            }
+
+            _ => {
+                // Skip unsupported constructors
+                continue;
+            }
+        }
+    }
+
+    // After all cases, check default or exit loop
+    if let Some(default_tree) = default {
+        emit_while_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else {
+        ctx.emit_jump(exit_block);
+    }
+}
+
+/// Emit string comparison chain for while-let.
+fn emit_while_let_string_switch(
+    ctx: &mut LoweringContext,
+    switch_place: &Place,
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
+    default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
+    scrutinee: &Place,
+    conditions: &[IfCondition],
+    index: usize,
+    body_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+    exit_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
+) {
+    use kestrel_execution_graph::BinOp;
+    use kestrel_semantic_pattern_matching::Constructor;
+
+    // If no cases, check default
+    if cases.is_empty() {
+        if let Some(default_tree) = default {
+            emit_while_let_decision_tree(
+                ctx,
+                default_tree,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+        } else {
+            ctx.emit_jump(exit_block);
+        }
+        return;
+    }
+
+    // Build a chain of string comparisons
+    for (ctor, tree) in cases {
+        if let Constructor::StringLiteral(value) = ctor {
+            let match_block = ctx.create_block();
+            let next_block = ctx.create_block();
+
+            // Compare: switch_place == value
+            let cmp_ty = ctx.mir.ty_bool();
+            let cmp_local = ctx.create_temp("cmp", cmp_ty);
+            let cmp_place = Place::local(cmp_local);
+            ctx.emit_assign(
+                cmp_place.clone(),
+                Rvalue::BinaryOp {
+                    op: BinOp::Eq,
+                    lhs: Value::Place(switch_place.clone()),
+                    rhs: Value::Immediate(Immediate::string(value.clone())),
+                },
+            );
+
+            ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
+
+            ctx.set_current_block(match_block);
+            emit_while_let_decision_tree(
+                ctx,
+                tree,
+                scrutinee,
+                conditions,
+                index,
+                body_block,
+                exit_block,
+            );
+
+            ctx.set_current_block(next_block);
+        }
+    }
+
+    // After all cases, check default or exit loop
+    if let Some(default_tree) = default {
+        emit_while_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            body_block,
+            exit_block,
+        );
+    } else {
+        ctx.emit_jump(exit_block);
+    }
 }

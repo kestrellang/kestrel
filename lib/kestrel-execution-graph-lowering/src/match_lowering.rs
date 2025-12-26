@@ -183,7 +183,9 @@ fn emit_success(
 }
 
 /// Emit MIR for pattern bindings.
-fn emit_bindings(ctx: &mut LoweringContext, bindings: &[Binding], scrutinee: &Place) {
+///
+/// This is public so it can be reused by if-let lowering.
+pub fn emit_bindings(ctx: &mut LoweringContext, bindings: &[Binding], scrutinee: &Place) {
     for binding in bindings {
         // Compute the place for this binding
         let source_place = apply_path(scrutinee, &binding.path);
@@ -200,7 +202,9 @@ fn emit_bindings(ctx: &mut LoweringContext, bindings: &[Binding], scrutinee: &Pl
 }
 
 /// Apply a path to a place to get a sub-place.
-fn apply_path(base: &Place, path: &AccessPath) -> Place {
+///
+/// This is public so it can be reused by if-let lowering.
+pub fn apply_path(base: &Place, path: &AccessPath) -> Place {
     let mut result = base.clone();
     for elem in path {
         result = match elem {
