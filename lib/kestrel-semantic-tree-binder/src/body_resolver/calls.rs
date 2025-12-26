@@ -343,6 +343,25 @@ pub fn resolve_call(
             resolve_type_parameter_init_call(symbol_id, arguments, arg_labels, span, ctx)
         }
 
+        // Enum case - allow calling with empty parens (Color.Red() is same as Color.Red)
+        ExprKind::EnumCase { case_id } => {
+            // Only allow empty argument lists for simple enum cases
+            if arguments.is_empty() {
+                // Return the enum case expression directly (Color.Red() => Color.Red)
+                Expression::enum_case(case_id, callee_ty, span)
+            } else {
+                // Enum case doesn't have associated values but was called with args
+                ctx.diagnostics.add_diagnostic(
+                    NonCallableError {
+                        span: span.clone(),
+                        ty: format!("{}", callee_ty),
+                    }
+                    .into_diagnostic(),
+                );
+                Expression::error(span)
+            }
+        }
+
         // Local variable reference - could be calling a function stored in a variable
         ExprKind::LocalRef(_local_id) => {
             // Variables cannot have explicit type arguments

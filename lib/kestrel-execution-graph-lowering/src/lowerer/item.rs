@@ -1,6 +1,7 @@
 //! Item dispatch - routes symbols to their appropriate lowerers.
 
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
 
-use super::{lower_function, lower_struct};
+use super::{lower_enum, lower_function, lower_struct};
 
 /// Lower a symbol to MIR.
 ///
@@ -64,16 +65,16 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             }
         }
 
-        // === Not yet implemented ===
         KestrelSymbolKind::Enum => {
-            // TODO: Lower enum definitions
-            ctx.emit_error(LoweringError::unsupported_item("Enum", span));
+            if let Ok(enum_symbol) = symbol.clone().downcast_arc::<EnumSymbol>() {
+                lower_enum(ctx, &enum_symbol);
 
-            // Still try to lower methods within
-            for child in symbol.metadata().children() {
-                let child_kind = child.metadata().kind();
-                if child_kind == KestrelSymbolKind::Function {
-                    lower_item(ctx, &child);
+                // Also lower methods within the enum
+                for child in symbol.metadata().children() {
+                    let child_kind = child.metadata().kind();
+                    if child_kind == KestrelSymbolKind::Function {
+                        lower_item(ctx, &child);
+                    }
                 }
             }
         }

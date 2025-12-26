@@ -115,26 +115,31 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // eprintln!("ResolveValuePath({:?}) = {:?}", path, resolution);
     match resolution {
         ValuePathResolution::Symbol { symbol_id, ty } => {
-            // Check if this is a static method or enum case accessed via a qualified type path
-            // e.g., Box[Int].wrap where wrap is a static method
-            // or Option[Int].None where None is an enum case
-            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
-                if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
-                    // Handle simple enum cases (without associated values) with explicit type arguments
-                    // e.g., Option[Int].None where None is a simple case
+            // Check if this is an enum case - always use EnumCase expression
+            // (both generic like Option[Int].None and non-generic like Color.Red)
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
+                    // Only handle cases without CallableBehavior (simple cases)
                     // Cases with associated values (like Some) are handled via the call path
-                    if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
-                        // Only handle cases without CallableBehavior (simple cases)
-                        if get_callable_behavior(&symbol).is_none() {
-                            // Apply the qualified type's substitutions to the case's type
+                    if get_callable_behavior(&symbol).is_none() {
+                        // For generic enums with explicit type args (e.g., Option[Int].None),
+                        // apply substitutions from the qualified type
+                        if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
                             if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
                                 let substituted_ty = ty.apply_substitutions(substitutions);
                                 return Expression::enum_case(symbol_id, substituted_ty, span);
                             }
                         }
+                        // For non-generic enums (e.g., Color.Red), use the type directly
+                        return Expression::enum_case(symbol_id, ty, span);
                     }
-                    
-                    // Handle static methods
+                }
+            }
+            
+            // Check if this is a static method accessed via a qualified type path
+            // e.g., Box[Int].wrap where wrap is a static method
+            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
+                if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
                     if let Some(callable) = get_callable_behavior(&symbol) {
                         if callable.is_static() {
                             // Get struct symbol from qualified type

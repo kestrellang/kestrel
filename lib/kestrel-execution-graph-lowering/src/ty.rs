@@ -123,13 +123,19 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
 
         // === Type Parameters ===
         TyKind::TypeParameter(param_symbol) => {
-            // TODO: Type parameters should be preserved until monomorphization
-            // For now, emit an error - generics aren't fully supported yet
-            ctx.emit_error(LoweringError::unsupported_type(
-                format!("type parameter '{}'", param_symbol.metadata().name().value),
-                ty.span().clone(),
-            ));
-            ctx.mir.ty_unit() // Fallback
+            // Look up the MIR type param from our mapping
+            let symbol_id = param_symbol.metadata().id();
+            if let Some(mir_type_param) = ctx.get_type_param(symbol_id) {
+                ctx.mir.intern_type(MirTy::TypeParam(mir_type_param))
+            } else {
+                // Type parameter not in scope - this can happen when lowering
+                // a generic definition without entering its context first
+                ctx.emit_error(LoweringError::unsupported_type(
+                    format!("type parameter '{}' not in scope", param_symbol.metadata().name().value),
+                    ty.span().clone(),
+                ));
+                ctx.mir.ty_unit() // Fallback
+            }
         }
 
         // === Associated Types ===

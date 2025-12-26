@@ -4,12 +4,13 @@ use std::collections::HashMap;
 
 use kestrel_execution_graph::{
     BasicBlock, Block, Callee, Function, Id, Immediate, Local, MirContext, Place, QualifiedName,
-    Rvalue, StatementKind, Terminator, TerminatorKind, Ty, Value,
+    Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
 };
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::symbol::local::LocalId;
+use semantic_tree::symbol::SymbolId;
 
 use crate::error::LoweringError;
 use crate::LoweringResult;
@@ -49,6 +50,10 @@ pub struct LoweringContext<'a> {
     /// Reset for each function.
     local_map: HashMap<LocalId, Id<Local>>,
 
+    /// Maps semantic TypeParameterSymbol ID to MIR TypeParam ID.
+    /// Set when entering a generic item (struct, enum, function).
+    type_param_map: HashMap<SymbolId, Id<TypeParam>>,
+
     /// Stack of active loops for break/continue resolution.
     loop_stack: Vec<LoopInfo>,
 
@@ -70,6 +75,7 @@ impl<'a> LoweringContext<'a> {
             mir: MirContext::new(),
             current_function: None,
             local_map: HashMap::new(),
+            type_param_map: HashMap::new(),
             loop_stack: Vec::new(),
             current_block: None,
             diagnostics: Vec::new(),
@@ -145,6 +151,23 @@ impl<'a> LoweringContext<'a> {
             .get(&semantic_id)
             .copied()
             .unwrap_or_else(|| panic!("local {:?} not found in local_map", semantic_id))
+    }
+
+    // === Type Parameter Mapping ===
+
+    /// Map a semantic type parameter symbol ID to a MIR type param ID.
+    pub fn map_type_param(&mut self, semantic_id: SymbolId, mir_id: Id<TypeParam>) {
+        self.type_param_map.insert(semantic_id, mir_id);
+    }
+
+    /// Get the MIR type param ID for a semantic type parameter symbol.
+    pub fn get_type_param(&self, semantic_id: SymbolId) -> Option<Id<TypeParam>> {
+        self.type_param_map.get(&semantic_id).copied()
+    }
+
+    /// Clear the type parameter mapping (when leaving a generic context).
+    pub fn clear_type_params(&mut self) {
+        self.type_param_map.clear();
     }
 
     // === Loop Stack ===
