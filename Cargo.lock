@@ -288,10 +288,15 @@ name = "kestrel-execution-graph-lowering"
 version = "0.9.0"
 dependencies = [
  "kestrel-execution-graph",
+ "kestrel-lexer",
+ "kestrel-parser",
  "kestrel-reporting",
+ "kestrel-semantic-analyzers",
  "kestrel-semantic-model",
  "kestrel-semantic-pattern-matching",
  "kestrel-semantic-tree",
+ "kestrel-semantic-tree-binder",
+ "kestrel-semantic-tree-builder",
  "kestrel-span",
  "semantic-tree",
 ]

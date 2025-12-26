@@ -16,6 +16,7 @@
 //! let mir = result.mir;
 //! ```
 
+mod closure;
 mod context;
 mod error;
 mod expr;
@@ -25,6 +26,9 @@ mod name;
 mod pattern;
 mod stmt;
 mod ty;
+
+#[cfg(test)]
+mod closure_tests;
 
 pub use context::LoweringContext;
 pub use error::LoweringError;

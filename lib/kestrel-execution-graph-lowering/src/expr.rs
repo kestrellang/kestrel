@@ -198,21 +198,22 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Closures ===
         ExprKind::Closure {
-            params: _,
-            body: _,
-            tail_expr: _,
-            captures: _,
+            params,
+            body,
+            tail_expr,
+            captures,
             uses_it: _,
-            implicit_param: _,
-        } => {
-            // TODO: Implement closure lowering
-            // This requires generating an environment struct and a call function
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "closure expression",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
-        }
+            implicit_param,
+        } => crate::closure::lower_closure(
+            ctx,
+            params,
+            body,
+            tail_expr,
+            captures,
+            implicit_param,
+            &expr.ty,
+            &expr.span,
+        ),
 
         // === Other ===
         ExprKind::Array(elements) => {

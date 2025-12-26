@@ -584,6 +584,8 @@ pub struct ClosureParam {
     pub is_type_annotated: bool,
     /// Source span
     pub span: Span,
+    /// The local variable ID for this parameter
+    pub local_id: LocalId,
 }
 
 /// A captured variable from an enclosing scope.

@@ -37,10 +37,19 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
         PatternKind::Local {
             local_id,
             mutability: _,
-            name: _,
+            name,
         } => {
             // Simple local binding - assign the value to the local
-            let mir_local = ctx.get_local_unwrap(*local_id);
+            // If the local doesn't exist yet (e.g., in closure bodies), create it
+            let mir_local = if let Some(existing) = ctx.get_local(*local_id) {
+                existing
+            } else {
+                // Create the local on demand (happens in closure bodies)
+                let local_ty = lower_type(ctx, &pattern.ty);
+                let new_local = ctx.create_local(name, local_ty);
+                ctx.map_local(*local_id, new_local);
+                new_local
+            };
             ctx.emit_assign_value(Place::local(mir_local), value);
         }
 

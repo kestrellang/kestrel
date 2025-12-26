@@ -65,6 +65,10 @@ pub struct LoweringContext<'a> {
 
     /// Counter for generating unique temporary names.
     temp_counter: u32,
+
+    /// Counter for generating unique closure indices within a function.
+    /// Reset when entering a new function.
+    closure_counter: u32,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -80,6 +84,7 @@ impl<'a> LoweringContext<'a> {
             current_block: None,
             diagnostics: Vec::new(),
             temp_counter: 0,
+            closure_counter: 0,
         }
     }
 
@@ -112,6 +117,7 @@ impl<'a> LoweringContext<'a> {
         self.loop_stack.clear();
         self.current_block = None;
         self.temp_counter = 0;
+        self.closure_counter = 0;
     }
 
     /// Exit the current function.
@@ -225,6 +231,40 @@ impl<'a> LoweringContext<'a> {
         let n = self.temp_counter;
         self.temp_counter += 1;
         format!("{}_{}", prefix, n)
+    }
+
+    // === Closure Support ===
+
+    /// Get the next closure index and increment the counter.
+    pub fn next_closure_index(&mut self) -> u32 {
+        let idx = self.closure_counter;
+        self.closure_counter += 1;
+        idx
+    }
+
+    /// Save the current local map (for restoring after lowering a nested closure).
+    pub fn save_local_map(&self) -> HashMap<LocalId, Id<Local>> {
+        self.local_map.clone()
+    }
+
+    /// Restore a previously saved local map.
+    pub fn restore_local_map(&mut self, map: HashMap<LocalId, Id<Local>>) {
+        self.local_map = map;
+    }
+
+    /// Set the current function (used when switching to closure context).
+    pub fn set_current_function(&mut self, func_id: Option<Id<Function>>) {
+        self.current_function = func_id;
+    }
+
+    /// Get the current closure counter value (for saving).
+    pub fn get_closure_counter(&self) -> u32 {
+        self.closure_counter
+    }
+
+    /// Set the closure counter (for restoring).
+    pub fn set_closure_counter(&mut self, counter: u32) {
+        self.closure_counter = counter;
     }
 
     // === Statement Emission ===

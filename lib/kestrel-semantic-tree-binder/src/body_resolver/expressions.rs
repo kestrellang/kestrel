@@ -1338,7 +1338,7 @@ fn resolve_closure_params(
             };
 
             // Bind parameter as local
-            ctx.local_scope.bind(
+            let local_id = ctx.local_scope.bind(
                 name.clone(),
                 ty.clone(),
                 false, // closure params are immutable
@@ -1350,6 +1350,7 @@ fn resolve_closure_params(
                 ty,
                 is_type_annotated: is_annotated,
                 span: param_span,
+                local_id,
             });
         }
     }
