@@ -454,6 +454,100 @@ fn lower_primitive_method_call(
             );
         }
 
+        // === String methods (unary) ===
+        PrimitiveMethod::StringLength => {
+            // string.length() -> StrLen(string)
+            ctx.emit_assign(result_place.clone(), Rvalue::StrLen(receiver_value));
+        }
+
+        PrimitiveMethod::StringIsEmpty => {
+            // string.isEmpty() -> StrLen(string) == 0
+            // First get the length
+            let len_ty = ctx.mir.ty_i64();
+            let len_local = ctx.create_temp("len", len_ty);
+            let len_place = Place::local(len_local);
+            ctx.emit_assign(len_place.clone(), Rvalue::StrLen(receiver_value));
+
+            // Then compare to 0
+            ctx.emit_assign(
+                result_place.clone(),
+                Rvalue::BinaryOp {
+                    op: BinOp::Eq,
+                    lhs: Value::Place(len_place),
+                    rhs: Value::Immediate(Immediate::i64(0)),
+                },
+            );
+        }
+
+        // === Int methods (unary) ===
+        PrimitiveMethod::IntAbs => {
+            // int.abs() -> if int < 0 { -int } else { int }
+            // We implement this with: (int ^ (int >> 63)) - (int >> 63)
+            // This is a branchless abs for signed integers
+            //
+            // Alternative: just emit a conditional
+            let int_ty = lower_type(ctx, &receiver.ty);
+
+            // First, we need the receiver in a place if it's not already
+            let receiver_place = match &receiver_value {
+                Value::Place(p) => p.clone(),
+                Value::Immediate(imm) => {
+                    let temp = ctx.create_temp("abs_input", int_ty);
+                    let temp_place = Place::local(temp);
+                    ctx.emit_assign(temp_place.clone(), Rvalue::Use(imm.clone()));
+                    temp_place
+                }
+            };
+
+            // Create blocks for the conditional
+            let neg_block = ctx.create_block();
+            let pos_block = ctx.create_block();
+            let join_block = ctx.create_block();
+
+            // Check if value < 0
+            let cmp_ty = ctx.mir.ty_bool();
+            let cmp_local = ctx.create_temp("is_neg", cmp_ty);
+            let cmp_place = Place::local(cmp_local);
+            ctx.emit_assign(
+                cmp_place.clone(),
+                Rvalue::BinaryOp {
+                    op: BinOp::LtSigned,
+                    lhs: Value::Place(receiver_place.clone()),
+                    rhs: Value::Immediate(Immediate::i64(0)),
+                },
+            );
+
+            ctx.emit_branch(Value::Place(cmp_place), neg_block, pos_block);
+
+            // Negative case: result = -value
+            ctx.set_current_block(neg_block);
+            ctx.emit_assign(
+                result_place.clone(),
+                Rvalue::UnaryOp {
+                    op: UnOp::Neg,
+                    operand: Value::Place(receiver_place.clone()),
+                },
+            );
+            ctx.emit_jump(join_block);
+
+            // Positive case: result = value
+            ctx.set_current_block(pos_block);
+            ctx.emit_assign_value(result_place.clone(), Value::Place(receiver_place));
+            ctx.emit_jump(join_block);
+
+            // Continue from join block
+            ctx.set_current_block(join_block);
+        }
+
+        PrimitiveMethod::IntToString => {
+            // TODO: int.toString() needs runtime support
+            ctx.emit_error(LoweringError::unsupported_expr(
+                "Int.toString() - requires runtime support",
+                expr.span.clone(),
+            ));
+            return Value::Immediate(Immediate::unit());
+        }
+
         // === Binary Operations ===
         _ => {
             // Binary operations take one argument
@@ -514,20 +608,7 @@ fn lower_primitive_method_call(
                 PrimitiveMethod::StringEq => BinOp::Eq,
                 PrimitiveMethod::StringNe => BinOp::Ne,
 
-                // Methods that don't map to binary ops
-                PrimitiveMethod::IntToString
-                | PrimitiveMethod::IntAbs
-                | PrimitiveMethod::StringLength
-                | PrimitiveMethod::StringIsEmpty => {
-                    // TODO: These need special handling (function calls)
-                    ctx.emit_error(LoweringError::unsupported_expr(
-                        format!("primitive method '{}'", method.name()),
-                        expr.span.clone(),
-                    ));
-                    return Value::Immediate(Immediate::unit());
-                }
-
-                // Already handled as unary
+                // Already handled above
                 _ => unreachable!(),
             };
 
