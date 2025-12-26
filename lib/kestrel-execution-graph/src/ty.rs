@@ -53,6 +53,11 @@ pub enum MirTy {
     /// Thick callable (has environment, can escape).
     /// `func escaping(Args...) -> Ret`
     FuncThick { params: Vec<Id<Ty>>, ret: Id<Ty> },
+
+    /// `Self` - the implementing type in a protocol context.
+    /// Only valid in protocol method signatures. During witness lookup,
+    /// this gets substituted with the concrete implementing type.
+    SelfType,
 }
 
 impl MirTy {
@@ -167,6 +172,8 @@ impl fmt::Display for MirTyDisplay<'_> {
                 }
                 write!(f, ") -> {}", self.ctx.ty(*ret).display(self.ctx))
             }
+
+            MirTy::SelfType => write!(f, "Self"),
         }
     }
 }

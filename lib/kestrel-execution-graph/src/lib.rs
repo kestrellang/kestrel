@@ -222,6 +222,11 @@ impl MirContext {
         self.intern_type(MirTy::Named { name, type_args })
     }
 
+    /// Intern the Self type (for protocol method signatures).
+    pub fn ty_self(&mut self) -> Id<Ty> {
+        self.intern_type(MirTy::SelfType)
+    }
+
     // === Name interning ===
 
     /// Intern a qualified name, returning its ID.

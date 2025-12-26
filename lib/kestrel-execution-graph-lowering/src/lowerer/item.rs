@@ -4,15 +4,20 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
+use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 
-use crate::context::LoweringContext;
-use crate::error::LoweringError;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 
-use super::{lower_enum, lower_function, lower_struct};
+use crate::context::LoweringContext;
+
+use super::{
+    generate_witnesses_for_extension, generate_witnesses_for_struct, lower_enum, lower_function,
+    lower_protocol, lower_struct,
+};
 
 /// Lower a symbol to MIR.
 ///
@@ -48,6 +53,9 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
                         lower_item(ctx, &child);
                     }
                 }
+
+                // Generate witnesses for protocol conformances
+                generate_witnesses_for_struct(ctx, &struct_symbol);
             }
         }
 
@@ -80,8 +88,9 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
         }
 
         KestrelSymbolKind::Protocol => {
-            // TODO: Lower protocol definitions
-            ctx.emit_error(LoweringError::unsupported_item("Protocol", span));
+            if let Ok(protocol_symbol) = symbol.clone().downcast_arc::<ProtocolSymbol>() {
+                lower_protocol(ctx, &protocol_symbol);
+            }
         }
 
         KestrelSymbolKind::Extension => {
@@ -98,6 +107,11 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
                 {
                     lower_item(ctx, &child);
                 }
+            }
+
+            // Generate witnesses for protocol conformances added by this extension
+            if let Ok(extension_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
+                generate_witnesses_for_extension(ctx, &extension_symbol);
             }
         }
 

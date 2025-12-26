@@ -22,6 +22,9 @@ pub struct ProtocolDef {
     pub name: Id<QualifiedName>,
     /// Generic type parameters.
     pub type_params: Vec<Id<TypeParam>>,
+    /// Parent protocols (for inheritance like `protocol Shape: Drawable`).
+    /// References the qualified names of inherited protocols.
+    pub parent_protocols: Vec<Id<QualifiedName>>,
     /// Associated types in declaration order.
     pub associated_types: Vec<Id<AssociatedType>>,
     /// Associated type lookup by name.
@@ -39,11 +42,17 @@ impl ProtocolDef {
             priors: Vec::new(),
             name,
             type_params: Vec::new(),
+            parent_protocols: Vec::new(),
             associated_types: Vec::new(),
             associated_types_by_name: HashMap::new(),
             methods: Vec::new(),
             methods_by_name: HashMap::new(),
         }
+    }
+
+    /// Add a parent protocol (for inheritance).
+    pub fn add_parent(&mut self, parent: Id<QualifiedName>) {
+        self.parent_protocols.push(parent);
     }
 
     /// Add an associated type to this protocol.
@@ -92,6 +101,17 @@ impl fmt::Display for ProtocolDefDisplay<'_> {
                 write!(f, "{}", self.ctx.type_param(*tp).name)?;
             }
             write!(f, "]")?;
+        }
+
+        // Show parent protocols if any
+        if !self.def.parent_protocols.is_empty() {
+            write!(f, ": ")?;
+            for (i, parent) in self.def.parent_protocols.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", self.ctx.name(*parent))?;
+            }
         }
 
         writeln!(f, " {{")?;

@@ -150,9 +150,9 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
 
         // === Self Type ===
         TyKind::SelfType => {
-            // Self should have been substituted by now
-            ctx.emit_error(LoweringError::unsupported_type("Self type", ty.span().clone()));
-            ctx.mir.ty_unit() // Fallback
+            // In protocol method signatures, Self is preserved as MirTy::SelfType.
+            // During witness lookup, this gets substituted with the concrete implementing type.
+            ctx.mir.ty_self()
         }
 
         // === Inference Placeholder ===
