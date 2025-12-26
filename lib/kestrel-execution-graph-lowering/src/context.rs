@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use kestrel_execution_graph::{
-    BasicBlock, Block, Function, Id, Immediate, Local, MirContext, Place, Rvalue,
-    StatementKind, Terminator, TerminatorKind, Ty, Value,
+    BasicBlock, Block, Callee, Function, Id, Immediate, Local, MirContext, Place, QualifiedName,
+    Rvalue, StatementKind, Terminator, TerminatorKind, Ty, Value,
 };
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;
@@ -310,5 +310,38 @@ impl<'a> LoweringContext<'a> {
         let block_id = self.mir.blocks.alloc(block);
         self.mir.function_mut(func_id).blocks.push(block_id);
         block_id
+    }
+
+    // === Call Emission ===
+
+    /// Emit a call that assigns its result to a place.
+    pub fn emit_call(
+        &mut self,
+        dest: Place,
+        callee: Callee,
+        args: Vec<Value>,
+    ) {
+        self.emit_assign(dest, Rvalue::Call { callee, args });
+    }
+
+    /// Emit a direct function call and assign result to a place.
+    pub fn emit_direct_call(
+        &mut self,
+        dest: Place,
+        func_name: Id<QualifiedName>,
+        type_args: Vec<Id<Ty>>,
+        args: Vec<Value>,
+    ) {
+        let callee = if type_args.is_empty() {
+            Callee::direct(func_name)
+        } else {
+            Callee::direct_generic(func_name, type_args)
+        };
+        self.emit_call(dest, callee, args);
+    }
+
+    /// Emit a call to a unit-returning function (no result assignment needed).
+    pub fn emit_call_unit(&mut self, callee: Callee, args: Vec<Value>) {
+        self.emit_statement(StatementKind::Call { callee, args });
     }
 }

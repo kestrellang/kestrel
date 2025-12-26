@@ -4,15 +4,15 @@
 //! a MIR Value (either a Place or an Immediate), potentially generating
 //! statements and new basic blocks along the way.
 
-use kestrel_execution_graph::{BinOp, Immediate, Place, Rvalue, UnOp, Value};
+use kestrel_execution_graph::{BinOp, Callee, Immediate, Place, Rvalue, UnOp, Value};
+use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
 
-
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
-
+use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
 use crate::ty::lower_type;
 
@@ -118,8 +118,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         ExprKind::Call {
             callee,
             arguments,
-            substitutions: _,
-        } => lower_call(ctx, callee, arguments, expr),
+            substitutions,
+        } => lower_call(ctx, callee, arguments, substitutions, expr),
 
         // === Control Flow ===
         ExprKind::If {
@@ -137,17 +137,10 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         } => lower_while(ctx, *loop_id, condition, body, expr),
 
         ExprKind::Loop {
-            loop_id: _,
+            loop_id,
             label: _,
-            body: _,
-        } => {
-            // TODO: Implement infinite loop with break/continue
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "loop expression",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
-        }
+            body,
+        } => lower_loop(ctx, *loop_id, body, expr),
 
         ExprKind::WhileLet {
             loop_id: _,
@@ -163,21 +156,33 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::unit())
         }
 
-        ExprKind::Break { loop_id: _, label: _ } => {
-            // TODO: Jump to loop exit block
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "break expression",
-                expr.span.clone(),
-            ));
+        ExprKind::Break { loop_id, label: _ } => {
+            // Find the target loop and jump to its exit block
+            if let Some(loop_info) = ctx.find_loop(*loop_id) {
+                let exit_block = loop_info.exit_block;
+                ctx.emit_jump(exit_block);
+            } else {
+                ctx.emit_error(LoweringError::internal(
+                    "break: loop not found in loop stack",
+                    Some(expr.span.clone()),
+                ));
+            }
+            // Break never produces a value (it transfers control)
             Value::Immediate(Immediate::unit())
         }
 
-        ExprKind::Continue { loop_id: _, label: _ } => {
-            // TODO: Jump to loop header block
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "continue expression",
-                expr.span.clone(),
-            ));
+        ExprKind::Continue { loop_id, label: _ } => {
+            // Find the target loop and jump to its header block
+            if let Some(loop_info) = ctx.find_loop(*loop_id) {
+                let header_block = loop_info.header_block;
+                ctx.emit_jump(header_block);
+            } else {
+                ctx.emit_error(LoweringError::internal(
+                    "continue: loop not found in loop stack",
+                    Some(expr.span.clone()),
+                ));
+            }
+            // Continue never produces a value (it transfers control)
             Value::Immediate(Immediate::unit())
         }
 
@@ -528,58 +533,257 @@ fn lower_call(
     ctx: &mut LoweringContext,
     callee: &Expression,
     arguments: &[CallArgument],
+    substitutions: &kestrel_semantic_tree::ty::Substitutions,
     expr: &Expression,
 ) -> Value {
     // Lower arguments first
-    let _arg_values: Vec<Value> = arguments
+    let arg_values: Vec<Value> = arguments
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
 
-    // Determine the callee
-    let _mir_callee = match &callee.kind {
-        ExprKind::SymbolRef(_symbol_id) => {
+    // Lower type arguments for generic calls
+    let type_args: Vec<_> = substitutions
+        .types()
+        .map(|ty| lower_type(ctx, ty))
+        .collect();
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("call", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Determine the callee and emit the call
+    match &callee.kind {
+        ExprKind::SymbolRef(symbol_id) => {
             // Direct function call
-            // TODO: Look up the symbol to get its qualified name
-            // For now, emit an error
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "function call via SymbolRef",
-                expr.span.clone(),
-            ));
-            return Value::Immediate(Immediate::unit());
+            // Look up the symbol to get its qualified name
+            let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
+            match symbol {
+                Some(sym) => {
+                    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+                    
+                    // Check if this is an initializer call
+                    let is_initializer = sym.metadata().kind() == KestrelSymbolKind::Initializer;
+                    
+                    if is_initializer {
+                        // Initializer call - need to allocate self and pass as first arg
+                        // Initializers have signature: func Type.init(self: &var Type, params...) -> ()
+                        let func_name = qualified_name_for_symbol(ctx, &sym);
+                        
+                        // Create a mutable reference to the result place
+                        let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+                        let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                        let self_ref_place = Place::local(self_ref_local);
+                        
+                        // Emit: %self_ref = ref var %result
+                        ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+                        
+                        // Build args: self_ref first, then the user-provided arguments
+                        let mut all_args = vec![Value::Place(self_ref_place)];
+                        all_args.extend(arg_values);
+                        
+                        // Create a temp for the unit return value of init (we discard it)
+                        let unit_ty = ctx.mir.ty_unit();
+                        let unit_local = ctx.create_temp("init_ret", unit_ty);
+                        let unit_place = Place::local(unit_local);
+                        
+                        // Call the init function
+                        let mir_callee = if type_args.is_empty() {
+                            Callee::direct(func_name)
+                        } else {
+                            Callee::direct_generic(func_name, type_args)
+                        };
+                        ctx.emit_call(unit_place, mir_callee, all_args);
+                        
+                        // result_place now contains the initialized struct
+                    } else {
+                        // Regular function call
+                        let func_name = qualified_name_for_symbol(ctx, &sym);
+                        let mir_callee = if type_args.is_empty() {
+                            Callee::direct(func_name)
+                        } else {
+                            Callee::direct_generic(func_name, type_args)
+                        };
+                        ctx.emit_call(result_place.clone(), mir_callee, arg_values);
+                    }
+                }
+                None => {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("symbol not found for call: {:?}", symbol_id),
+                        Some(expr.span.clone()),
+                    ));
+                    return Value::Immediate(Immediate::unit());
+                }
+            }
         }
 
         ExprKind::MethodRef {
-            receiver: _,
-            candidates: _,
+            receiver,
+            candidates,
             method_name,
         } => {
-            // Method call - add receiver as first argument
-            ctx.emit_error(LoweringError::unsupported_expr(
-                format!("method call '{}'", method_name),
-                expr.span.clone(),
-            ));
-            return Value::Immediate(Immediate::unit());
+            // Method call - receiver becomes first argument
+            let receiver_value = lower_expression(ctx, receiver);
+            let mut all_args = vec![receiver_value];
+            all_args.extend(arg_values);
+
+            // For methods, we need to find the resolved method from candidates
+            // During type inference, the correct candidate should have been selected
+            if let Some(&method_id) = candidates.first() {
+                let method_symbol = ctx.model.query(SymbolFor { id: method_id });
+                match method_symbol {
+                    Some(sym) => {
+                        let func_name = qualified_name_for_symbol(ctx, &sym);
+                        let mir_callee = if type_args.is_empty() {
+                            Callee::direct(func_name)
+                        } else {
+                            Callee::direct_generic(func_name, type_args)
+                        };
+                        ctx.emit_call(result_place.clone(), mir_callee, all_args);
+                    }
+                    None => {
+                        ctx.emit_error(LoweringError::internal(
+                            format!("method symbol not found for '{}'", method_name),
+                            Some(expr.span.clone()),
+                        ));
+                        return Value::Immediate(Immediate::unit());
+                    }
+                }
+            } else {
+                ctx.emit_error(LoweringError::internal(
+                    format!("no method candidates for '{}'", method_name),
+                    Some(expr.span.clone()),
+                ));
+                return Value::Immediate(Immediate::unit());
+            }
         }
 
-        ExprKind::TypeRef(_symbol_id) => {
-            // Calling a type (initializer call)
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "initializer call via TypeRef",
-                expr.span.clone(),
-            ));
-            return Value::Immediate(Immediate::unit());
+        ExprKind::TypeRef(symbol_id) => {
+            // Calling a type = initializer call
+            // Initializers have signature: func Type.init(self: &var Type, params...) -> ()
+            // So we need to:
+            // 1. Allocate space for the struct (result_place already exists)
+            // 2. Take a mutable reference to it
+            // 3. Pass the reference as the first argument
+            // 4. Call the init (which returns unit)
+            // 5. Return the struct value
+            
+            let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
+            match symbol {
+                Some(sym) => {
+                    // Build the init function name
+                    let mut name_parts = Vec::new();
+                    collect_symbol_name_parts(&sym, &mut name_parts);
+                    name_parts.push("init".to_string());
+
+                    let init_name = ctx.mir.intern_name(
+                        kestrel_execution_graph::QualifiedNameData::new(name_parts),
+                    );
+                    
+                    // Create a mutable reference to the result place
+                    // The ref type is &var T where T is the struct type
+                    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+                    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+                    let self_ref_place = Place::local(self_ref_local);
+                    
+                    // Emit: %self_ref = ref var %result
+                    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+                    
+                    // Build args: self_ref first, then the user-provided arguments
+                    let mut all_args = vec![Value::Place(self_ref_place)];
+                    all_args.extend(arg_values);
+                    
+                    // Create a temp for the unit return value of init (we discard it)
+                    let unit_ty = ctx.mir.ty_unit();
+                    let unit_local = ctx.create_temp("init_ret", unit_ty);
+                    let unit_place = Place::local(unit_local);
+                    
+                    // Call the init function
+                    let mir_callee = if type_args.is_empty() {
+                        Callee::direct(init_name)
+                    } else {
+                        Callee::direct_generic(init_name, type_args)
+                    };
+                    ctx.emit_call(unit_place, mir_callee, all_args);
+                    
+                    // result_place now contains the initialized struct
+                    // (init wrote to it via the self_ref)
+                }
+                None => {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("type symbol not found for initializer call: {:?}", symbol_id),
+                        Some(expr.span.clone()),
+                    ));
+                    return Value::Immediate(Immediate::unit());
+                }
+            }
+        }
+
+        ExprKind::LocalRef(local_id) => {
+            // Indirect call through a local variable (closure)
+            let mir_local = ctx.get_local_unwrap(*local_id);
+            let callee_place = Place::local(mir_local);
+            // Closures are "thick" callables
+            ctx.emit_call(result_place.clone(), Callee::Thick(callee_place), arg_values);
         }
 
         _ => {
-            // Other callee expressions (closures, etc.)
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "indirect call",
-                expr.span.clone(),
-            ));
-            return Value::Immediate(Immediate::unit());
+            // Other callee expressions - try to lower as a place for indirect call
+            let callee_value = lower_expression(ctx, callee);
+            match callee_value {
+                Value::Place(callee_place) => {
+                    // Assume it's a thin function pointer for now
+                    // TODO: Distinguish thin vs thick based on type
+                    ctx.emit_call(result_place.clone(), Callee::Thin(callee_place), arg_values);
+                }
+                Value::Immediate(_) => {
+                    ctx.emit_error(LoweringError::unsupported_expr(
+                        "indirect call on immediate value",
+                        expr.span.clone(),
+                    ));
+                    return Value::Immediate(Immediate::unit());
+                }
+            }
         }
-    };
+    }
+
+    Value::Place(result_place)
+}
+
+/// Collect name segments from a symbol (helper for TypeRef init calls).
+fn collect_symbol_name_parts(
+    symbol: &std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    parts: &mut Vec<String>,
+) {
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+
+    // First, collect parent segments
+    if let Some(parent) = symbol.metadata().parent() {
+        collect_symbol_name_parts(&parent, parts);
+    }
+
+    // Then add this symbol's name
+    let kind = symbol.metadata().kind();
+    let name_value = &symbol.metadata().name().value;
+
+    // Skip root
+    if name_value == "<root>" {
+        return;
+    }
+
+    match kind {
+        KestrelSymbolKind::SourceFile => {}
+        KestrelSymbolKind::Module
+        | KestrelSymbolKind::Struct
+        | KestrelSymbolKind::Enum
+        | KestrelSymbolKind::Protocol
+        | KestrelSymbolKind::TypeAlias
+        | KestrelSymbolKind::Extension => {
+            parts.push(name_value.clone());
+        }
+        _ => {}
+    }
 }
 
 /// Lower an if expression.
@@ -745,5 +949,53 @@ fn lower_while(
     ctx.set_current_block(exit_block);
 
     // While loops always return unit
+    Value::Immediate(Immediate::unit())
+}
+
+/// Lower an infinite loop (`loop { ... }`).
+fn lower_loop(
+    ctx: &mut LoweringContext,
+    loop_id: kestrel_semantic_tree::expr::LoopId,
+    body: &[kestrel_semantic_tree::stmt::Statement],
+    _expr: &Expression,
+) -> Value {
+    use crate::context::LoopInfo;
+
+    // Create blocks: header (body entry) and exit
+    // For infinite loops, header IS the body - no condition check
+    let header_block = ctx.create_block();
+    let exit_block = ctx.create_block();
+
+    // Push loop info for break/continue
+    ctx.push_loop(LoopInfo {
+        loop_id,
+        header_block,
+        exit_block,
+    });
+
+    // Jump to header (body entry)
+    ctx.emit_jump(header_block);
+
+    // Body
+    ctx.set_current_block(header_block);
+    for stmt in body {
+        lower_statement(ctx, stmt);
+        if ctx.is_block_terminated() {
+            break;
+        }
+    }
+
+    // Jump back to header (infinite loop) if not terminated by break/return
+    if !ctx.is_block_terminated() {
+        ctx.emit_jump(header_block);
+    }
+
+    // Pop loop info
+    ctx.pop_loop();
+
+    // Continue with exit block (reached via break)
+    ctx.set_current_block(exit_block);
+
+    // Loop expressions return unit
     Value::Immediate(Immediate::unit())
 }

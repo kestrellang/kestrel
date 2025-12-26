@@ -1,8 +1,9 @@
 //! Struct lowering - converts semantic struct symbols to MIR struct definitions.
 
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
-use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 
@@ -46,8 +47,15 @@ fn lower_field(
 ) {
     let name = field_symbol.metadata().name().value.clone();
 
-    let field_ty = field_symbol.field_type();
-    let mir_ty = lower_type(ctx, field_ty);
+    // Get the resolved type from TypedBehavior (set during binding), 
+    // falling back to field_type() if not available
+    let field_ty = field_symbol
+        .metadata()
+        .get_behavior::<TypedBehavior>()
+        .map(|typed| typed.ty().clone())
+        .unwrap_or_else(|| field_symbol.field_type().clone());
+
+    let mir_ty = lower_type(ctx, &field_ty);
 
     ctx.mir.add_field(struct_id, name, mir_ty);
 }
