@@ -38,13 +38,48 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Place(Place::local(mir_local))
         }
 
-        ExprKind::SymbolRef(_symbol_id) => {
-            // TODO: Handle module-level functions and globals
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "SymbolRef",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
+        ExprKind::SymbolRef(symbol_id) => {
+            // Look up the symbol to determine what kind of reference this is
+            let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
+            match symbol {
+                Some(sym) => {
+                    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+                    
+                    if sym.metadata().kind() == KestrelSymbolKind::EnumCase {
+                        // Simple enum case without associated values (e.g., Color.Red)
+                        let variant_name = sym.metadata().name().value.clone();
+                        let enum_ty = lower_type(ctx, &expr.ty);
+                        
+                        let result_local = ctx.create_temp("enum", enum_ty);
+                        let result_place = Place::local(result_local);
+                        
+                        ctx.emit_assign(
+                            result_place.clone(),
+                            Rvalue::EnumVariant {
+                                enum_ty,
+                                variant: variant_name,
+                                payload: vec![],
+                            },
+                        );
+                        
+                        Value::Place(result_place)
+                    } else {
+                        // TODO: Handle module-level functions and globals
+                        ctx.emit_error(LoweringError::unsupported_expr(
+                            "SymbolRef",
+                            expr.span.clone(),
+                        ));
+                        Value::Immediate(Immediate::unit())
+                    }
+                }
+                None => {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("symbol not found: {:?}", symbol_id),
+                        Some(expr.span.clone()),
+                    ));
+                    Value::Immediate(Immediate::unit())
+                }
+            }
         }
 
         // === Field Access ===
@@ -327,13 +362,40 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::unit())
         }
 
-        ExprKind::EnumCase { case_id: _ } => {
-            // TODO: Enum case construction
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "enum case",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
+        ExprKind::EnumCase { case_id } => {
+            // Simple enum case (no associated values)
+            // Look up the case symbol to get its name
+            let case_symbol = ctx.model.query(SymbolFor { id: *case_id });
+            match case_symbol {
+                Some(sym) => {
+                    let variant_name = sym.metadata().name().value.clone();
+                    
+                    // Get the enum type from the expression type
+                    let enum_ty = lower_type(ctx, &expr.ty);
+                    
+                    // Create result and emit enum variant construction
+                    let result_local = ctx.create_temp("enum", enum_ty);
+                    let result_place = Place::local(result_local);
+                    
+                    ctx.emit_assign(
+                        result_place.clone(),
+                        Rvalue::EnumVariant {
+                            enum_ty,
+                            variant: variant_name,
+                            payload: vec![],
+                        },
+                    );
+                    
+                    Value::Place(result_place)
+                }
+                None => {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("enum case symbol not found: {:?}", case_id),
+                        Some(expr.span.clone()),
+                    ));
+                    Value::Immediate(Immediate::unit())
+                }
+            }
         }
 
         ExprKind::ImplicitMemberAccess {
@@ -597,10 +659,21 @@ fn lower_call(
                 Some(sym) => {
                     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
                     
-                    // Check if this is an initializer call
-                    let is_initializer = sym.metadata().kind() == KestrelSymbolKind::Initializer;
+                    let kind = sym.metadata().kind();
                     
-                    if is_initializer {
+                    if kind == KestrelSymbolKind::EnumCase {
+                        // Enum case with associated values
+                        let variant_name = sym.metadata().name().value.clone();
+                        
+                        ctx.emit_assign(
+                            result_place.clone(),
+                            Rvalue::EnumVariant {
+                                enum_ty: result_ty,
+                                variant: variant_name,
+                                payload: arg_values,
+                            },
+                        );
+                    } else if kind == KestrelSymbolKind::Initializer {
                         // Initializer call - need to allocate self and pass as first arg
                         // Initializers have signature: func Type.init(self: &var Type, params...) -> ()
                         let func_name = qualified_name_for_symbol(ctx, &sym);

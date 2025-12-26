@@ -63,6 +63,16 @@ pub enum Rvalue {
         elements: Vec<Value>,
     },
 
+    /// `enum Enum.Variant` or `enum Enum.Variant(payload...)`
+    EnumVariant {
+        /// The enum type
+        enum_ty: Id<Ty>,
+        /// The variant name
+        variant: String,
+        /// Payload values for associated data (empty for simple variants)
+        payload: Vec<Value>,
+    },
+
     /// `call func(args...)` with return value
     Call { callee: Callee, args: Vec<Value> },
 
@@ -376,6 +386,20 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, "{}", elem.display(self.ctx))?;
                 }
                 write!(f, "]")
+            }
+            Rvalue::EnumVariant { enum_ty, variant, payload } => {
+                write!(f, "enum {}.{}", self.ctx.ty(*enum_ty).display(self.ctx), variant)?;
+                if !payload.is_empty() {
+                    write!(f, "(")?;
+                    for (i, val) in payload.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", val.display(self.ctx))?;
+                    }
+                    write!(f, ")")?;
+                }
+                Ok(())
             }
         }
     }
