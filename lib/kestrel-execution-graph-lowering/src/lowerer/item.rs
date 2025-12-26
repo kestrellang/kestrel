@@ -85,13 +85,17 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
         }
 
         KestrelSymbolKind::Extension => {
-            // TODO: Lower extension methods as top-level functions
-            ctx.emit_error(LoweringError::unsupported_item("Extension", span));
-
-            // Still try to lower methods within
+            // Extensions don't have their own MIR representation - they just add methods
+            // to existing types. The methods are lowered as top-level functions with
+            // qualified names based on the target type (e.g., Int.double for an extension
+            // method on Int).
+            //
+            // Lower all methods and initializers within the extension
             for child in symbol.metadata().children() {
                 let child_kind = child.metadata().kind();
-                if child_kind == KestrelSymbolKind::Function {
+                if child_kind == KestrelSymbolKind::Function
+                    || child_kind == KestrelSymbolKind::Initializer
+                {
                     lower_item(ctx, &child);
                 }
             }

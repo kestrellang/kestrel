@@ -2,7 +2,9 @@
 
 use kestrel_execution_graph::{Id, QualifiedName, QualifiedNameData};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 
@@ -54,10 +56,49 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         KestrelSymbolKind::Struct
         | KestrelSymbolKind::Enum
         | KestrelSymbolKind::Protocol
-        | KestrelSymbolKind::TypeAlias
-        | KestrelSymbolKind::Extension => {
+        | KestrelSymbolKind::TypeAlias => {
             let name = symbol.metadata().name();
             segments.push(name.value.clone());
+        }
+
+        // Extensions contribute the name of their target type
+        KestrelSymbolKind::Extension => {
+            // Try to get the target type symbol from the extension
+            if let Ok(ext_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
+                if let Some(target_type) = ext_symbol.target_type() {
+                    // Extract the symbol from the target type and use its name
+                    match target_type.kind() {
+                        TyKind::Struct { symbol: target_sym, .. } => {
+                            let name = target_sym.metadata().name();
+                            segments.push(name.value.clone());
+                        }
+                        TyKind::Enum { symbol: target_sym, .. } => {
+                            let name = target_sym.metadata().name();
+                            segments.push(name.value.clone());
+                        }
+                        TyKind::Protocol { symbol: target_sym, .. } => {
+                            let name = target_sym.metadata().name();
+                            segments.push(name.value.clone());
+                        }
+                        // For primitive types, use their string representation
+                        TyKind::Int(_) => segments.push("Int".to_string()),
+                        TyKind::Float(_) => segments.push("Float".to_string()),
+                        TyKind::Bool => segments.push("Bool".to_string()),
+                        TyKind::String => segments.push("String".to_string()),
+                        TyKind::Unit => segments.push("Unit".to_string()),
+                        // For other types, fall back to the synthetic name
+                        _ => {
+                            segments.push("(extension)".to_string());
+                        }
+                    }
+                } else {
+                    // No target type available, use synthetic name
+                    segments.push("(extension)".to_string());
+                }
+            } else {
+                // Couldn't downcast, use synthetic name
+                segments.push("(extension)".to_string());
+            }
         }
 
         // Functions and initializers contribute their name
