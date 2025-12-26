@@ -40,11 +40,8 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         }
 
         TyKind::Array(element_ty) => {
-            // TODO: Arrays need special handling - they're typically represented
-            // as a struct with pointer, length, capacity in MIR
-            let _element = lower_type(ctx, element_ty);
-            ctx.emit_error(LoweringError::unsupported_type("Array", ty.span().clone()));
-            ctx.mir.ty_unit() // Fallback
+            let element = lower_type(ctx, element_ty);
+            ctx.mir.ty_array(element)
         }
 
         // === Named Types ===

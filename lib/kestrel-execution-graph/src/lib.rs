@@ -212,6 +212,11 @@ impl MirContext {
         self.intern_type(MirTy::Tuple(elems))
     }
 
+    /// Intern an array type.
+    pub fn ty_array(&mut self, elem: Id<Ty>) -> Id<Ty> {
+        self.intern_type(MirTy::Array(elem))
+    }
+
     /// Intern a named type.
     pub fn ty_named(&mut self, name: Id<QualifiedName>, type_args: Vec<Id<Ty>>) -> Id<Ty> {
         self.intern_type(MirTy::Named { name, type_args })

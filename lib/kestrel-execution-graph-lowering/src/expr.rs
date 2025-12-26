@@ -226,22 +226,56 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         }
 
         // === Other ===
-        ExprKind::Array(_elements) => {
-            // TODO: Array literal
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "array literal",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
+        ExprKind::Array(elements) => {
+            // Lower each element
+            let element_values: Vec<Value> = elements
+                .iter()
+                .map(|e| lower_expression(ctx, e))
+                .collect();
+
+            // Get the array element type from the expression type
+            let element_ty = match expr.ty.kind() {
+                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => lower_type(ctx, elem_ty),
+                _ => {
+                    ctx.emit_error(LoweringError::internal(
+                        "array literal with non-array type",
+                        Some(expr.span.clone()),
+                    ));
+                    ctx.mir.ty_unit()
+                }
+            };
+
+            // Create result local and emit array construction
+            let result_ty = lower_type(ctx, &expr.ty);
+            let result_local = ctx.create_temp("array", result_ty);
+            let result_place = Place::local(result_local);
+
+            ctx.emit_assign(
+                result_place.clone(),
+                Rvalue::Array {
+                    element_ty,
+                    elements: element_values,
+                },
+            );
+
+            Value::Place(result_place)
         }
 
-        ExprKind::Tuple(_elements) => {
-            // TODO: Tuple literal - needs construct statement
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "tuple literal",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
+        ExprKind::Tuple(elements) => {
+            // Lower each element
+            let element_values: Vec<Value> = elements
+                .iter()
+                .map(|e| lower_expression(ctx, e))
+                .collect();
+
+            // Create result local and emit tuple construction
+            let result_ty = lower_type(ctx, &expr.ty);
+            let result_local = ctx.create_temp("tuple", result_ty);
+            let result_place = Place::local(result_local);
+
+            ctx.emit_assign(result_place.clone(), Rvalue::Tuple(element_values));
+
+            Value::Place(result_place)
         }
 
         ExprKind::Grouping(inner) => lower_expression(ctx, inner),

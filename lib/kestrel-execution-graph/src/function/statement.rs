@@ -54,6 +54,15 @@ pub enum Rvalue {
         fields: Vec<(String, Value)>,
     },
 
+    /// `tuple (v0, v1, ...)`
+    Tuple(Vec<Value>),
+
+    /// `array [v0, v1, ...]`
+    Array {
+        element_ty: Id<Ty>,
+        elements: Vec<Value>,
+    },
+
     /// `call func(args...)` with return value
     Call { callee: Callee, args: Vec<Value> },
 
@@ -347,6 +356,26 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, "{}", cap.display(self.ctx))?;
                 }
                 write!(f, ")")
+            }
+            Rvalue::Tuple(elements) => {
+                write!(f, "tuple (")?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem.display(self.ctx))?;
+                }
+                write!(f, ")")
+            }
+            Rvalue::Array { element_ty, elements } => {
+                write!(f, "array[{}] [", self.ctx.ty(*element_ty).display(self.ctx))?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem.display(self.ctx))?;
+                }
+                write!(f, "]")
             }
         }
     }
