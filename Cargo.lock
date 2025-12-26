@@ -290,6 +290,7 @@ dependencies = [
  "kestrel-execution-graph",
  "kestrel-reporting",
  "kestrel-semantic-model",
+ "kestrel-semantic-pattern-matching",
  "kestrel-semantic-tree",
  "kestrel-span",
  "semantic-tree",

@@ -20,6 +20,7 @@ mod context;
 mod error;
 mod expr;
 mod lowerer;
+mod match_lowering;
 mod name;
 mod pattern;
 mod stmt;

@@ -43,6 +43,7 @@
 //! ```
 
 mod constructor;
+mod decision_tree;
 mod exhaustiveness;
 mod irrefutability;
 mod matrix;
@@ -50,6 +51,7 @@ mod usefulness;
 mod witness;
 
 pub use constructor::Constructor;
+pub use decision_tree::{compile, AccessPath, Binding, DecisionTree, PathElement};
 pub use exhaustiveness::{check_exhaustiveness, ExhaustivenessChecker, ExhaustivenessResult};
 pub use irrefutability::is_irrefutable;
 pub use matrix::{PatternMatrix, PatternRow};

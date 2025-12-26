@@ -199,13 +199,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         }
 
         // === Match Expressions ===
-        ExprKind::Match { scrutinee: _, arms: _ } => {
-            // TODO: Implement match lowering with switch and pattern matching
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "match expression",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::unit())
+        ExprKind::Match { scrutinee, arms } => {
+            crate::match_lowering::lower_match_expr(ctx, scrutinee, arms, expr)
         }
 
         // === Closures ===
