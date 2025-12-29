@@ -142,20 +142,24 @@ struct CompileContext {
     column_paths: Vec<AccessPath>,
     /// Maps column index to the type of that column
     column_types: Vec<Ty>,
+    /// Original patterns for each arm (indexed by arm_index), used for binding collection
+    original_patterns: Vec<Pattern>,
 }
 
 impl CompileContext {
-    fn new(scrutinee_type: Ty) -> Self {
+    fn new(scrutinee_type: Ty, original_patterns: Vec<Pattern>) -> Self {
         CompileContext {
             column_paths: vec![vec![]], // Single column: the scrutinee itself
             column_types: vec![scrutinee_type],
+            original_patterns,
         }
     }
 
-    fn from_matrix(matrix: &PatternMatrix, column_paths: Vec<AccessPath>) -> Self {
+    fn from_matrix(matrix: &PatternMatrix, column_paths: Vec<AccessPath>, original_patterns: Vec<Pattern>) -> Self {
         CompileContext {
             column_paths,
             column_types: matrix.column_types.clone(),
+            original_patterns,
         }
     }
 }
@@ -185,7 +189,9 @@ pub fn compile(
         matrix.push_row(vec![pattern.clone()], i, has_guard);
     }
 
-    let ctx = CompileContext::new(scrutinee_type.clone());
+    // Store original patterns for binding collection at leaf nodes
+    let original_patterns = patterns.to_vec();
+    let ctx = CompileContext::new(scrutinee_type.clone(), original_patterns);
     compile_matrix(&matrix, &ctx)
 }
 
@@ -249,7 +255,19 @@ fn compile_matrix(matrix: &PatternMatrix, ctx: &CompileContext) -> DecisionTree 
 fn compile_leaf(rows: &[PatternRow], ctx: &CompileContext) -> DecisionTree {
     // Find the first row without a guard, or the first row with a guard
     for row in rows {
-        let bindings = collect_bindings_from_row(row, ctx);
+        // Collect bindings from the ORIGINAL pattern for this arm, not the (possibly empty) row patterns.
+        // The row patterns may have been stripped during matrix operations, but the original
+        // pattern contains all the binding information we need.
+        let bindings = if let Some(original_pattern) = ctx.original_patterns.get(row.arm_index) {
+            let mut bindings = Vec::new();
+            // The path is empty (root) because we're collecting from the original pattern
+            // which represents the entire scrutinee
+            collect_bindings_from_pattern(original_pattern, &vec![], &mut bindings);
+            bindings
+        } else {
+            // Fallback to row-based collection (shouldn't happen in practice)
+            collect_bindings_from_row(row, ctx)
+        };
         
         if row.has_guard {
             // Need to check the guard
@@ -482,7 +500,7 @@ fn specialize_matrix_and_context(
         }
     }
     
-    let new_ctx = CompileContext::from_matrix(&specialized, new_paths);
+    let new_ctx = CompileContext::from_matrix(&specialized, new_paths, ctx.original_patterns.clone());
     (specialized, new_ctx)
 }
 
@@ -502,7 +520,7 @@ fn default_matrix_and_context(
         }
     }
     
-    let new_ctx = CompileContext::from_matrix(&default, new_paths);
+    let new_ctx = CompileContext::from_matrix(&default, new_paths, ctx.original_patterns.clone());
     (default, new_ctx)
 }
 
