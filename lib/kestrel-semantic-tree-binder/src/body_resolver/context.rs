@@ -164,6 +164,14 @@ pub fn resolve_code_block(block_node: &SyntaxNode, ctx: &mut BodyResolutionConte
 
         match child.kind() {
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                // If this is the last child, check if it's a statement-wrapped expression
+                // without a semicolon (e.g., an if-expression as the final value)
+                if is_last {
+                    if let Some(expr) = try_extract_yield_expression(child, ctx) {
+                        yield_expr = Some(expr);
+                        continue;
+                    }
+                }
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
@@ -199,6 +207,198 @@ fn has_trailing_semicolon(node: &SyntaxNode) -> bool {
     // Check if the node or its parent has a semicolon token after
     node.children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Semicolon)
+}
+
+/// Try to extract a yield expression from a Statement or ExpressionStatement node.
+///
+/// This handles the case where an expression (like an if-expression with else) is wrapped in
+/// a Statement > ExpressionStatement > Expression structure by the parser. If the
+/// innermost expression has no trailing semicolon AND can produce a value, it should be
+/// treated as a yield expression rather than a statement.
+///
+/// Returns Some(expression) if this is a yield expression, None otherwise.
+fn try_extract_yield_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<kestrel_semantic_tree::expr::Expression> {
+    // Don't extract if this node has a semicolon at its level
+    if has_trailing_semicolon(node) {
+        return None;
+    }
+
+    // Look for the inner content
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::ExpressionStatement => {
+                // Recurse into ExpressionStatement
+                return try_extract_yield_expression(&child, ctx);
+            }
+            SyntaxKind::Expression => {
+                // Found the expression wrapper - look inside for the actual expression
+                if !has_trailing_semicolon(&child) {
+                    // Check if the inner expression can produce a value
+                    if can_be_yield_expression(&child) {
+                        return Some(resolve_expression(&child, ctx));
+                    }
+                }
+            }
+            // Also handle direct expression kinds (ExprIf, ExprMatch without Expression wrapper)
+            SyntaxKind::ExprIf => {
+                if !has_trailing_semicolon(&child) && has_else_branch(&child) {
+                    return Some(resolve_expression(&child, ctx));
+                }
+            }
+            SyntaxKind::ExprMatch => {
+                if !has_trailing_semicolon(&child) {
+                    return Some(resolve_expression(&child, ctx));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+/// Check if a syntax kind could potentially be a yield expression.
+fn can_syntax_kind_be_yield(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::ExprIf
+            | SyntaxKind::ExprMatch
+    )
+    // Note: ExprLoop and ExprWhile are NOT included because:
+    // - loop without break-with-value returns Never
+    // - while always returns () (no else branch concept)
+}
+
+/// Check if an expression node can be used as a yield expression.
+/// 
+/// This checks structural properties to determine if the expression can produce a value:
+/// - If-expressions: only if they have an else branch
+/// - Match expressions: always (they're exhaustive)
+/// - Other expressions: always
+fn can_be_yield_expression(expr_node: &SyntaxNode) -> bool {
+    // Look for the actual expression type inside the Expression wrapper
+    for child in expr_node.children() {
+        match child.kind() {
+            SyntaxKind::ExprIf => {
+                // If-expression can be a yield only if it has an else branch
+                return has_else_branch(&child);
+            }
+            SyntaxKind::ExprMatch => {
+                // Match expressions are always exhaustive and can be yield expressions
+                return true;
+            }
+            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
+                // Loops cannot be yield expressions - they return () or Never
+                return false;
+            }
+            _ => {
+                // Other expressions can be yield expressions
+                return true;
+            }
+        }
+    }
+    // If we found nothing inside, it's probably a simple expression
+    true
+}
+
+/// Check if an if-expression can be used as a yield expression.
+/// 
+/// An if-expression can only be a yield expression if:
+/// 1. It has a complete else chain (all branches covered)
+/// 2. The branches end with value expressions (not statements like return/let)
+///
+/// Examples:
+/// - `if x { a } else { b }` - YES if a and b are expressions
+/// - `if x { a }` - NO, missing else
+/// - `if x { return 1 } else { 2 }` - NO, one branch has return statement
+/// - `if x { a } else if y { b } else { c }` - YES if all are expressions
+fn has_else_branch(if_node: &SyntaxNode) -> bool {
+    // Find the then block (CodeBlock after condition)
+    let then_block = if_node.children().find(|child| child.kind() == SyntaxKind::CodeBlock);
+    
+    // Check if then block ends with a value expression
+    if let Some(then) = then_block {
+        if !block_ends_with_value_expression(&then) {
+            return false;
+        }
+    } else {
+        return false;
+    }
+    
+    // Find the ElseClause
+    let else_clause = if_node.children().find(|child| child.kind() == SyntaxKind::ElseClause);
+    
+    match else_clause {
+        None => false, // No else at all
+        Some(else_node) => {
+            // Check what's inside the else clause
+            for child in else_node.children() {
+                match child.kind() {
+                    SyntaxKind::ExprIf => {
+                        // It's an "else if" - recursively check
+                        return has_else_branch(&child);
+                    }
+                    SyntaxKind::CodeBlock => {
+                        // It's a final "else { ... }" - check if it ends with a value
+                        return block_ends_with_value_expression(&child);
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+    }
+}
+
+/// Check if a code block ends with a value expression (not a statement).
+/// 
+/// A block ends with a value expression if its last child is an Expression
+/// without a trailing semicolon, or a statement-like expression (if/match with else).
+fn block_ends_with_value_expression(block: &SyntaxNode) -> bool {
+    // Get the last significant child
+    let children: Vec<_> = block.children().collect();
+    
+    if let Some(last) = children.last() {
+        match last.kind() {
+            SyntaxKind::Expression => {
+                // Check if it's a value expression without semicolon
+                !has_trailing_semicolon(last)
+            }
+            SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                // Check if it's a statement-wrapped expression that can be a value
+                // Look inside for the expression
+                for child in last.children() {
+                    match child.kind() {
+                        SyntaxKind::ExpressionStatement => {
+                            // Recurse
+                            for inner in child.children() {
+                                if inner.kind() == SyntaxKind::Expression && !has_trailing_semicolon(&inner) {
+                                    return can_be_yield_expression(&inner);
+                                }
+                            }
+                        }
+                        SyntaxKind::Expression => {
+                            if !has_trailing_semicolon(&child) {
+                                return can_be_yield_expression(&child);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
+            SyntaxKind::VariableDeclaration => {
+                // let/var statements are not value expressions
+                false
+            }
+            _ => false
+        }
+    } else {
+        false
+    }
 }
 
 /// Resolve a function's body and attach ExecutableBehavior to the symbol
