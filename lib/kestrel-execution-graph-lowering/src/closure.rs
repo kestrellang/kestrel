@@ -47,6 +47,7 @@ pub fn lower_closure(
     tail_expr: &Option<Box<Expression>>,
     captures: &[Capture],
     implicit_param: &Option<(LocalId, SemanticTy, Span)>,
+    uses_it: bool,
     closure_type: &SemanticTy,
     span: &Span,
 ) -> Value {
@@ -58,7 +59,7 @@ pub fn lower_closure(
     let (closure_name, env_struct_name) = generate_closure_names(ctx, closure_idx);
 
     // Build list of effective parameters
-    let effective_params = build_effective_params(params, implicit_param);
+    let effective_params = build_effective_params(params, implicit_param, uses_it);
 
     if captures.is_empty() {
         lower_non_capturing_closure(
@@ -89,6 +90,7 @@ pub fn lower_closure(
 fn extract_return_type(ty: &SemanticTy) -> SemanticTy {
     match ty.kind() {
         TyKind::Function { return_type, .. } => (**return_type).clone(),
+        TyKind::UnresolvedFunction { return_type, .. } => (**return_type).clone(),
         _ => {
             // Shouldn't happen - closure should have function type
             // Return unit as fallback
@@ -129,9 +131,13 @@ fn generate_closure_names(
 }
 
 /// Build the list of effective parameters from explicit params or implicit `it`.
+///
+/// The `uses_it` flag indicates whether the implicit `it` parameter was actually
+/// referenced in the closure body. We only add it as a parameter if it was used.
 fn build_effective_params(
     params: &Option<Vec<ClosureParam>>,
     implicit_param: &Option<(LocalId, SemanticTy, Span)>,
+    uses_it: bool,
 ) -> Vec<EffectiveParam> {
     if let Some(explicit_params) = params {
         // Explicit parameters - use the LocalId from the ClosureParam
@@ -143,15 +149,19 @@ fn build_effective_params(
                 local_id: p.local_id,
             })
             .collect()
-    } else if let Some((local_id, ty, _span)) = implicit_param {
-        // Implicit `it` parameter
-        vec![EffectiveParam {
-            name: "it".to_string(),
-            ty: ty.clone(),
-            local_id: *local_id,
-        }]
+    } else if uses_it {
+        // Implicit `it` parameter was used - include it
+        if let Some((local_id, ty, _span)) = implicit_param {
+            vec![EffectiveParam {
+                name: "it".to_string(),
+                ty: ty.clone(),
+                local_id: *local_id,
+            }]
+        } else {
+            vec![]
+        }
     } else {
-        // No parameters
+        // No parameters (closure like `{ 42 }` with no `it` usage)
         vec![]
     }
 }

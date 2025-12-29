@@ -583,6 +583,35 @@ mod inherited_witness {
 
     #[test]
     fn struct_satisfies_inherited_methods() {
+        // When S conforms to B (which inherits from A), S must also explicitly conform to A
+        Test::new(
+            r#"
+            module Test
+
+            protocol A {
+                func a()
+            }
+
+            protocol B: A {
+                func b()
+            }
+
+            struct S: A, B {
+                func a() { }
+                func b() { }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        // Should have witnesses for both A and B
+        .expect(Mir::mir_witness("Test.S", "Test.B"))
+        .expect(Mir::mir_witness("Test.S", "Test.A"));
+    }
+
+    #[test]
+    fn missing_parent_conformance_is_error() {
+        // Conforming to B without also conforming to A should be an error
         Test::new(
             r#"
             module Test
@@ -601,11 +630,7 @@ mod inherited_witness {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(Mir::compiles())
-        // Should have witnesses for both A and B
-        .expect(Mir::mir_witness("Test.S", "Test.B"))
-        .expect(Mir::mir_witness("Test.S", "Test.A"));
+        .expect(HasError("conforms to 'B' but not its parent protocol 'A'"));
     }
 }
 

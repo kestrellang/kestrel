@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -8,6 +9,7 @@ use kestrel_semantic_tree::symbol::associated_type::{
     AssociatedTypeBoundsBehavior
 };
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
@@ -108,6 +110,9 @@ impl DeclarationBinder for TypeAliasBinder {
                                 span.clone(),
                                 context,
                             );
+                            
+                            // Add ConformsToBehavior to track which protocol's associated type this binds
+                            add_conforms_to_behavior(symbol, &name, &parent);
                         }
                     }
 
@@ -741,6 +746,73 @@ fn validate_inherited_where_clause_constraints(
                         kestrel_semantic_tree::ty::Constraint::TypeEquality { .. } => {}
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Add ConformsToBehavior to a type alias that binds an associated type in a struct.
+///
+/// This finds the protocol(s) that define the associated type and creates a
+/// ConformsToBehavior for each one, allowing witness generation to properly
+/// bind associated types.
+fn add_conforms_to_behavior(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    type_name: &str,
+    parent: &Arc<dyn Symbol<KestrelLanguage>>,
+) {
+    // Get the struct's conformances
+    let conformances = parent
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+        .map(|cb| cb.conformances().to_vec())
+        .unwrap_or_default();
+
+    // Collect all protocols (direct and inherited) to find associated type definitions
+    let mut all_protocols = Vec::new();
+    let mut to_check: Vec<_> = conformances.clone();
+
+    // BFS to collect all protocols including inherited ones
+    while let Some(conformance) = to_check.pop() {
+        if let TyKind::Protocol {
+            symbol: protocol_symbol,
+            ..
+        } = conformance.kind()
+        {
+            all_protocols.push(protocol_symbol.clone());
+
+            // Add inherited protocols (protocol conformances)
+            if let Some(inherited_conformances) = protocol_symbol
+                .metadata()
+                .get_behavior::<ConformancesBehavior>()
+            {
+                for inherited in inherited_conformances.conformances() {
+                    to_check.push(inherited.clone());
+                }
+            }
+        }
+    }
+
+    // Find protocols that define this associated type and add ConformsToBehavior for each
+    for protocol_symbol in all_protocols {
+        let protocol_dyn = protocol_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+        // Find the associated type in this protocol
+        for child in protocol_dyn.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                && child.metadata().name().value == type_name
+            {
+                // Found a matching associated type - add the behavior
+                let conforms_to = ConformsToBehavior::new(
+                    protocol_symbol.clone(),
+                    type_name.to_string(),
+                    Some(child.metadata().id()),
+                );
+                symbol.metadata().add_behavior(conforms_to);
+                
+                // Note: We add behavior for each protocol that defines this associated type.
+                // This handles the case where multiple protocols have the same associated type name.
+                break; // Only one per protocol
             }
         }
     }

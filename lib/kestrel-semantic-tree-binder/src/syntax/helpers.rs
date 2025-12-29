@@ -6,15 +6,13 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
-use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree::utils::get_node_span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::declaration_binder::BindingContext;
-use crate::diagnostics::{NotAProtocolContext, NotAProtocolError};
+use crate::diagnostics::{MissingParentProtocolConformanceError, NotAProtocolContext, NotAProtocolError};
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
@@ -88,6 +86,70 @@ pub fn resolve_conformance_list(
         }
     }
 
+    // Validate that all parent protocols are also declared
+    validate_parent_protocol_conformances(&resolved, symbol, ctx);
+
     let conformances_behavior = ConformancesBehavior::new(resolved);
     symbol.metadata().add_behavior(conformances_behavior);
+}
+
+/// Validate that if a struct conforms to protocol B which inherits from A,
+/// it must also explicitly declare conformance to A.
+///
+/// This only applies to structs, not to protocols (protocol inheritance is different).
+fn validate_parent_protocol_conformances(
+    conformances: &[Ty],
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    ctx: &mut BindingContext,
+) {
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    
+    // Only validate structs, not protocols
+    // Protocol inheritance (protocol B: A) is different from struct conformance (struct S: A, B)
+    if symbol.metadata().kind() != KestrelSymbolKind::Struct {
+        return;
+    }
+    
+    // Collect all directly declared protocol IDs for quick lookup
+    let declared_protocol_ids: std::collections::HashSet<_> = conformances
+        .iter()
+        .filter_map(|ty| {
+            if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                Some(symbol.metadata().id())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // For each declared conformance, check its parent protocols
+    for conformance in conformances {
+        if let TyKind::Protocol { symbol: protocol_symbol, .. } = conformance.kind() {
+            // Get the protocol's own conformances (parent protocols)
+            if let Some(parent_conformances) = protocol_symbol
+                .metadata()
+                .get_behavior::<ConformancesBehavior>()
+            {
+                for parent in parent_conformances.conformances() {
+                    if let TyKind::Protocol { symbol: parent_protocol, .. } = parent.kind() {
+                        let parent_id = parent_protocol.metadata().id();
+                        
+                        // Check if the parent protocol is in our declared conformances
+                        if !declared_protocol_ids.contains(&parent_id) {
+                            let child_name = protocol_symbol.metadata().name().value.clone();
+                            let parent_name = parent_protocol.metadata().name().value.clone();
+                            let struct_name = symbol.metadata().name().value.clone();
+                            
+                            ctx.diagnostics.throw(MissingParentProtocolConformanceError {
+                                span: symbol.metadata().span().clone(),
+                                struct_name,
+                                child_protocol: child_name,
+                                parent_protocol: parent_name,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -241,7 +241,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             body,
             tail_expr,
             captures,
-            uses_it: _,
+            uses_it,
             implicit_param,
         } => crate::closure::lower_closure(
             ctx,
@@ -250,6 +250,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             tail_expr,
             captures,
             implicit_param,
+            *uses_it,
             &expr.ty,
             &expr.span,
         ),
@@ -991,9 +992,18 @@ fn lower_call(
             let callee_value = lower_expression(ctx, callee);
             match callee_value {
                 Value::Place(callee_place) => {
-                    // Assume it's a thin function pointer for now
-                    // TODO: Distinguish thin vs thick based on type
-                    ctx.emit_call(result_place.clone(), Callee::Thin(callee_place), arg_values);
+                    // Determine if this is a thick (closure) or thin function call
+                    // by checking the callee's type
+                    let is_thick = matches!(
+                        callee.ty.kind(),
+                        TyKind::Function { .. } | TyKind::UnresolvedFunction { .. }
+                    );
+                    let mir_callee = if is_thick {
+                        Callee::Thick(callee_place)
+                    } else {
+                        Callee::Thin(callee_place)
+                    };
+                    ctx.emit_call(result_place.clone(), mir_callee, arg_values);
                 }
                 Value::Immediate(_) => {
                     ctx.emit_error(LoweringError::unsupported_expr(
