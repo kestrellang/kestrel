@@ -246,6 +246,8 @@ version = "0.9.0"
 dependencies = [
  "clap",
  "kestrel-compiler",
+ "kestrel-execution-graph",
+ "kestrel-execution-graph-lowering",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",
@@ -271,6 +273,32 @@ dependencies = [
  "kestrel-semantic-tree-builder",
  "kestrel-span",
  "kestrel-syntax-tree",
+]
+
+[[package]]
+name = "kestrel-execution-graph"
+version = "0.9.0"
+dependencies = [
+ "kestrel-reporting",
+ "kestrel-span",
+]
+
+[[package]]
+name = "kestrel-execution-graph-lowering"
+version = "0.9.0"
+dependencies = [
+ "kestrel-execution-graph",
+ "kestrel-lexer",
+ "kestrel-parser",
+ "kestrel-reporting",
+ "kestrel-semantic-analyzers",
+ "kestrel-semantic-model",
+ "kestrel-semantic-pattern-matching",
+ "kestrel-semantic-tree",
+ "kestrel-semantic-tree-binder",
+ "kestrel-semantic-tree-builder",
+ "kestrel-span",
+ "semantic-tree",
 ]
 
 [[package]]
@@ -409,6 +437,8 @@ name = "kestrel-test-suite"
 version = "0.9.0"
 dependencies = [
  "downcast-rs",
+ "kestrel-execution-graph",
+ "kestrel-execution-graph-lowering",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",

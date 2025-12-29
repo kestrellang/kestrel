@@ -1,0 +1,8 @@
+[package]
+name = "kestrel-execution-graph"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kestrel-span = { path = "../kestrel-span" }
+kestrel-reporting = { path = "../kestrel-reporting" }

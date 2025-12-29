@@ -13,5 +13,7 @@ kestrel-semantic-tree-builder = { path = "../kestrel-semantic-tree-builder" }
 kestrel-semantic-tree-binder = { path = "../kestrel-semantic-tree-binder" }
 kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }
 kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-execution-graph = { path = "../kestrel-execution-graph" }
+kestrel-execution-graph-lowering = { path = "../kestrel-execution-graph-lowering" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = { workspace = true }

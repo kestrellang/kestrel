@@ -573,6 +573,12 @@ fn link_protocol_methods_for_struct(
             }
         }
 
+        // Deduplicate matches by protocol method ID.
+        // This handles the case where a struct explicitly conforms to both A and B,
+        // where B: A. The method `a()` from protocol A will appear twice (once from
+        // direct conformance to A, once through B's inheritance), but it's the same method.
+        matches.dedup_by_key(|(_, method)| method.metadata().id());
+
         if matches.len() > 1 {
             let protocol_names: Vec<String> = matches
                 .iter()

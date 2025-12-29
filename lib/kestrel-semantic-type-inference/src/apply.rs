@@ -249,6 +249,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                         ty: resolve_type(&p.ty, solution),
                         is_type_annotated: p.is_type_annotated,
                         span: p.span.clone(),
+                        local_id: p.local_id,
                     })
                     .collect()
             });

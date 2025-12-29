@@ -11,6 +11,8 @@ kestrel-semantic-tree = { path = "lib/kestrel-semantic-tree" }
 kestrel-semantic-tree-builder = { path = "lib/kestrel-semantic-tree-builder" }
 kestrel-semantic-tree-binder = { path = "lib/kestrel-semantic-tree-binder" }
 kestrel-compiler = { path = "lib/kestrel-compiler" }
+kestrel-execution-graph = { path = "lib/kestrel-execution-graph" }
+kestrel-execution-graph-lowering = { path = "lib/kestrel-execution-graph-lowering" }
 kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-span = { path = "lib/kestrel-span" }
 semantic-tree = { path = "lib/semantic-tree" }
@@ -48,5 +50,7 @@ members = [
     "lib/kestrel-semantic-pattern-matching",
     "lib/kestrel-reporting",
     "lib/kestrel-compiler",
+    "lib/kestrel-execution-graph",
+    "lib/kestrel-execution-graph-lowering",
     "lib/kestrel-test-suite"
 ]

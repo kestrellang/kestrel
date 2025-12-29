@@ -142,6 +142,8 @@ mod inheritance {
 
     #[test]
     fn struct_implements_inherited_protocol_method() {
+        // When conforming to Shape (which inherits from Drawable),
+        // must also explicitly conform to Drawable
         Test::new(
             r#"module Test
             protocol Drawable {
@@ -150,7 +152,7 @@ mod inheritance {
             protocol Shape: Drawable {
                 func area() -> Int
             }
-            struct Circle: Shape {
+            struct Circle: Drawable, Shape {
                 func draw() { }
                 func area() -> Int { 42 }
             }
@@ -171,6 +173,8 @@ mod inheritance {
 
     #[test]
     fn struct_implements_multiple_inherited_protocols() {
+        // When conforming to Widget (which inherits from Drawable and Clickable),
+        // must also explicitly conform to Drawable and Clickable
         Test::new(
             r#"module Test
             protocol Drawable {
@@ -182,7 +186,7 @@ mod inheritance {
             protocol Widget: Drawable, Clickable {
                 func update()
             }
-            struct Button: Widget {
+            struct Button: Drawable, Clickable, Widget {
                 func draw() { }
                 func onClick() { }
                 func update() { }

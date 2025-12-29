@@ -370,19 +370,69 @@
 
 ## Phase 10: Execution Graph
 
-- [ ] Execution Graph IR
-  - [ ] Basic block representation
-  - [ ] Control flow graph structure
-  - [ ] Lower semantic-tree to execution-graph
-- [ ] Operations
-  - [ ] Primitive operations (arithmetic, comparisons)
-  - [ ] Memory operations (load, store, alloc)
-  - [ ] Control flow operations (branch, jump, return)
-  - [ ] Call operations (direct, indirect, method)
+- [x] Execution Graph IR
+  - [x] Basic block representation (BasicBlock with statements + terminator)
+  - [x] Control flow graph structure (FunctionDef with blocks, entry_block)
+  - [x] Lower semantic-tree to execution-graph (kestrel-execution-graph-lowering)
+  - [x] MirContext with arenas for all items (structs, enums, protocols, witnesses, functions, statics)
+  - [x] Type interning and name interning
+- [x] Type System
+  - [x] Primitives: I8-I64, F16-F64, Bool, Unit, Never, Str
+  - [x] Pointers/References: Pointer, Ref, RefMut
+  - [x] Compound: Tuple, Array, Named (structs/enums with type args)
+  - [x] Function types: FuncThin (no captures), FuncThick (closures)
+  - [x] Generics: TypeParam, SelfType, AssociatedTypeProjection
+- [x] Operations
+  - [x] Primitive operations (arithmetic, comparisons, bitwise, boolean)
+  - [x] Memory operations (Place with Local, Field, Index, Deref, Downcast)
+  - [x] Control flow operations (Return, Jump, Branch, Switch, Panic, Unreachable)
+  - [x] Call operations (Direct, Thin function pointer, Thick closure, Witness protocol method)
+  - [x] Struct construction, tuple/array creation, enum variant creation
+  - [x] Cast operations (int/float conversions, pointer casts)
+  - [x] String operations (StrPtr, StrLen, StrFromParts)
+  - [x] Pointer operations (PtrOffset, PtrToRef, RefToPtr)
+  - [x] Closure operations (FuncToEscaping, ApplyPartial)
+- [x] Item Lowering
+  - [x] Functions with body, params, type params, where clauses
+  - [x] Initializers (as functions with `self: &var Type`)
+  - [x] Structs with fields and generic type support
+  - [x] Enums with cases and payload structs
+  - [x] Protocols with associated types, methods, parent protocols
+  - [x] Witnesses auto-generated from conformances
+  - [x] Extensions (methods lowered, witnesses generated)
+- [x] Expression Lowering
+  - [x] Literals (unit, int, float, bool, string)
+  - [x] Variable references and field access
+  - [x] Assignment
+  - [x] All primitive method calls (arithmetic, comparison, bitwise, boolean)
+  - [x] Struct construction
+  - [x] Function/method calls (direct, witness, thick/thin)
+  - [x] Control flow (if/else, if-let, while, while-let, loop)
+  - [x] Break, continue, return
+  - [x] Match expressions (full decision tree compilation)
+  - [x] Closures (capturing and non-capturing)
+  - [x] Arrays, tuples
+- [x] Pattern Lowering
+  - [x] Irrefutable patterns (let bindings): local, wildcard, tuple, struct, enum, array prefix, @
+  - [x] Refutable patterns (match/if-let): enum variants, literals, ranges via decision trees
+- [x] Pass System
+  - [x] MirPass trait for whole-context passes
+  - [x] FunctionPass trait for per-function passes
+  - [x] PassManager with sequential execution
+  - [x] Fixed-point iteration support
 - [ ] Analysis Infrastructure
-  - [ ] CFG traversal utilities
-  - [ ] Dataflow analysis framework
-  - [ ] SSA form (optional)
+  - [ ] CFG traversal utilities (dominator computation, post-order traversal)
+  - [ ] Dataflow analysis framework (reaching definitions, liveness)
+  - [ ] Loop detection utilities
+- [ ] Optimization Passes
+  - [ ] Dead code elimination
+  - [ ] Constant folding/propagation
+  - [ ] Copy propagation
+  - [ ] Inlining
+- [x] Remaining Features
+  - [x] Method references as values (bound methods)
+  - [x] Int.toString() (IntToString MIR operation)
+  - [ ] Thin closure optimization (when no captures)
 
 ## Phase 11: Memory Model
 
@@ -393,6 +443,10 @@
   - [ ] Reference counting, or
   - [ ] Ownership/borrowing, or
   - [ ] Garbage collection
+- [ ] Existential Types
+  - [ ] Protocol types as values (boxing + witness table)
+  - [ ] `any Protocol` syntax
+  - [ ] Dynamic dispatch via witness tables
 
 ## Phase 12: Code Generation
 
@@ -421,20 +475,21 @@
 
 ## Current Status
 
-**Phase**: Phase 9 (Enums & Algebraic Data Types) - 🚧 IN PROGRESS
-**Progress**: Phases 1-8 complete. Enum declarations complete, pattern matching in progress.
+**Phase**: Phase 10 (Execution Graph) - 🚧 IN PROGRESS
+**Progress**: Phases 1-9 complete. Core execution graph IR and lowering complete.
 
-**Phase 9 Completed Features**:
+**Phase 10 Completed Features**:
 
-- ✅ Simple and generic enum declarations
-- ✅ Enums with associated values
-- ✅ Recursive enums with `indirect` keyword
-- ✅ Indirect recursion detection through structs
-- ✅ Protocol conformance for enums
-- ✅ Instance and static methods in enums
-- ✅ Enum extensions
+- ✅ Complete MIR data structure (MirContext, BasicBlock, Statement, Terminator)
+- ✅ Full type system representation (primitives, pointers, tuples, arrays, generics)
+- ✅ All operations (arithmetic, memory, control flow, calls, closures)
+- ✅ Lowering for all language constructs (functions, types, expressions, patterns)
+- ✅ Pattern matching via decision tree compilation
+- ✅ Closure conversion with environment capture
+- ✅ Protocol conformance witness generation
+- ✅ Pass system infrastructure
 
-**Next Up**: Pattern matching (`match` expressions, exhaustiveness checking)
+**Next Up**: Analysis infrastructure (CFG utilities, dataflow analysis) and optimization passes
 
 ## Notes
 

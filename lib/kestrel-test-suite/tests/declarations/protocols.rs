@@ -342,6 +342,8 @@ mod validation {
 
     #[test]
     fn struct_implements_inherited_protocol_methods() {
+        // When conforming to Shape (which inherits from Drawable),
+        // must also explicitly conform to Drawable
         Test::new(
             r#"module Test
             protocol Drawable {
@@ -350,7 +352,7 @@ mod validation {
             protocol Shape: Drawable {
                 func area() -> Int
             }
-            struct Circle: Shape {
+            struct Circle: Drawable, Shape {
                 func draw() { }
                 func area() -> Int { 42 }
             }
@@ -360,7 +362,7 @@ mod validation {
         .expect(
             Symbol::new("Circle")
                 .is(SymbolKind::Struct)
-                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ConformanceCount(2))
                 .has(Behavior::ChildCount(2)),
         );
     }
@@ -460,12 +462,12 @@ mod validation {
 
     #[test]
     fn protocol_conformance_with_inherited_protocols() {
-        // TODO: Check inherited protocols
+        // When conforming to B (which inherits from A), must also explicitly conform to A
         Test::new(
             r#"module Test
             protocol A { func a() }
             protocol B: A { func b() }
-            struct S: B {
+            struct S: A, B {
                 func a() { }
                 func b() { }
             }

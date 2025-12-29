@@ -1,0 +1,20 @@
+[package]
+name = "kestrel-execution-graph-lowering"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kestrel-execution-graph = { path = "../kestrel-execution-graph" }
+kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-semantic-model = { path = "../kestrel-semantic-model" }
+kestrel-semantic-pattern-matching = { path = "../kestrel-semantic-pattern-matching" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+semantic-tree = { path = "../semantic-tree" }
+
+[dev-dependencies]
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
+kestrel-semantic-tree-builder = { path = "../kestrel-semantic-tree-builder" }
+kestrel-semantic-tree-binder = { path = "../kestrel-semantic-tree-binder" }
+kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }

@@ -115,26 +115,42 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // eprintln!("ResolveValuePath({:?}) = {:?}", path, resolution);
     match resolution {
         ValuePathResolution::Symbol { symbol_id, ty } => {
-            // Check if this is a static method or enum case accessed via a qualified type path
-            // e.g., Box[Int].wrap where wrap is a static method
-            // or Option[Int].None where None is an enum case
-            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
-                if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
-                    // Handle simple enum cases (without associated values) with explicit type arguments
-                    // e.g., Option[Int].None where None is a simple case
-                    // Cases with associated values (like Some) are handled via the call path
-                    if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
-                        // Only handle cases without CallableBehavior (simple cases)
-                        if get_callable_behavior(&symbol).is_none() {
-                            // Apply the qualified type's substitutions to the case's type
-                            if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
+            // Check if this is an enum case - always use EnumCase expression
+            // (both generic like Option[Int].None and non-generic like Color.Red)
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
+                if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
+                    // Check if this enum case is accessed via a qualified type path with explicit type args
+                    // e.g., Result[Int, Bool].Ok or Option[String].Some
+                    if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
+                        if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
+                            if !substitutions.is_empty() {
+                                // Apply substitutions to the type (callable type for cases with values,
+                                // or enum type for simple cases)
                                 let substituted_ty = ty.apply_substitutions(substitutions);
-                                return Expression::enum_case(symbol_id, substituted_ty, span);
+                                
+                                if get_callable_behavior(&symbol).is_some() {
+                                    // Enum case with associated values (like Ok, Some)
+                                    // Return SymbolRef with substituted callable type
+                                    return Expression::symbol_ref(symbol_id, substituted_ty, false, span);
+                                } else {
+                                    // Simple enum case (like None)
+                                    return Expression::enum_case(symbol_id, substituted_ty, span);
+                                }
                             }
                         }
                     }
                     
-                    // Handle static methods
+                    // No explicit type args - handle simple cases without CallableBehavior
+                    if get_callable_behavior(&symbol).is_none() {
+                        return Expression::enum_case(symbol_id, ty, span);
+                    }
+                }
+            }
+            
+            // Check if this is a static method accessed via a qualified type path
+            // e.g., Box[Int].wrap where wrap is a static method
+            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
+                if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
                     if let Some(callable) = get_callable_behavior(&symbol) {
                         if callable.is_static() {
                             // Get struct symbol from qualified type

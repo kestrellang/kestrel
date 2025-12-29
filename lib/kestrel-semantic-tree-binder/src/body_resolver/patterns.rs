@@ -927,10 +927,16 @@ fn resolve_array_pattern(
         }
     }
 
+    // Check for suffix elements - not yet supported
+    if !suffix.is_empty() {
+        use crate::diagnostics::ArraySuffixPatternError;
+        let error = ArraySuffixPatternError { span: span.clone() };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Pattern::error(span);
+    }
+
     // Build element type from patterns
     let element_ty = if let Some(first) = prefix.first() {
-        first.ty.clone()
-    } else if let Some(first) = suffix.first() {
         first.ty.clone()
     } else {
         expected_element_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()))

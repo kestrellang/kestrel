@@ -875,6 +875,8 @@ mod protocol_inheritance {
 
     #[test]
     fn struct_conforming_to_child_provides_associated_type() {
+        // When conforming to BidirectionalIterator (which inherits from Iterator),
+        // must also explicitly conform to Iterator
         Test::new(
             r#"module Test
             protocol Iterator {
@@ -884,7 +886,7 @@ mod protocol_inheritance {
             protocol BidirectionalIterator: Iterator {
                 func prev() -> Item
             }
-            struct IntBiIterator: BidirectionalIterator {
+            struct IntBiIterator: Iterator, BidirectionalIterator {
                 type Item = Int;
                 func next() -> Int { 0 }
                 func prev() -> Int { 0 }
