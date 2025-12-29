@@ -6,6 +6,7 @@
 //! - `types/` - Type system (generics, literals)
 //! - `expressions/` - Expression resolution (literals, operators, paths, calls, field access)
 //! - `statements/` - Statement resolution (variables, assignments)
+//! - `patterns/` - Pattern matching (match, if-let, guard-let, while-let, destructuring)
 //! - `validation/` - Semantic validation (mutability, cycles, visibility, duplicates, conformance)
 //! - `instantiation/` - Creating instances of types
 //! - `inference/` - Type inference
@@ -16,6 +17,7 @@ mod expressions;
 mod framework;
 mod inference;
 mod instantiation;
+mod patterns;
 mod statements;
 mod types;
 mod validation;

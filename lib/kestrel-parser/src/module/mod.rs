@@ -2,13 +2,13 @@ mod path;
 
 pub use path::{ModulePath, parse_module_path};
 
-use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_module_path, module_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span};
 
 /// Represents a module declaration: module A.B.C
 ///
@@ -53,12 +53,12 @@ pub fn parse_module_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    // Convert Span to Range<usize> for chumsky's Stream
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    use chumsky::prelude::*;
 
-    match module_declaration_parser_internal().parse(stream) {
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
+
+    match module_declaration_parser_internal().parse(input).into_result() {
         Ok((module_span, path_segments)) => {
             emit_module_declaration(sink, module_span, &path_segments);
         }
@@ -67,7 +67,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

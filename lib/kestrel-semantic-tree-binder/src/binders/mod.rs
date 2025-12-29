@@ -1,3 +1,5 @@
+mod enum_binder;
+mod enum_case;
 mod extension;
 mod field;
 mod function;
@@ -11,6 +13,8 @@ mod terminal;
 mod type_alias;
 mod utils;
 
+pub use enum_binder::EnumBinder;
+pub use enum_case::EnumCaseBinder;
 pub use extension::ExtensionBinder;
 pub use field::FieldBinder;
 pub use function::FunctionBinder;

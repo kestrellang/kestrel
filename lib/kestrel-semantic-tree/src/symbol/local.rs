@@ -102,6 +102,9 @@ pub trait LocalContainer: Send + Sync + std::fmt::Debug {
     fn locals(&self) -> Vec<Local>;
     /// Get number of locals.
     fn local_count(&self) -> usize;
+    /// Update the type of a local variable.
+    /// This is used by type inference to update pattern-bound locals with their resolved types.
+    fn update_local_type(&self, id: LocalId, ty: Ty);
 }
 
 #[cfg(test)]

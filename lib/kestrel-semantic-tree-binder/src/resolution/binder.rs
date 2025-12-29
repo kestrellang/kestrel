@@ -132,6 +132,8 @@ impl SemanticBinder {
     fn symbol_kind_to_syntax_kind(kind: KestrelSymbolKind) -> Option<SyntaxKind> {
         match kind {
             KestrelSymbolKind::AssociatedType => Some(SyntaxKind::TypeAliasDeclaration),
+            KestrelSymbolKind::Enum => Some(SyntaxKind::EnumDeclaration),
+            KestrelSymbolKind::EnumCase => Some(SyntaxKind::EnumCaseDeclaration),
             KestrelSymbolKind::Extension => Some(SyntaxKind::ExtensionDeclaration),
             KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
             KestrelSymbolKind::Initializer => Some(SyntaxKind::InitializerDeclaration),

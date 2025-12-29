@@ -7,6 +7,7 @@ use kestrel_semantic_model::{SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
+use kestrel_semantic_type_inference::TypeOracle;
 use semantic_tree::symbol::Symbol;
 use semantic_tree::symbol::SymbolId;
 
@@ -49,6 +50,14 @@ pub fn is_assignable_with_constraints(
 ) -> bool {
     if from.is_assignable_to(to) {
         return true;
+    }
+
+    // Check protocol conformance: a struct/enum can be assigned to a protocol it conforms to
+    if let TyKind::Protocol { symbol, .. } = to.kind() {
+        let protocol_id = symbol.metadata().id();
+        if model.conforms_to(from, protocol_id) {
+            return true;
+        }
     }
 
     let where_clauses = collect_where_clauses(model, context_id);

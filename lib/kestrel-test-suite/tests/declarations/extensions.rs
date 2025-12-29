@@ -190,6 +190,25 @@ mod conformance {
         )
         .expect(Compiles);
     }
+
+    #[test]
+    fn extension_conformance_on_generic_type() {
+        Test::new(
+            r#"module Test
+            struct Container[T] { let value: T }
+            protocol Printable { func print() }
+            extend Container[Int]: Printable {
+                func print() { }
+            }
+            func usePrintable(p: Printable) { p.print(); }
+            func main() {
+                let c = Container(value: 42);
+                usePrintable(c);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod generics {
@@ -700,5 +719,26 @@ mod constraint_inference {
         "#,
         )
         .expect(HasError("type mismatch"));
+    }
+}
+
+mod future_features {
+    use super::*;
+
+    #[test]
+    fn extend_enum() {
+        Test::new(
+            r#"module Test
+            enum Color {
+                case Red
+                case Green
+                case Blue
+            }
+            extend Color {
+                func isRed() -> Bool { return true; }
+            }
+        "#,
+        )
+        .expect(Compiles);
     }
 }

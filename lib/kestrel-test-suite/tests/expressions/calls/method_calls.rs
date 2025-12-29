@@ -764,7 +764,7 @@ module Main
 struct Widget {
     let id: Int
 
-    pub func getId() -> Int {
+    public func getId() -> Int {
         self.id
     }
 

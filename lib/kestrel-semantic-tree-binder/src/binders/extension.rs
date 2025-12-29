@@ -10,6 +10,7 @@ use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
@@ -44,9 +45,9 @@ impl DeclarationBinder for ExtensionBinder {
         // Resolve the target type from the Ty node
         let target_result = resolve_extension_target(syntax, &source, file_id, symbol_id, context);
 
-        if let Some((target_ty, target_struct, type_arguments, referenced_params)) = target_result {
-            // Get the target struct's where clause constraints (inherited)
-            let inherited_where_clause = target_struct.where_clause();
+        if let Some((target_ty, target_symbol, type_arguments, referenced_params)) = target_result {
+            // Get the target's where clause constraints (inherited)
+            let inherited_where_clause = target_symbol.where_clause();
 
             // Resolve extension's own where clause
             let extension_where_clause = crate::binders::utils::generics::resolve_where_clause(
@@ -72,7 +73,7 @@ impl DeclarationBinder for ExtensionBinder {
             symbol.metadata().add_behavior(target_behavior);
 
             // Register extension in the ExtensionRegistry
-            let target_id = target_struct.metadata().id();
+            let target_id = target_symbol.id();
             if let Ok(extension_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
                 context
                     .model
@@ -93,9 +94,38 @@ impl DeclarationBinder for ExtensionBinder {
     }
 }
 
+/// Symbol that can be extended (struct or enum)
+enum ExtendableSymbol {
+    Struct(Arc<StructSymbol>),
+    Enum(Arc<EnumSymbol>),
+}
+
+impl ExtendableSymbol {
+    fn type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
+        match self {
+            ExtendableSymbol::Struct(s) => s.type_parameters(),
+            ExtendableSymbol::Enum(e) => e.type_parameters(),
+        }
+    }
+
+    fn id(&self) -> semantic_tree::symbol::SymbolId {
+        match self {
+            ExtendableSymbol::Struct(s) => s.metadata().id(),
+            ExtendableSymbol::Enum(e) => e.metadata().id(),
+        }
+    }
+
+    fn where_clause(&self) -> WhereClause {
+        match self {
+            ExtendableSymbol::Struct(s) => s.where_clause(),
+            ExtendableSymbol::Enum(e) => e.where_clause(),
+        }
+    }
+}
+
 /// Resolve the extension's target type from syntax.
 ///
-/// Returns (target_type, target_struct_symbol, type_arguments, referenced_type_params)
+/// Returns (target_type, target_symbol, type_arguments, referenced_type_params)
 ///
 /// For generic extensions like `extend Pair[T, U]`, the type arguments T and U are
 /// resolved as references to the struct's type parameters, not looked up in scope.
@@ -107,7 +137,7 @@ fn resolve_extension_target(
     ctx: &mut BindingContext,
 ) -> Option<(
     Ty,
-    Arc<StructSymbol>,
+    ExtendableSymbol,
     Vec<Ty>,
     Vec<Arc<TypeParameterSymbol>>,
 )> {
@@ -135,9 +165,10 @@ fn resolve_extension_target(
         path: segments.clone(),
         context: context_id,
     });
-    let struct_symbol = match base_resolution {
+    let target_symbol = match base_resolution {
         TypePathResolution::Resolved(ty) => match ty.kind() {
-            TyKind::Struct { symbol, .. } => symbol.clone(),
+            TyKind::Struct { symbol, .. } => ExtendableSymbol::Struct(symbol.clone()),
+            TyKind::Enum { symbol, .. } => ExtendableSymbol::Enum(symbol.clone()),
             _ => {
                 ctx.diagnostics.throw(CannotExtendTypeError {
                     span: ty_span.clone(),
@@ -156,15 +187,15 @@ fn resolve_extension_target(
         _ => return None,
     };
 
-    // Get the struct's type parameters
-    let struct_type_params = struct_symbol.type_parameters();
+    // Get the target's type parameters
+    let target_type_params = target_symbol.type_parameters();
 
-    // Now resolve the type arguments, using the struct's type params as available references
+    // Now resolve the type arguments, using the target's type params as available references
     let type_args = resolve_extension_type_arguments(
         &ty_path_node,
         source,
         file_id,
-        &struct_type_params,
+        &target_type_params,
         context_id,
         ctx,
     )?;
@@ -176,7 +207,7 @@ fn resolve_extension_target(
     // For generic extensions like `extend Pair[T, U]`, validate that type parameters
     // appear in their declared positions (T must be in position 0, U in position 1)
     let mut substitutions = kestrel_semantic_tree::ty::Substitutions::new();
-    for (index, (param, arg)) in struct_type_params.iter().zip(type_args.iter()).enumerate() {
+    for (index, (param, arg)) in target_type_params.iter().zip(type_args.iter()).enumerate() {
         let param_id = param.metadata().id();
 
         // Check if arg is a type parameter reference
@@ -186,16 +217,16 @@ fn resolve_extension_target(
             // Check if it's a different type parameter in this position
             // (not self-referential, e.g., U in T's position)
             if arg_param_id != param_id {
-                // Check if it's actually one of the struct's type parameters but in wrong position
-                let is_struct_param_wrong_position =
-                    struct_type_params
+                // Check if it's actually one of the target's type parameters but in wrong position
+                let is_target_param_wrong_position =
+                    target_type_params
                         .iter()
                         .enumerate()
                         .any(|(other_index, other_param)| {
                             other_param.metadata().id() == arg_param_id && other_index != index
                         });
 
-                if is_struct_param_wrong_position {
+                if is_target_param_wrong_position {
                     // Error: type parameter in wrong position (e.g., extend Pair[U, T])
                     let param_name = param.metadata().name().value.clone();
                     let arg_name = arg_param.metadata().name().value.clone();
@@ -216,9 +247,18 @@ fn resolve_extension_target(
         // The cycle detection in Substitutions::apply will handle self-referential cases gracefully
         substitutions.insert(param_id, arg.clone());
     }
-    let resolved_ty = Ty::generic_struct(struct_symbol.clone(), substitutions, ty_span);
 
-    Some((resolved_ty, struct_symbol, type_args, referenced_params))
+    // Build the resolved type based on target symbol type
+    let resolved_ty = match &target_symbol {
+        ExtendableSymbol::Struct(struct_sym) => {
+            Ty::generic_struct(struct_sym.clone(), substitutions, ty_span)
+        }
+        ExtendableSymbol::Enum(enum_sym) => {
+            Ty::generic_enum(enum_sym.clone(), substitutions, ty_span)
+        }
+    };
+
+    Some((resolved_ty, target_symbol, type_args, referenced_params))
 }
 
 /// Resolve type arguments for an extension target.
@@ -352,7 +392,7 @@ fn format_type_kind(kind: &TyKind) -> String {
     }
 }
 
-/// Error for trying to extend a non-struct type
+/// Error for trying to extend a non-extendable type
 #[derive(Debug, Clone)]
 pub struct CannotExtendTypeError {
     pub span: kestrel_span::Span,
@@ -363,15 +403,15 @@ impl kestrel_reporting::IntoDiagnostic for CannotExtendTypeError {
     fn into_diagnostic(&self) -> kestrel_reporting::Diagnostic<usize> {
         kestrel_reporting::Diagnostic::error()
             .with_message(format!(
-                "cannot extend type '{}' - only structs can be extended",
+                "cannot extend type '{}' - only structs and enums can be extended",
                 self.type_name
             ))
             .with_labels(vec![
                 kestrel_reporting::Label::primary(self.span.file_id, self.span.range())
-                    .with_message("not a struct type"),
+                    .with_message("not a struct or enum type"),
             ])
             .with_notes(vec![
-                "Extensions can only be applied to struct types".to_string(),
+                "Extensions can only be applied to struct and enum types".to_string(),
             ])
     }
 }

@@ -36,6 +36,7 @@ impl Default for TyId {
 
 use crate::language::KestrelLanguage;
 use crate::symbol::associated_type::AssociatedTypeSymbol;
+use crate::symbol::enum_symbol::EnumSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
@@ -119,6 +120,22 @@ impl fmt::Display for Ty {
                 f.write_char(']')
             }
             TyKind::Struct {
+                symbol,
+                substitutions,
+            } => {
+                f.write_str(&symbol.metadata().name().value)?;
+                if substitutions.is_empty() {
+                    return Ok(());
+                }
+                f.write_char('[')?;
+                fmt_list(
+                    f,
+                    true,
+                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                )?;
+                f.write_char(']')
+            }
+            TyKind::Enum {
                 symbol,
                 substitutions,
             } => {
@@ -344,6 +361,32 @@ impl Ty {
         )
     }
 
+    /// Create an enum type (resolved) with no type arguments
+    pub fn r#enum(enum_symbol: Arc<EnumSymbol>, span: Span) -> Self {
+        Self::new(
+            TyKind::Enum {
+                symbol: enum_symbol,
+                substitutions: Substitutions::new(),
+            },
+            span,
+        )
+    }
+
+    /// Create a generic enum type (resolved) with type arguments
+    pub fn generic_enum(
+        enum_symbol: Arc<EnumSymbol>,
+        substitutions: Substitutions,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            TyKind::Enum {
+                symbol: enum_symbol,
+                substitutions,
+            },
+            span,
+        )
+    }
+
     /// Create a type alias type with no type arguments
     pub fn type_alias(type_alias_symbol: Arc<TypeAliasSymbol>, span: Span) -> Self {
         Self::new(
@@ -556,6 +599,17 @@ impl Ty {
                 Ty::generic_struct(symbol.clone(), new_subs, self.span.clone())
             }
 
+            TyKind::Enum {
+                symbol,
+                substitutions,
+            } => {
+                let mut new_subs = Substitutions::new();
+                for (id, ty) in substitutions.iter() {
+                    new_subs.insert(*id, ty.substitute_self(replacement));
+                }
+                Ty::generic_enum(symbol.clone(), new_subs, self.span.clone())
+            }
+
             TyKind::Protocol {
                 symbol,
                 substitutions,
@@ -671,6 +725,22 @@ impl Ty {
                     && a_subs.is_specialization_of(b_subs)
             }
 
+            // Enums
+            (
+                TyKind::Enum {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Enum {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && a_subs.is_specialization_of(b_subs)
+            }
+
             // Protocols
             (
                 TyKind::Protocol {
@@ -748,6 +818,22 @@ impl Ty {
                     substitutions: a_subs,
                 },
                 TyKind::Struct {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && a_subs.overlaps_with(b_subs)
+            }
+
+            // Enums
+            (
+                TyKind::Enum {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Enum {
                     symbol: b_sym,
                     substitutions: b_subs,
                 },
@@ -869,6 +955,23 @@ impl Ty {
                     && substitutions_equal(a_subs, b_subs)
             }
 
+            // Enums - nominal equality (same symbol by ID)
+            (
+                TyKind::Enum {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Enum {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                // Same enum symbol by ID (not pointer) to handle different Arc instances
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && substitutions_equal(a_subs, b_subs)
+            }
+
             // Protocols - nominal equality (same symbol by ID)
             (
                 TyKind::Protocol {
@@ -959,6 +1062,8 @@ impl Ty {
         is_protocol => TyKind::Protocol { .. },
         /// Check if this is a struct type (resolved)
         is_struct => TyKind::Struct { .. },
+        /// Check if this is an enum type (resolved)
+        is_enum => TyKind::Enum { .. },
         /// Check if this is a type alias type
         is_type_alias => TyKind::TypeAlias { .. },
         /// Check if this is an associated type reference
@@ -1051,6 +1156,25 @@ impl Ty {
     pub fn as_struct_with_subs(&self) -> Option<(&Arc<StructSymbol>, &Substitutions)> {
         match &self.kind {
             TyKind::Struct {
+                symbol,
+                substitutions,
+            } => Some((symbol, substitutions)),
+            _ => None,
+        }
+    }
+
+    /// Get enum symbol if this is an enum type
+    pub fn as_enum(&self) -> Option<&Arc<EnumSymbol>> {
+        match &self.kind {
+            TyKind::Enum { symbol, .. } => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get enum symbol and substitutions if this is an enum type
+    pub fn as_enum_with_subs(&self) -> Option<(&Arc<EnumSymbol>, &Substitutions)> {
+        match &self.kind {
+            TyKind::Enum {
                 symbol,
                 substitutions,
             } => Some((symbol, substitutions)),

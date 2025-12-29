@@ -15,6 +15,7 @@ use crate::common::{
     function_declaration_parser_internal, initializer_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::ty::ty_parser;
 use crate::type_param::{conformance_list_parser, where_clause_parser};
 
@@ -81,8 +82,8 @@ impl ExtensionDeclaration {
 /// Internal parser for extension body items
 ///
 /// Extension bodies can contain: functions and initializers
-fn extension_body_item_parser_internal()
--> impl Parser<Token, ExtensionBodyItem, Error = Simple<Token>> + Clone {
+fn extension_body_item_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
         initializer_declaration_parser_internal().map(ExtensionBodyItem::Initializer);
 
@@ -95,14 +96,15 @@ fn extension_body_item_parser_internal()
 ///
 /// This is the single source of truth for extension declaration parsing.
 /// Syntax: extend Type: Protocol where ... { ... }
-pub fn extension_declaration_parser_internal()
--> impl Parser<Token, ExtensionDeclarationData, Error = Simple<Token>> + Clone {
+pub fn extension_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionDeclarationData, ParserExtra<'tokens>> + Clone
+{
     token(Token::Extend)
         .then(ty_parser())
         .then(conformance_list_parser().or_not())
         .then(where_clause_parser().or_not())
         .then(token(Token::LBrace))
-        .then(extension_body_item_parser_internal().repeated())
+        .then(extension_body_item_parser_internal().repeated().collect())
         .then(token(Token::RBrace))
         .map(
             |(
@@ -132,18 +134,19 @@ pub fn parse_extension_declaration<I>(source: &str, tokens: I, sink: &mut EventS
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    use chumsky::Parser;
 
-    match extension_declaration_parser_internal().parse(stream) {
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
+
+    match extension_declaration_parser_internal().parse(input).into_result() {
         Ok(data) => {
             emit_extension_declaration(sink, data);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

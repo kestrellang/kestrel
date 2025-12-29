@@ -3,16 +3,18 @@
 //! This module handles resolving statements from syntax nodes into semantic
 //! Statement representations, including variable declarations and expression statements.
 
+use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
-use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use super::context::resolve_code_block;
 
 use kestrel_syntax_tree::utils::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
+use super::patterns::{is_pattern_kind, resolve_pattern_with_mutability};
 use super::utils::{is_expression_kind, validate_not_standalone_type_param};
 
 /// Resolve a statement syntax node
@@ -28,6 +30,9 @@ pub fn resolve_statement(
             }
             SyntaxKind::ExpressionStatement => {
                 return resolve_expression_statement(&child, ctx);
+            }
+            SyntaxKind::GuardLetStatement => {
+                return resolve_guard_let_statement(&child, ctx);
             }
             SyntaxKind::Expression => {
                 let expr = resolve_expression(&child, ctx);
@@ -74,18 +79,10 @@ pub fn resolve_variable_declaration(
 ) -> Option<Statement> {
     let span = get_node_span(decl_node, ctx.file_id);
 
-    // Determine if let or var
+    // Determine if let or var (affects mutability of all bindings in pattern)
     let is_mutable = decl_node
         .children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Var);
-    let mutability = if is_mutable {
-        Mutability::Mutable
-    } else {
-        Mutability::Immutable
-    };
-
-    // Extract name
-    let name = extract_var_name(decl_node)?;
 
     // Extract type annotation (if any)
     let ty = extract_var_type(decl_node, ctx);
@@ -100,55 +97,47 @@ pub fn resolve_variable_declaration(
             validate_not_standalone_type_param(expr, ctx)
         });
 
-    // Determine the type from annotation or initializer
-    let resolved_ty = ty.unwrap_or_else(|| {
-        value
-            .as_ref()
-            .map(|e| e.ty.clone())
-            .unwrap_or_else(|| Ty::infer(span.clone()))
-    });
+    // Determine the expected type from annotation or initializer
+    let expected_ty = ty.or_else(|| value.as_ref().map(|e| e.ty.clone()));
 
-    // Bind the local variable
-    let name_span = get_name_span(decl_node, ctx.file_id).unwrap_or(span.clone());
-    let local_id = ctx.local_scope.bind(
-        name.clone(),
-        resolved_ty.clone(),
-        is_mutable,
-        name_span.clone(),
-    );
-
-    // Create the pattern
-    let pattern = Pattern::local(local_id, mutability, name, resolved_ty, name_span);
-
-    Some(Statement::binding(pattern, value, span))
-}
-
-/// Extract the variable name from a VariableDeclaration node
-fn extract_var_name(decl_node: &SyntaxNode) -> Option<String> {
-    // Look for Name node
-    if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
-        // Get identifier token from Name
-        return name_node
+    // Find and resolve the pattern
+    // Look for Pattern node first (new syntax), then fall back to Name (old syntax) or BindingPattern
+    let pattern = if let Some(pattern_node) = decl_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Pattern || is_pattern_kind(c.kind()))
+    {
+        // Pass the mutability from the statement level (var vs let)
+        resolve_pattern_with_mutability(&pattern_node, ctx, expected_ty.as_ref(), is_mutable)
+    } else if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
+        // Old syntax: Name node with identifier
+        let name = name_node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::Identifier)
-            .map(|t| t.text().to_string());
-    }
+            .map(|t| t.text().to_string())?;
 
-    // Fallback: look for bare Identifier
-    decl_node
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)
-        .map(|t| t.text().to_string())
-}
+        let name_span = get_node_span(&name_node, ctx.file_id);
+        let mutability = if is_mutable {
+            Mutability::Mutable
+        } else {
+            Mutability::Immutable
+        };
 
-/// Get the span of the name in a variable declaration
-fn get_name_span(decl_node: &SyntaxNode, file_id: usize) -> Option<Span> {
-    if let Some(name_node) = decl_node.children().find(|c| c.kind() == SyntaxKind::Name) {
-        return Some(get_node_span(&name_node, file_id));
-    }
-    None
+        let resolved_ty = expected_ty.unwrap_or_else(|| Ty::infer(span.clone()));
+        let local_id = ctx.local_scope.bind(
+            name.clone(),
+            resolved_ty.clone(),
+            is_mutable,
+            name_span.clone(),
+        );
+
+        Pattern::local(local_id, mutability, name, resolved_ty, name_span)
+    } else {
+        // No pattern found - return error pattern
+        Pattern::error(span.clone())
+    };
+
+    Some(Statement::binding(pattern, value, span))
 }
 
 /// Extract type annotation from a variable declaration
@@ -170,4 +159,88 @@ fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
             );
             resolver.resolve(&ty_node)
         })
+}
+
+/// Resolve a guard-let statement with chain support:
+/// - Single: `guard let pattern = expr else { block }`
+/// - Chain: `guard let .Some(x) = a, let .Some(y) = b, x > 0 else { block }`
+///
+/// Guard-let has special scoping rules:
+/// - Pattern bindings are NOT visible in the else block
+/// - Pattern bindings ARE visible after the guard statement (in subsequent statements)
+/// - In chains, pattern bindings from earlier conditions are visible in later conditions
+pub fn resolve_guard_let_statement(
+    guard_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Statement> {
+    use kestrel_semantic_tree::expr::IfCondition;
+
+    let span = get_node_span(guard_node, ctx.file_id);
+
+    // Resolve else block BEFORE the pattern bindings, so pattern bindings are not visible
+    let else_block = guard_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::CodeBlock)
+        .map(|block_node| {
+            // Resolve the else block before adding pattern bindings
+            // Pattern bindings from THIS guard are not visible, but earlier bindings are
+            resolve_code_block(&block_node, ctx)
+        })
+        .unwrap_or_else(CodeBlock::empty);
+
+    // Collect all conditions (GuardLetCondition or Expression children before CodeBlock)
+    let mut conditions: Vec<IfCondition> = Vec::new();
+    for child in guard_node.children() {
+        if child.kind() == SyntaxKind::CodeBlock {
+            break;
+        }
+        if child.kind() == SyntaxKind::Expression || is_expression_kind(child.kind()) {
+            // Boolean condition
+            let cond_expr = resolve_expression(&child, ctx);
+            conditions.push(IfCondition::Expr(cond_expr));
+        } else if child.kind() == SyntaxKind::GuardLetCondition {
+            // Guard-let condition: let pattern = expr
+            let cond = resolve_guard_let_condition(&child, ctx);
+            conditions.push(cond);
+        }
+    }
+
+    // Ensure we have at least one condition
+    if conditions.is_empty() {
+        conditions.push(IfCondition::Expr(kestrel_semantic_tree::expr::Expression::error(span.clone())));
+    }
+
+    Some(Statement::guard_let(conditions, else_block, span))
+}
+
+/// Resolve a single guard-let condition: let pattern = expr
+fn resolve_guard_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> kestrel_semantic_tree::expr::IfCondition {
+    use kestrel_semantic_tree::expr::IfCondition;
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the value expression (the scrutinee)
+    let value_node = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let value = value_node
+        .map(|n| resolve_expression(&n, ctx))
+        .unwrap_or_else(|| kestrel_semantic_tree::expr::Expression::error(span.clone()));
+
+    // Find and resolve the pattern
+    // Pattern bindings will be added to the current scope for subsequent conditions
+    let pattern_node = node
+        .children()
+        .find(|c| is_pattern_kind(c.kind()));
+
+    let pattern = pattern_node
+        .map(|n| resolve_pattern_with_mutability(&n, ctx, Some(&value.ty), false))
+        .unwrap_or_else(|| Pattern::error(span.clone()));
+
+    IfCondition::Let {
+        pattern,
+        value,
+        span,
+    }
 }

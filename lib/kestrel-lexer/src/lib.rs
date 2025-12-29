@@ -148,6 +148,16 @@ pub enum Token {
     #[token("where")]
     Where,
 
+    // ===== Enum Keywords =====
+    #[token("enum")]
+    Enum,
+
+    #[token("case")]
+    Case,
+
+    #[token("indirect")]
+    Indirect,
+
     // ===== Logical Keywords =====
     #[token("and")]
     And,
@@ -188,6 +198,12 @@ pub enum Token {
 
     #[token("while")]
     While,
+
+    #[token("match")]
+    Match,
+
+    #[token("guard")]
+    Guard,
 
     // ===== Braces =====
     #[token("(")]
@@ -237,6 +253,9 @@ pub enum Token {
     #[token("..<")]
     DotDotLess,
 
+    #[token("..")]
+    DotDot,
+
     #[token("<<")]
     LessLess,
 
@@ -260,6 +279,9 @@ pub enum Token {
 
     #[token("->")]
     Arrow,
+
+    #[token("=>")]
+    FatArrow,
 
     // Single-character operators
     #[token("=")]
@@ -294,6 +316,9 @@ pub enum Token {
 
     #[token(">")]
     Greater,
+
+    #[token("@")]
+    At,
 }
 
 pub type SpannedToken = Spanned<Token>;

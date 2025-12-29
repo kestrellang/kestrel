@@ -117,7 +117,12 @@ impl Query for ResolveValuePath {
 
             // If no direct children match, search extensions for static methods
             // This handles cases like Point.origin() where origin is a static method in an extension
-            if matches.is_empty() && current_symbol.metadata().kind() == KestrelSymbolKind::Struct {
+            if matches.is_empty()
+                && matches!(
+                    current_symbol.metadata().kind(),
+                    KestrelSymbolKind::Struct | KestrelSymbolKind::Enum
+                )
+            {
                 let current_id = current_symbol.metadata().id();
                 let extensions = model.query(ExtensionsFor {
                     target_id: current_id,

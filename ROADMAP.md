@@ -350,18 +350,41 @@
 
 ## Phase 9: Enums & Algebraic Data Types
 
-- [ ] Enum Declarations
-  - [ ] Simple enums: `enum Color { Red, Green, Blue }`
-  - [ ] Enums with associated values: `enum Option[T] { Some(T), None }`
-  - [ ] Recursive enums
-- [ ] Pattern Matching
-  - [ ] `match` expressions
-  - [ ] Exhaustiveness checking
-  - [ ] Patterns: literals, bindings, enum variants, wildcards
-  - [ ] Guard clauses in patterns
-  - [ ] `if let` / `guard let`
+- [x] Enum Declarations
+  - [x] Simple enums: `enum Color { case Red, Green, Blue }`
+  - [x] Enums with associated values: `enum Option[T] { case Some(T), None }`
+  - [x] Recursive enums with `indirect` keyword
+  - [x] Indirect recursion detection through structs
+  - [x] Generic enums with type parameters and where clauses
+  - [x] Enum instantiation (full path `Color.Red` and shorthand `.Red`)
+  - [x] Protocol conformance for enums
+  - [x] Instance methods in enums
+  - [x] Static methods in enums
+  - [x] Enum extensions (`extend Color { ... }`)
+- [x] Pattern Matching
+  - [x] `match` expressions
+  - [x] Exhaustiveness checking
+  - [x] Patterns: literals, bindings, enum variants, wildcards
+  - [x] Guard clauses in patterns
+  - [x] `if let` / `guard let`
 
-## Phase 10: Memory Model
+## Phase 10: Execution Graph
+
+- [ ] Execution Graph IR
+  - [ ] Basic block representation
+  - [ ] Control flow graph structure
+  - [ ] Lower semantic-tree to execution-graph
+- [ ] Operations
+  - [ ] Primitive operations (arithmetic, comparisons)
+  - [ ] Memory operations (load, store, alloc)
+  - [ ] Control flow operations (branch, jump, return)
+  - [ ] Call operations (direct, indirect, method)
+- [ ] Analysis Infrastructure
+  - [ ] CFG traversal utilities
+  - [ ] Dataflow analysis framework
+  - [ ] SSA form (optional)
+
+## Phase 11: Memory Model
 
 - [ ] Value vs Reference Semantics
   - [ ] Structs as value types (copy semantics)
@@ -371,7 +394,7 @@
   - [ ] Ownership/borrowing, or
   - [ ] Garbage collection
 
-## Phase 11: Code Generation
+## Phase 12: Code Generation
 
 - [ ] IR Generation
   - [ ] Choose target: LLVM, WASM, bytecode, or transpile
@@ -381,7 +404,7 @@
 - [ ] Executable Output
   - [ ] Binary or interpreted execution
 
-## Phase 12: Standard Library & Syntactic Sugar
+## Phase 13: Standard Library & Syntactic Sugar
 
 - [ ] Standard Library
   - [ ] Option[T], Result[T, E] (as regular enums)
@@ -399,19 +422,19 @@
 ## Current Status
 
 **Phase**: Phase 9 (Enums & Algebraic Data Types) - 🚧 IN PROGRESS
-**Progress**: Phases 1-8 complete.
+**Progress**: Phases 1-8 complete. Enum declarations complete, pattern matching in progress.
 
-**Phase 8 Completed Features**:
+**Phase 9 Completed Features**:
 
-- ✅ Closure Expressions with multiple syntax forms
-- ✅ Immutable by-value variable captures
-- ✅ First-class function references
-- ✅ Higher-order function support
-- ✅ Closure parameter type inference (bidirectional)
-- ✅ Implicit `it` parameter for single-parameter closures
-- ✅ Multiple trailing closure syntax with labels
+- ✅ Simple and generic enum declarations
+- ✅ Enums with associated values
+- ✅ Recursive enums with `indirect` keyword
+- ✅ Indirect recursion detection through structs
+- ✅ Protocol conformance for enums
+- ✅ Instance and static methods in enums
+- ✅ Enum extensions
 
-**Ready for Phase 9**: Enums & Algebraic Data Types
+**Next Up**: Pattern matching (`match` expressions, exhaustiveness checking)
 
 ## Notes
 

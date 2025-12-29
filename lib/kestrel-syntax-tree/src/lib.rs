@@ -45,6 +45,12 @@ pub enum SyntaxKind {
     StructBody,
     ExtensionDeclaration,
     ExtensionBody,
+    EnumDeclaration,
+    EnumBody,
+    EnumCaseDeclaration,
+    EnumCaseParameter,
+    EnumCaseParameterList,
+    IndirectModifier,
     ImportDeclaration,
     ImportItem,
     ModuleDeclaration,
@@ -102,6 +108,8 @@ pub enum SyntaxKind {
     Statement,           // Wrapper for statement variants
     ExpressionStatement, // expression;
     VariableDeclaration, // let/var name: Type = expr;
+    GuardLetStatement,   // guard let pattern = expr else { block }
+    GuardLetCondition,   // let pattern = expr (in guard-let condition chain)
 
     // Expression nodes
     Expression,     // Wrapper for expression variants
@@ -121,19 +129,46 @@ pub enum SyntaxKind {
     ExprCall,       // foo(1, 2) or expr(args)
     ExprAssignment, // lhs = rhs
     ExprIf,         // if condition { then } else { else }
+    IfLetCondition, // let pattern = expr (in if-let condition)
     ElseClause,     // else { ... } or else if ...
     ExprWhile,      // while condition { body }
+    WhileLetCondition, // let pattern = expr (in while-let condition)
     ExprLoop,       // loop { body }
     ExprBreak,      // break or break label
     ExprContinue,   // continue or continue label
     ExprReturn,     // return or return expr
     ExprTupleIndex, // tuple.0, tuple.1 (tuple element access)
-    ExprClosure,    // { params in body } or { body }
-    ClosureParams,  // (param, param) in closure
-    ClosureParam,   // Single closure parameter: name or name: Type
-    LoopLabel,      // label: (before while/loop)
-    ArgumentList,   // (arg1, label: arg2, ...)
-    Argument,       // Single argument: expr or label: expr
+    ExprClosure,            // { params in body } or { body }
+    ClosureParams,          // (param, param) in closure
+    ClosureParam,           // Single closure parameter: name or name: Type
+    LoopLabel,              // label: (before while/loop)
+    ArgumentList,           // (arg1, label: arg2, ...)
+    Argument,               // Single argument: expr or label: expr
+    ExprImplicitMemberAccess, // .Case or .Case(args)
+    ExprMatch,              // match scrutinee { arms }
+    MatchArm,               // pattern => expression
+    MatchArmGuard,          // if condition (guard clause in match arm)
+
+    // Pattern nodes
+    Pattern,             // Root pattern wrapper
+    WildcardPattern,     // _
+    BindingPattern,      // name or var name
+    TuplePattern,        // (p1, p2, ...)
+    TuplePatternElement, // Single element in tuple pattern
+    LiteralPattern,      // 42, "hello", 'c', true
+    RangePattern,        // 0..=9 or 0..<10 (range pattern)
+    EnumPattern,         // .Case or .Case(args)
+    EnumPatternArg,      // Single arg in enum pattern: label or label: pattern
+    StructPattern,       // Point { x, y } or Point { x: a, y: b }
+    StructPatternField,  // Single field: name or name: pattern
+    StructPatternRest,   // .. (ignore remaining fields)
+    ArrayPattern,        // [a, b, ..rest]
+    ArrayPatternElement, // Single element in array pattern
+    ArrayPatternRest,    // ..rest or .. (rest pattern in arrays)
+    AtPattern,           // name @ pattern (binds name while matching pattern)
+    RestPattern,         // .. (rest pattern in tuples)
+    OrPattern,           // p1 or p2 or ... (or-pattern)
+    ErrorPattern,        // Error recovery
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -147,14 +182,17 @@ pub enum SyntaxKind {
     // Keywords
     As,
     Break,
+    Case,
     Consuming,
     Continue,
     Else,
+    Enum,
     Extend,
     Fileprivate,
     Func,
     If,
     Import,
+    Indirect,
     Loop,
     Init,
     Internal,
@@ -172,6 +210,8 @@ pub enum SyntaxKind {
     Where,
     While,
     In,
+    Match,
+    Guard,
 
     // Logical keywords
     And,
@@ -199,6 +239,7 @@ pub enum SyntaxKind {
     // Multi-character
     DotDotEquals,
     DotDotLess,
+    DotDot,
     LessLess,
     GreaterGreater,
     LessEquals,
@@ -207,6 +248,7 @@ pub enum SyntaxKind {
     BangEquals,
     QuestionQuestion,
     Arrow,
+    FatArrow,
     // Single-character
     Equals,
     Plus,
@@ -219,6 +261,7 @@ pub enum SyntaxKind {
     Caret,
     Less,
     Greater,
+    At,
 
     // Trivia (whitespace and comments)
     Whitespace,
@@ -252,14 +295,17 @@ impl From<Token> for SyntaxKind {
             // Keywords
             Token::As => SyntaxKind::As,
             Token::Break => SyntaxKind::Break,
+            Token::Case => SyntaxKind::Case,
             Token::Consuming => SyntaxKind::Consuming,
             Token::Continue => SyntaxKind::Continue,
             Token::Else => SyntaxKind::Else,
+            Token::Enum => SyntaxKind::Enum,
             Token::Extend => SyntaxKind::Extend,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
             Token::Import => SyntaxKind::Import,
+            Token::Indirect => SyntaxKind::Indirect,
             Token::Init => SyntaxKind::Init,
             Token::Loop => SyntaxKind::Loop,
             Token::Internal => SyntaxKind::Internal,
@@ -277,6 +323,8 @@ impl From<Token> for SyntaxKind {
             Token::Where => SyntaxKind::Where,
             Token::While => SyntaxKind::While,
             Token::In => SyntaxKind::In,
+            Token::Match => SyntaxKind::Match,
+            Token::Guard => SyntaxKind::Guard,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -299,6 +347,7 @@ impl From<Token> for SyntaxKind {
             // Operators
             Token::DotDotEquals => SyntaxKind::DotDotEquals,
             Token::DotDotLess => SyntaxKind::DotDotLess,
+            Token::DotDot => SyntaxKind::DotDot,
             Token::LessLess => SyntaxKind::LessLess,
             Token::GreaterGreater => SyntaxKind::GreaterGreater,
             Token::LessEquals => SyntaxKind::LessEquals,
@@ -307,6 +356,7 @@ impl From<Token> for SyntaxKind {
             Token::BangEquals => SyntaxKind::BangEquals,
             Token::QuestionQuestion => SyntaxKind::QuestionQuestion,
             Token::Arrow => SyntaxKind::Arrow,
+            Token::FatArrow => SyntaxKind::FatArrow,
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
@@ -318,6 +368,7 @@ impl From<Token> for SyntaxKind {
             Token::Caret => SyntaxKind::Caret,
             Token::Less => SyntaxKind::Less,
             Token::Greater => SyntaxKind::Greater,
+            Token::At => SyntaxKind::At,
         }
     }
 }
@@ -339,6 +390,12 @@ impl Language for KestrelLanguage {
         const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
         const EXTENSION_DECLARATION: u16 = SyntaxKind::ExtensionDeclaration as u16;
         const EXTENSION_BODY: u16 = SyntaxKind::ExtensionBody as u16;
+        const ENUM_DECLARATION: u16 = SyntaxKind::EnumDeclaration as u16;
+        const ENUM_BODY: u16 = SyntaxKind::EnumBody as u16;
+        const ENUM_CASE_DECLARATION: u16 = SyntaxKind::EnumCaseDeclaration as u16;
+        const ENUM_CASE_PARAMETER: u16 = SyntaxKind::EnumCaseParameter as u16;
+        const ENUM_CASE_PARAMETER_LIST: u16 = SyntaxKind::EnumCaseParameterList as u16;
+        const INDIRECT_MODIFIER: u16 = SyntaxKind::IndirectModifier as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
         const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
@@ -381,6 +438,8 @@ impl Language for KestrelLanguage {
         const STATEMENT: u16 = SyntaxKind::Statement as u16;
         const EXPRESSION_STATEMENT: u16 = SyntaxKind::ExpressionStatement as u16;
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
+        const GUARD_LET_STATEMENT: u16 = SyntaxKind::GuardLetStatement as u16;
+        const GUARD_LET_CONDITION: u16 = SyntaxKind::GuardLetCondition as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
@@ -398,8 +457,10 @@ impl Language for KestrelLanguage {
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
         const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
+        const IF_LET_CONDITION: u16 = SyntaxKind::IfLetCondition as u16;
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
         const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
+        const WHILE_LET_CONDITION: u16 = SyntaxKind::WhileLetCondition as u16;
         const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
@@ -411,6 +472,30 @@ impl Language for KestrelLanguage {
         const LOOP_LABEL: u16 = SyntaxKind::LoopLabel as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
+        const EXPR_IMPLICIT_MEMBER_ACCESS: u16 = SyntaxKind::ExprImplicitMemberAccess as u16;
+        const EXPR_MATCH: u16 = SyntaxKind::ExprMatch as u16;
+        const MATCH_ARM: u16 = SyntaxKind::MatchArm as u16;
+        const MATCH_ARM_GUARD: u16 = SyntaxKind::MatchArmGuard as u16;
+        // Pattern nodes
+        const PATTERN: u16 = SyntaxKind::Pattern as u16;
+        const WILDCARD_PATTERN: u16 = SyntaxKind::WildcardPattern as u16;
+        const BINDING_PATTERN: u16 = SyntaxKind::BindingPattern as u16;
+        const TUPLE_PATTERN: u16 = SyntaxKind::TuplePattern as u16;
+        const TUPLE_PATTERN_ELEMENT: u16 = SyntaxKind::TuplePatternElement as u16;
+        const LITERAL_PATTERN: u16 = SyntaxKind::LiteralPattern as u16;
+        const RANGE_PATTERN: u16 = SyntaxKind::RangePattern as u16;
+        const ENUM_PATTERN: u16 = SyntaxKind::EnumPattern as u16;
+        const ENUM_PATTERN_ARG: u16 = SyntaxKind::EnumPatternArg as u16;
+        const STRUCT_PATTERN: u16 = SyntaxKind::StructPattern as u16;
+        const STRUCT_PATTERN_FIELD: u16 = SyntaxKind::StructPatternField as u16;
+        const STRUCT_PATTERN_REST: u16 = SyntaxKind::StructPatternRest as u16;
+        const ARRAY_PATTERN: u16 = SyntaxKind::ArrayPattern as u16;
+        const ARRAY_PATTERN_ELEMENT: u16 = SyntaxKind::ArrayPatternElement as u16;
+        const ARRAY_PATTERN_REST: u16 = SyntaxKind::ArrayPatternRest as u16;
+        const AT_PATTERN: u16 = SyntaxKind::AtPattern as u16;
+        const REST_PATTERN: u16 = SyntaxKind::RestPattern as u16;
+        const OR_PATTERN: u16 = SyntaxKind::OrPattern as u16;
+        const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -419,14 +504,17 @@ impl Language for KestrelLanguage {
         const NULL: u16 = SyntaxKind::Null as u16;
         const AS: u16 = SyntaxKind::As as u16;
         const BREAK: u16 = SyntaxKind::Break as u16;
+        const CASE: u16 = SyntaxKind::Case as u16;
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const CONTINUE: u16 = SyntaxKind::Continue as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
+        const ENUM: u16 = SyntaxKind::Enum as u16;
         const EXTEND: u16 = SyntaxKind::Extend as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
         const IMPORT: u16 = SyntaxKind::Import as u16;
+        const INDIRECT: u16 = SyntaxKind::Indirect as u16;
         const INIT: u16 = SyntaxKind::Init as u16;
         const LOOP: u16 = SyntaxKind::Loop as u16;
         const INTERNAL: u16 = SyntaxKind::Internal as u16;
@@ -444,6 +532,8 @@ impl Language for KestrelLanguage {
         const WHERE: u16 = SyntaxKind::Where as u16;
         const WHILE: u16 = SyntaxKind::While as u16;
         const IN: u16 = SyntaxKind::In as u16;
+        const MATCH: u16 = SyntaxKind::Match as u16;
+        const GUARD: u16 = SyntaxKind::Guard as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -472,6 +562,7 @@ impl Language for KestrelLanguage {
         const BANG_EQUALS: u16 = SyntaxKind::BangEquals as u16;
         const QUESTION_QUESTION: u16 = SyntaxKind::QuestionQuestion as u16;
         const ARROW: u16 = SyntaxKind::Arrow as u16;
+        const FAT_ARROW: u16 = SyntaxKind::FatArrow as u16;
         const EQUALS: u16 = SyntaxKind::Equals as u16;
         const PLUS: u16 = SyntaxKind::Plus as u16;
         const MINUS: u16 = SyntaxKind::Minus as u16;
@@ -497,6 +588,12 @@ impl Language for KestrelLanguage {
             STRUCT_BODY => SyntaxKind::StructBody,
             EXTENSION_DECLARATION => SyntaxKind::ExtensionDeclaration,
             EXTENSION_BODY => SyntaxKind::ExtensionBody,
+            ENUM_DECLARATION => SyntaxKind::EnumDeclaration,
+            ENUM_BODY => SyntaxKind::EnumBody,
+            ENUM_CASE_DECLARATION => SyntaxKind::EnumCaseDeclaration,
+            ENUM_CASE_PARAMETER => SyntaxKind::EnumCaseParameter,
+            ENUM_CASE_PARAMETER_LIST => SyntaxKind::EnumCaseParameterList,
+            INDIRECT_MODIFIER => SyntaxKind::IndirectModifier,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
             IMPORT_ITEM => SyntaxKind::ImportItem,
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
@@ -539,6 +636,8 @@ impl Language for KestrelLanguage {
             STATEMENT => SyntaxKind::Statement,
             EXPRESSION_STATEMENT => SyntaxKind::ExpressionStatement,
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
+            GUARD_LET_STATEMENT => SyntaxKind::GuardLetStatement,
+            GUARD_LET_CONDITION => SyntaxKind::GuardLetCondition,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,
             EXPR_INTEGER => SyntaxKind::ExprInteger,
@@ -556,8 +655,10 @@ impl Language for KestrelLanguage {
             EXPR_CALL => SyntaxKind::ExprCall,
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
             EXPR_IF => SyntaxKind::ExprIf,
+            IF_LET_CONDITION => SyntaxKind::IfLetCondition,
             ELSE_CLAUSE => SyntaxKind::ElseClause,
             EXPR_WHILE => SyntaxKind::ExprWhile,
+            WHILE_LET_CONDITION => SyntaxKind::WhileLetCondition,
             EXPR_LOOP => SyntaxKind::ExprLoop,
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
@@ -569,6 +670,30 @@ impl Language for KestrelLanguage {
             LOOP_LABEL => SyntaxKind::LoopLabel,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
+            EXPR_IMPLICIT_MEMBER_ACCESS => SyntaxKind::ExprImplicitMemberAccess,
+            EXPR_MATCH => SyntaxKind::ExprMatch,
+            MATCH_ARM => SyntaxKind::MatchArm,
+            MATCH_ARM_GUARD => SyntaxKind::MatchArmGuard,
+            // Pattern nodes
+            PATTERN => SyntaxKind::Pattern,
+            WILDCARD_PATTERN => SyntaxKind::WildcardPattern,
+            BINDING_PATTERN => SyntaxKind::BindingPattern,
+            TUPLE_PATTERN => SyntaxKind::TuplePattern,
+            TUPLE_PATTERN_ELEMENT => SyntaxKind::TuplePatternElement,
+            LITERAL_PATTERN => SyntaxKind::LiteralPattern,
+            RANGE_PATTERN => SyntaxKind::RangePattern,
+            ENUM_PATTERN => SyntaxKind::EnumPattern,
+            ENUM_PATTERN_ARG => SyntaxKind::EnumPatternArg,
+            STRUCT_PATTERN => SyntaxKind::StructPattern,
+            STRUCT_PATTERN_FIELD => SyntaxKind::StructPatternField,
+            STRUCT_PATTERN_REST => SyntaxKind::StructPatternRest,
+            ARRAY_PATTERN => SyntaxKind::ArrayPattern,
+            ARRAY_PATTERN_ELEMENT => SyntaxKind::ArrayPatternElement,
+            ARRAY_PATTERN_REST => SyntaxKind::ArrayPatternRest,
+            AT_PATTERN => SyntaxKind::AtPattern,
+            REST_PATTERN => SyntaxKind::RestPattern,
+            OR_PATTERN => SyntaxKind::OrPattern,
+            ERROR_PATTERN => SyntaxKind::ErrorPattern,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,
@@ -577,14 +702,17 @@ impl Language for KestrelLanguage {
             NULL => SyntaxKind::Null,
             AS => SyntaxKind::As,
             BREAK => SyntaxKind::Break,
+            CASE => SyntaxKind::Case,
             CONSUMING => SyntaxKind::Consuming,
             CONTINUE => SyntaxKind::Continue,
             ELSE => SyntaxKind::Else,
+            ENUM => SyntaxKind::Enum,
             EXTEND => SyntaxKind::Extend,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,
             IMPORT => SyntaxKind::Import,
+            INDIRECT => SyntaxKind::Indirect,
             INIT => SyntaxKind::Init,
             LOOP => SyntaxKind::Loop,
             INTERNAL => SyntaxKind::Internal,
@@ -602,6 +730,8 @@ impl Language for KestrelLanguage {
             WHERE => SyntaxKind::Where,
             WHILE => SyntaxKind::While,
             IN => SyntaxKind::In,
+            MATCH => SyntaxKind::Match,
+            GUARD => SyntaxKind::Guard,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,
@@ -630,6 +760,7 @@ impl Language for KestrelLanguage {
             BANG_EQUALS => SyntaxKind::BangEquals,
             QUESTION_QUESTION => SyntaxKind::QuestionQuestion,
             ARROW => SyntaxKind::Arrow,
+            FAT_ARROW => SyntaxKind::FatArrow,
             EQUALS => SyntaxKind::Equals,
             PLUS => SyntaxKind::Plus,
             MINUS => SyntaxKind::Minus,

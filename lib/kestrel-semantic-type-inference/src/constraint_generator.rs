@@ -6,6 +6,7 @@
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -54,8 +55,8 @@ pub fn generate_constraints(
 fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Statement) {
     match &stmt.kind {
         StatementKind::Binding { pattern, value } => {
-            // Register the pattern type
-            ctx.register_type(&pattern.ty);
+            // Generate constraints for the pattern
+            generate_pattern_constraints(ctx, pattern);
 
             // If there's an initializer, equate its type with the pattern type
             if let Some(init) = value {
@@ -66,6 +67,194 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
         }
         StatementKind::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
+        }
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Generate constraints for each condition in the chain
+            for condition in conditions {
+                generate_if_condition_constraints(ctx, condition);
+            }
+
+            // Generate constraints for the else block statements
+            for else_stmt in &else_block.statements {
+                generate_statement_constraints(ctx, else_stmt);
+            }
+            // The else block's yield expression (if any)
+            if let Some(yield_expr) = else_block.yield_expr() {
+                generate_expression_constraints(ctx, yield_expr);
+            }
+        }
+    }
+}
+
+/// Generate constraints for a pattern.
+///
+/// This registers the pattern's type and generates constraints based on the pattern kind:
+/// - For tuples: creates tuple type constraints from elements
+/// - For literals: constrains to the literal's type
+/// - For enum variants: the case resolution happens later during type application
+///
+/// # Arguments
+/// * `ctx` - The inference context to add constraints to
+/// * `pattern` - The pattern to generate constraints for
+pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pattern) {
+    // Register the pattern's type
+    ctx.register_type(&pattern.ty);
+
+    match &pattern.kind {
+        PatternKind::Local { .. } => {
+            // Local bindings just register their type - nothing more needed
+        }
+
+        PatternKind::Wildcard => {
+            // Wildcard patterns match anything - type is already registered
+        }
+
+        PatternKind::Tuple { prefix, has_rest, suffix } => {
+            // For tuple patterns, generate constraints for each element
+            // and ensure the tuple type matches
+            if let TyKind::Tuple(elem_tys) = pattern.ty.kind() {
+                // Handle prefix elements (matched from the start)
+                for (i, elem) in prefix.iter().enumerate() {
+                    generate_pattern_constraints(ctx, elem);
+                    if let Some(elem_ty) = elem_tys.get(i) {
+                        ctx.register_type(elem_ty);
+                        ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                    }
+                }
+
+                // Handle suffix elements (matched from the end)
+                let suffix_start = elem_tys.len().saturating_sub(suffix.len());
+                for (i, elem) in suffix.iter().enumerate() {
+                    generate_pattern_constraints(ctx, elem);
+                    if let Some(elem_ty) = elem_tys.get(suffix_start + i) {
+                        ctx.register_type(elem_ty);
+                        ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
+                    }
+                }
+            } else {
+                // Pattern type is not a tuple - still process all elements
+                for elem in prefix.iter().chain(suffix.iter()) {
+                    generate_pattern_constraints(ctx, elem);
+                }
+            }
+        }
+
+        PatternKind::Literal { .. } => {
+            // Literal patterns have concrete types - nothing more needed
+            // The type is set during pattern creation
+        }
+
+        PatternKind::EnumVariant { case_name, bindings, .. } => {
+            // For enum patterns, generate constraints for each binding
+            for binding in bindings {
+                generate_pattern_constraints(ctx, &binding.pattern);
+            }
+            
+            // Generate a constraint to validate the enum case exists and connect
+            // binding types to the enum case's parameter types.
+            let binding_tys: Vec<(Option<String>, _)> = bindings
+                .iter()
+                .map(|b| {
+                    ctx.register_type(&b.pattern.ty);
+                    (b.label.clone(), b.pattern.ty.id())
+                })
+                .collect();
+            
+            ctx.enum_pattern_binding(
+                pattern.ty.id(),
+                case_name.clone(),
+                binding_tys,
+                pattern.span.clone(),
+            );
+        }
+
+        PatternKind::Range { .. } => {
+            // Range patterns have concrete types (Int or Char) - type is already set
+        }
+
+        PatternKind::Struct { struct_name, fields, has_rest, .. } => {
+            // For struct patterns, generate constraints for each field pattern
+            for field in fields {
+                generate_pattern_constraints(ctx, &field.pattern);
+            }
+            
+            // Generate struct pattern binding constraint to connect field types
+            // to the struct's field types
+            let field_bindings: Vec<(String, _)> = fields
+                .iter()
+                .map(|f| {
+                    ctx.register_type(&f.pattern.ty);
+                    (f.field_name.clone(), f.pattern.ty.id())
+                })
+                .collect();
+            
+            ctx.struct_pattern_binding(
+                pattern.ty.id(),
+                struct_name.clone(),
+                field_bindings,
+                *has_rest,
+                pattern.span.clone(),
+            );
+        }
+
+        PatternKind::Array { prefix, suffix, .. } => {
+            // For array patterns, generate constraints for prefix and suffix patterns
+            for elem in prefix {
+                generate_pattern_constraints(ctx, elem);
+            }
+            for elem in suffix {
+                generate_pattern_constraints(ctx, elem);
+            }
+            // The rest pattern (.. or ..name) is just a marker/binding - no pattern constraints needed
+        }
+
+        PatternKind::Or { alternatives } => {
+            // For or-patterns, generate constraints for each alternative
+            // and equate their types with the or-pattern's type
+            for alt in alternatives {
+                generate_pattern_constraints(ctx, alt);
+                // Each alternative's type must equal the or-pattern's type
+                ctx.equate(pattern.ty.id(), alt.ty.id(), alt.span.clone());
+            }
+        }
+
+        PatternKind::At { subpattern, .. } => {
+            // For at-patterns, generate constraints for the subpattern
+            generate_pattern_constraints(ctx, subpattern);
+            // The @ pattern's type must equal the subpattern's type
+            ctx.equate(pattern.ty.id(), subpattern.ty.id(), pattern.span.clone());
+        }
+
+        PatternKind::Rest => {
+            // Rest patterns are just markers - no additional constraints needed
+        }
+
+        PatternKind::Error => {
+            // Error patterns are poison values - don't generate constraints
+        }
+    }
+}
+
+/// Generate constraints for an if condition (used by if-let, while-let, guard-let chains).
+fn generate_if_condition_constraints(
+    ctx: &mut InferenceContext<'_>,
+    condition: &kestrel_semantic_tree::expr::IfCondition,
+) {
+    use kestrel_semantic_tree::expr::IfCondition;
+    match condition {
+        IfCondition::Expr(expr) => {
+            generate_expression_constraints(ctx, expr);
+            // Boolean condition must be Bool
+            let bool_ty = Ty::bool(expr.span.clone());
+            ctx.register_type(&bool_ty);
+            ctx.equate(expr.ty.id(), bool_ty.id(), expr.span.clone());
+        }
+        IfCondition::Let { pattern, value, .. } => {
+            // Generate constraints for the scrutinee expression
+            generate_expression_constraints(ctx, value);
+            // Generate constraints for the pattern (pattern type == scrutinee type)
+            generate_pattern_constraints(ctx, pattern);
+            ctx.equate(pattern.ty.id(), value.ty.id(), value.span.clone());
         }
     }
 }
@@ -109,7 +298,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // References: type is already set during binding
         ExprKind::LocalRef(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) => {}
-        ExprKind::OverloadedRef(_) | ExprKind::TypeParameterRef(_) => {}
+        ExprKind::OverloadedRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef => {}
 
         // Field access: type is the field type
         ExprKind::FieldAccess { object, .. } => {
@@ -208,16 +397,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // Control flow
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            generate_expression_constraints(ctx, condition);
-            // Condition must be Bool
-            let bool_ty = Ty::bool(condition.span.clone());
-            ctx.register_type(&bool_ty);
-            ctx.equate(condition.ty.id(), bool_ty.id(), condition.span.clone());
+            // Process each condition
+            for condition in conditions {
+                generate_if_condition_constraints(ctx, condition);
+            }
 
             // Process then branch
             for stmt in then_branch {
@@ -225,6 +413,11 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
             if let Some(then_val) = then_value {
                 generate_expression_constraints(ctx, then_val);
+                // Only equate then value type with expression type when there's an else branch.
+                // Without else, the if expression type is () and the then value is discarded.
+                if else_branch.is_some() {
+                    ctx.equate(expr.ty.id(), then_val.ty.id(), then_val.span.clone());
+                }
             }
 
             // Process else branch
@@ -236,10 +429,14 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         }
                         if let Some(else_val) = value {
                             generate_expression_constraints(ctx, else_val);
+                            // Else branch value type equals expression type
+                            ctx.equate(expr.ty.id(), else_val.ty.id(), else_val.span.clone());
                         }
                     }
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(else_if) => {
                         generate_expression_constraints(ctx, else_if);
+                        // Else-if expression type equals this expression type
+                        ctx.equate(expr.ty.id(), else_if.ty.id(), else_if.span.clone());
                     }
                 }
             }
@@ -254,6 +451,20 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             ctx.register_type(&bool_ty);
             ctx.equate(condition.ty.id(), bool_ty.id(), condition.span.clone());
 
+            for stmt in body {
+                generate_statement_constraints(ctx, stmt);
+            }
+        }
+
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
+            // Generate constraints for each condition in the chain
+            for condition in conditions {
+                generate_if_condition_constraints(ctx, condition);
+            }
+
+            // Generate constraints for body statements
             for stmt in body {
                 generate_statement_constraints(ctx, stmt);
             }
@@ -422,6 +633,80 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         generate_expression_constraints(ctx, tail);
                     }
                 }
+            }
+        }
+
+        // Enum case reference: type is already set during binding
+        ExprKind::EnumCase { .. } => {}
+
+        // Implicit member access: will be resolved during type inference
+        ExprKind::ImplicitMemberAccess { member_name, arguments } => {
+            // Register the expression type
+            ctx.register_type(&expr.ty);
+            
+            // Process argument expressions and collect their type IDs
+            let argument_tys: Vec<(Option<String>, _)> = arguments
+                .as_ref()
+                .map(|args| {
+                    args.iter()
+                        .map(|arg| {
+                            generate_expression_constraints(ctx, &arg.value);
+                            ctx.register_type(&arg.value.ty);
+                            (arg.label.clone(), arg.value.ty.id())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            
+            // Generate the ImplicitMember constraint
+            ctx.implicit_member(
+                expr.ty.id(),
+                member_name.clone(),
+                argument_tys,
+                expr.id,
+                expr.span.clone(),
+            );
+        }
+
+        ExprKind::Match { scrutinee, arms } => {
+            // Generate constraints for the scrutinee
+            generate_expression_constraints(ctx, scrutinee);
+            ctx.register_type(&scrutinee.ty);
+
+            // Generate constraints for each arm
+            for arm in arms {
+                // Generate constraints for the pattern
+                generate_pattern_constraints(ctx, &arm.pattern);
+                ctx.register_type(&arm.pattern.ty);
+
+                // Pattern type must match scrutinee type
+                ctx.equate(
+                    arm.pattern.ty.id(),
+                    scrutinee.ty.id(),
+                    arm.pattern.span.clone(),
+                );
+
+                // Generate constraints for the guard if present
+                if let Some(guard) = &arm.guard {
+                    generate_expression_constraints(ctx, guard);
+                    ctx.register_type(&guard.ty);
+                    // Guard must be Bool
+                    let bool_ty = Ty::bool(guard.span.clone());
+                    ctx.register_type(&bool_ty);
+                    ctx.equate(guard.ty.id(), bool_ty.id(), guard.span.clone());
+                }
+
+                // Generate constraints for the body
+                generate_expression_constraints(ctx, &arm.body);
+                ctx.register_type(&arm.body.ty);
+
+                // Body type contributes to match expression type
+                // All arms should have compatible types
+                ctx.equate(
+                    expr.ty.id(),
+                    arm.body.ty.id(),
+                    arm.body.span.clone(),
+                );
             }
         }
 

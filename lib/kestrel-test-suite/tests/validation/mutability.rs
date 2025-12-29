@@ -291,10 +291,10 @@ mod initializers {
                 var count: Int
 
                 init(id: Int, name: String, value: Int, count: Int) {
-                    self.id = id
-                    self.name = name
-                    self.value = value
-                    self.count = count
+                    self.id = id;
+                    self.name = name;
+                    self.value = value;
+                    self.count = count;
                 }
             }
         "#,
@@ -312,8 +312,8 @@ mod initializers {
                 let y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
         "#,
@@ -331,8 +331,8 @@ mod initializers {
                 var y: Int
 
                 init(x: Int, y: Int) {
-                    self.x = x
-                    self.y = y
+                    self.x = x;
+                    self.y = y;
                 }
             }
         "#,

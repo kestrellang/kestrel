@@ -83,8 +83,8 @@ func getStartX(line: Line) -> Int {
 module Main
 
 struct Point {
-    pub let x: Int
-    pub let y: Int
+    public let x: Int
+    public let y: Int
 }
 
 func getX(p: Point) -> Int {

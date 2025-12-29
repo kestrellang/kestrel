@@ -198,6 +198,18 @@ impl<'a> TypeResolver<'a> {
                 )
             }
 
+            TyKind::Enum { symbol, .. } => {
+                let type_params = symbol.type_parameters();
+                let type_name = symbol.metadata().name().value.clone();
+                self.apply_type_args_to_generic(
+                    &type_params,
+                    &type_name,
+                    type_args,
+                    span.clone(),
+                    |subs| Ty::generic_enum(symbol.clone(), subs, span),
+                )
+            }
+
             // Non-generic types with type arguments is an error
             _ => {
                 let type_name = match resolved_ty.kind() {

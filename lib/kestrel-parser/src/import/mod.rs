@@ -1,10 +1,10 @@
-use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_import_declaration, import_declaration_parser_internal};
 use crate::event::EventSink;
+use crate::input::{create_input, prepare_tokens, to_kestrel_span};
 use crate::module::ModulePath;
 
 /// Represents an import declaration
@@ -87,11 +87,12 @@ pub fn parse_import_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    use chumsky::prelude::*;
 
-    match import_declaration_parser_internal().parse(stream) {
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
+
+    match import_declaration_parser_internal().parse(input).into_result() {
         Ok((import_span, path_segments, alias, items)) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
         }
@@ -100,7 +101,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

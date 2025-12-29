@@ -17,6 +17,7 @@ use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -36,8 +37,8 @@ use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, matches_signature,
-    substitute_self,
+    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, infer_type_arguments,
+    matches_signature, substitute_self, substitute_type,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -77,6 +78,17 @@ pub fn resolve_member_access(
     if let ExprKind::TypeParameterRef(symbol_id) = &base.kind {
         return resolve_type_parameter_static_member(
             *symbol_id,
+            member_name,
+            member_span,
+            full_span,
+            ctx,
+        );
+    }
+
+    // 0.5. Check if base is an AssociatedTypeRef (for chained access like T.Next.Next.method())
+    if let ExprKind::AssociatedTypeRef = &base.kind {
+        return resolve_associated_type_member_access(
+            &base,
             member_name,
             member_span,
             full_span,
@@ -531,9 +543,28 @@ pub fn resolve_member_call(
 
                 // Apply substitutions from the base type to the return type
                 // e.g., for Box[Int].get() where get returns T, substitute T with Int
+                // or for Option[Int].Some where Some returns Option[T], substitute T with Int
                 let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
                 if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
                     return_ty = return_ty.apply_substitutions(substitutions);
+                } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs() {
+                    // Check if base type already has concrete substitutions
+                    let has_concrete_subs = !substitutions.is_empty() 
+                        && substitutions.iter().all(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
+                    
+                    if has_concrete_subs {
+                        // Base type has concrete type args (e.g., Option[Int].Some)
+                        return_ty = return_ty.apply_substitutions(substitutions);
+                    } else {
+                        // Base type has no concrete type args - infer from arguments
+                        // e.g., Option.Some(value: 42) should infer T = Int from the argument
+                        let type_params = enum_sym.type_parameters();
+                        if !type_params.is_empty() {
+                            let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                            let inferred_subs = infer_type_arguments(&type_params, &callable, &arg_types);
+                            return_ty = substitute_type(&return_ty, &inferred_subs);
+                        }
+                    }
                 }
 
                 // Create method ref and then call
@@ -877,7 +908,19 @@ fn resolve_type_parameter_static_member(
     }
 
     // For Self substitution - use the type parameter type so T.create() returns T, not _
-    let type_param_ty = Ty::type_parameter(type_param_arc, full_span.clone());
+    let type_param_ty = Ty::type_parameter(type_param_arc.clone(), full_span.clone());
+
+    // First, check if member_name is an associated type in any protocol bound
+    // This enables chained associated type access like T.Next.Next.baseValue()
+    if let Some(assoc_type_expr) = find_associated_type_in_bounds(
+        &bounds,
+        member_name,
+        &type_param_ty,
+        full_span.clone(),
+        ctx,
+    ) {
+        return assoc_type_expr;
+    }
 
     // Collect static methods from all protocol bounds
     let mut candidates: Vec<StaticMethodCandidate> = Vec::new();
@@ -944,6 +987,184 @@ fn resolve_type_parameter_static_member(
             type_param_ty.clone(),
             Span::from(full_span.start..full_span.start),
         ),
+        method_ids,
+        member_name.to_string(),
+        full_span,
+    )
+}
+
+/// Find an associated type with the given name in the protocol bounds.
+///
+/// Returns an `AssociatedTypeRef` expression if found, or `None` if no matching
+/// associated type exists in any of the bounds.
+fn find_associated_type_in_bounds(
+    bounds: &[Ty],
+    member_name: &str,
+    container_ty: &Ty,
+    span: Span,
+    ctx: &BodyResolutionContext,
+) -> Option<Expression> {
+    for bound in bounds {
+        if let TyKind::Protocol { symbol: protocol, .. } = bound.kind() {
+            // Check direct children of protocol for associated types
+            let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+            for child in protocol_dyn.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                    && child.metadata().name().value == member_name
+                {
+                    // Found an associated type - create a qualified associated type
+                    if let Some(symbol) = ctx.model.query(SymbolFor {
+                        id: child.metadata().id(),
+                    }) {
+                        if let Ok(assoc_type_arc) =
+                            symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+                        {
+                            let qualified_ty = Ty::qualified_associated_type(
+                                assoc_type_arc,
+                                container_ty.clone(),
+                                span.clone(),
+                            );
+                            return Some(Expression::associated_type_ref(qualified_ty, span));
+                        }
+                    }
+                }
+            }
+
+            // Check inherited protocols (via FlattenedProtocolBehavior)
+            if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+                if let Some(flattened_assoc) = flattened.associated_types().get(member_name) {
+                    let qualified_ty = Ty::qualified_associated_type(
+                        flattened_assoc.symbol.clone(),
+                        container_ty.clone(),
+                        span.clone(),
+                    );
+                    return Some(Expression::associated_type_ref(qualified_ty, span));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve member access on an associated type expression.
+///
+/// This handles chained associated type access like `T.Next.Next.baseValue()`.
+/// When the base is an `AssociatedTypeRef`, we look at the associated type's bounds
+/// to find either another associated type or a static method.
+fn resolve_associated_type_member_access(
+    base: &Expression,
+    member_name: &str,
+    _member_span: Span,
+    full_span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Extract the associated type symbol and container from base.ty
+    let TyKind::AssociatedType { symbol: assoc_type, container } = base.ty.kind() else {
+        // Should not happen - AssociatedTypeRef should always have AssociatedType ty
+        return Expression::error(full_span);
+    };
+
+    // Get the bounds of the associated type (e.g., `type Next: Level2` has bounds [Level2])
+    let Some(bounds) = assoc_type.bounds() else {
+        // No bounds - cannot access members on unconstrained associated type
+        // This is similar to an unconstrained type parameter
+        let error = UnconstrainedTypeParameterMemberError {
+            span: full_span.clone(),
+            member_name: member_name.to_string(),
+            type_param_name: assoc_type.metadata().name().value.clone(),
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    };
+
+    if bounds.is_empty() {
+        let error = UnconstrainedTypeParameterMemberError {
+            span: full_span.clone(),
+            member_name: member_name.to_string(),
+            type_param_name: assoc_type.metadata().name().value.clone(),
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    }
+
+    // The container type for nested lookups is the qualified associated type itself
+    // e.g., for T.Next.Next, the container for the second Next is T.Next
+    let container_ty = match container {
+        Some(c) => Ty::qualified_associated_type(assoc_type.clone(), (**c).clone(), full_span.clone()),
+        None => base.ty.clone(),
+    };
+
+    // First, check if member_name is an associated type in any protocol bound
+    if let Some(assoc_type_expr) = find_associated_type_in_bounds(
+        &bounds,
+        member_name,
+        &container_ty,
+        full_span.clone(),
+        ctx,
+    ) {
+        return assoc_type_expr;
+    }
+
+    // Collect static methods from all protocol bounds
+    let mut candidates: Vec<StaticMethodCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Collect static methods from this protocol
+            collect_protocol_static_methods(proto, member_name, &container_ty, &mut candidates);
+        }
+    }
+
+    if candidates.is_empty() {
+        // No static method found with that name in any bound
+        let error = MethodNotInBoundsError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            type_param_name: assoc_type.metadata().name().value.clone(),
+            bound_names,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    }
+
+    // Check for ambiguity - same method in multiple protocols
+    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let unique_candidates: Vec<&StaticMethodCandidate> = candidates
+        .iter()
+        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
+        .collect();
+
+    if unique_candidates.len() > 1 {
+        // Multiple protocols have the same static method
+        let protocol_names: Vec<String> = unique_candidates
+            .iter()
+            .map(|c| c.protocol_name.clone())
+            .collect();
+        let definition_spans: Vec<(String, Span)> = unique_candidates
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
+            .collect();
+
+        let error = AmbiguousConstrainedMethodError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return Expression::error(full_span);
+    }
+
+    // Single method found - create method reference
+    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
+
+    // Clone the base expression for the receiver
+    Expression::method_ref(
+        base.clone(),
         method_ids,
         member_name.to_string(),
         full_span,
@@ -1038,13 +1259,14 @@ fn filter_applicable_extensions(
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 
-    // Get substitutions from actual type
-    let actual_subs = match actual_ty.as_struct_with_subs() {
-        Some((_, subs)) => subs,
-        None => {
-            // Not a struct type - no extensions apply
-            return Vec::new();
-        }
+    // Get substitutions from actual type (struct or enum)
+    let actual_subs = if let Some((_, subs)) = actual_ty.as_struct_with_subs() {
+        subs
+    } else if let Some((_, subs)) = actual_ty.as_enum_with_subs() {
+        subs
+    } else {
+        // Not a struct or enum type - no extensions apply
+        return Vec::new();
     };
 
     // Filter extensions by applicability
@@ -1063,10 +1285,13 @@ fn filter_applicable_extensions(
 
             let target_ty = target_behavior.target_type();
 
-            // Extract substitutions from extension's target type
-            let extension_subs = match target_ty.as_struct_with_subs() {
-                Some((_, subs)) => subs,
-                None => return None,
+            // Extract substitutions from extension's target type (struct or enum)
+            let extension_subs = if let Some((_, subs)) = target_ty.as_struct_with_subs() {
+                subs
+            } else if let Some((_, subs)) = target_ty.as_enum_with_subs() {
+                subs
+            } else {
+                return None;
             };
 
             // Check if this extension's type arguments are applicable to the actual type

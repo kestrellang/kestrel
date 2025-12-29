@@ -1,3 +1,5 @@
+pub mod enum_builder;
+pub mod enum_case;
 pub mod extension;
 pub mod field;
 pub mod function;
@@ -10,6 +12,8 @@ pub mod terminal;
 pub mod type_alias;
 pub mod type_parameter;
 
+pub use enum_builder::EnumBuilder;
+pub use enum_case::EnumCaseBuilder;
 pub use extension::ExtensionBuilder;
 pub use field::FieldBuilder;
 pub use function::FunctionBuilder;

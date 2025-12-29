@@ -123,6 +123,7 @@ impl<'a> InferenceContext<'a> {
                 self.register_type(return_type);
             }
             TyKind::Struct { substitutions, .. }
+            | TyKind::Enum { substitutions, .. }
             | TyKind::Protocol { substitutions, .. }
             | TyKind::TypeAlias { substitutions, .. } => {
                 for (_, sub_ty) in substitutions.iter() {
@@ -211,6 +212,55 @@ impl<'a> InferenceContext<'a> {
     ) {
         self.constraints.push(Constraint::member_access(
             receiver, member, is_static, result, expr_id, span,
+        ));
+    }
+
+    /// Add an implicit member constraint: resolve `.Member` or `.Member(args)` based on expected type.
+    ///
+    /// This is used for enum shorthand syntax where the enum type is inferred from context.
+    pub fn implicit_member(
+        &mut self,
+        expr_ty: TyId,
+        member_name: String,
+        argument_tys: Vec<(Option<String>, TyId)>,
+        expr_id: ExprId,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::implicit_member(
+            expr_ty, member_name, argument_tys, expr_id, span,
+        ));
+    }
+
+    /// Add an enum pattern binding constraint.
+    ///
+    /// This is used when matching enum patterns like `.Some(value)` to connect
+    /// the binding's type to the enum case's parameter type.
+    pub fn enum_pattern_binding(
+        &mut self,
+        enum_ty: TyId,
+        case_name: String,
+        binding_tys: Vec<(Option<String>, TyId)>,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::enum_pattern_binding(
+            enum_ty, case_name, binding_tys, span,
+        ));
+    }
+
+    /// Add a struct pattern binding constraint.
+    ///
+    /// This is used when matching struct patterns like `Point { x, y }` to connect
+    /// the binding's type to the struct's field types.
+    pub fn struct_pattern_binding(
+        &mut self,
+        struct_ty: TyId,
+        struct_name: String,
+        field_bindings: Vec<(String, TyId)>,
+        has_rest: bool,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::struct_pattern_binding(
+            struct_ty, struct_name, field_bindings, has_rest, span,
         ));
     }
 

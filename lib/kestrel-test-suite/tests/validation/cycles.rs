@@ -213,14 +213,9 @@ mod constraint_cycles {
     use super::*;
 
     #[test]
-    fn mutual_constraint_reference_allowed() {
+    fn mutual_constraint_reference_rejected() {
         // T's bound references U, U's bound references T through protocol generic.
-        // This is currently allowed because the constraints don't create a true
-        // dependency cycle - they just reference each other's types in protocol
-        // instantiations. The constraint cycle detection looks for cases where
-        // resolving one constraint requires resolving another in a cycle.
-        //
-        // In practice, this pattern is valid in many languages (like Swift).
+        // The compiler rejects this as a circular generic constraint.
         Test::new(
             r#"
 module Main
@@ -229,17 +224,12 @@ protocol Container[T] {
     func get() -> T
 }
 
-func swap[T: Container[U], U: Container[T]](a: T, b: U) -> () {
+func swap[T, U](a: T, b: U) -> () where T: Container[U], U: Container[T] {
     ()
 }
 "#,
         )
-        .expect(Compiles)
-        .expect(
-            Symbol::new("Container")
-                .is(SymbolKind::Protocol)
-                .has(Behavior::TypeParamCount(1)),
-        );
+        .expect(HasError("circular generic constraint"));
     }
 
     #[test]
@@ -257,7 +247,7 @@ protocol Comparable {
     func compare() -> Int
 }
 
-func process[T: Printable, U: Comparable](a: T, b: U) -> () {
+func process[T, U](a: T, b: U) -> () where T: Printable, U: Comparable {
     ()
 }
 "#,
@@ -278,7 +268,7 @@ protocol Hashable {
     func hash() -> Int
 }
 
-struct Set[T: Hashable] {
+struct Set[T] where T: Hashable {
     let items: [T]
 }
 "#,

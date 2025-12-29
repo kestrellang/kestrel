@@ -89,6 +89,56 @@ pub enum Constraint {
         /// Span for error reporting
         span: Span,
     },
+
+    /// Implicit member access for enum shorthand: .Case or .Case(args)
+    ///
+    /// Resolved when the expression's expected type becomes known through
+    /// unification with context (e.g., parameter type, return type, binding type).
+    ImplicitMember {
+        /// The expression's type (starts as Infer, unified with expected type)
+        expr_ty: TyId,
+        /// The member/case name
+        member_name: String,
+        /// Argument type IDs if present (for associated values)
+        /// Each entry is (optional label, type_id)
+        argument_tys: Vec<(Option<String>, TyId)>,
+        /// Expression ID for value resolution recording
+        expr_id: ExprId,
+        /// Span for error reporting
+        span: Span,
+    },
+
+    /// Enum pattern binding constraint: binds pattern types to enum case parameter types.
+    ///
+    /// When matching `.Some(value)`, the type of `value` must match the `Some` case's
+    /// parameter type. This constraint defers the binding until the enum type is known.
+    EnumPatternBinding {
+        /// The enum type (pattern's type, which equals the scrutinee type)
+        enum_ty: TyId,
+        /// The case name being matched (e.g., "Some")
+        case_name: String,
+        /// Binding types: each entry is (optional label, binding pattern's TyId)
+        binding_tys: Vec<(Option<String>, TyId)>,
+        /// Span for error reporting
+        span: Span,
+    },
+
+    /// Struct pattern binding constraint: binds pattern types to struct field types.
+    ///
+    /// When matching `Point { x, y }`, the types of `x` and `y` bindings must match
+    /// the `Point` struct's field types. This constraint defers until the struct type is known.
+    StructPatternBinding {
+        /// The struct type (pattern's type, which equals the scrutinee type)
+        struct_ty: TyId,
+        /// The struct name as written in the pattern
+        struct_name: String,
+        /// Field bindings: each entry is (field_name, binding pattern's TyId)
+        field_bindings: Vec<(String, TyId)>,
+        /// Whether the pattern has a rest pattern (`..`) to ignore extra fields
+        has_rest: bool,
+        /// Span for error reporting
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -138,6 +188,58 @@ impl Constraint {
             Constraint::Conforms { protocol, .. } => &protocol.span,
             Constraint::Normalizes { span, .. } => span,
             Constraint::MemberAccess { span, .. } => span,
+            Constraint::ImplicitMember { span, .. } => span,
+            Constraint::EnumPatternBinding { span, .. } => span,
+            Constraint::StructPatternBinding { span, .. } => span,
+        }
+    }
+
+    /// Create an implicit member access constraint.
+    pub fn implicit_member(
+        expr_ty: TyId,
+        member_name: String,
+        argument_tys: Vec<(Option<String>, TyId)>,
+        expr_id: ExprId,
+        span: Span,
+    ) -> Self {
+        Constraint::ImplicitMember {
+            expr_ty,
+            member_name,
+            argument_tys,
+            expr_id,
+            span,
+        }
+    }
+
+    /// Create an enum pattern binding constraint.
+    pub fn enum_pattern_binding(
+        enum_ty: TyId,
+        case_name: String,
+        binding_tys: Vec<(Option<String>, TyId)>,
+        span: Span,
+    ) -> Self {
+        Constraint::EnumPatternBinding {
+            enum_ty,
+            case_name,
+            binding_tys,
+            span,
+        }
+    }
+
+    /// Create a struct pattern binding constraint.
+    pub fn struct_pattern_binding(
+        struct_ty: TyId,
+        struct_name: String,
+        field_bindings: Vec<(String, TyId)>,
+        has_rest: bool,
+        span: Span,
+    ) -> Self {
+        Constraint::StructPatternBinding {
+            struct_ty,
+            struct_name,
+            field_bindings,
+            has_rest,
+            span,
         }
     }
 }

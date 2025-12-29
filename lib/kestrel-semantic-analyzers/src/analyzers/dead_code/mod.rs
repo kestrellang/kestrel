@@ -4,7 +4,7 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::ExecutableBodyFor;
-use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -125,6 +125,29 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
         } => analyze_expression(expr, errors),
         StatementKind::Binding { value: None, .. } => Divergence::None,
         StatementKind::Expr(expr) => analyze_expression(expr, errors),
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Analyze each condition
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        let div = analyze_expression(expr, errors);
+                        if div != Divergence::None {
+                            return div;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        let div = analyze_expression(value, errors);
+                        if div != Divergence::None {
+                            return div;
+                        }
+                    }
+                }
+            }
+            // The else block must diverge, but the guard-let itself doesn't diverge
+            // (control continues after guard-let if the pattern matches)
+            let _ = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), errors);
+            Divergence::None
+        }
     }
 }
 
@@ -139,14 +162,20 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         ExprKind::Break { .. } => Divergence::Breaks,
         ExprKind::Continue { .. } => Divergence::Continues,
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            let cond_div = analyze_expression(condition, errors);
-            if cond_div.diverges() {
-                return cond_div;
+            // Analyze all conditions
+            for condition in conditions {
+                let cond_div = match condition {
+                    IfCondition::Expr(expr) => analyze_expression(expr, errors),
+                    IfCondition::Let { value, .. } => analyze_expression(value, errors),
+                };
+                if cond_div.diverges() {
+                    return cond_div;
+                }
             }
 
             let then_div = analyze_block(then_branch, then_value.as_deref(), errors);
@@ -173,6 +202,40 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             let cond_div = analyze_expression(condition, errors);
             if cond_div.diverges() {
                 return cond_div;
+            }
+            let mut body_div = Divergence::None;
+            for stmt in body {
+                if body_div.diverges() {
+                    if let Some(reason) = body_div.to_reason() {
+                        errors.push(UnreachableCodeWarning {
+                            span: stmt.span.clone(),
+                            reason,
+                        });
+                    }
+                    break;
+                }
+                body_div = analyze_statement(stmt, errors);
+            }
+            Divergence::None
+        }
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        let div = analyze_expression(expr, errors);
+                        if div.diverges() {
+                            return div;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        let div = analyze_expression(value, errors);
+                        if div.diverges() {
+                            return div;
+                        }
+                    }
+                }
             }
             let mut body_div = Divergence::None;
             for stmt in body {
@@ -302,6 +365,18 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             // Closures don't cause divergence in the enclosing scope
             Divergence::None
         }
+        // Implicit member access - check arguments if present
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    let d = analyze_expression(&arg.value, errors);
+                    if d.diverges() {
+                        return d;
+                    }
+                }
+            }
+            Divergence::None
+        }
         // Leaf expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -309,7 +384,36 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
+        | ExprKind::EnumCase { .. }
         | ExprKind::Error => Divergence::None,
+
+        // Match expressions - all arms must diverge for the match to diverge
+        ExprKind::Match { scrutinee, arms } => {
+            // Analyze scrutinee for any errors
+            let _ = analyze_expression(scrutinee, errors);
+            
+            if arms.is_empty() {
+                Divergence::None
+            } else {
+                // Check if all arms diverge
+                let mut all_diverge = true;
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        let _ = analyze_expression(guard, errors);
+                    }
+                    let body_divergence = analyze_expression(&arm.body, errors);
+                    if !body_divergence.diverges() {
+                        all_diverge = false;
+                    }
+                }
+                if all_diverge {
+                    Divergence::Returns
+                } else {
+                    Divergence::None
+                }
+            }
+        }
     }
 }
 
@@ -319,36 +423,7 @@ fn statement_contains_break(stmt: &StatementKind) -> bool {
             kind: ExprKind::Break { .. },
             ..
         }) => true,
-        StatementKind::Expr(Expression {
-            kind:
-                ExprKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                },
-            ..
-        }) => {
-            then_branch
-                .iter()
-                .any(|s| statement_contains_break(&s.kind))
-                || else_branch
-                    .as_ref()
-                    .map(|b| match b {
-                        ElseBranch::Block { statements, .. } => {
-                            statements.iter().any(|s| statement_contains_break(&s.kind))
-                        }
-                        ElseBranch::ElseIf(e) => expression_contains_break(e),
-                    })
-                    .unwrap_or(false)
-        }
-        StatementKind::Expr(Expression {
-            kind: ExprKind::While { body, .. },
-            ..
-        })
-        | StatementKind::Expr(Expression {
-            kind: ExprKind::Loop { body, .. },
-            ..
-        }) => body.iter().any(|s| statement_contains_break(&s.kind)),
+        StatementKind::Expr(e) => expression_contains_break(e),
         _ => false,
     }
 }
@@ -374,7 +449,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
                     })
                     .unwrap_or(false)
         }
-        ExprKind::While { body, .. } | ExprKind::Loop { body, .. } => {
+        ExprKind::While { body, .. } | ExprKind::WhileLet { body, .. } | ExprKind::Loop { body, .. } => {
             body.iter().any(|s| statement_contains_break(&s.kind))
         }
         ExprKind::Grouping(inner) => expression_contains_break(inner),

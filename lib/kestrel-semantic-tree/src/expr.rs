@@ -358,6 +358,11 @@ pub enum ExprKind {
     /// When calling `T()` or `T.create()` where T is a type parameter.
     /// Stores the SymbolId of the TypeParameterSymbol.
     TypeParameterRef(SymbolId),
+    /// Reference to a qualified associated type for static member access.
+    /// e.g., `T.Next` where `Next` is an associated type in T's protocol bounds.
+    /// The actual type (`Ty::qualified_associated_type`) is stored in the expression's `ty` field.
+    /// This is used for chained associated type access like `T.Next.Next.staticMethod()`.
+    AssociatedTypeRef,
 
     // Member access
     /// Field access: `obj.field`
@@ -426,13 +431,17 @@ pub enum ExprKind {
     },
 
     /// If expression: `if condition { then } else { else }`
+    /// Also supports if-let: `if let pattern = expr { then } else { else }`
+    /// And if-let chains: `if let .Some(x) = a, let .Some(y) = b { ... }`
     ///
     /// Type is:
     /// - `()` if there's no else branch
     /// - The common type of both branches if there's an else branch
     ///   (type checking deferred - currently just uses then_branch type)
     If {
-        condition: Box<Expression>,
+        /// List of conditions (at least one). Each is either a boolean expression
+        /// or a let-binding pattern match.
+        conditions: Vec<IfCondition>,
         then_branch: Vec<crate::stmt::Statement>,
         /// Optional trailing expression in then branch (determines its value)
         then_value: Option<Box<Expression>>,
@@ -450,6 +459,23 @@ pub enum ExprKind {
         label: Option<LabelInfo>,
         /// The condition expression (must be Bool)
         condition: Box<Expression>,
+        /// Statements in the loop body
+        body: Vec<crate::stmt::Statement>,
+    },
+
+    /// While-let loop expression: `label: while let pattern = expr, ... { body }`
+    ///
+    /// Loops while all conditions are true (patterns match and bool conditions are true).
+    /// Supports chains: `while let .Some(x) = a, let .Some(y) = b, x > 0 { ... }`
+    /// Pattern bindings are visible in subsequent conditions and the loop body.
+    /// Type is `()` (unit) - while-let loops never produce a value.
+    WhileLet {
+        /// Unique identifier for this loop (for break/continue resolution)
+        loop_id: LoopId,
+        /// Optional label for named break/continue
+        label: Option<LabelInfo>,
+        /// The conditions to check (at least one must be a Let condition)
+        conditions: Vec<IfCondition>,
         /// Statements in the loop body
         body: Vec<crate::stmt::Statement>,
     },
@@ -514,6 +540,34 @@ pub enum ExprKind {
         implicit_param: Option<(LocalId, Ty, Span)>,
     },
 
+    /// Reference to a resolved enum case (simple case without arguments).
+    /// Used for enum cases like `Option.None` or `.None`.
+    EnumCase {
+        /// The symbol ID of the enum case
+        case_id: SymbolId,
+    },
+
+    /// Unresolved implicit member access: `.Case` or `.Case(args)`.
+    /// Type inference resolves this to EnumCase or validates against expected type.
+    /// Used for Swift-style shorthand enum syntax.
+    ImplicitMemberAccess {
+        /// The name of the member (case) being accessed
+        member_name: String,
+        /// Optional arguments for associated values
+        arguments: Option<Vec<CallArgument>>,
+    },
+
+    /// Match expression: `match scrutinee { pattern => body, ... }`
+    ///
+    /// Type is the common type of all arm bodies.
+    /// Must be exhaustive - all possible values of the scrutinee must be covered.
+    Match {
+        /// The expression being matched against
+        scrutinee: Box<Expression>,
+        /// The match arms (pattern => body pairs)
+        arms: Vec<MatchArm>,
+    },
+
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
@@ -573,6 +627,68 @@ pub enum ElseBranch {
     },
     /// else if condition { ... } else { ... }
     ElseIf(Box<Expression>),
+}
+
+/// A single condition in an if or if-let expression.
+///
+/// In an if-let chain like `if let .Some(x) = a, let .Some(y) = b, x > 0 { ... }`,
+/// each part is an IfCondition.
+#[derive(Debug, Clone)]
+pub enum IfCondition {
+    /// Boolean expression condition: `x > 0`
+    Expr(Expression),
+    /// Let binding condition: `let pattern = expr`
+    /// Pattern bindings are visible in subsequent conditions and the then-branch.
+    Let {
+        /// The pattern to match against
+        pattern: crate::pattern::Pattern,
+        /// The expression to match the pattern against (the scrutinee)
+        value: Expression,
+        /// The span of the entire condition
+        span: Span,
+    },
+}
+
+/// A match arm in a match expression.
+///
+/// Represents `pattern [if guard] => body` in a match expression.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    /// The pattern to match against
+    pub pattern: crate::pattern::Pattern,
+    /// Optional guard condition (the `if expr` part)
+    pub guard: Option<Expression>,
+    /// The body expression to evaluate if the pattern matches
+    pub body: Expression,
+    /// The span of the entire arm
+    pub span: Span,
+}
+
+impl MatchArm {
+    /// Create a new match arm without a guard.
+    pub fn new(pattern: crate::pattern::Pattern, body: Expression, span: Span) -> Self {
+        MatchArm {
+            pattern,
+            guard: None,
+            body,
+            span,
+        }
+    }
+
+    /// Create a new match arm with a guard.
+    pub fn with_guard(
+        pattern: crate::pattern::Pattern,
+        guard: Expression,
+        body: Expression,
+        span: Span,
+    ) -> Self {
+        MatchArm {
+            pattern,
+            guard: Some(guard),
+            body,
+            span,
+        }
+    }
 }
 
 impl ElseBranch {
@@ -678,6 +794,7 @@ impl Expression {
             ExprKind::OverloadedRef(_) => "overloaded".to_string(),
             ExprKind::TypeRef(id) => format!("type_{:?}", id),
             ExprKind::TypeParameterRef(_) => "<type_param>".to_string(),
+            ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
             ExprKind::FieldAccess { object, field } => {
                 format!("{}.{}", object.debug_compact(), field)
             }
@@ -730,11 +847,18 @@ impl Expression {
                 format!("{} = {}", target.debug_compact(), value.debug_compact())
             }
             ExprKind::If {
-                condition,
+                conditions,
                 then_value,
                 else_branch,
                 ..
             } => {
+                let cond_strs: Vec<String> = conditions.iter().map(|c| match c {
+                    IfCondition::Expr(e) => e.debug_compact(),
+                    IfCondition::Let { pattern, value, .. } => {
+                        format!("let {:?} = {}", pattern, value.debug_compact())
+                    }
+                }).collect();
+                let cond_str = cond_strs.join(", ");
                 let then_str = if let Some(v) = then_value {
                     v.debug_compact()
                 } else {
@@ -756,13 +880,20 @@ impl Expression {
                 };
                 format!(
                     "if {} {{ {} }}{}",
-                    condition.debug_compact(),
+                    cond_str,
                     then_str,
                     else_str
                 )
             }
             ExprKind::While { condition, .. } => {
                 format!("while {} {{ ... }}", condition.debug_compact())
+            }
+            ExprKind::WhileLet { conditions, .. } => {
+                let conds: Vec<_> = conditions.iter().map(|c| match c {
+                    IfCondition::Let { pattern, value, .. } => format!("let {:?} = {}", pattern, value.debug_compact()),
+                    IfCondition::Expr(e) => e.debug_compact(),
+                }).collect();
+                format!("while {} {{ ... }}", conds.join(", "))
             }
             ExprKind::Loop { .. } => "loop { ... }".to_string(),
             ExprKind::Break { label, .. } => {
@@ -805,6 +936,30 @@ impl Expression {
                     .map(|e| e.debug_compact())
                     .unwrap_or_else(|| "...".to_string());
                 format!("{{ {}{} }}", params_str, body_str)
+            }
+            ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
+            ExprKind::ImplicitMemberAccess {
+                member_name,
+                arguments,
+            } => {
+                if let Some(args) = arguments {
+                    let args_str: Vec<String> = args
+                        .iter()
+                        .map(|a| {
+                            if let Some(ref label) = a.label {
+                                format!("{}: {}", label, a.value.debug_compact())
+                            } else {
+                                a.value.debug_compact()
+                            }
+                        })
+                        .collect();
+                    format!(".{}({})", member_name, args_str.join(", "))
+                } else {
+                    format!(".{}", member_name)
+                }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                format!("match {} {{ {} arms }}", scrutinee.debug_compact(), arms.len())
             }
             ExprKind::Error => "<error>".to_string(),
         }
@@ -964,6 +1119,20 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::TypeParameterRef(symbol_id),
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an associated type reference expression.
+    /// Used when accessing an associated type on a type parameter for static member access.
+    /// E.g., `T.Next` where T: Level1 and Level1 has `type Next: Level2`.
+    /// The `ty` parameter should be a `Ty::qualified_associated_type(...)`.
+    pub fn associated_type_ref(ty: Ty, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::AssociatedTypeRef,
             ty,
             span,
             mutable: false,
@@ -1145,6 +1314,41 @@ impl Expression {
         }
     }
 
+    /// Create a resolved enum case expression.
+    ///
+    /// Used when a path resolves to an enum case without associated values.
+    /// Enum cases are not mutable lvalues.
+    pub fn enum_case(case_id: SymbolId, ty: Ty, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::EnumCase { case_id },
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an implicit member access with `Ty::infer()`.
+    ///
+    /// Type inference will resolve the actual type based on context.
+    /// Used for Swift-style shorthand: `.None` instead of `Option.None`.
+    pub fn implicit_member_access(
+        member_name: String,
+        arguments: Option<Vec<CallArgument>>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::ImplicitMemberAccess {
+                member_name,
+                arguments,
+            },
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
     /// Create an assignment expression.
     ///
     /// The type of an assignment expression is Never, meaning the value
@@ -1163,7 +1367,7 @@ impl Expression {
         }
     }
 
-    /// Create an if expression.
+    /// Create an if expression with a single boolean condition.
     ///
     /// Type computation with Never propagation:
     /// - No else branch: type is `()`
@@ -1175,6 +1379,32 @@ impl Expression {
     /// If expressions are not mutable lvalues.
     pub fn if_expr(
         condition: Expression,
+        then_branch: Vec<crate::stmt::Statement>,
+        then_value: Option<Expression>,
+        else_branch: Option<ElseBranch>,
+        span: Span,
+    ) -> Self {
+        Self::if_expr_with_conditions(
+            vec![IfCondition::Expr(condition)],
+            then_branch,
+            then_value,
+            else_branch,
+            span,
+        )
+    }
+
+    /// Create an if expression with multiple conditions (if-let chains).
+    ///
+    /// Type computation with Never propagation:
+    /// - No else branch: type is `()`
+    /// - With else branch: join the types of both branches
+    ///   - If one branch is Never (return, break, etc.), use the other branch's type
+    ///   - If both branches are Never, the type is Never
+    ///   - Otherwise, use the then branch's type (type checking validates compatibility)
+    ///
+    /// If expressions are not mutable lvalues.
+    pub fn if_expr_with_conditions(
+        conditions: Vec<IfCondition>,
         then_branch: Vec<crate::stmt::Statement>,
         then_value: Option<Expression>,
         else_branch: Option<ElseBranch>,
@@ -1197,7 +1427,7 @@ impl Expression {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::If {
-                condition: Box::new(condition),
+                conditions,
                 then_branch,
                 then_value: then_value.map(Box::new),
                 else_branch,
@@ -1224,6 +1454,31 @@ impl Expression {
                 loop_id,
                 label,
                 condition: Box::new(condition),
+                body,
+            },
+            ty: Ty::unit(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a while-let loop expression.
+    ///
+    /// Loops while all conditions are true.
+    /// Type is always `()` (unit).
+    pub fn while_let(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        conditions: Vec<IfCondition>,
+        body: Vec<crate::stmt::Statement>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::WhileLet {
+                loop_id,
+                label,
+                conditions,
                 body,
             },
             ty: Ty::unit(span.clone()),
@@ -1290,6 +1545,35 @@ impl Expression {
                 value: value.map(Box::new),
             },
             ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a match expression.
+    ///
+    /// Type is computed from the arm bodies - they should all have compatible types.
+    /// If all arms have Never type, the match expression has Never type.
+    /// Otherwise, the type is inferred and will be resolved during type inference.
+    pub fn match_expr(scrutinee: Expression, arms: Vec<MatchArm>, span: Span) -> Self {
+        // Compute the type by joining all arm body types
+        // This handles Never propagation correctly
+        let ty = if arms.is_empty() {
+            Ty::never(span.clone())
+        } else {
+            arms.iter()
+                .map(|arm| arm.body.ty.clone())
+                .reduce(|a, b| a.join(&b))
+                .unwrap_or_else(|| Ty::infer(span.clone()))
+        };
+
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            ty,
             span,
             mutable: false,
         }

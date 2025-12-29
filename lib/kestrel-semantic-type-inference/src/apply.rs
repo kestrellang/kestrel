@@ -7,6 +7,7 @@ use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, ExprKind, Expression};
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::local::LocalContainer;
 use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyKind};
 
 use crate::solution::Solution;
@@ -49,15 +50,19 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
         StatementKind::Expr(expr) => {
             StatementKind::Expr(apply_to_expression(expr, solution))
         }
+        StatementKind::GuardLet { conditions, else_block } => {
+            let resolved_conditions = conditions.iter().map(|cond| {
+                apply_to_if_condition(cond, solution)
+            }).collect();
+            let resolved_else_block = apply_solution(else_block, solution);
+            StatementKind::GuardLet {
+                conditions: resolved_conditions,
+                else_block: resolved_else_block,
+            }
+        }
     };
 
     Statement::new(kind, stmt.span.clone())
-}
-
-/// Apply solution to a pattern.
-fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
-    let resolved_ty = resolve_type(&pattern.ty, solution);
-    Pattern::new(pattern.kind.clone(), resolved_ty, pattern.span.clone())
 }
 
 /// Apply solution to an expression.
@@ -72,6 +77,17 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         ExprKind::OverloadedRef(ids) => ExprKind::OverloadedRef(ids.clone()),
         ExprKind::TypeRef(id) => ExprKind::TypeRef(*id),
         ExprKind::TypeParameterRef(id) => ExprKind::TypeParameterRef(*id),
+        ExprKind::AssociatedTypeRef => ExprKind::AssociatedTypeRef,
+        ExprKind::EnumCase { case_id } => ExprKind::EnumCase { case_id: *case_id },
+        ExprKind::ImplicitMemberAccess {
+            member_name,
+            arguments,
+        } => ExprKind::ImplicitMemberAccess {
+            member_name: member_name.clone(),
+            arguments: arguments
+                .as_ref()
+                .map(|args| args.iter().map(|arg| apply_to_argument(arg, solution)).collect()),
+        },
         ExprKind::Error => ExprKind::Error,
         ExprKind::Break { loop_id, label } => ExprKind::Break {
             loop_id: *loop_id,
@@ -158,12 +174,15 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         },
 
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => ExprKind::If {
-            condition: Box::new(apply_to_expression(condition, solution)),
+            conditions: conditions
+                .iter()
+                .map(|c| apply_to_if_condition(c, solution))
+                .collect(),
             then_branch: then_branch
                 .iter()
                 .map(|s| apply_to_statement(s, solution))
@@ -183,6 +202,18 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             loop_id: *loop_id,
             label: label.clone(),
             condition: Box::new(apply_to_expression(condition, solution)),
+            body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
+        },
+
+        ExprKind::WhileLet {
+            loop_id,
+            label,
+            conditions,
+            body,
+        } => ExprKind::WhileLet {
+            loop_id: *loop_id,
+            label: label.clone(),
+            conditions: conditions.iter().map(|c| apply_to_if_condition(c, solution)).collect(),
             body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
         },
 
@@ -256,6 +287,18 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 implicit_param: resolved_implicit_param,
             }
         }
+
+        ExprKind::Match { scrutinee, arms } => {
+            let resolved_scrutinee = Box::new(apply_to_expression(scrutinee, solution));
+            let resolved_arms = arms
+                .iter()
+                .map(|arm| apply_to_match_arm(arm, solution))
+                .collect();
+            ExprKind::Match {
+                scrutinee: resolved_scrutinee,
+                arms: resolved_arms,
+            }
+        }
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)
@@ -286,6 +329,113 @@ fn apply_to_else_branch(branch: &ElseBranch, solution: &Solution) -> ElseBranch 
             ElseBranch::ElseIf(Box::new(apply_to_expression(if_expr, solution)))
         }
     }
+}
+
+/// Apply solution to an if condition.
+fn apply_to_if_condition(
+    condition: &kestrel_semantic_tree::expr::IfCondition,
+    solution: &Solution,
+) -> kestrel_semantic_tree::expr::IfCondition {
+    use kestrel_semantic_tree::expr::IfCondition;
+
+    match condition {
+        IfCondition::Expr(expr) => IfCondition::Expr(apply_to_expression(expr, solution)),
+        IfCondition::Let { pattern, value, span } => IfCondition::Let {
+            pattern: apply_to_pattern(pattern, solution),
+            value: apply_to_expression(value, solution),
+            span: span.clone(),
+        },
+    }
+}
+
+/// Apply solution to a match arm.
+fn apply_to_match_arm(
+    arm: &kestrel_semantic_tree::expr::MatchArm,
+    solution: &Solution,
+) -> kestrel_semantic_tree::expr::MatchArm {
+    let resolved_pattern = apply_to_pattern(&arm.pattern, solution);
+    let resolved_guard = arm.guard.as_ref().map(|g| apply_to_expression(g, solution));
+    let resolved_body = apply_to_expression(&arm.body, solution);
+
+    kestrel_semantic_tree::expr::MatchArm {
+        pattern: resolved_pattern,
+        guard: resolved_guard,
+        body: resolved_body,
+        span: arm.span.clone(),
+    }
+}
+
+/// Apply solution to a pattern.
+fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
+    use kestrel_semantic_tree::pattern::PatternKind;
+
+    let resolved_ty = resolve_type(&pattern.ty, solution);
+
+    let kind = match &pattern.kind {
+        // Simple patterns - just clone
+        PatternKind::Local { local_id, mutability, name } => PatternKind::Local {
+            local_id: *local_id,
+            mutability: *mutability,
+            name: name.clone(),
+        },
+        PatternKind::Wildcard => PatternKind::Wildcard,
+        PatternKind::Literal { value } => PatternKind::Literal { value: value.clone() },
+        PatternKind::Rest => PatternKind::Rest,
+        PatternKind::Error => PatternKind::Error,
+
+        // Compound patterns - recurse
+        PatternKind::Tuple { prefix, has_rest, suffix } => PatternKind::Tuple {
+            prefix: prefix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+            has_rest: *has_rest,
+            suffix: suffix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+        },
+        PatternKind::EnumVariant { case_id, case_name, bindings } => PatternKind::EnumVariant {
+            case_id: *case_id,
+            case_name: case_name.clone(),
+            bindings: bindings
+                .iter()
+                .map(|b| kestrel_semantic_tree::pattern::EnumPatternBinding {
+                    label: b.label.clone(),
+                    pattern: Box::new(apply_to_pattern(&b.pattern, solution)),
+                    span: b.span.clone(),
+                })
+                .collect(),
+        },
+        PatternKind::Range { start, end, inclusive } => PatternKind::Range {
+            start: start.clone(),
+            end: end.clone(),
+            inclusive: *inclusive,
+        },
+        PatternKind::Struct { struct_id, struct_name, fields, has_rest } => PatternKind::Struct {
+            struct_id: *struct_id,
+            struct_name: struct_name.clone(),
+            fields: fields
+                .iter()
+                .map(|f| kestrel_semantic_tree::pattern::StructPatternField {
+                    field_name: f.field_name.clone(),
+                    pattern: apply_to_pattern(&f.pattern, solution),
+                    span: f.span.clone(),
+                })
+                .collect(),
+            has_rest: *has_rest,
+        },
+        PatternKind::Array { prefix, rest, suffix } => PatternKind::Array {
+            prefix: prefix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+            rest: rest.clone(),
+            suffix: suffix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+        },
+        PatternKind::Or { alternatives } => PatternKind::Or {
+            alternatives: alternatives.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+        },
+        PatternKind::At { name, local_id, mutability, subpattern } => PatternKind::At {
+            name: name.clone(),
+            local_id: *local_id,
+            mutability: *mutability,
+            subpattern: Box::new(apply_to_pattern(subpattern, solution)),
+        },
+    };
+
+    Pattern::new(kind, resolved_ty, pattern.span.clone())
 }
 
 /// Resolve a type using the solution.
@@ -345,6 +495,25 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
         // Nominal types with substitutions would need recursive resolution too,
         // but for now just return the original type
         _ => ty.clone(),
+    }
+}
+
+/// Update all locals in the container with their resolved types from the solution.
+///
+/// This is necessary because pattern-bound variables are initially created with
+/// `Ty::infer()` placeholder types. After type inference solves the constraints,
+/// the actual types are known but the `Local` entries in the container still have
+/// the old placeholder types. When subsequent code references these locals via
+/// `LocalRef`, it reads the type from the container, so we must update it.
+pub fn apply_solution_to_locals(container: &dyn LocalContainer, solution: &Solution) {
+    for local in container.locals() {
+        let ty = local.ty();
+        if matches!(ty.kind(), TyKind::Infer) {
+            if let Some(resolved) = solution.get_type(ty.id()) {
+                let fully_resolved = resolve_type(resolved, solution);
+                container.update_local_type(local.id(), fully_resolved);
+            }
+        }
     }
 }
 

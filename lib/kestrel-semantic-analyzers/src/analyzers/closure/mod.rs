@@ -108,17 +108,10 @@ fn validate_closure_type(
             }
         }
 
-        // Check return type compatibility
-        if let Some(tail) = tail_expr {
-            // Only check if both types are concrete (not Infer)
-            if !tail.ty.is_infer() && !return_ty.is_infer() && tail.ty.id() != return_ty.id() {
-                ctx.report(ClosureReturnTypeMismatchError {
-                    span: tail.span.clone(),
-                    actual: tail.ty.to_string(),
-                    expected: return_ty.to_string(),
-                });
-            }
-        }
+        // Return type compatibility is already validated by the type inference solver.
+        // The solver generates constraints during type inference that ensure the tail
+        // expression's type unifies with the closure's return type. This analyzer runs
+        // after type inference completes, so we trust those results.
     }
 }
 
@@ -207,8 +200,18 @@ fn find_assignments_to_locals(
         }
 
         // Recursively check other expression kinds
-        ExprKind::If { condition, then_branch, then_value, else_branch } => {
-            find_assignments_to_locals(condition, target_locals, container_id, ctx);
+        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+            // Process conditions
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        find_assignments_to_locals(expr, target_locals, container_id, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        find_assignments_to_locals(value, target_locals, container_id, ctx);
+                    }
+                }
+            }
 
             for stmt in then_branch {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
@@ -237,6 +240,22 @@ fn find_assignments_to_locals(
 
         ExprKind::While { condition, body, .. } => {
             find_assignments_to_locals(condition, target_locals, container_id, ctx);
+            for stmt in body {
+                walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
+            }
+        }
+
+        ExprKind::WhileLet { conditions, body, .. } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        find_assignments_to_locals(expr, target_locals, container_id, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        find_assignments_to_locals(value, target_locals, container_id, ctx);
+                    }
+                }
+            }
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
             }
@@ -307,6 +326,15 @@ fn find_assignments_to_locals(
             }
         }
 
+        // Implicit member access - check arguments if present
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+                }
+            }
+        }
+
         // Leaf expressions - no sub-expressions to check
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -314,9 +342,21 @@ fn find_assignments_to_locals(
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
+        | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Error => {}
+
+        ExprKind::Match { scrutinee, arms } => {
+            find_assignments_to_locals(scrutinee, target_locals, container_id, ctx);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    find_assignments_to_locals(guard, target_locals, container_id, ctx);
+                }
+                find_assignments_to_locals(&arm.body, target_locals, container_id, ctx);
+            }
+        }
     }
 }
 
@@ -335,6 +375,24 @@ fn walk_statement_for_assignments(
         }
         kestrel_semantic_tree::stmt::StatementKind::Expr(expr) => {
             find_assignments_to_locals(expr, target_locals, container_id, ctx);
+        }
+        kestrel_semantic_tree::stmt::StatementKind::GuardLet { conditions, else_block } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        find_assignments_to_locals(expr, target_locals, container_id, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        find_assignments_to_locals(value, target_locals, container_id, ctx);
+                    }
+                }
+            }
+            for else_stmt in &else_block.statements {
+                walk_statement_for_assignments(else_stmt, target_locals, container_id, ctx);
+            }
+            if let Some(yield_expr) = &else_block.yield_expr {
+                find_assignments_to_locals(yield_expr, target_locals, container_id, ctx);
+            }
         }
     }
 }

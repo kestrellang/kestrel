@@ -1,8 +1,10 @@
+use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::common::module_path_parser_internal;
 use crate::event::{EventSink, TreeBuilder};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span};
 
 /// Represents a module path like A.B.C
 ///
@@ -76,16 +78,14 @@ impl ModulePath {
 /// This is the primary event-driven parser function
 pub fn parse_module_path<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
-    I: Iterator<Item = (kestrel_lexer::Token, Span)> + Clone,
+    I: Iterator<Item = (Token, Span)> + Clone,
 {
     use chumsky::prelude::*;
 
-    let end_pos = source.len();
-    // Convert Span to Range<usize> for chumsky's Stream
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match module_path_parser_internal().parse(stream) {
+    match module_path_parser_internal().parse(input).into_result() {
         Ok(segments) => {
             crate::common::emit_module_path(sink, &segments);
         }
@@ -94,7 +94,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }

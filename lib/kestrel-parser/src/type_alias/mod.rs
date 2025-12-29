@@ -33,11 +33,12 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    AssociatedTypeBoundsData, AssociatedTypeTargetData, TypeAliasDeclarationData,
     emit_type_alias_declaration, identifier, token, visibility_parser_internal,
+    AssociatedTypeBoundsData, AssociatedTypeTargetData, TypeAliasDeclarationData,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::ty::{TyVariant, ty_parser};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::ty::{ty_parser, TyVariant};
 use crate::type_param::type_parameter_list_parser;
 
 /// Represents a type alias declaration: (visibility)? type Name[T]? = Type;
@@ -138,10 +139,16 @@ impl TypeAliasDeclaration {
 }
 
 /// Parser for associated type bounds (: Equatable, Hashable)
-fn associated_type_bounds_parser()
--> impl Parser<Token, AssociatedTypeBoundsData, Error = Simple<Token>> + Clone {
+fn associated_type_bounds_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, AssociatedTypeBoundsData, ParserExtra<'tokens>> + Clone
+{
     token(Token::Colon)
-        .then(ty_parser().separated_by(just(Token::Comma)).at_least(1))
+        .then(
+            ty_parser()
+                .separated_by(just(Token::Comma))
+                .at_least(1)
+                .collect(),
+        )
         .map(|(colon_span, bounds)| AssociatedTypeBoundsData { colon_span, bounds })
 }
 
@@ -155,8 +162,9 @@ fn associated_type_bounds_parser()
 /// If we see a dot, we need to determine if it's part of a type path or the
 /// associated type accessor. The key insight is that the qualified form always
 /// ends with `.Name` where Name is a simple identifier.
-fn associated_type_target_parser()
--> impl Parser<Token, AssociatedTypeTargetData, Error = Simple<Token>> + Clone {
+fn associated_type_target_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, AssociatedTypeTargetData, ParserExtra<'tokens>> + Clone
+{
     // Simple approach: parse identifier, optionally followed by more path segments
     // and a final .name
     //
@@ -171,7 +179,12 @@ fn associated_type_target_parser()
             // Optional: generic args followed by dot and name
             // Or just: dot and name
             just(Token::LBracket)
-                .ignore_then(ty_parser().separated_by(just(Token::Comma)).at_least(1))
+                .ignore_then(
+                    ty_parser()
+                        .separated_by(just(Token::Comma))
+                        .at_least(1)
+                        .collect(),
+                )
                 .then_ignore(just(Token::RBracket))
                 .or_not()
                 .then(token(Token::Dot))
@@ -208,8 +221,9 @@ fn associated_type_target_parser()
 /// - Regular: `type Alias = Type;`
 /// - Associated type (protocol): `type Item;` or `type Item: Bound;` or `type Item = Default;`
 /// - Qualified binding (struct): `type Iterator.Item = Int;`
-pub fn type_alias_declaration_parser_internal()
--> impl Parser<Token, TypeAliasDeclarationData, Error = Simple<Token>> + Clone {
+pub fn type_alias_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeAliasDeclarationData, ParserExtra<'tokens>> + Clone
+{
     visibility_parser_internal()
         .then(token(Token::Type))
         .then(associated_type_target_parser())
@@ -242,18 +256,20 @@ pub fn parse_type_alias_declaration<I>(source: &str, tokens: I, sink: &mut Event
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    match type_alias_declaration_parser_internal().parse(stream) {
+    match type_alias_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_type_alias_declaration(sink, data);
         }
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }
@@ -350,12 +366,10 @@ mod tests {
         // No aliased type for abstract associated types
         assert_eq!(decl.aliased_type(), None);
         // No AliasedType node should exist
-        assert!(
-            !decl
-                .syntax
-                .children()
-                .any(|c| c.kind() == SyntaxKind::AliasedType)
-        );
+        assert!(!decl
+            .syntax
+            .children()
+            .any(|c| c.kind() == SyntaxKind::AliasedType));
     }
 
     #[test]

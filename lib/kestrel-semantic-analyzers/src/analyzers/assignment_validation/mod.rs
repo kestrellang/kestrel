@@ -111,14 +111,19 @@ fn validate_assignment_target(
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
+        | ExprKind::EnumCase { .. }
+        | ExprKind::ImplicitMemberAccess { .. }
         | ExprKind::Assignment { .. }
         | ExprKind::If { .. }
         | ExprKind::While { .. }
+        | ExprKind::WhileLet { .. }
         | ExprKind::Loop { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::Return { .. }
         | ExprKind::Closure { .. }
+        | ExprKind::Match { .. }
         | ExprKind::Error => {
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {

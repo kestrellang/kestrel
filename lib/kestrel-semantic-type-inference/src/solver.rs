@@ -87,6 +87,26 @@ fn try_solve(
             expr_id,
             span,
         } => resolve_member(ctx, *receiver, member, *is_static, *result, *expr_id, span),
+        Constraint::ImplicitMember {
+            expr_ty,
+            member_name,
+            argument_tys,
+            expr_id,
+            span,
+        } => resolve_implicit_member(ctx, *expr_ty, member_name, argument_tys, *expr_id, span),
+        Constraint::EnumPatternBinding {
+            enum_ty,
+            case_name,
+            binding_tys,
+            span,
+        } => resolve_enum_pattern_binding(ctx, *enum_ty, case_name, binding_tys, span),
+        Constraint::StructPatternBinding {
+            struct_ty,
+            struct_name,
+            field_bindings,
+            has_rest,
+            span,
+        } => resolve_struct_pattern_binding(ctx, *struct_ty, struct_name, field_bindings, *has_rest, span),
     }
 }
 
@@ -280,9 +300,9 @@ fn unify(
         // Structural unification for compound types
         (TyKind::Tuple(elems_a), TyKind::Tuple(elems_b)) => {
             if elems_a.len() != elems_b.len() {
-                return Err(InferenceError::type_mismatch(
-                    ty_a.clone(),
-                    ty_b.clone(),
+                return Err(InferenceError::tuple_arity_mismatch(
+                    elems_b.len(),  // expected (the scrutinee type)
+                    elems_a.len(),  // found (the pattern)
                     span.clone(),
                 ));
             }
@@ -512,6 +532,54 @@ fn unify(
             Ok(SolveResult::Solved)
         }
 
+        (
+            TyKind::Enum {
+                symbol: sym_a,
+                substitutions: subs_a,
+            },
+            TyKind::Enum {
+                symbol: sym_b,
+                substitutions: subs_b,
+            },
+        ) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
+            let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
+
+            if id_a != id_b {
+                return Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ));
+            }
+
+            // Unify substitutions by matching keys (type parameter IDs)
+            for (key, sub_a) in subs_a.iter() {
+                if let Some(sub_b) = subs_b.get(*key) {
+                    ctx.equate(sub_a.id(), sub_b.id(), span.clone());
+                } else {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+            }
+            for (key, _) in subs_b.iter() {
+                if !subs_a.contains(*key) {
+                    return Err(InferenceError::type_mismatch(
+                        ty_a.clone(),
+                        ty_b.clone(),
+                        span.clone(),
+                    ));
+                }
+            }
+            Ok(SolveResult::Solved)
+        }
+
         // Type parameters - only equal if they're the same parameter
         (TyKind::TypeParameter(param_a), TyKind::TypeParameter(param_b)) => {
             use semantic_tree::symbol::Symbol;
@@ -544,6 +612,70 @@ fn unify(
         }
         (TyKind::SelfType, TyKind::Protocol { .. }) | (TyKind::Protocol { .. }, TyKind::SelfType) => {
             Ok(SolveResult::Solved)
+        }
+
+        // Struct to Protocol - check conformance
+        (TyKind::Struct { .. }, TyKind::Protocol { symbol, .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_a, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+        (TyKind::Protocol { symbol, .. }, TyKind::Struct { .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_b, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+
+        // Enum to Protocol - check conformance
+        (TyKind::Enum { .. }, TyKind::Protocol { symbol, .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_a, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
+        }
+        (TyKind::Protocol { symbol, .. }, TyKind::Enum { .. }) => {
+            use semantic_tree::symbol::Symbol;
+            use kestrel_semantic_tree::language::KestrelLanguage;
+
+            let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
+            if ctx.oracle().conforms_to(&ty_b, protocol_id) {
+                Ok(SolveResult::Solved)
+            } else {
+                Err(InferenceError::type_mismatch(
+                    ty_a.clone(),
+                    ty_b.clone(),
+                    span.clone(),
+                ))
+            }
         }
 
         // Primitive types - exact match required
@@ -681,6 +813,324 @@ fn resolve_member(
     }
 }
 
+/// Resolve an implicit member access (enum shorthand like `.SomeCase`).
+fn resolve_implicit_member(
+    ctx: &mut InferenceContext<'_>,
+    expr_ty: TyId,
+    member_name: &str,
+    argument_tys: &[(Option<String>, TyId)],
+    expr_id: kestrel_semantic_tree::expr::ExprId,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    #[allow(unused_imports)]
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    #[allow(unused_imports)]
+    use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
+    use semantic_tree::symbol::Symbol;
+
+    let resolved_ty = resolve_type(ctx, expr_ty);
+
+    // If still Infer, defer until expected type is known
+    if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Must be an enum type
+    let TyKind::Enum {
+        symbol: enum_symbol,
+        substitutions,
+    } = resolved_ty.kind()
+    else {
+        // Not an enum - error
+        return Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            member_name.to_string(),
+            span.clone(),
+        ));
+    };
+
+    // Find the case by name
+    let cases = enum_symbol.cases();
+    let case = cases.iter().find(|c| c.metadata().name().value == member_name);
+
+    let Some(case) = case else {
+        return Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            member_name.to_string(),
+            span.clone(),
+        ));
+    };
+
+    // Check if case has associated values (CallableBehavior)
+    let callable = case.callable_behavior();
+
+    match (&callable, argument_tys.is_empty()) {
+        // Simple case, no args expected, none provided - OK
+        (None, true) => {
+            ctx.values_mut()
+                .insert(expr_id, ValueResolution::simple(case.metadata().id()));
+            Ok(SolveResult::Solved)
+        }
+
+        // Simple case but args provided - error
+        (None, false) => Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            format!("{}(...)", member_name),
+            span.clone(),
+        )),
+
+        // Case with params, no args provided - error (unless params are empty)
+        (Some(cb), true) if !cb.parameters().is_empty() => Err(InferenceError::member_not_found(
+            resolved_ty.clone(),
+            member_name.to_string(),
+            span.clone(),
+        )),
+
+        // Case with empty params, no args - OK
+        (Some(_cb), true) => {
+            ctx.values_mut()
+                .insert(expr_id, ValueResolution::simple(case.metadata().id()));
+            Ok(SolveResult::Solved)
+        }
+
+        // Case with params, args provided - validate
+        (Some(cb), false) => {
+            let params = cb.parameters();
+
+            // Check arity
+            if params.len() != argument_tys.len() {
+                return Err(InferenceError::closure_arity_mismatch(
+                    argument_tys.len(),
+                    params.len(),
+                    span.clone(),
+                ));
+            }
+
+            // Check labels and equate types
+            let mut labels_match = true;
+            let provided_labels: Vec<Option<String>> = argument_tys.iter()
+                .map(|(label, _)| label.clone())
+                .collect();
+            let expected_labels: Vec<Option<String>> = params.iter()
+                .map(|p| p.label.as_ref().map(|l| l.value.clone()))
+                .collect();
+
+            for ((label, _), param) in argument_tys.iter().zip(params.iter()) {
+                let expected_label = param.label.as_ref().map(|l| l.value.as_str());
+                let actual_label = label.as_deref();
+                if actual_label != expected_label {
+                    labels_match = false;
+                    break;
+                }
+            }
+
+            if !labels_match {
+                return Err(InferenceError::no_matching_overload(
+                    member_name.to_string(),
+                    resolved_ty.clone(),
+                    provided_labels,
+                    expected_labels,
+                    span.clone(),
+                ));
+            }
+
+            // All labels match - equate types
+            for ((_, arg_ty_id), param) in argument_tys.iter().zip(params.iter()) {
+                // Apply substitutions to parameter type and equate
+                let param_ty = param.ty.apply_substitutions(substitutions);
+                ctx.register_type(&param_ty);
+                ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
+            ctx.values_mut()
+                .insert(expr_id, ValueResolution::simple(case.metadata().id()));
+            Ok(SolveResult::Solved)
+        }
+    }
+}
+
+/// Resolve an enum pattern binding constraint.
+///
+/// This connects the types of bindings in an enum pattern (like `.Some(value)`)
+/// to the corresponding parameter types of the enum case.
+fn resolve_enum_pattern_binding(
+    ctx: &mut InferenceContext<'_>,
+    enum_ty: TyId,
+    case_name: &str,
+    binding_tys: &[(Option<String>, TyId)],
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    #[allow(unused_imports)]
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    let resolved_ty = resolve_type(ctx, enum_ty);
+
+    // If still Infer, defer until the enum type is known
+    if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Must be an enum type
+    let TyKind::Enum {
+        symbol: enum_symbol,
+        substitutions,
+    } = resolved_ty.kind()
+    else {
+        // Not an enum type - this shouldn't happen in well-formed code,
+        // but we can just skip the constraint (type mismatch will be caught elsewhere)
+        return Ok(SolveResult::Solved);
+    };
+
+    // Find the case by name
+    let cases = enum_symbol.cases();
+    let case = cases.iter().find(|c| c.metadata().name().value == case_name);
+
+    let Some(case) = case else {
+        // Case not found - emit an error
+        let enum_name = enum_symbol.metadata().name().value.clone();
+        return Err(InferenceError::unknown_enum_case(
+            enum_name,
+            case_name.to_string(),
+            span.clone(),
+        ));
+    };
+
+    // Get the callable behavior (parameter types) if the case has associated values
+    let Some(callable) = case.callable_behavior() else {
+        // Case has no parameters, but we have bindings - this shouldn't happen
+        // in well-formed patterns, but we can skip
+        return Ok(SolveResult::Solved);
+    };
+
+    let params = callable.parameters();
+
+    // Match bindings to parameters
+    // For positional bindings (no label), match by position
+    // For labeled bindings, match by label
+    for (idx, (label, binding_ty_id)) in binding_tys.iter().enumerate() {
+        let param = if let Some(label_name) = label {
+            // Labeled binding - find parameter by label
+            params.iter().find(|p| {
+                p.external_label() == Some(label_name.as_str())
+                    || p.internal_name() == label_name.as_str()
+            })
+        } else {
+            // Positional binding - use index
+            params.get(idx)
+        };
+
+        if let Some(param) = param {
+            // Apply substitutions to the parameter type and equate
+            let param_ty = param.ty.apply_substitutions(substitutions);
+            ctx.register_type(&param_ty);
+            ctx.equate(*binding_ty_id, param_ty.id(), span.clone());
+        }
+    }
+
+    Ok(SolveResult::Solved)
+}
+
+/// Resolve a struct pattern binding constraint.
+///
+/// This connects the types of bindings in a struct pattern (like `Point { x, y }`)
+/// to the corresponding field types of the struct.
+fn resolve_struct_pattern_binding(
+    ctx: &mut InferenceContext<'_>,
+    struct_ty: TyId,
+    struct_name: &str,
+    field_bindings: &[(String, TyId)],
+    has_rest: bool,
+    span: &Span,
+) -> Result<SolveResult, InferenceError> {
+    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use semantic_tree::symbol::Symbol;
+
+    let resolved_ty = resolve_type(ctx, struct_ty);
+
+    // If still Infer, defer until the struct type is known
+    if matches!(resolved_ty.kind(), TyKind::Infer) {
+        return Ok(SolveResult::Deferred);
+    }
+
+    // Must be a struct type
+    let TyKind::Struct {
+        symbol: struct_symbol,
+        substitutions,
+    } = resolved_ty.kind()
+    else {
+        // Not a struct type - this shouldn't happen in well-formed code,
+        // but we can just skip the constraint (type mismatch will be caught elsewhere)
+        return Ok(SolveResult::Solved);
+    };
+
+    // Get field symbols from struct
+    let fields: Vec<_> = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+        .collect();
+    
+    // Collect field names from the struct
+    let struct_field_names: std::collections::HashSet<_> = fields
+        .iter()
+        .map(|f| f.metadata().name().value.clone())
+        .collect();
+
+    // Match bindings to fields by name
+    for (field_name, binding_ty_id) in field_bindings {
+        let field = fields.iter().find(|f| &f.metadata().name().value == field_name);
+
+        if let Some(field) = field {
+            // Get field type from TypedBehavior (resolved type) or fallback to field_type
+            let raw_field_ty = field
+                .metadata()
+                .get_behavior::<TypedBehavior>()
+                .map(|typed| typed.ty().clone())
+                .unwrap_or_else(|| field.field_type().clone());
+            
+            // Apply substitutions to handle generic structs
+            let field_ty = raw_field_ty.apply_substitutions(substitutions);
+            ctx.register_type(&field_ty);
+            ctx.equate(*binding_ty_id, field_ty.id(), span.clone());
+        } else {
+            // Unknown field error
+            return Err(InferenceError::unknown_struct_field(
+                struct_name.to_string(),
+                field_name.clone(),
+                span.clone(),
+            ));
+        }
+    }
+    
+    // Check for missing fields if no rest pattern
+    if !has_rest {
+        let matched_field_names: std::collections::HashSet<_> = field_bindings
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        
+        let missing: Vec<_> = struct_field_names
+            .difference(&matched_field_names)
+            .cloned()
+            .collect();
+        
+        if !missing.is_empty() {
+            return Err(InferenceError::missing_struct_fields(
+                struct_name.to_string(),
+                missing,
+                span.clone(),
+            ));
+        }
+    }
+
+    Ok(SolveResult::Solved)
+}
+
 /// Follow the substitution chain to get the current resolved type for an ID.
 fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
     // Follow substitution chain
@@ -755,6 +1205,7 @@ fn occurs_check_inner(
                 || occurs_check_inner(var, return_type, ctx, visited)
         }
         TyKind::Struct { substitutions, .. }
+        | TyKind::Enum { substitutions, .. }
         | TyKind::Protocol { substitutions, .. }
         | TyKind::TypeAlias { substitutions, .. } => substitutions
             .iter()
@@ -789,7 +1240,40 @@ fn occurs_check_inner(
 
 /// Check that all inference placeholders have been resolved.
 /// If any remain unresolved, adds an Ambiguous error to the context.
+/// 
+/// Also processes any remaining constraints that may now be solvable
+/// (e.g., ImplicitMember constraints that were deferred waiting for type info).
 fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
+    // First, try to solve any remaining constraints one more time.
+    // This handles cases where constraints were deferred but the types
+    // have since been resolved through other unification.
+    let remaining_constraints = ctx.take_constraints();
+    for constraint in remaining_constraints {
+        match try_solve(ctx, &constraint) {
+            Ok(SolveResult::Solved) => {
+                // Great, constraint is now solved
+            }
+            Ok(SolveResult::Deferred) => {
+                // Still can't solve - check if it's an ImplicitMember that we can
+                // report a better error for
+                if let Constraint::ImplicitMember { member_name, span, .. } = &constraint {
+                    // Report specific error for unresolved enum shorthand
+                    ctx.add_error(InferenceError::cannot_infer_enum_type(
+                        member_name.clone(),
+                        span.clone(),
+                    ));
+                } else {
+                    // Put it back for generic error checking below
+                    ctx.push_constraint(constraint);
+                }
+            }
+            Err(error) => {
+                // Constraint failed - record the error
+                ctx.add_error(error);
+            }
+        }
+    }
+
     let mut unresolved = Vec::new();
 
     // Check all registered types
@@ -818,6 +1302,36 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             } => {
                 check_resolved_id(*receiver, ctx, &mut unresolved);
                 check_resolved_id(*result, ctx, &mut unresolved);
+            }
+            Constraint::ImplicitMember {
+                expr_ty,
+                argument_tys,
+                ..
+            } => {
+                check_resolved_id(*expr_ty, ctx, &mut unresolved);
+                for (_, arg_ty) in argument_tys {
+                    check_resolved_id(*arg_ty, ctx, &mut unresolved);
+                }
+            }
+            Constraint::EnumPatternBinding {
+                enum_ty,
+                binding_tys,
+                ..
+            } => {
+                check_resolved_id(*enum_ty, ctx, &mut unresolved);
+                for (_, binding_ty) in binding_tys {
+                    check_resolved_id(*binding_ty, ctx, &mut unresolved);
+                }
+            }
+            Constraint::StructPatternBinding {
+                struct_ty,
+                field_bindings,
+                ..
+            } => {
+                check_resolved_id(*struct_ty, ctx, &mut unresolved);
+                for (_, binding_ty) in field_bindings {
+                    check_resolved_id(*binding_ty, ctx, &mut unresolved);
+                }
             }
         }
     }

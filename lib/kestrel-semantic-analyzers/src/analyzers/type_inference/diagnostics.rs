@@ -50,7 +50,7 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                 span,
             } => Diagnostic::error()
                 .with_message(format!(
-                    "no member `{}` found for type `{}`",
+                    "member not found: `{}` on type `{}`",
                     member, receiver
                 ))
                 .with_labels(vec![Label::primary(span.file_id, span.range())
@@ -127,6 +127,112 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range()).with_message("used here")
                 ]),
+
+            InferenceError::NoMatchingOverload {
+                name,
+                receiver_ty,
+                provided_labels,
+                expected_labels,
+                span,
+            } => {
+                let provided: Vec<_> = provided_labels.iter().map(|l| l.as_deref().unwrap_or("_")).collect();
+                let expected: Vec<_> = expected_labels.iter().map(|l| l.as_deref().unwrap_or("_")).collect();
+                Diagnostic::error()
+                    .with_message(format!(
+                        "no matching overload for '{}'",
+                        name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message(format!("provided ({}), expected ({})", provided.join(", "), expected.join(", ")))
+                    ])
+                    .with_notes(vec![
+                        format!("on type `{}`", receiver_ty)
+                    ])
+            }
+
+            InferenceError::CannotInferEnumType { member_name, span } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "cannot infer enum type for shorthand '.{}'",
+                        member_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("type cannot be inferred from context")
+                    ])
+                    .with_notes(vec![
+                        "add a type annotation or use the full type path (e.g., `EnumType.Case`)".to_string()
+                    ])
+            }
+
+            InferenceError::UnknownStructField {
+                struct_name,
+                field_name,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "struct `{}` has no field `{}`",
+                        struct_name, field_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("unknown field")
+                    ])
+            }
+
+            InferenceError::MissingStructFields {
+                struct_name,
+                missing_fields,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "pattern does not mention fields {} of `{}`",
+                        missing_fields.join(", "),
+                        struct_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("missing fields in pattern")
+                    ])
+                    .with_notes(vec![
+                        "use `..` to ignore the remaining fields".to_string()
+                    ])
+            }
+
+            InferenceError::UnknownEnumCase {
+                enum_name,
+                case_name,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "enum `{}` has no case `{}`",
+                        enum_name, case_name
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message(format!("`{}` is not a case of `{}`", case_name, enum_name))
+                    ])
+            }
+
+            InferenceError::TupleArityMismatch {
+                expected,
+                found,
+                span,
+            } => {
+                Diagnostic::error()
+                    .with_message(format!(
+                        "tuple pattern arity mismatch: expected {} elements, found {}",
+                        expected, found
+                    ))
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message(format!("expected {} elements", expected))
+                    ])
+            }
         }
     }
 }

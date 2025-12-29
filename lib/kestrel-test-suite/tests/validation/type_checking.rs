@@ -1301,7 +1301,7 @@ mod type_alias {
             r#"
 module Main
 
-type MyInt = Int
+type MyInt = Int;
 
 func test() {
     let x: MyInt = 42;

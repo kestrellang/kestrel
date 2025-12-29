@@ -151,6 +151,18 @@ impl LocalScope {
     pub fn scope_depth_of(&self, id: LocalId) -> Option<usize> {
         self.local_depths.get(&id).copied()
     }
+
+    /// Snapshot the current name->LocalId bindings.
+    /// Used for or-pattern resolution to restore bindings after each alternative.
+    pub fn snapshot_bindings(&self) -> HashMap<String, LocalId> {
+        self.current_bindings.clone()
+    }
+
+    /// Restore bindings from a snapshot.
+    /// Used for or-pattern resolution to ensure the arm body sees the first alternative's bindings.
+    pub fn restore_bindings(&mut self, bindings: HashMap<String, LocalId>) {
+        self.current_bindings = bindings;
+    }
 }
 
 #[cfg(test)]

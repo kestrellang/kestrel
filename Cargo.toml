@@ -17,11 +17,11 @@ semantic-tree = { path = "lib/semantic-tree" }
 clap = { workspace = true }
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 
 [workspace.dependencies]
-chumsky = "0.9.3"
+chumsky = "0.12"
 clap = { version = "4.5.53", features = ["derive"] }
 codespan-reporting = "0.13.1"
 downcast-rs = "2.0.2"
@@ -45,6 +45,7 @@ members = [
     "lib/kestrel-semantic-tree-builder",
     "lib/kestrel-semantic-tree-binder",
     "lib/kestrel-semantic-type-inference",
+    "lib/kestrel-semantic-pattern-matching",
     "lib/kestrel-reporting",
     "lib/kestrel-compiler",
     "lib/kestrel-test-suite"

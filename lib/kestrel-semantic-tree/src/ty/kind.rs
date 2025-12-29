@@ -1,4 +1,5 @@
 use crate::symbol::associated_type::AssociatedTypeSymbol;
+use crate::symbol::enum_symbol::EnumSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
@@ -107,6 +108,13 @@ pub enum TyKind {
     /// This is a reference to a struct symbol with optional type arguments
     Struct {
         symbol: Arc<StructSymbol>,
+        substitutions: Substitutions,
+    },
+
+    /// Enum type (resolved)
+    /// This is a reference to an enum symbol with optional type arguments
+    Enum {
+        symbol: Arc<EnumSymbol>,
         substitutions: Substitutions,
     },
 

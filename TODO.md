@@ -19,13 +19,20 @@
 
 ## Phase 9: Enums & Algebraic Data Types
 
-- [ ] Enum Declarations
-  - [ ] Simple enums: `enum Color { Red, Green, Blue }`
-  - [ ] Enums with associated values: `enum Option[T] { Some(T), None }`
-  - [ ] Recursive enums
-- [ ] Pattern Matching
-  - [ ] `match` expressions
-  - [ ] Exhaustiveness checking
-  - [ ] Patterns: literals, bindings, enum variants, wildcards
-  - [ ] Guard clauses in patterns
-  - [ ] `if let` / `guard let`
+- [x] Enum Declarations
+  - [x] Simple enums: `enum Color { case Red, Green, Blue }`
+  - [x] Enums with associated values: `enum Option[T] { case Some(T), None }`
+  - [x] Recursive enums with `indirect` keyword
+  - [x] Indirect recursion detection through structs
+  - [x] Generic enums with type parameters and where clauses
+  - [x] Enum instantiation (full path `Color.Red` and shorthand `.Red`)
+  - [x] Protocol conformance for enums
+  - [x] Instance methods in enums
+  - [x] Static methods in enums
+  - [x] Enum extensions (`extend Color { ... }`)
+- [xr] Pattern Matching
+  - [x] `match` expressions
+  - [x] Exhaustiveness checking
+  - [x] Patterns: literals, bindings, enum variants, wildcards
+  - [x] Guard clauses in patterns
+  - [x] `if let` / `guard let`

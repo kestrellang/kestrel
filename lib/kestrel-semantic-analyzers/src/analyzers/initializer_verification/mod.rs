@@ -214,6 +214,22 @@ fn analyze_statement(
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
         }
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Analyze each condition
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        state = analyze_expression(expr, state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                    }
+                }
+            }
+            // Analyze the else block (it diverges so we don't merge state)
+            let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), ctx);
+            let _ = else_state;
+        }
     }
     state
 }
@@ -268,6 +284,7 @@ fn analyze_expression(
         | ExprKind::SymbolRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
         | ExprKind::OverloadedRef(_) => {}
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
@@ -323,12 +340,22 @@ fn analyze_expression(
             state = analyze_expression(target, state, true, ctx);
         }
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            state = analyze_expression(condition, state, false, ctx);
+            // Analyze all conditions
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                        state = analyze_expression(e, state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                    }
+                }
+            }
             let pre = state.clone();
             // then
             ctx.state = pre.clone();
@@ -385,6 +412,29 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // Ignore yield for while
+        }
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                        state = analyze_expression(e, state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                    }
+                }
+            }
+            // Body may execute zero times; so it doesn't contribute guaranteed initialization
+            let mut body_state = state.clone();
+            for stmt in body {
+                if body_state.diverged {
+                    break;
+                }
+                body_state = analyze_statement(stmt, body_state, ctx);
+            }
+            // Ignore yield for while-let
         }
         ExprKind::Loop { body, .. } => {
             let mut break_states: Vec<InitState> = Vec::new();
@@ -446,6 +496,24 @@ fn analyze_expression(
             }
             // Closures don't change the initialization state of the enclosing scope
         }
+        ExprKind::EnumCase { .. } => {}
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    state = analyze_expression(&arg.value, state, false, ctx);
+                }
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            state = analyze_expression(scrutinee, state, false, ctx);
+            for arm in arms {
+                let mut arm_state = state.clone();
+                if let Some(guard) = &arm.guard {
+                    arm_state = analyze_expression(guard, arm_state, false, ctx);
+                }
+                arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
+            }
+        }
         ExprKind::Error => {}
     }
     state
@@ -458,6 +526,33 @@ fn contains_break_at_top_level(kind: &StatementKind) -> bool {
             value: Some(expr), ..
         } => expr_contains_break_at_top_level(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
+        StatementKind::GuardLet { conditions, else_block } => {
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        if expr_contains_break_at_top_level(&expr.kind) {
+                            return true;
+                        }
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
+                        if expr_contains_break_at_top_level(&value.kind) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            for stmt in &else_block.statements {
+                if contains_break_at_top_level(&stmt.kind) {
+                    return true;
+                }
+            }
+            if let Some(yield_expr) = &else_block.yield_expr {
+                if expr_contains_break_at_top_level(&yield_expr.kind) {
+                    return true;
+                }
+            }
+            false
+        }
     }
 }
 
@@ -503,7 +598,7 @@ fn expr_contains_break_at_top_level(kind: &ExprKind) -> bool {
             }
             false
         }
-        ExprKind::While { .. } | ExprKind::Loop { .. } => false,
+        ExprKind::While { .. } | ExprKind::WhileLet { .. } | ExprKind::Loop { .. } => false,
         _ => false,
     }
 }

@@ -7,7 +7,7 @@ use kestrel_semantic_model::CallableParamTypesForCall;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::expr::{
-    CallArgument, ElseBranch, ExprKind, Expression, compute_block_type,
+    CallArgument, ElseBranch, ExprKind, Expression, IfCondition, compute_block_type,
 };
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::ty::Ty;
@@ -91,12 +91,17 @@ impl Analyzer for TypeCheckAnalyzer {
                 self.check_assignment(target, value, ctx);
             }
             ExprKind::If {
-                condition,
+                conditions,
                 then_branch,
                 then_value,
                 else_branch,
             } => {
-                self.check_if_condition(condition, ctx);
+                for cond in conditions {
+                    if let IfCondition::Expr(condition) = cond {
+                        self.check_if_condition(condition, ctx);
+                    }
+                    // For IfCondition::Let, type checking is done during binding
+                }
                 self.check_if_branches(
                     then_branch,
                     then_value.as_ref().map(|v| v.as_ref()),

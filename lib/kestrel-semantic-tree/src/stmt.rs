@@ -6,7 +6,8 @@
 
 use kestrel_span::Span;
 
-use crate::expr::Expression;
+use crate::behavior::executable::CodeBlock;
+use crate::expr::{Expression, IfCondition};
 use crate::pattern::Pattern;
 
 /// Represents the kind of statement.
@@ -21,6 +22,17 @@ pub enum StatementKind {
     },
     /// Expression statement: `foo();`
     Expr(Expression),
+    /// Guard-let statement: `guard let pattern = expr, ... else { block }`
+    ///
+    /// Supports chains: `guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }`
+    /// Pattern bindings are visible AFTER the guard statement, but NOT in the else block.
+    /// The else block MUST diverge (return, break, continue, or panic).
+    GuardLet {
+        /// The conditions to check (at least one must be a Let condition)
+        conditions: Vec<IfCondition>,
+        /// The else block (must diverge)
+        else_block: CodeBlock,
+    },
 }
 
 /// A resolved statement in the semantic tree.
@@ -57,6 +69,17 @@ impl Statement {
         }
     }
 
+    /// Create a guard-let statement.
+    pub fn guard_let(conditions: Vec<IfCondition>, else_block: CodeBlock, span: Span) -> Self {
+        Statement {
+            kind: StatementKind::GuardLet {
+                conditions,
+                else_block,
+            },
+            span,
+        }
+    }
+
     /// Check if this is a binding statement.
     pub fn is_binding(&self) -> bool {
         matches!(self.kind, StatementKind::Binding { .. })
@@ -65,6 +88,11 @@ impl Statement {
     /// Check if this is an expression statement.
     pub fn is_expr(&self) -> bool {
         matches!(self.kind, StatementKind::Expr(_))
+    }
+
+    /// Check if this is a guard-let statement.
+    pub fn is_guard_let(&self) -> bool {
+        matches!(self.kind, StatementKind::GuardLet { .. })
     }
 
     /// Get the pattern if this is a binding statement.
@@ -105,7 +133,23 @@ impl Statement {
                             "let"
                         }
                     }
-                    PatternKind::Error => "let",
+                    PatternKind::At { mutability, .. } => {
+                        if *mutability == Mutability::Mutable {
+                            "var"
+                        } else {
+                            "let"
+                        }
+                    }
+                    PatternKind::Wildcard
+                    | PatternKind::Tuple { .. }
+                    | PatternKind::Literal { .. }
+                    | PatternKind::EnumVariant { .. }
+                    | PatternKind::Range { .. }
+                    | PatternKind::Struct { .. }
+                    | PatternKind::Array { .. }
+                    | PatternKind::Or { .. }
+                    | PatternKind::Rest
+                    | PatternKind::Error => "let",
                 };
                 let name = pattern.name().unwrap_or("<error>");
                 let value_str = value
@@ -115,6 +159,16 @@ impl Statement {
                 format!("{} {}{};", keyword, name, value_str)
             }
             StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
+            StatementKind::GuardLet { conditions, .. } => {
+                let conds: Vec<_> = conditions.iter().map(|c| match c {
+                    IfCondition::Let { pattern, value, .. } => {
+                        let name = pattern.name().unwrap_or("<pattern>");
+                        format!("let {} = {}", name, value.debug_compact())
+                    }
+                    IfCondition::Expr(e) => e.debug_compact(),
+                }).collect();
+                format!("guard {} else {{ ... }}", conds.join(", "))
+            }
         }
     }
 }

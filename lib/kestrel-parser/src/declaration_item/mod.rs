@@ -13,13 +13,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    ExtensionDeclarationData,
-    FieldDeclarationData,
-    FunctionDeclarationData,
-    ProtocolDeclarationData,
-    // Shared data types
-    StructDeclarationData,
-    TypeAliasDeclarationData,
+    emit_enum_declaration,
     emit_extension_declaration,
     emit_field_declaration,
     emit_function_declaration,
@@ -33,24 +27,33 @@ use crate::common::{
     function_declaration_parser_internal,
     import_declaration_parser_internal,
     module_declaration_parser_internal,
-    skip_trivia,
+    EnumDeclarationData,
+    ExtensionDeclarationData,
+    FieldDeclarationData,
+    FunctionDeclarationData,
+    ProtocolDeclarationData,
+    // Shared data types
+    StructDeclarationData,
+    TypeAliasDeclarationData,
 };
+use crate::enum_decl::{enum_declaration_parser_internal, parse_enum_declaration, EnumDeclaration};
 use crate::event::EventSink;
 use crate::extension::{
-    ExtensionDeclaration, extension_declaration_parser_internal, parse_extension_declaration,
+    extension_declaration_parser_internal, parse_extension_declaration, ExtensionDeclaration,
 };
-use crate::field::{FieldDeclaration, parse_field_declaration};
-use crate::function::{FunctionDeclaration, parse_function_declaration};
-use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::module::{ModuleDeclaration, parse_module_declaration};
+use crate::field::{parse_field_declaration, FieldDeclaration};
+use crate::function::{parse_function_declaration, FunctionDeclaration};
+use crate::import::{parse_import_declaration, ImportDeclaration};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::module::{parse_module_declaration, ModuleDeclaration};
 use crate::protocol::{
-    ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
+    parse_protocol_declaration, protocol_declaration_parser_internal, ProtocolDeclaration,
 };
 use crate::r#struct::{
-    StructDeclaration, parse_struct_declaration, struct_declaration_parser_internal,
+    parse_struct_declaration, struct_declaration_parser_internal, StructDeclaration,
 };
 use crate::type_alias::{
-    TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
+    parse_type_alias_declaration, type_alias_declaration_parser_internal, TypeAliasDeclaration,
 };
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
@@ -60,6 +63,7 @@ pub enum DeclarationItem {
     Import(ImportDeclaration),
     Protocol(ProtocolDeclaration),
     Struct(StructDeclaration),
+    Enum(EnumDeclaration),
     Extension(ExtensionDeclaration),
     Field(FieldDeclaration),
     Function(FunctionDeclaration),
@@ -74,6 +78,7 @@ impl DeclarationItem {
             DeclarationItem::Import(decl) => &decl.span,
             DeclarationItem::Protocol(decl) => &decl.span,
             DeclarationItem::Struct(decl) => &decl.span,
+            DeclarationItem::Enum(decl) => &decl.span,
             DeclarationItem::Extension(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
             DeclarationItem::Function(decl) => &decl.span,
@@ -88,6 +93,7 @@ impl DeclarationItem {
             DeclarationItem::Import(decl) => &decl.syntax,
             DeclarationItem::Protocol(decl) => &decl.syntax,
             DeclarationItem::Struct(decl) => &decl.syntax,
+            DeclarationItem::Enum(decl) => &decl.syntax,
             DeclarationItem::Extension(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
             DeclarationItem::Function(decl) => &decl.syntax,
@@ -108,6 +114,7 @@ enum DeclarationItemData {
     ),
     Protocol(ProtocolDeclarationData),
     Struct(StructDeclarationData),
+    Enum(EnumDeclarationData),
     Extension(ExtensionDeclarationData),
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
@@ -147,12 +154,26 @@ where
     }
 }
 
+/// Parser that skips trivia tokens
+fn skip_trivia<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+    any()
+        .filter(|token: &Token| {
+            matches!(
+                token,
+                Token::Whitespace | Token::LineComment | Token::BlockComment
+            )
+        })
+        .repeated()
+        .ignored()
+}
+
 /// Internal Chumsky parser for a single declaration item
 ///
 /// This parser ROUTES to the module-specific parsers - it does not implement
 /// parsing logic itself.
-fn declaration_item_parser_internal()
--> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
+fn declaration_item_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
     // Route to module-specific parsers
     let module_parser = module_declaration_parser_internal()
         .map(|(span, path)| DeclarationItemData::Module(span, path));
@@ -165,6 +186,8 @@ fn declaration_item_parser_internal()
     let protocol_parser = protocol_declaration_parser_internal().map(DeclarationItemData::Protocol);
 
     let struct_parser = struct_declaration_parser_internal().map(DeclarationItemData::Struct);
+
+    let enum_parser = enum_declaration_parser_internal().map(DeclarationItemData::Enum);
 
     let extension_parser =
         extension_declaration_parser_internal().map(DeclarationItemData::Extension);
@@ -181,6 +204,7 @@ fn declaration_item_parser_internal()
         .or(import_parser)
         .or(protocol_parser)
         .or(struct_parser)
+        .or(enum_parser)
         .or(extension_parser)
         .or(function_parser)
         .or(field_parser)
@@ -188,11 +212,13 @@ fn declaration_item_parser_internal()
 }
 
 /// Internal Chumsky parser for multiple declaration items
-fn declaration_items_parser_internal()
--> impl Parser<Token, Vec<DeclarationItemData>, Error = Simple<Token>> + Clone {
+fn declaration_items_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<DeclarationItemData>, ParserExtra<'tokens>> + Clone
+{
     declaration_item_parser_internal()
         .repeated()
         .at_least(0)
+        .collect()
         .then_ignore(skip_trivia())
 }
 
@@ -212,6 +238,9 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         }
         DeclarationItemData::Struct(data) => {
             emit_struct_declaration(sink, data);
+        }
+        DeclarationItemData::Enum(data) => {
+            emit_enum_declaration(sink, data);
         }
         DeclarationItemData::Extension(data) => {
             emit_extension_declaration(sink, data);
@@ -249,6 +278,9 @@ where
     if try_parse(source, tokens.clone(), sink, parse_struct_declaration) {
         return;
     }
+    if try_parse(source, tokens.clone(), sink, parse_enum_declaration) {
+        return;
+    }
     if try_parse(source, tokens.clone(), sink, parse_extension_declaration) {
         return;
     }
@@ -263,7 +295,7 @@ where
     }
 
     // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, extension, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -273,13 +305,15 @@ pub fn parse_source_file<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let end_pos = source.len();
-    let tokens_with_range = tokens.map(|(tok, span)| (tok, span.range()));
-    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens_with_range);
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
     sink.start_node(SyntaxKind::SourceFile);
 
-    match declaration_items_parser_internal().parse(stream) {
+    match declaration_items_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(items) => {
             for item_data in items {
                 emit_declaration_item(sink, item_data);
@@ -288,7 +322,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), Span::from(span));
+                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
             }
         }
     }
@@ -562,5 +596,128 @@ mod tests {
                 i
             );
         }
+    }
+
+    #[test]
+    fn test_enum_declaration_in_source_file() {
+        let source = r#"module Test
+            enum Color { case Red case Green case Blue }
+            enum Option[T] { case Some(value: T) case None }
+            "#;
+
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.events();
+
+        // Count enum declarations - should be 2
+        let enum_count = events.iter().filter(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::EnumDeclaration)
+        }).count();
+
+        // Count enum case declarations - should be 5 (3 for Color + 2 for Option)
+        let case_count = events.iter().filter(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::EnumCaseDeclaration)
+        }).count();
+
+        assert_eq!(enum_count, 2, "Should have 2 EnumDeclarations");
+        assert_eq!(case_count, 5, "Should have 5 EnumCaseDeclarations");
+    }
+
+    #[test]
+    fn test_enum_with_struct_in_source_file() {
+        let source = r#"module Test
+            struct Point { var x: Int; var y: Int }
+            enum Shape {
+                case Circle(center: Point, radius: Int)
+                case Rectangle(origin: Point, width: Int, height: Int)
+            }
+            "#;
+
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.events();
+
+        let has_struct = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::StructDeclaration)
+        });
+        let has_enum = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::EnumDeclaration)
+        });
+
+        assert!(has_struct, "Should have StructDeclaration in syntax tree");
+        assert!(has_enum, "Should have EnumDeclaration in syntax tree");
+    }
+
+    #[test]
+    fn test_shorthand_in_assignment_expression() {
+        use crate::event::TreeBuilder;
+
+        // Test that .CaseName works in assignment expressions
+        let source = r#"module Test
+            enum Status {
+                case Pending
+                case Active
+                case Complete
+            }
+
+            func test() {
+                var status: Status = .Pending;
+                status = .Active;
+                status = .Complete;
+            }
+        "#;
+
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        fn find_nodes(
+            node: &kestrel_syntax_tree::SyntaxNode,
+            kind: SyntaxKind,
+        ) -> Vec<kestrel_syntax_tree::SyntaxNode> {
+            let mut result = Vec::new();
+            if node.kind() == kind {
+                result.push(node.clone());
+            }
+            for child in node.children() {
+                result.extend(find_nodes(&child, kind));
+            }
+            result
+        }
+
+        let func_decls = find_nodes(&tree, SyntaxKind::FunctionDeclaration);
+        assert_eq!(func_decls.len(), 1, "Should have 1 FunctionDeclaration");
+
+        for func in &func_decls {
+            let has_body = func
+                .children()
+                .any(|c| c.kind() == SyntaxKind::FunctionBody);
+            assert!(has_body, "Function should have a body");
+        }
+
+        let implicit_accesses = find_nodes(&tree, SyntaxKind::ExprImplicitMemberAccess);
+        assert_eq!(
+            implicit_accesses.len(),
+            3,
+            "Should have 3 ExprImplicitMemberAccess (.Pending, .Active, .Complete)"
+        );
     }
 }

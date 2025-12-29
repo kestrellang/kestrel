@@ -5,8 +5,9 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 use kestrel_semantic_model::ExecutableBodyFor;
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
-use kestrel_semantic_tree::expr::{ExprKind, Expression, ElseBranch};
+use kestrel_semantic_tree::expr::{ExprKind, Expression, ElseBranch, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
@@ -118,17 +119,39 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
             if let Some(value_expr) = value {
                 state = analyze_expression(value_expr, state, false, ctx);
                 // Mark variables in pattern as initialized
-                use kestrel_semantic_tree::pattern::PatternKind;
-                match &pattern.kind {
-                    PatternKind::Local { local_id, .. } => {
-                        state.assigned.insert(*local_id);
-                    }
-                    PatternKind::Error => {}
-                }
+                mark_pattern_locals_assigned(pattern, &mut state);
             }
         }
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
+        }
+        StatementKind::GuardLet { conditions, else_block } => {
+            // Analyze each condition
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        state = analyze_expression(expr, state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                        // Pattern bindings become assigned for subsequent conditions
+                        mark_pattern_locals_assigned(pattern, &mut state);
+                    }
+                }
+            }
+            
+            // The else block is analyzed with current state (bindings from earlier statements are visible)
+            // but the pattern bindings from THIS guard-let are NOT visible in the else block
+            let mut else_ctx = VerificationContext {
+                assigned: state.assigned.clone(),
+                errors: Vec::new(),
+                container_id: ctx.container_id,
+                model: ctx.model,
+            };
+            let _else_state = analyze_block(else_block, &mut else_ctx);
+            // Collect any errors from the else block
+            ctx.errors.extend(else_ctx.errors);
+            // Else block diverges, we don't merge its state
         }
     }
     state
@@ -163,15 +186,27 @@ fn analyze_expression(
             state = analyze_expression(target, state, true, ctx);
         }
         ExprKind::If {
-            condition,
+            conditions,
             then_branch,
             then_value,
             else_branch,
         } => {
-            state = analyze_expression(condition, state, false, ctx);
+            // Analyze conditions
+            for condition in conditions {
+                match condition {
+                    IfCondition::Expr(expr) => {
+                        state = analyze_expression(expr, state, false, ctx);
+                    }
+                    IfCondition::Let { value, pattern, .. } => {
+                        state = analyze_expression(value, state, false, ctx);
+                        // Mark pattern bindings as assigned for subsequent conditions
+                        mark_pattern_locals_assigned(pattern, &mut state);
+                    }
+                }
+            }
             let pre_if_assigned = state.assigned.clone();
 
-            // Analyze then branch
+            // Analyze then branch - pattern bindings are visible here
             let mut then_state = State {
                 assigned: pre_if_assigned.clone(),
                 diverged: false,
@@ -239,6 +274,30 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
         }
+        ExprKind::WhileLet { conditions, body, .. } => {
+            // Analyze each condition
+            let mut body_state = State {
+                assigned: state.assigned.clone(),
+                diverged: false,
+            };
+            for condition in conditions {
+                match condition {
+                    kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                        body_state = analyze_expression(expr, body_state, false, ctx);
+                    }
+                    kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        body_state = analyze_expression(value, body_state, false, ctx);
+                        // Mark pattern bindings as assigned for subsequent conditions and body
+                        mark_pattern_locals_assigned(pattern, &mut body_state);
+                    }
+                }
+            }
+            for stmt in body {
+                if body_state.diverged { break; }
+                body_state = analyze_statement(stmt, body_state, ctx);
+            }
+            // Pattern bindings don't persist after the loop
+        }
         ExprKind::Loop { body, .. } => {
             let mut body_state = State {
                 assigned: state.assigned.clone(),
@@ -259,7 +318,14 @@ fn analyze_expression(
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
         }
-        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::Error | ExprKind::OverloadedRef(_) | ExprKind::Closure { .. } => {}
+        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef | ExprKind::EnumCase { .. } | ExprKind::Error | ExprKind::OverloadedRef(_) | ExprKind::Closure { .. } => {}
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    state = analyze_expression(&arg.value, state, false, ctx);
+                }
+            }
+        }
         ExprKind::Array(exprs) | ExprKind::Tuple(exprs) => {
             for e in exprs {
                 state = analyze_expression(e, state, false, ctx);
@@ -294,8 +360,94 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
+        ExprKind::Match { scrutinee, arms } => {
+            // Analyze scrutinee
+            state = analyze_expression(scrutinee, state, false, ctx);
+            // For match arms, we'd need to intersect states from all arms
+            // For now, just analyze each arm
+            for arm in arms {
+                let mut arm_state = state.clone();
+                // Pattern bindings are local to the arm
+                mark_pattern_locals_assigned(&arm.pattern, &mut arm_state);
+                if let Some(guard) = &arm.guard {
+                    arm_state = analyze_expression(guard, arm_state, false, ctx);
+                }
+                arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
+                // Note: proper handling would merge states from all arms
+            }
+        }
     }
     state
+}
+
+/// Recursively mark all local bindings in a pattern as assigned.
+///
+/// This handles:
+/// - Local bindings: mark the local as assigned
+/// - Tuple patterns: recursively mark all elements
+/// - Enum variant patterns: recursively mark all bindings
+/// - Wildcard, literal, error: nothing to mark
+fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
+    match &pattern.kind {
+        PatternKind::Local { local_id, .. } => {
+            state.assigned.insert(*local_id);
+        }
+        PatternKind::Wildcard => {
+            // Wildcards don't bind anything
+        }
+        PatternKind::Tuple { prefix, suffix, .. } => {
+            for elem in prefix.iter().chain(suffix.iter()) {
+                mark_pattern_locals_assigned(elem, state);
+            }
+        }
+        PatternKind::Literal { .. } => {
+            // Literals don't bind anything
+        }
+        PatternKind::EnumVariant { bindings, .. } => {
+            for binding in bindings {
+                mark_pattern_locals_assigned(&binding.pattern, state);
+            }
+        }
+        PatternKind::Range { .. } => {
+            // Range patterns don't bind anything
+        }
+        PatternKind::Struct { fields, .. } => {
+            for field in fields {
+                mark_pattern_locals_assigned(&field.pattern, state);
+            }
+        }
+        PatternKind::Array { prefix, suffix, rest } => {
+            for elem in prefix {
+                mark_pattern_locals_assigned(elem, state);
+            }
+            for elem in suffix {
+                mark_pattern_locals_assigned(elem, state);
+            }
+            // Mark the rest binding as assigned if it has a LocalId
+            if let Some((Some(_name), Some(local_id))) = rest {
+                state.assigned.insert(*local_id);
+            }
+        }
+        PatternKind::Or { alternatives } => {
+            // For or-patterns, all alternatives must bind the same names
+            // We can mark from the first alternative since they're all the same
+            if let Some(first) = alternatives.first() {
+                mark_pattern_locals_assigned(first, state);
+            }
+        }
+        PatternKind::At { local_id, subpattern, .. } => {
+            // Mark the binding from the @ pattern
+            state.assigned.insert(*local_id);
+            // Also mark any bindings from the subpattern
+            mark_pattern_locals_assigned(subpattern, state);
+        }
+        PatternKind::Rest => {
+            // Rest patterns don't bind anything (the named variant is tracked elsewhere)
+        }
+        PatternKind::Error => {
+            // Error patterns don't bind anything
+        }
+    }
 }
 
 pub mod diagnostics;

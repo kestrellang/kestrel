@@ -31,17 +31,27 @@ fn transitive_equality_constraints_in_extension_method() {
 fn nested_associated_type_projections() {
     Test::new(
         r#"module Test
-        protocol Level3 { static func baseValue() -> Int; }
-        protocol Level2 { type Next: Level3; func level2() -> Int; }
-        protocol Level1 { type Next: Level2; }
+        protocol Level3 {
+            static func baseValue() -> Int
+        }
+        protocol Level2 {
+            type Next: Level3;
+            func level2() -> Int
+        }
+        protocol Level1 {
+            type Next: Level2;
+        }
 
-        struct S1 {}
-        struct S2 {}
-        struct S3 {}
-
-        extend S1: Level1 { type Next = S2; }
-        extend S2: Level2 { type Next = S3; func level2() -> Int { return 2; } }
-        extend S3: Level3 { static func baseValue() -> Int { return 300; } }
+        struct S3: Level3 {
+            static func baseValue() -> Int { return 300; }
+        }
+        struct S2: Level2 {
+            type Next = S3;
+            func level2() -> Int { return 2; }
+        }
+        struct S1: Level1 {
+            type Next = S2;
+        }
 
         struct Wrapper[T] { var val: T }
 

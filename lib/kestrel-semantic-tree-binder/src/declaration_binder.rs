@@ -14,8 +14,8 @@ use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::binders::{
-    ExtensionBinder, FieldBinder, FunctionBinder, ImportBinder, InitializerBinder, ModuleBinder,
-    ProtocolBinder, StructBinder, TerminalBinder, TypeAliasBinder,
+    EnumBinder, EnumCaseBinder, ExtensionBinder, FieldBinder, FunctionBinder, ImportBinder,
+    InitializerBinder, ModuleBinder, ProtocolBinder, StructBinder, TerminalBinder, TypeAliasBinder,
 };
 use crate::maps::SourceMap;
 
@@ -107,6 +107,8 @@ impl DeclarationBinderRegistry {
         binders.insert(SyntaxKind::ProtocolDeclaration, Box::new(ProtocolBinder));
         binders.insert(SyntaxKind::StructDeclaration, Box::new(StructBinder));
         binders.insert(SyntaxKind::ExtensionDeclaration, Box::new(ExtensionBinder));
+        binders.insert(SyntaxKind::EnumDeclaration, Box::new(EnumBinder));
+        binders.insert(SyntaxKind::EnumCaseDeclaration, Box::new(EnumCaseBinder));
         binders.insert(SyntaxKind::FieldDeclaration, Box::new(FieldBinder));
         binders.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionBinder));
         binders.insert(

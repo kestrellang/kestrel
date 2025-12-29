@@ -10,6 +10,8 @@ use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
+use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -215,7 +217,7 @@ fn extract_type_arguments_from_callee(
 }
 
 /// Resolve an argument list node into CallArguments
-fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
+pub(crate) fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
     let mut arguments = Vec::new();
 
     for child in node.children() {
@@ -620,6 +622,31 @@ fn resolve_single_function_call(
                 // Apply substitution to return type
                 let return_ty = substitute_type(callable.return_type(), &substitutions);
                 (return_ty, substitutions)
+            } else {
+                (callable.return_type().clone(), Substitutions::new())
+            }
+        } else if symbol.as_any().downcast_ref::<EnumCaseSymbol>().is_some() {
+            // Enum case - get type parameters from parent enum
+            if let Some(parent) = symbol.metadata().parent() {
+                if let Some(enum_sym) = parent.as_any().downcast_ref::<EnumSymbol>() {
+                    let type_params = enum_sym.type_parameters();
+
+                    if !type_params.is_empty() {
+                        // Collect argument types
+                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+
+                        // Infer type arguments from argument types
+                        let substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
+
+                        // Apply substitution to return type
+                        let return_ty = substitute_type(callable.return_type(), &substitutions);
+                        (return_ty, substitutions)
+                    } else {
+                        (callable.return_type().clone(), Substitutions::new())
+                    }
+                } else {
+                    (callable.return_type().clone(), Substitutions::new())
+                }
             } else {
                 (callable.return_type().clone(), Substitutions::new())
             }

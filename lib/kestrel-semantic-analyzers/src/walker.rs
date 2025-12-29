@@ -108,6 +108,27 @@ fn walk_statement(
             StatementKind::Expr(expr) => {
                 walk_expression(expr, analyzers, model, ctx);
             }
+            StatementKind::GuardLet { conditions, else_block } => {
+                // Walk each condition
+                for condition in conditions {
+                    match condition {
+                        kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                            walk_expression(expr, analyzers, model, ctx);
+                        }
+                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                            walk_pattern(pattern, analyzers, model, ctx);
+                            walk_expression(value, analyzers, model, ctx);
+                        }
+                    }
+                }
+                // Walk the else block statements
+                for else_stmt in &else_block.statements {
+                    walk_statement(else_stmt, analyzers, model, ctx);
+                }
+                if let Some(yield_expr) = &else_block.yield_expr {
+                    walk_expression(yield_expr, analyzers, model, ctx);
+                }
+            }
         }
     }
 
@@ -209,12 +230,31 @@ fn walk_expression(
                 walk_expression(value, analyzers, model, ctx);
             }
             ExprKind::If {
-                condition,
+                conditions,
                 then_branch,
                 then_value,
                 else_branch,
             } => {
-                walk_expression(condition, analyzers, model, ctx);
+                for cond in conditions {
+                    match cond {
+                        kestrel_semantic_tree::expr::IfCondition::Expr(e) => {
+                            walk_expression(e, analyzers, model, ctx);
+                            if ctx.stopped {
+                                return;
+                            }
+                        }
+                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                            walk_pattern(pattern, analyzers, model, ctx);
+                            if ctx.stopped {
+                                return;
+                            }
+                            walk_expression(value, analyzers, model, ctx);
+                            if ctx.stopped {
+                                return;
+                            }
+                        }
+                    }
+                }
                 for stmt in then_branch {
                     walk_statement(stmt, analyzers, model, ctx);
                     if ctx.stopped {
@@ -254,6 +294,27 @@ fn walk_expression(
                     }
                 }
             }
+            ExprKind::WhileLet {
+                conditions, body, ..
+            } => {
+                for condition in conditions {
+                    match condition {
+                        kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
+                            walk_expression(expr, analyzers, model, ctx);
+                        }
+                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                            walk_pattern(pattern, analyzers, model, ctx);
+                            walk_expression(value, analyzers, model, ctx);
+                        }
+                    }
+                }
+                for stmt in body {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            }
             ExprKind::Closure { body, tail_expr, .. } => {
                 // Walk closure body statements
                 for stmt in body {
@@ -267,18 +328,40 @@ fn walk_expression(
                     walk_expression(tail, analyzers, model, ctx);
                 }
             }
+            ExprKind::ImplicitMemberAccess { arguments, .. } => {
+                if let Some(args) = arguments {
+                    for arg in args {
+                        walk_expression(&arg.value, analyzers, model, ctx);
+                        if ctx.stopped {
+                            return;
+                        }
+                    }
+                }
+            }
             // Leaf kinds or handled elsewhere
             ExprKind::Literal(_)
             | ExprKind::LocalRef(_)
             | ExprKind::SymbolRef(_)
             | ExprKind::TypeRef(_)
             | ExprKind::TypeParameterRef(_)
+            | ExprKind::AssociatedTypeRef
+            | ExprKind::EnumCase { .. }
             | ExprKind::Break { .. }
             | ExprKind::Continue { .. }
             | ExprKind::Return { value: None }
             | ExprKind::Error => {}
             ExprKind::Return { value: Some(v) } => {
                 walk_expression(v, analyzers, model, ctx);
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                walk_expression(scrutinee, analyzers, model, ctx);
+                for arm in arms {
+                    walk_pattern(&arm.pattern, analyzers, model, ctx);
+                    if let Some(guard) = &arm.guard {
+                        walk_expression(guard, analyzers, model, ctx);
+                    }
+                    walk_expression(&arm.body, analyzers, model, ctx);
+                }
             }
         }
     }
@@ -328,6 +411,12 @@ fn walk_type(
 fn get_executable_body(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
+    // Prefer ResolvedExecutableBehavior if available (after type inference).
+    // This ensures analyzers running after type inference see resolved types.
+    if let Some(resolved) = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+        return Some(resolved.body().clone());
+    }
+    // Fall back to unresolved ExecutableBehavior.
     symbol
         .metadata()
         .get_behavior::<ExecutableBehavior>()
