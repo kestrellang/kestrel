@@ -48,6 +48,9 @@
 //!     .has(Behavior::ConformanceCount(1));
 //! ```
 
+pub mod mir;
+
+use std::cell::OnceCell;
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
@@ -84,6 +87,18 @@ pub struct TestContext {
     pub semantic_model: SemanticModel,
     pub diagnostics: DiagnosticContext,
     pub has_errors: bool,
+    /// Lazily computed MIR lowering result
+    mir_result: OnceCell<kestrel_execution_graph_lowering::LoweringResult>,
+}
+
+impl TestContext {
+    /// Get the MIR lowering result, computing it lazily if needed.
+    pub fn mir(&self) -> &kestrel_execution_graph_lowering::LoweringResult {
+        self.mir_result.get_or_init(|| {
+            let root = self.semantic_model.root();
+            kestrel_execution_graph_lowering::lower_module(&self.semantic_model, &root)
+        })
+    }
 }
 
 /// A test case that can be run against the Kestrel compiler
@@ -176,6 +191,7 @@ impl Test {
             semantic_model: model,
             diagnostics,
             has_errors,
+            mir_result: OnceCell::new(),
         });
     }
 

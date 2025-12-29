@@ -13,6 +13,7 @@
 //! - `framework/` - Test framework features
 
 mod declarations;
+mod execution_graph;
 mod expressions;
 mod framework;
 mod inference;

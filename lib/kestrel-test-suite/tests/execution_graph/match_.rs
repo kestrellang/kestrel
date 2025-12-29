@@ -1,0 +1,524 @@
+//! Pattern matching MIR tests.
+//!
+//! Tests for pattern matching including:
+//! - Match expressions
+//! - If-let expressions
+//! - Guard-let statements
+//! - While-let loops
+//! - Pattern bindings
+
+use kestrel_test_suite::mir::*;
+use kestrel_test_suite::*;
+
+// ============================================================================
+// MATCH EXPRESSIONS
+// ============================================================================
+
+mod match_expressions {
+    use super::*;
+
+    #[test]
+    fn match_on_int() {
+        Test::new(
+            r#"
+            module Main
+
+            func describe(n: Int) -> Int {
+                match n {
+                    0 => 0,
+                    1 => 1,
+                    _ => 2
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.describe")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(3),
+        );
+    }
+
+    #[test]
+    fn match_on_bool() {
+        Test::new(
+            r#"
+            module Main
+
+            func toInt(b: Bool) -> Int {
+                match b {
+                    true => 1,
+                    false => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.toInt")
+                .returns(MirTy::I64)
+                .any_block(|b| b.terminates_with(TerminatorPattern::Branch)),
+        );
+    }
+
+    #[test]
+    fn match_with_binding() {
+        Test::new(
+            r#"
+            module Main
+
+            enum Option {
+                case Some(value: Int)
+                case None
+            }
+
+            func unwrap(opt: Option) -> Int {
+                match opt {
+                    .Some(v) => v,
+                    .None => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.unwrap")
+                .returns(MirTy::I64)
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+        );
+    }
+
+    #[test]
+    fn match_with_wildcard() {
+        Test::new(
+            r#"
+            module Main
+
+            enum Color {
+                case Red
+                case Green
+                case Blue
+            }
+
+            func isRed(c: Color) -> Bool {
+                match c {
+                    .Red => true,
+                    _ => false
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.isRed")
+                .returns(MirTy::Bool)
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+        );
+    }
+}
+
+// ============================================================================
+// IF-LET EXPRESSIONS
+// ============================================================================
+
+mod if_let {
+    use super::*;
+
+    #[test]
+    fn simple_if_let() {
+        // Based on tmp/14_if_let.ks
+        Test::new(
+            r#"
+            module Main
+
+            enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            func unwrap(opt: Option[Int]) -> Int {
+                if let .Some(v) = opt {
+                    v
+                } else {
+                    0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.unwrap")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(3), // entry, then, else
+        );
+    }
+
+    #[test]
+    fn if_let_chain() {
+        // Based on tmp/14_if_let.ks
+        Test::new(
+            r#"
+            module Main
+
+            enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            func addIfBothSome(a: Option[Int], b: Option[Int]) -> Int {
+                if let .Some(x) = a, let .Some(y) = b {
+                    x + y
+                } else {
+                    0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.addIfBothSome")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(4), // entry, first match, second match, else
+        );
+    }
+
+    #[test]
+    fn if_let_without_else() {
+        Test::new(
+            r#"
+            module Main
+
+            enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            func maybeDouble(opt: Option[Int]) -> Int {
+                var result = 0;
+                if let .Some(v) = opt {
+                    result = v * 2;
+                }
+                result
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.maybeDouble")
+                .returns(MirTy::I64)
+                .has_local("result", MirTy::I64),
+        );
+    }
+}
+
+// ============================================================================
+// GUARD-LET STATEMENTS
+// ============================================================================
+
+mod guard_let {
+    use super::*;
+
+    #[test]
+    fn simple_guard_let() {
+        // Based on tmp/15_guard_let.ks
+        Test::new(
+            r#"
+            module Main
+
+            enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            func process(opt: Option[Int]) -> Int {
+                guard let .Some(v) = opt else {
+                    return 0
+                }
+                v * 2
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.process")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(3), // entry, guard body, continuation
+        );
+    }
+
+    #[test]
+    fn multiple_guard_lets() {
+        Test::new(
+            r#"
+            module Main
+
+            enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            func process(a: Option[Int], b: Option[Int]) -> Int {
+                guard let .Some(x) = a else {
+                    return 0
+                }
+                guard let .Some(y) = b else {
+                    return 0
+                }
+                x + y
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.process")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(4),
+        );
+    }
+}
+
+// ============================================================================
+// WHILE-LET LOOPS
+// ============================================================================
+
+mod while_let {
+    use super::*;
+
+    #[test]
+    fn simple_while_let() {
+        // Based on tmp/18_while_let.ks
+        Test::new(
+            r#"
+            module Main
+
+            enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            struct Counter {
+                var count: Int
+                
+                init(start: Int) {
+                    self.count = start;
+                }
+                
+                mutating func next() -> Option[Int] {
+                    if self.count > 0 {
+                        let v = self.count;
+                        self.count = self.count - 1;
+                        Option[Int].Some(value: v)
+                    } else {
+                        Option[Int].None
+                    }
+                }
+            }
+
+            func sumAll() -> Int {
+                var counter = Counter(start: 5);
+                var sum = 0;
+                while let .Some(v) = counter.next() {
+                    sum = sum + v;
+                }
+                sum
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.sumAll")
+                .returns(MirTy::I64)
+                .has_local("counter", MirTy::named("Main.Counter"))
+                .has_local("sum", MirTy::I64)
+                .calls("Main.Counter.next"),
+        );
+    }
+}
+
+// ============================================================================
+// TUPLE PATTERNS
+// ============================================================================
+
+mod tuple_patterns {
+    use super::*;
+
+    #[test]
+    fn match_on_tuple() {
+        Test::new(
+            r#"
+            module Main
+
+            func classify(pair: (Int, Int)) -> Int {
+                match pair {
+                    (0, 0) => 0,
+                    (0, _) => 1,
+                    (_, 0) => 2,
+                    _ => 3
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.classify")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(4),
+        );
+    }
+
+    #[test]
+    fn destructure_tuple() {
+        Test::new(
+            r#"
+            module Main
+
+            func sum(pair: (Int, Int)) -> Int {
+                let (a, b) = pair;
+                a + b
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.sum")
+                .returns(MirTy::I64)
+                .has_local("a", MirTy::I64)
+                .has_local("b", MirTy::I64),
+        );
+    }
+}
+
+// NOTE: Struct patterns (like `Point(x: 0, y: 0)`) are not yet supported in the parser
+
+// ============================================================================
+// NESTED PATTERNS
+// ============================================================================
+
+mod nested_patterns {
+    use super::*;
+
+    #[test]
+    fn nested_enum_pattern() {
+        Test::new(
+            r#"
+            module Main
+
+            enum Inner {
+                case A(x: Int)
+                case B
+            }
+
+            enum Outer {
+                case Wrap(inner: Inner)
+                case Empty
+            }
+
+            func extract(o: Outer) -> Int {
+                match o {
+                    .Wrap(.A(x)) => x,
+                    .Wrap(.B) => 0,
+                    .Empty => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.extract")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(4),
+        );
+    }
+}
+
+// ============================================================================
+// MATCH IN CLOSURES
+// ============================================================================
+
+mod match_in_closures {
+    use super::*;
+
+    #[test]
+    fn closure_with_match() {
+        // Based on tmp/21_closure_in_match.ks
+        Test::new(
+            r#"
+            module Main
+
+            enum Option {
+                case Some(value: Int)
+                case None
+            }
+
+            func main() -> Int {
+                let unwrap: (Option) -> Int = { (opt: Option) in
+                    match opt {
+                        .Some(v) => v,
+                        .None => 0
+                    }
+                };
+                unwrap(Option.Some(value: 42))
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.main")
+                .returns(MirTy::I64)
+                .calls_escaping(),
+        )
+        .expect(
+            Mir::mir_closure("Main.main", 0)
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+        );
+    }
+}
+
+// ============================================================================
+// MATCH WITH GUARDS
+// ============================================================================
+
+mod match_with_guards {
+    use super::*;
+
+    #[test]
+    fn match_with_if_guard() {
+        // Based on tmp/30_match_with_guards.ks
+        Test::new(
+            r#"
+            module Main
+
+            func classify(n: Int) -> Int {
+                match n {
+                    x if x < 0 => 0 - 1,
+                    x if x == 0 => 0,
+                    x if x < 10 => 1,
+                    _ => 2
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Main.classify")
+                .returns(MirTy::I64)
+                .has_at_least_blocks(5), // Multiple guards create multiple branches
+        );
+    }
+}

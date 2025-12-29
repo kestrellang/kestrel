@@ -437,6 +437,8 @@ name = "kestrel-test-suite"
 version = "0.9.0"
 dependencies = [
  "downcast-rs",
+ "kestrel-execution-graph",
+ "kestrel-execution-graph-lowering",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",

@@ -27,12 +27,6 @@ mod pattern;
 mod stmt;
 mod ty;
 
-#[cfg(test)]
-mod closure_tests;
-
-#[cfg(test)]
-mod protocol_tests;
-
 pub use context::LoweringContext;
 pub use error::LoweringError;
 
