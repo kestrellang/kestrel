@@ -1,5 +1,6 @@
 //! Struct lowering - converts semantic struct symbols to MIR struct definitions.
 
+use kestrel_execution_graph::TypeParamOwner;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -22,14 +23,17 @@ pub fn lower_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>
     // Create the struct
     let struct_id = ctx.mir.add_struct(name);
 
-    // TODO: Handle type parameters (generics)
-    // For now, we skip generic structs or emit a warning
-    if struct_symbol.is_generic() {
-        // Still create the struct, but type parameters won't be properly handled
-        // The type conversion will emit warnings for type parameter usage
+    // Register type parameters BEFORE lowering field types.
+    // This ensures that type parameters like A, B are in scope when lowering fields.
+    for tp in struct_symbol.type_parameters() {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def = kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Struct(struct_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.structs[struct_id].type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
     }
 
-    // Add fields
+    // Add fields (now type parameters are in scope)
     for child in struct_symbol.metadata().children() {
         if child.metadata().kind() == KestrelSymbolKind::Field {
             if let Ok(field_symbol) = child.downcast_arc::<FieldSymbol>() {
@@ -37,6 +41,10 @@ pub fn lower_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>
             }
         }
     }
+
+    // Clear type params after lowering struct fields.
+    // Methods will register their own type params (including parent's) when lowered.
+    ctx.clear_type_params();
 }
 
 /// Lower a field to MIR.
