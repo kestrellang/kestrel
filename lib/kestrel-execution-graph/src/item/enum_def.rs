@@ -81,12 +81,20 @@ impl fmt::Display for EnumDefDisplay<'_> {
 
         for case_id in &self.def.cases {
             let case = &self.ctx.enum_cases[*case_id];
-            writeln!(
-                f,
-                "    {}: {}",
-                case.name,
-                self.ctx.name(case.struct_name)
-            )?;
+            write!(f, "    {}: {}", case.name, self.ctx.name(case.struct_name))?;
+            
+            // Include type parameters if the enum has any
+            if !self.def.type_params.is_empty() {
+                write!(f, "[")?;
+                for (i, tp) in self.def.type_params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", self.ctx.type_param(*tp).name)?;
+                }
+                write!(f, "]")?;
+            }
+            writeln!(f)?;
         }
 
         write!(f, "}}")
