@@ -144,13 +144,38 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         }
 
         // === Associated Types ===
-        TyKind::AssociatedType { symbol, .. } => {
-            // TODO: Associated types need to be resolved through witnesses
-            ctx.emit_error(LoweringError::unsupported_type(
-                format!("associated type '{}'", symbol.metadata().name().value),
-                ty.span().clone(),
-            ));
-            ctx.mir.ty_error()
+        TyKind::AssociatedType { symbol, container } => {
+            // Get the associated type name
+            let assoc_name = symbol.metadata().name().value.clone();
+
+            // Get the protocol that defines this associated type (parent of the symbol)
+            let protocol_name = if let Some(parent) = symbol.metadata().parent() {
+                qualified_name_for_symbol(ctx, &parent)
+            } else {
+                // Orphan associated type - shouldn't happen
+                ctx.emit_error(LoweringError::unsupported_type(
+                    format!("orphan associated type '{}'", assoc_name),
+                    ty.span().clone(),
+                ));
+                return ctx.mir.ty_error();
+            };
+
+            match container {
+                Some(container_ty) => {
+                    // Container is known - e.g., T.Element where T: Container
+                    // Lower the base type and create a projection
+                    let base = lower_type(ctx, container_ty);
+                    ctx.mir.ty_assoc_projection(base, protocol_name, assoc_name)
+                }
+                None => {
+                    // No container - bare associated type in protocol context
+                    // This means we're in a protocol method signature like:
+                    //   func get() -> Element
+                    // The associated type should be projected from Self
+                    let self_ty = ctx.mir.ty_self();
+                    ctx.mir.ty_assoc_projection(self_ty, protocol_name, assoc_name)
+                }
+            }
         }
 
         // === Self Type ===

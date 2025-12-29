@@ -59,6 +59,21 @@ pub enum MirTy {
     /// this gets substituted with the concrete implementing type.
     SelfType,
 
+    /// Associated type projection: `T.Element` where `T: Container`.
+    ///
+    /// During monomorphization, this is resolved to the concrete type
+    /// by looking up the witness table for the implementing type.
+    /// For example, if `T` is substituted with `MyStruct` and `MyStruct: Container`
+    /// with `type Element = Int`, then `T.Element` resolves to `Int`.
+    AssociatedTypeProjection {
+        /// The base type (e.g., type parameter T, or Self)
+        base: Id<Ty>,
+        /// The protocol that defines the associated type
+        protocol: Id<QualifiedName>,
+        /// The associated type name (e.g., "Element")
+        associated: String,
+    },
+
     /// Error/poison type used when lowering fails.
     /// This represents a type that couldn't be lowered due to an error.
     /// Using a dedicated error type instead of Unit makes error cases explicit.
@@ -179,6 +194,21 @@ impl fmt::Display for MirTyDisplay<'_> {
             }
 
             MirTy::SelfType => write!(f, "Self"),
+
+            MirTy::AssociatedTypeProjection {
+                base,
+                protocol,
+                associated,
+            } => {
+                write!(
+                    f,
+                    "({}.{} for {})",
+                    self.ctx.name(*protocol),
+                    associated,
+                    self.ctx.ty(*base).display(self.ctx),
+                )
+            }
+
             MirTy::Error => write!(f, "<error>"),
         }
     }

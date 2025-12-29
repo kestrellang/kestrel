@@ -227,6 +227,24 @@ impl MirContext {
         self.intern_type(MirTy::SelfType)
     }
 
+    /// Intern an associated type projection.
+    ///
+    /// This represents `T.Element` where `T: Protocol` and `Element` is an
+    /// associated type of `Protocol`. During monomorphization, this is resolved
+    /// to the concrete type from the witness table.
+    pub fn ty_assoc_projection(
+        &mut self,
+        base: Id<Ty>,
+        protocol: Id<QualifiedName>,
+        associated: impl Into<String>,
+    ) -> Id<Ty> {
+        self.intern_type(MirTy::AssociatedTypeProjection {
+            base,
+            protocol,
+            associated: associated.into(),
+        })
+    }
+
     /// Intern the error type.
     /// Used when lowering fails and a placeholder type is needed.
     pub fn ty_error(&mut self) -> Id<Ty> {
