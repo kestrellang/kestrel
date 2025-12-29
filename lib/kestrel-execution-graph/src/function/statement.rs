@@ -125,6 +125,19 @@ pub enum Callee {
 
     /// Thick callable: `call escaping %closure(...)`
     Thick(Place),
+
+    /// Witness method lookup: `call witness_method Protocol.method for Type(...)`
+    ///
+    /// Used when calling methods on type parameters. The actual implementation
+    /// is looked up at monomorphization time from the witness table.
+    Witness {
+        /// The protocol that defines the method
+        protocol: Id<QualifiedName>,
+        /// The method name within the protocol
+        method: String,
+        /// The type parameter we're calling on (e.g., `T`)
+        for_type: Id<Ty>,
+    },
 }
 
 /// Binary operations.
@@ -419,6 +432,22 @@ impl Callee {
         Callee::Direct { name, type_args }
     }
 
+    /// Create a witness method callee.
+    ///
+    /// Used for calling methods on type parameters where the concrete
+    /// implementation is resolved via witness table lookup.
+    pub fn witness(
+        protocol: Id<QualifiedName>,
+        method: impl Into<String>,
+        for_type: Id<Ty>,
+    ) -> Self {
+        Callee::Witness {
+            protocol,
+            method: method.into(),
+            for_type,
+        }
+    }
+
     /// Create a display wrapper for printing this callee.
     pub fn display<'a>(&'a self, ctx: &'a MirContext) -> impl fmt::Display + 'a {
         CalleeDisplay { callee: self, ctx }
@@ -449,6 +478,19 @@ impl fmt::Display for CalleeDisplay<'_> {
             }
             Callee::Thin(p) => write!(f, "{}", p.display(self.ctx)),
             Callee::Thick(p) => write!(f, "escaping {}", p.display(self.ctx)),
+            Callee::Witness {
+                protocol,
+                method,
+                for_type,
+            } => {
+                write!(
+                    f,
+                    "witness_method {}.{} for {}",
+                    self.ctx.name(*protocol),
+                    method,
+                    self.ctx.ty(*for_type).display(self.ctx)
+                )
+            }
         }
     }
 }

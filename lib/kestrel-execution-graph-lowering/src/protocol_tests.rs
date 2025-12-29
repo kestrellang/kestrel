@@ -788,3 +788,242 @@ struct S: B {
         );
     }
 }
+
+// ============================================================================
+// WITNESS METHOD CALLS (Type Parameter Calls)
+// ============================================================================
+
+mod witness_method_calls {
+    use super::*;
+
+    #[test]
+    fn instance_method_on_type_parameter() {
+        // a.add(b) where a: T, T: Add
+        let source = r#"
+module Test
+
+protocol Add {
+    func add(other: Self) -> Self
+}
+
+func addThem[T](a: T, b: T) -> T where T: Add {
+    return a.add(b)
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method
+        assert!(
+            output.contains("witness_method Test.Add.add for T"),
+            "Expected witness_method call for Add.add\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn static_method_on_type_parameter() {
+        // T.create() where T: Factory
+        let source = r#"
+module Test
+
+protocol Factory {
+    static func create() -> Self
+}
+
+func make[T]() -> T where T: Factory {
+    return T.create()
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method
+        assert!(
+            output.contains("witness_method Test.Factory.create for T"),
+            "Expected witness_method call for Factory.create\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn init_on_type_parameter() {
+        // T() where T: Factory
+        let source = r#"
+module Test
+
+protocol Factory {
+    init()
+}
+
+func make[T]() -> T where T: Factory {
+    return T()
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method for init
+        assert!(
+            output.contains("witness_method Test.Factory.init for T"),
+            "Expected witness_method call for Factory.init\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn init_with_arguments_on_type_parameter() {
+        // T(value: v) where T: Factory
+        let source = r#"
+module Test
+
+protocol Factory {
+    init(value: Int)
+}
+
+func make[T](v: Int) -> T where T: Factory {
+    return T(value: v)
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method for init
+        assert!(
+            output.contains("witness_method Test.Factory.init for T"),
+            "Expected witness_method call for Factory.init\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn method_with_arguments_on_type_parameter() {
+        // a.process(x, y) where a: T, T: Processor
+        let source = r#"
+module Test
+
+protocol Processor {
+    func process(x: Int, y: Int) -> Int
+}
+
+func run[T](proc: T, a: Int, b: Int) -> Int where T: Processor {
+    return proc.process(a, b)
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method
+        assert!(
+            output.contains("witness_method Test.Processor.process for T"),
+            "Expected witness_method call for Processor.process\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn multiple_bounds_uses_correct_protocol() {
+        // When T has multiple bounds, the witness should reference the correct protocol
+        let source = r#"
+module Test
+
+protocol Add {
+    func add(other: Self) -> Self
+}
+
+protocol Mul {
+    func mul(other: Self) -> Self
+}
+
+func compute[T](a: T, b: T) -> T where T: Add and Mul {
+    let sum = a.add(b);
+    return sum.mul(b)
+}
+"#;
+        let output = mir_output(source);
+
+        // Should have witness calls for both protocols
+        assert!(
+            output.contains("witness_method Test.Add.add for T"),
+            "Expected witness_method for Add.add\n\nActual MIR:\n{}",
+            output
+        );
+        assert!(
+            output.contains("witness_method Test.Mul.mul for T"),
+            "Expected witness_method for Mul.mul\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn static_method_with_arguments() {
+        // T.fromInt(42) where T: Convertible
+        let source = r#"
+module Test
+
+protocol Convertible {
+    static func fromInt(value: Int) -> Self
+}
+
+func convert[T](n: Int) -> T where T: Convertible {
+    return T.fromInt(n)
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method
+        assert!(
+            output.contains("witness_method Test.Convertible.fromInt for T"),
+            "Expected witness_method call for Convertible.fromInt\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn mutating_method_on_type_parameter() {
+        // a.increment() where T: Counter, mutating func
+        let source = r#"
+module Test
+
+protocol Counter {
+    mutating func increment()
+}
+
+func bump[T](a: T) where T: Counter {
+    var x = a;
+    x.increment()
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method
+        assert!(
+            output.contains("witness_method Test.Counter.increment for T"),
+            "Expected witness_method call for Counter.increment\n\nActual MIR:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn static_method_on_associated_type() {
+        // T.Item.create() where T: Container, Container.Item: Factory
+        let source = r#"
+module Test
+
+protocol Factory {
+    static func create() -> Self
+}
+
+protocol Container {
+    type Item: Factory;
+}
+
+func makeItem[T]() -> T.Item where T: Container {
+    return T.Item.create()
+}
+"#;
+        let output = mir_output(source);
+
+        // Should call via witness_method for the associated type
+        assert!(
+            output.contains("witness_method Test.Factory.create for"),
+            "Expected witness_method call for Factory.create\n\nActual MIR:\n{}",
+            output
+        );
+    }
+}

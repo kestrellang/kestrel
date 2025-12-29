@@ -9,6 +9,8 @@ use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::TyKind;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
@@ -712,7 +714,9 @@ fn lower_call(
                     } else if kind == KestrelSymbolKind::Initializer {
                         // Initializer call - need to allocate self and pass as first arg
                         // Initializers have signature: func Type.init(self: &var Type, params...) -> ()
-                        let func_name = qualified_name_for_symbol(ctx, &sym);
+                        
+                        // Check if return type is a type parameter (T() where T: Factory)
+                        let is_type_param_init = matches!(expr.ty.kind(), TyKind::TypeParameter(_));
                         
                         // Create a mutable reference to the result place
                         let ref_ty = ctx.mir.ty_ref_mut(result_ty);
@@ -731,13 +735,39 @@ fn lower_call(
                         let unit_local = ctx.create_temp("init_ret", unit_ty);
                         let unit_place = Place::local(unit_local);
                         
-                        // Call the init function
-                        let mir_callee = if type_args.is_empty() {
-                            Callee::direct(func_name)
+                        if is_type_param_init {
+                            // Protocol initializer on type parameter: T() where T: Factory
+                            // The parent of the init symbol should be the protocol
+                            if let Some(parent) = sym.metadata().parent() {
+                                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                                    let protocol_name = qualified_name_for_symbol(ctx, &parent);
+                                    let for_type = lower_type(ctx, &expr.ty);
+                                    let mir_callee = Callee::witness(protocol_name, "init", for_type);
+                                    ctx.emit_call(unit_place, mir_callee, all_args);
+                                } else {
+                                    ctx.emit_error(LoweringError::internal(
+                                        "init's parent is not a protocol for type parameter init",
+                                        Some(expr.span.clone()),
+                                    ));
+                                    return Value::Immediate(Immediate::unit());
+                                }
+                            } else {
+                                ctx.emit_error(LoweringError::internal(
+                                    "init has no parent for type parameter init",
+                                    Some(expr.span.clone()),
+                                ));
+                                return Value::Immediate(Immediate::unit());
+                            }
                         } else {
-                            Callee::direct_generic(func_name, type_args)
-                        };
-                        ctx.emit_call(unit_place, mir_callee, all_args);
+                            // Regular initializer call
+                            let func_name = qualified_name_for_symbol(ctx, &sym);
+                            let mir_callee = if type_args.is_empty() {
+                                Callee::direct(func_name)
+                            } else {
+                                Callee::direct_generic(func_name, type_args.clone())
+                            };
+                            ctx.emit_call(unit_place, mir_callee, all_args);
+                        }
                         
                         // result_place now contains the initialized struct
                     } else {
@@ -766,10 +796,27 @@ fn lower_call(
             candidates,
             method_name,
         } => {
-            // Method call - receiver becomes first argument
-            let receiver_value = lower_expression(ctx, receiver);
-            let mut all_args = vec![receiver_value];
-            all_args.extend(arg_values);
+            // Check if this is a call on a type parameter (needs witness method lookup)
+            let is_type_param_call = matches!(receiver.ty.kind(), TyKind::TypeParameter(_));
+            let is_static_type_param_call = matches!(receiver.kind, ExprKind::TypeParameterRef(_));
+
+            // Check if this is a call on an associated type (also needs witness method lookup)
+            let is_assoc_type_call = matches!(receiver.ty.kind(), TyKind::AssociatedType { .. });
+            let is_static_assoc_type_call = matches!(receiver.kind, ExprKind::AssociatedTypeRef);
+
+            // For instance methods on type params, receiver becomes first argument
+            // For static methods on type params/assoc types, there's no receiver value
+            let all_args = if is_static_type_param_call || is_static_assoc_type_call {
+                // Static method call on type parameter or associated type: T.create(), T.Item.create()
+                // No receiver value, just the arguments
+                arg_values
+            } else {
+                // Instance method call: a.add(b) where a: T
+                let receiver_value = lower_expression(ctx, receiver);
+                let mut all_args = vec![receiver_value];
+                all_args.extend(arg_values);
+                all_args
+            };
 
             // For methods, we need to find the resolved method from candidates
             // During type inference, the correct candidate should have been selected
@@ -777,13 +824,44 @@ fn lower_call(
                 let method_symbol = ctx.model.query(SymbolFor { id: method_id });
                 match method_symbol {
                     Some(sym) => {
-                        let func_name = qualified_name_for_symbol(ctx, &sym);
-                        let mir_callee = if type_args.is_empty() {
-                            Callee::direct(func_name)
+                        // Check if this is a witness method call (method on type parameter or associated type)
+                        if is_type_param_call || is_static_type_param_call || is_assoc_type_call || is_static_assoc_type_call {
+                            // Get the protocol from the method's parent
+                            if let Some(parent) = sym.metadata().parent() {
+                                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                                    let protocol_name = qualified_name_for_symbol(ctx, &parent);
+                                    let for_type = lower_type(ctx, &receiver.ty);
+                                    let mir_callee =
+                                        Callee::witness(protocol_name, method_name.clone(), for_type);
+                                    ctx.emit_call(result_place.clone(), mir_callee, all_args);
+                                } else {
+                                    // Method's parent is not a protocol - shouldn't happen
+                                    ctx.emit_error(LoweringError::internal(
+                                        format!(
+                                            "method '{}' parent is not a protocol",
+                                            method_name
+                                        ),
+                                        Some(expr.span.clone()),
+                                    ));
+                                    return Value::Immediate(Immediate::unit());
+                                }
+                            } else {
+                                ctx.emit_error(LoweringError::internal(
+                                    format!("method '{}' has no parent", method_name),
+                                    Some(expr.span.clone()),
+                                ));
+                                return Value::Immediate(Immediate::unit());
+                            }
                         } else {
-                            Callee::direct_generic(func_name, type_args)
-                        };
-                        ctx.emit_call(result_place.clone(), mir_callee, all_args);
+                            // Regular direct method call
+                            let func_name = qualified_name_for_symbol(ctx, &sym);
+                            let mir_callee = if type_args.is_empty() {
+                                Callee::direct(func_name)
+                            } else {
+                                Callee::direct_generic(func_name, type_args.clone())
+                            };
+                            ctx.emit_call(result_place.clone(), mir_callee, all_args);
+                        }
                     }
                     None => {
                         ctx.emit_error(LoweringError::internal(

@@ -1,6 +1,6 @@
 //! Function and initializer lowering.
 
-
+use kestrel_execution_graph::TypeParamOwner;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::executable::ResolvedExecutableBehavior;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -88,6 +88,17 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         func.id()
     };
 
+    // Lower type parameters for generic functions
+    for tp in func_symbol.type_parameters() {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def = kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+
+        // Register the type param mapping for lowering types within this function
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
     // Enter the function context
     ctx.enter_function(func_id);
 
@@ -144,6 +155,9 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     }
 
     ctx.exit_function();
+
+    // Clear type param mappings after exiting function
+    ctx.clear_type_params();
 }
 
 /// Lower an initializer to MIR.
