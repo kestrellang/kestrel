@@ -1,16 +1,20 @@
 //! Function and initializer lowering.
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use kestrel_execution_graph::TypeParamOwner;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
-use kestrel_semantic_tree::behavior::executable::ResolvedExecutableBehavior;
+use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableBehavior};
+use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
+use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
+use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-
 use semantic_tree::symbol::Symbol;
-use std::sync::Arc;
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
@@ -100,6 +104,11 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // Enter the function context
     ctx.enter_function(func_id);
 
+    // Collect LocalIds that belong to closures (their parameters and implicit `it`).
+    // These should NOT be created as locals in the parent function - they'll be
+    // created when the closure function is lowered.
+    let closure_local_ids = collect_closure_local_ids(&body);
+
     // Map semantic locals to MIR locals
     // Parameters are already created, map them first
     // Copy the locals vector to avoid borrow issues
@@ -117,8 +126,12 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         ctx.map_local(local.id(), mir_local_id);
     }
 
-    // Then create and map non-parameter locals
+    // Then create and map non-parameter locals, excluding closure parameters
     for local in locals.iter().skip(param_count) {
+        // Skip locals that belong to closures
+        if closure_local_ids.contains(&local.id()) {
+            continue;
+        }
         let mir_ty = lower_type(ctx, local.ty());
         let mir_local_id = ctx.create_local(local.name().to_string(), mir_ty);
         ctx.map_local(local.id(), mir_local_id);
@@ -341,4 +354,200 @@ fn get_initializer_parent_type_parameters(init_symbol: &Arc<InitializerSymbol>) 
         }
     }
     vec![]
+}
+
+/// Collect all LocalIds that belong to closures in a code block.
+/// 
+/// This includes:
+/// - Explicit closure parameters (`{ x in ... }`)
+/// - Implicit `it` parameters (`{ $0 + 1 }`)
+///
+/// These locals should NOT be created in the parent function - they will be
+/// created when the closure function is lowered.
+fn collect_closure_local_ids(body: &CodeBlock) -> HashSet<LocalId> {
+    let mut ids = HashSet::new();
+    
+    for stmt in &body.statements {
+        collect_closure_local_ids_from_stmt(stmt, &mut ids);
+    }
+    
+    if let Some(expr) = &body.yield_expr {
+        collect_closure_local_ids_from_expr(expr, &mut ids);
+    }
+    
+    ids
+}
+
+fn collect_closure_local_ids_from_stmt(stmt: &Statement, ids: &mut HashSet<LocalId>) {
+    match &stmt.kind {
+        StatementKind::Binding { value, .. } => {
+            if let Some(expr) = value {
+                collect_closure_local_ids_from_expr(expr, ids);
+            }
+        }
+        StatementKind::Expr(expr) => {
+            collect_closure_local_ids_from_expr(expr, ids);
+        }
+        StatementKind::GuardLet { conditions, else_block } => {
+            for cond in conditions {
+                collect_closure_local_ids_from_condition(cond, ids);
+            }
+            for stmt in &else_block.statements {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+            if let Some(expr) = &else_block.yield_expr {
+                collect_closure_local_ids_from_expr(expr, ids);
+            }
+        }
+    }
+}
+
+fn collect_closure_local_ids_from_condition(cond: &IfCondition, ids: &mut HashSet<LocalId>) {
+    match cond {
+        IfCondition::Expr(expr) => collect_closure_local_ids_from_expr(expr, ids),
+        IfCondition::Let { value, .. } => collect_closure_local_ids_from_expr(value, ids),
+    }
+}
+
+fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<LocalId>) {
+    match &expr.kind {
+        ExprKind::Closure { params, body, tail_expr, implicit_param, .. } => {
+            // Collect explicit parameter LocalIds
+            if let Some(param_list) = params {
+                for param in param_list {
+                    ids.insert(param.local_id);
+                }
+            }
+            // Collect implicit `it` parameter LocalId
+            if let Some((local_id, _, _)) = implicit_param {
+                ids.insert(*local_id);
+            }
+            // Recurse into closure body (for nested closures)
+            for stmt in body {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+            if let Some(tail) = tail_expr {
+                collect_closure_local_ids_from_expr(tail, ids);
+            }
+        }
+        
+        // Recurse into all expression kinds that can contain sub-expressions
+        ExprKind::Call { callee, arguments, .. } => {
+            collect_closure_local_ids_from_expr(callee, ids);
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        }
+        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        }
+        ExprKind::ImplicitStructInit { arguments, .. } => {
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        }
+        ExprKind::Assignment { target, value } => {
+            collect_closure_local_ids_from_expr(target, ids);
+            collect_closure_local_ids_from_expr(value, ids);
+        }
+        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+            for cond in conditions {
+                collect_closure_local_ids_from_condition(cond, ids);
+            }
+            for stmt in then_branch {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+            if let Some(val) = then_value {
+                collect_closure_local_ids_from_expr(val, ids);
+            }
+            if let Some(else_b) = else_branch {
+                match else_b {
+                    ElseBranch::ElseIf(else_if) => {
+                        collect_closure_local_ids_from_expr(else_if, ids);
+                    }
+                    ElseBranch::Block { statements, value } => {
+                        for stmt in statements {
+                            collect_closure_local_ids_from_stmt(stmt, ids);
+                        }
+                        if let Some(val) = value {
+                            collect_closure_local_ids_from_expr(val, ids);
+                        }
+                    }
+                }
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_closure_local_ids_from_expr(scrutinee, ids);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_closure_local_ids_from_expr(guard, ids);
+                }
+                collect_closure_local_ids_from_expr(&arm.body, ids);
+            }
+        }
+        ExprKind::While { condition, body, .. } => {
+            collect_closure_local_ids_from_expr(condition, ids);
+            for stmt in body {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+        }
+        ExprKind::WhileLet { conditions, body, .. } => {
+            for cond in conditions {
+                collect_closure_local_ids_from_condition(cond, ids);
+            }
+            for stmt in body {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+        }
+        ExprKind::Loop { body, .. } => {
+            for stmt in body {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+        }
+        ExprKind::Tuple(exprs) | ExprKind::Array(exprs) => {
+            for e in exprs {
+                collect_closure_local_ids_from_expr(e, ids);
+            }
+        }
+        ExprKind::Grouping(inner) => {
+            collect_closure_local_ids_from_expr(inner, ids);
+        }
+        ExprKind::FieldAccess { object, .. } => {
+            collect_closure_local_ids_from_expr(object, ids);
+        }
+        ExprKind::TupleIndex { tuple, .. } => {
+            collect_closure_local_ids_from_expr(tuple, ids);
+        }
+        ExprKind::MethodRef { receiver, .. } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+        }
+        ExprKind::Return { value } => {
+            if let Some(e) = value {
+                collect_closure_local_ids_from_expr(e, ids);
+            }
+        }
+        ExprKind::ImplicitMemberAccess { arguments, .. } => {
+            if let Some(args) = arguments {
+                for arg in args {
+                    collect_closure_local_ids_from_expr(&arg.value, ids);
+                }
+            }
+        }
+        
+        // Leaf expressions that don't contain sub-expressions
+        ExprKind::Literal(_)
+        | ExprKind::LocalRef(_)
+        | ExprKind::SymbolRef(_)
+        | ExprKind::OverloadedRef(_)
+        | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
+        | ExprKind::EnumCase { .. }
+        | ExprKind::Break { .. }
+        | ExprKind::Continue { .. }
+        | ExprKind::Error => {}
+    }
 }

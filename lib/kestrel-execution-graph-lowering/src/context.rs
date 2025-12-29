@@ -267,6 +267,16 @@ impl<'a> LoweringContext<'a> {
         self.closure_counter = counter;
     }
 
+    /// Get the current temp counter value (for saving).
+    pub fn get_temp_counter(&self) -> u32 {
+        self.temp_counter
+    }
+
+    /// Set the temp counter (for restoring).
+    pub fn set_temp_counter(&mut self, counter: u32) {
+        self.temp_counter = counter;
+    }
+
     // === Statement Emission ===
 
     /// Add a statement to the current block.

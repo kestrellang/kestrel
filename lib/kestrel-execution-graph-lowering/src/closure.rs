@@ -311,6 +311,7 @@ fn create_closure_function(
     let saved_local_map = ctx.save_local_map();
     let saved_block = ctx.current_block();
     let saved_closure_counter = ctx.get_closure_counter();
+    let saved_temp_counter = ctx.get_temp_counter();
 
     // Pre-compute types for env parameter and regular parameters to avoid borrow issues
     let env_param_ty = env_info.as_ref().map(|(_, env_struct_name)| {
@@ -416,6 +417,7 @@ fn create_closure_function(
     ctx.set_current_function(saved_func);
     ctx.restore_local_map(saved_local_map);
     ctx.set_closure_counter(saved_closure_counter);
+    ctx.set_temp_counter(saved_temp_counter);
     if let Some(block) = saved_block {
         ctx.set_current_block(block);
     }
