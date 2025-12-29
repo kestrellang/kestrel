@@ -1,38 +1,58 @@
 # Kestrel TODO
 
-## Phase 8: Closures & First-Class Functions
+## Phase 10: Execution Graph
 
-- [x] Closure Expressions
-  - [x] Closure syntax (e.g., `{ x, y in x + y }` or `{ body }`)
-  - [x] Capturing variables from enclosing scope
-  - [x] Capture semantics (by value vs by reference)
-- [x] Function References
-  - [x] Reference named functions as values
-  - [x] Pass functions to higher-order functions
-- [x] Closure Type Inference
-  - [x] Infer parameter types from context
-  - [x] `numbers.map({ n in n * 2 })` infers `n: Int`
-  - [x] Implicit `it` parameter for single-parameter closures
-- [x] Trailing Closure Syntax
-  - [x] Swift-style trailing closures
-  - [x] Multiple trailing closures with labels
+### Completed
 
-## Phase 9: Enums & Algebraic Data Types
+- [x] Execution Graph IR
+  - [x] Basic block representation (BasicBlock with statements + terminator)
+  - [x] Control flow graph structure (FunctionDef with blocks, entry_block)
+  - [x] Lower semantic-tree to execution-graph
+  - [x] MirContext with arenas for all items
+  - [x] Type interning and name interning
+- [x] Type System
+  - [x] Primitives: I8-I64, F16-F64, Bool, Unit, Never, Str
+  - [x] Pointers/References: Pointer, Ref, RefMut
+  - [x] Compound: Tuple, Array, Named (structs/enums with type args)
+  - [x] Function types: FuncThin (no captures), FuncThick (closures)
+  - [x] Generics: TypeParam, SelfType, AssociatedTypeProjection
+- [x] Operations
+  - [x] Primitive operations (arithmetic, comparisons, bitwise, boolean)
+  - [x] Memory operations (Place with Local, Field, Index, Deref, Downcast)
+  - [x] Control flow operations (Return, Jump, Branch, Switch, Panic, Unreachable)
+  - [x] Call operations (Direct, Thin, Thick, Witness)
+  - [x] Struct/tuple/array/enum construction
+  - [x] Cast operations, string operations, pointer operations
+  - [x] Closure operations (FuncToEscaping, ApplyPartial)
+  - [x] IntToString operation
+- [x] Item Lowering
+  - [x] Functions, initializers, structs, enums, protocols, witnesses, extensions
+- [x] Expression Lowering
+  - [x] All literals, variable references, field access, assignment
+  - [x] All primitive method calls (including Int.toString())
+  - [x] Control flow (if/else, if-let, while, while-let, loop, break, continue, return)
+  - [x] Match expressions with decision tree compilation
+  - [x] Closures (capturing and non-capturing)
+  - [x] Method references as values (bound methods)
+- [x] Pattern Lowering
+  - [x] Irrefutable: local, wildcard, tuple, struct, enum, array prefix, @
+  - [x] Refutable: enum variants, literals, ranges
+- [x] Pass System
+  - [x] MirPass and FunctionPass traits
+  - [x] PassManager with sequential execution and fixed-point iteration
 
-- [x] Enum Declarations
-  - [x] Simple enums: `enum Color { case Red, Green, Blue }`
-  - [x] Enums with associated values: `enum Option[T] { case Some(T), None }`
-  - [x] Recursive enums with `indirect` keyword
-  - [x] Indirect recursion detection through structs
-  - [x] Generic enums with type parameters and where clauses
-  - [x] Enum instantiation (full path `Color.Red` and shorthand `.Red`)
-  - [x] Protocol conformance for enums
-  - [x] Instance methods in enums
-  - [x] Static methods in enums
-  - [x] Enum extensions (`extend Color { ... }`)
-- [xr] Pattern Matching
-  - [x] `match` expressions
-  - [x] Exhaustiveness checking
-  - [x] Patterns: literals, bindings, enum variants, wildcards
-  - [x] Guard clauses in patterns
-  - [x] `if let` / `guard let`
+### Remaining
+
+- [ ] Analysis Infrastructure
+  - [ ] CFG traversal utilities (dominator computation, post-order traversal)
+  - [ ] Dataflow analysis framework (reaching definitions, liveness)
+  - [ ] Loop detection utilities
+
+- [ ] Optimization Passes
+  - [ ] Dead code elimination
+  - [ ] Constant folding/propagation
+  - [ ] Copy propagation
+  - [ ] Inlining
+
+- [ ] Remaining Features
+  - [ ] Thin closure optimization (when no captures)

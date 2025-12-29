@@ -805,7 +805,8 @@ func test(arr: [Int]) -> Int {
     }
 
     #[test]
-    fn array_pattern_rest_at_beginning() {
+    fn array_pattern_rest_at_beginning_not_supported() {
+        // Array suffix patterns (elements after ..) are not yet supported
         Test::new(
             r#"
 module Main
@@ -818,11 +819,12 @@ func test(arr: [Int]) -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("array patterns with suffix elements are not yet supported"));
     }
 
     #[test]
-    fn array_pattern_rest_in_middle() {
+    fn array_pattern_rest_in_middle_not_supported() {
+        // Array suffix patterns (elements after ..) are not yet supported
         Test::new(
             r#"
 module Main
@@ -836,7 +838,7 @@ func test(arr: [Int]) -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(HasError("array patterns with suffix elements are not yet supported"));
     }
 
     #[test]

@@ -345,16 +345,19 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         }
 
         ExprKind::MethodRef {
-            receiver: _,
-            candidates: _,
+            receiver,
+            candidates,
             method_name,
         } => {
             // Method reference without a call - creates a bound method
-            ctx.emit_error(LoweringError::unsupported_expr(
-                format!("method reference '{}'", method_name),
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::error())
+            crate::bound_method::lower_bound_method(
+                ctx,
+                receiver,
+                candidates,
+                method_name,
+                &expr.ty,
+                &expr.span,
+            )
         }
 
         ExprKind::EnumCase { case_id } => {
@@ -581,12 +584,13 @@ fn lower_primitive_method_call(
         }
 
         PrimitiveMethod::IntToString => {
-            // TODO: int.toString() needs runtime support
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "Int.toString() - requires runtime support",
-                expr.span.clone(),
-            ));
-            return Value::Immediate(Immediate::error());
+            // Convert integer to string using the IntToString operation
+            let result_ty = lower_type(ctx, &expr.ty);
+            let result_local = ctx.create_temp("str", result_ty);
+            let result_place = Place::local(result_local);
+            
+            ctx.emit_assign(result_place.clone(), Rvalue::IntToString(receiver_value));
+            return Value::Place(result_place);
         }
 
         // === Binary Operations ===

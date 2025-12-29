@@ -90,6 +90,8 @@ pub enum Rvalue {
     StrLen(Value),
     /// `str.from_parts <ptr>, <len>`
     StrFromParts { ptr: Value, len: Value },
+    /// `int.to_string <value>` - convert integer to string
+    IntToString(Value),
 
     // === Pointer operations ===
     /// `ptr.offset <ptr>, <offset>`
@@ -356,6 +358,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     len.display(self.ctx)
                 )
             }
+            Rvalue::IntToString(v) => write!(f, "int.to_string {}", v.display(self.ctx)),
             Rvalue::PtrOffset { ptr, offset } => {
                 write!(
                     f,

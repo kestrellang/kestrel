@@ -16,6 +16,7 @@
 //! let mir = result.mir;
 //! ```
 
+mod bound_method;
 mod closure;
 mod context;
 mod error;
