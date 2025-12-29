@@ -119,18 +119,29 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             // (both generic like Option[Int].None and non-generic like Color.Red)
             if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
                 if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
-                    // Only handle cases without CallableBehavior (simple cases)
-                    // Cases with associated values (like Some) are handled via the call path
-                    if get_callable_behavior(&symbol).is_none() {
-                        // For generic enums with explicit type args (e.g., Option[Int].None),
-                        // apply substitutions from the qualified type
-                        if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
-                            if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
+                    // Check if this enum case is accessed via a qualified type path with explicit type args
+                    // e.g., Result[Int, Bool].Ok or Option[String].Some
+                    if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
+                        if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
+                            if !substitutions.is_empty() {
+                                // Apply substitutions to the type (callable type for cases with values,
+                                // or enum type for simple cases)
                                 let substituted_ty = ty.apply_substitutions(substitutions);
-                                return Expression::enum_case(symbol_id, substituted_ty, span);
+                                
+                                if get_callable_behavior(&symbol).is_some() {
+                                    // Enum case with associated values (like Ok, Some)
+                                    // Return SymbolRef with substituted callable type
+                                    return Expression::symbol_ref(symbol_id, substituted_ty, false, span);
+                                } else {
+                                    // Simple enum case (like None)
+                                    return Expression::enum_case(symbol_id, substituted_ty, span);
+                                }
                             }
                         }
-                        // For non-generic enums (e.g., Color.Red), use the type directly
+                    }
+                    
+                    // No explicit type args - handle simple cases without CallableBehavior
+                    if get_callable_behavior(&symbol).is_none() {
                         return Expression::enum_case(symbol_id, ty, span);
                     }
                 }

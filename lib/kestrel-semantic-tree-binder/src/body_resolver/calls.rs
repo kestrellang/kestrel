@@ -645,8 +645,32 @@ fn resolve_single_function_call(
                 (callable.return_type().clone(), Substitutions::new())
             }
         } else if symbol.as_any().downcast_ref::<EnumCaseSymbol>().is_some() {
-            // Enum case - get type parameters from parent enum
-            if let Some(parent) = symbol.metadata().parent() {
+            // Enum case - check if callee already has concrete types from qualified path
+            // e.g., Result[Int, Bool].Ok already has substitutions applied
+            let from_qualified_path = if let TyKind::Function { return_type, .. } = callee.ty.kind() {
+                // Check if the return type is a concrete enum (not just type parameters)
+                if let TyKind::Enum { substitutions, .. } = return_type.kind() {
+                    // Check if substitutions contain concrete types (not just type parameters)
+                    let has_concrete_subs = substitutions.iter().any(|(_, ty)| {
+                        !matches!(ty.kind(), TyKind::TypeParameter(_))
+                    });
+                    if has_concrete_subs {
+                        // Use the already-substituted return type from the callee
+                        Some((return_type.as_ref().clone(), substitutions.clone()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            if let Some((ret_ty, subs)) = from_qualified_path {
+                (ret_ty, subs)
+            } else if let Some(parent) = symbol.metadata().parent() {
+                // Fallback: infer type parameters from arguments
                 if let Some(enum_sym) = parent.as_any().downcast_ref::<EnumSymbol>() {
                     let type_params = enum_sym.type_parameters();
 

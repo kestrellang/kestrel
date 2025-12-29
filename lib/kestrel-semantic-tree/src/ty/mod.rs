@@ -111,11 +111,14 @@ impl fmt::Display for Ty {
                     return Ok(());
                 }
                 f.write_char('[')?;
-                // Note: Substitutions is a HashMap; ordering is not guaranteed.
+                // Iterate type parameters in declaration order to get deterministic output
+                let type_params = symbol.type_parameters();
                 fmt_list(
                     f,
                     true,
-                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                    type_params.iter().filter_map(|tp| {
+                        substitutions.get(tp.metadata().id()).cloned()
+                    }),
                 )?;
                 f.write_char(']')
             }
@@ -128,10 +131,14 @@ impl fmt::Display for Ty {
                     return Ok(());
                 }
                 f.write_char('[')?;
+                // Iterate type parameters in declaration order to get deterministic output
+                let type_params = symbol.type_parameters();
                 fmt_list(
                     f,
                     true,
-                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                    type_params.iter().filter_map(|tp| {
+                        substitutions.get(tp.metadata().id()).cloned()
+                    }),
                 )?;
                 f.write_char(']')
             }
@@ -144,10 +151,14 @@ impl fmt::Display for Ty {
                     return Ok(());
                 }
                 f.write_char('[')?;
+                // Iterate type parameters in declaration order to get deterministic output
+                let type_params = symbol.type_parameters();
                 fmt_list(
                     f,
                     true,
-                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                    type_params.iter().filter_map(|tp| {
+                        substitutions.get(tp.metadata().id()).cloned()
+                    }),
                 )?;
                 f.write_char(']')
             }
@@ -160,10 +171,14 @@ impl fmt::Display for Ty {
                     return Ok(());
                 }
                 f.write_char('[')?;
+                // Iterate type parameters in declaration order to get deterministic output
+                let type_params = symbol.type_parameters();
                 fmt_list(
                     f,
                     true,
-                    substitutions.iter().map(|(_, ty)| ty.clone()),
+                    type_params.iter().filter_map(|tp| {
+                        substitutions.get(tp.metadata().id()).cloned()
+                    }),
                 )?;
                 f.write_char(']')
             }

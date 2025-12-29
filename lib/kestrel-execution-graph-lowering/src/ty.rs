@@ -49,11 +49,13 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             // Get the qualified name for the struct
             let name = qualified_name_for_symbol(ctx, &(symbol.clone() as _));
 
-            // Convert type arguments
-            // TODO: Handle substitutions properly - need to iterate in declaration order
-            let type_args: Vec<_> = substitutions
+            // Convert type arguments in declaration order (not HashMap iteration order)
+            let type_params = symbol.type_parameters();
+            let type_args: Vec<_> = type_params
                 .iter()
-                .map(|(_, sub_ty)| lower_type(ctx, sub_ty))
+                .filter_map(|tp| {
+                    substitutions.get(tp.metadata().id()).map(|sub_ty| lower_type(ctx, sub_ty))
+                })
                 .collect();
 
             ctx.mir.ty_named(name, type_args)
@@ -63,10 +65,13 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             // Get the qualified name for the enum
             let name = qualified_name_for_symbol(ctx, &(symbol.clone() as _));
 
-            // Convert type arguments
-            let type_args: Vec<_> = substitutions
+            // Convert type arguments in declaration order (not HashMap iteration order)
+            let type_params = symbol.type_parameters();
+            let type_args: Vec<_> = type_params
                 .iter()
-                .map(|(_, sub_ty)| lower_type(ctx, sub_ty))
+                .filter_map(|tp| {
+                    substitutions.get(tp.metadata().id()).map(|sub_ty| lower_type(ctx, sub_ty))
+                })
                 .collect();
 
             ctx.mir.ty_named(name, type_args)
