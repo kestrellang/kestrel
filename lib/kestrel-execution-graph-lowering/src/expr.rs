@@ -40,14 +40,51 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Place(Place::local(mir_local))
         }
 
-        ExprKind::SymbolRef(_symbol_id) => {
-            // TODO: Handle module-level functions and globals
-            // Note: Enum cases now always go through EnumCase, not SymbolRef
-            ctx.emit_error(LoweringError::unsupported_expr(
-                "SymbolRef",
-                expr.span.clone(),
-            ));
-            Value::Immediate(Immediate::error())
+        ExprKind::SymbolRef(symbol_id) => {
+            // SymbolRef represents a reference to a symbol as a first-class value.
+            // This includes:
+            // - Module-level functions (e.g., `let f = myFunction`)
+            // - Enum cases with associated values (e.g., `let f = Option.Some`)
+            // - Initializers (e.g., `let f = SomeStruct.init`)
+            let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
+            match symbol {
+                Some(sym) => {
+                    let kind = sym.metadata().kind();
+                    match kind {
+                        KestrelSymbolKind::Function
+                        | KestrelSymbolKind::Initializer
+                        | KestrelSymbolKind::EnumCase => {
+                            // Function/callable reference as first-class value
+                            let func_name = qualified_name_for_symbol(ctx, &sym);
+                            // For now, emit without type args - generic function references
+                            // would need the substitutions from the expression context
+                            Value::Immediate(Immediate::function_ref(func_name))
+                        }
+                        KestrelSymbolKind::Field => {
+                            // Global variable access - not yet supported
+                            ctx.emit_error(LoweringError::unsupported_expr(
+                                "global variable access",
+                                expr.span.clone(),
+                            ));
+                            Value::Immediate(Immediate::error())
+                        }
+                        _ => {
+                            ctx.emit_error(LoweringError::unsupported_expr(
+                                format!("SymbolRef to {:?}", kind),
+                                expr.span.clone(),
+                            ));
+                            Value::Immediate(Immediate::error())
+                        }
+                    }
+                }
+                None => {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("symbol not found: {:?}", symbol_id),
+                        Some(expr.span.clone()),
+                    ));
+                    Value::Immediate(Immediate::error())
+                }
+            }
         }
 
         // === Field Access ===
