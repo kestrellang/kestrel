@@ -48,6 +48,12 @@ pub enum ImmediateKind {
     // === Null pointer ===
     /// `ptr.null[T]`
     NullPtr(Id<Ty>),
+
+    // === Error value ===
+    /// Error/poison value used when lowering fails.
+    /// This represents a value that couldn't be lowered due to an error.
+    /// Using a dedicated error value instead of Unit makes error cases explicit.
+    Error,
 }
 
 /// Integer bit widths.
@@ -190,6 +196,16 @@ impl Immediate {
         }
     }
 
+    /// Create an error/poison value.
+    /// Used when lowering fails and a placeholder value is needed.
+    pub fn error() -> Self {
+        Self {
+            meta: Metadata::new(),
+            inline_name: None,
+            kind: ImmediateKind::Error,
+        }
+    }
+
     /// Set an inline name for this immediate.
     pub fn with_inline_name(mut self, name: impl Into<String>) -> Self {
         self.inline_name = Some(name.into());
@@ -260,6 +276,7 @@ impl fmt::Display for ImmediateDisplay<'_> {
             ImmediateKind::NullPtr(ty) => {
                 write!(f, "ptr.null[{}]", self.ctx.ty(*ty).display(self.ctx))
             }
+            ImmediateKind::Error => write!(f, "<error>"),
         }
     }
 }

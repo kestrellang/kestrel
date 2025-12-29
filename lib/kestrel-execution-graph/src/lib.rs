@@ -227,6 +227,12 @@ impl MirContext {
         self.intern_type(MirTy::SelfType)
     }
 
+    /// Intern the error type.
+    /// Used when lowering fails and a placeholder type is needed.
+    pub fn ty_error(&mut self) -> Id<Ty> {
+        self.intern_type(MirTy::Error)
+    }
+
     // === Name interning ===
 
     /// Intern a qualified name, returning its ID.

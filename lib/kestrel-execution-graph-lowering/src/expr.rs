@@ -47,7 +47,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 "SymbolRef",
                 expr.span.clone(),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         // === Field Access ===
@@ -62,7 +62,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         "field access on immediate value",
                         Some(expr.span.clone()),
                     ));
-                    Value::Immediate(Immediate::unit())
+                    Value::Immediate(Immediate::error())
                 }
             }
         }
@@ -76,7 +76,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         "tuple index on immediate value",
                         Some(expr.span.clone()),
                     ));
-                    Value::Immediate(Immediate::unit())
+                    Value::Immediate(Immediate::error())
                 }
             }
         }
@@ -90,7 +90,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         "assignment to non-place",
                         Some(expr.span.clone()),
                     ));
-                    return Value::Immediate(Immediate::unit());
+                    return Value::Immediate(Immediate::error());
                 }
             };
 
@@ -233,7 +233,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         "array literal with non-array type",
                         Some(expr.span.clone()),
                     ));
-                    ctx.mir.ty_unit()
+                    ctx.mir.ty_error()
                 }
             };
 
@@ -278,7 +278,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 "unresolved overloaded reference",
                 Some(expr.span.clone()),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         ExprKind::TypeRef(_) => {
@@ -287,7 +287,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 "type reference as value",
                 Some(expr.span.clone()),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         ExprKind::TypeParameterRef(_) => {
@@ -295,7 +295,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 "type parameter reference",
                 expr.span.clone(),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         ExprKind::AssociatedTypeRef => {
@@ -303,7 +303,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 "associated type reference",
                 expr.span.clone(),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         ExprKind::MethodRef {
@@ -316,7 +316,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 format!("method reference '{}'", method_name),
                 expr.span.clone(),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         ExprKind::EnumCase { case_id } => {
@@ -350,7 +350,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         format!("enum case symbol not found: {:?}", case_id),
                         Some(expr.span.clone()),
                     ));
-                    Value::Immediate(Immediate::unit())
+                    Value::Immediate(Immediate::error())
                 }
             }
         }
@@ -364,12 +364,12 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 format!("unresolved implicit member '.{}'", member_name),
                 Some(expr.span.clone()),
             ));
-            Value::Immediate(Immediate::unit())
+            Value::Immediate(Immediate::error())
         }
 
         ExprKind::Error => {
-            // Error expression - return unit (error already reported)
-            Value::Immediate(Immediate::unit())
+            // Error expression - return error value (error already reported)
+            Value::Immediate(Immediate::error())
         }
     }
 }
@@ -548,7 +548,7 @@ fn lower_primitive_method_call(
                 "Int.toString() - requires runtime support",
                 expr.span.clone(),
             ));
-            return Value::Immediate(Immediate::unit());
+            return Value::Immediate(Immediate::error());
         }
 
         // === Binary Operations ===
@@ -559,7 +559,7 @@ fn lower_primitive_method_call(
                     "binary primitive method with no arguments",
                     Some(expr.span.clone()),
                 ));
-                return Value::Immediate(Immediate::unit());
+                return Value::Immediate(Immediate::error());
             }
 
             let rhs_value = lower_expression(ctx, &arguments[0].value);
@@ -749,14 +749,14 @@ fn lower_call(
                                         "init's parent is not a protocol for type parameter init",
                                         Some(expr.span.clone()),
                                     ));
-                                    return Value::Immediate(Immediate::unit());
+                                    return Value::Immediate(Immediate::error());
                                 }
                             } else {
                                 ctx.emit_error(LoweringError::internal(
                                     "init has no parent for type parameter init",
                                     Some(expr.span.clone()),
                                 ));
-                                return Value::Immediate(Immediate::unit());
+                                return Value::Immediate(Immediate::error());
                             }
                         } else {
                             // Regular initializer call
@@ -786,7 +786,7 @@ fn lower_call(
                         format!("symbol not found for call: {:?}", symbol_id),
                         Some(expr.span.clone()),
                     ));
-                    return Value::Immediate(Immediate::unit());
+                    return Value::Immediate(Immediate::error());
                 }
             }
         }
@@ -843,14 +843,14 @@ fn lower_call(
                                         ),
                                         Some(expr.span.clone()),
                                     ));
-                                    return Value::Immediate(Immediate::unit());
+                                    return Value::Immediate(Immediate::error());
                                 }
                             } else {
                                 ctx.emit_error(LoweringError::internal(
                                     format!("method '{}' has no parent", method_name),
                                     Some(expr.span.clone()),
                                 ));
-                                return Value::Immediate(Immediate::unit());
+                                return Value::Immediate(Immediate::error());
                             }
                         } else {
                             // Regular direct method call
@@ -868,7 +868,7 @@ fn lower_call(
                             format!("method symbol not found for '{}'", method_name),
                             Some(expr.span.clone()),
                         ));
-                        return Value::Immediate(Immediate::unit());
+                        return Value::Immediate(Immediate::error());
                     }
                 }
             } else {
@@ -876,7 +876,7 @@ fn lower_call(
                     format!("no method candidates for '{}'", method_name),
                     Some(expr.span.clone()),
                 ));
-                return Value::Immediate(Immediate::unit());
+                return Value::Immediate(Immediate::error());
             }
         }
 
@@ -936,7 +936,7 @@ fn lower_call(
                         format!("type symbol not found for initializer call: {:?}", symbol_id),
                         Some(expr.span.clone()),
                     ));
-                    return Value::Immediate(Immediate::unit());
+                    return Value::Immediate(Immediate::error());
                 }
             }
         }
@@ -963,7 +963,7 @@ fn lower_call(
                         "indirect call on immediate value",
                         expr.span.clone(),
                     ));
-                    return Value::Immediate(Immediate::unit());
+                    return Value::Immediate(Immediate::error());
                 }
             }
         }

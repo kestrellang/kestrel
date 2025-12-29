@@ -58,6 +58,11 @@ pub enum MirTy {
     /// Only valid in protocol method signatures. During witness lookup,
     /// this gets substituted with the concrete implementing type.
     SelfType,
+
+    /// Error/poison type used when lowering fails.
+    /// This represents a type that couldn't be lowered due to an error.
+    /// Using a dedicated error type instead of Unit makes error cases explicit.
+    Error,
 }
 
 impl MirTy {
@@ -174,6 +179,7 @@ impl fmt::Display for MirTyDisplay<'_> {
             }
 
             MirTy::SelfType => write!(f, "Self"),
+            MirTy::Error => write!(f, "<error>"),
         }
     }
 }

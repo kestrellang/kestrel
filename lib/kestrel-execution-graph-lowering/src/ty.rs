@@ -78,7 +78,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 format!("Protocol type '{}'", symbol.metadata().name().value),
                 ty.span().clone(),
             ));
-            ctx.mir.ty_unit() // Fallback
+            ctx.mir.ty_error()
         }
 
         TyKind::TypeAlias { symbol, substitutions: _ } => {
@@ -90,7 +90,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                     format!("unresolved type alias '{}'", symbol.metadata().name().value),
                     ty.span().clone(),
                 ));
-                ctx.mir.ty_unit()
+                ctx.mir.ty_error()
             } else {
                 lower_type(ctx, &expanded)
             }
@@ -134,7 +134,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                     format!("type parameter '{}' not in scope", param_symbol.metadata().name().value),
                     ty.span().clone(),
                 ));
-                ctx.mir.ty_unit() // Fallback
+                ctx.mir.ty_error()
             }
         }
 
@@ -145,7 +145,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 format!("associated type '{}'", symbol.metadata().name().value),
                 ty.span().clone(),
             ));
-            ctx.mir.ty_unit() // Fallback
+            ctx.mir.ty_error()
         }
 
         // === Self Type ===
@@ -162,13 +162,13 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 "unresolved inference type",
                 ty.span().clone(),
             ));
-            ctx.mir.ty_unit() // Fallback
+            ctx.mir.ty_error()
         }
 
         // === Error Type ===
         TyKind::Error => {
-            // Error types are poison values - use unit as fallback
-            ctx.mir.ty_unit()
+            // Error types are poison values
+            ctx.mir.ty_error()
         }
     }
 }
