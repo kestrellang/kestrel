@@ -566,6 +566,8 @@ pub enum Behavior {
     ConformsTo(&'static str),
     /// Check if symbol is copyable (has CopySemanticsBehavior::Copyable)
     IsCopyable(bool),
+    /// Check if struct has a deinit (has DeinitBehavior)
+    HasDeinit(bool),
 }
 
 impl Behavior {
@@ -845,6 +847,17 @@ impl Behavior {
                     }
                 }
             }
+            Behavior::HasDeinit(expected) => {
+                let has_deinit = get_has_deinit(symbol);
+                if has_deinit == *expected {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Symbol '{}' has_deinit={}, expected {}",
+                        path, has_deinit, expected
+                    ))
+                }
+            }
         }
     }
 }
@@ -873,6 +886,7 @@ impl std::fmt::Debug for Behavior {
             }
             Behavior::ConformsTo(name) => write!(f, "ConformsTo({})", name),
             Behavior::IsCopyable(b) => write!(f, "IsCopyable({})", b),
+            Behavior::HasDeinit(b) => write!(f, "HasDeinit({})", b),
         }
     }
 }
@@ -1133,4 +1147,11 @@ fn get_is_copyable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<boo
         .metadata()
         .get_behavior::<CopySemanticsBehavior>()
         .map(|csb| csb.is_copyable())
+}
+
+/// Helper to check if a struct has a deinit (has DeinitBehavior)
+fn get_has_deinit(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> bool {
+    use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
+
+    symbol.metadata().get_behavior::<DeinitBehavior>().is_some()
 }

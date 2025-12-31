@@ -10,11 +10,11 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,
-    AttributeArgsData, AttributeData, EnumCaseDeclarationData, EnumDeclarationData,
-    ExtensionBodyItem, ExtensionDeclarationData, FieldDeclarationData, FunctionDeclarationData,
-    InitializerDeclarationData, ParameterAccessMode, ParameterData, ProtocolBodyItem,
-    ProtocolDeclarationData, ReceiverModifier, StructDeclarationData, TypeAliasDeclarationData,
-    TypeDeclarationBodyItem,
+    AttributeArgsData, AttributeData, DeinitDeclarationData, EnumCaseDeclarationData,
+    EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData, FieldDeclarationData,
+    FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructDeclarationData,
+    TypeAliasDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -394,6 +394,16 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
     sink.finish_node();
 }
 
+/// Emit events for a deinitializer declaration
+///
+/// This is the single source of truth for deinit declaration emission.
+pub fn emit_deinit_declaration(sink: &mut EventSink, data: DeinitDeclarationData) {
+    sink.start_node(SyntaxKind::DeinitDeclaration);
+    sink.add_token(SyntaxKind::Deinit, data.deinit_span);
+    emit_function_body(sink, &data.body);
+    sink.finish_node();
+}
+
 /// Emit events for a struct declaration
 ///
 /// This is the single source of truth for struct declaration emission.
@@ -436,6 +446,7 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
         TypeDeclarationBodyItem::Field(data) => emit_field_declaration(sink, data),
         TypeDeclarationBodyItem::Function(data) => emit_function_declaration(sink, data),
         TypeDeclarationBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
+        TypeDeclarationBodyItem::Deinit(data) => emit_deinit_declaration(sink, data),
         TypeDeclarationBodyItem::Struct(data) => emit_struct_declaration(sink, *data),
         TypeDeclarationBodyItem::Enum(data) => emit_enum_declaration(sink, *data),
         TypeDeclarationBodyItem::EnumCase(data) => emit_enum_case(sink, data),

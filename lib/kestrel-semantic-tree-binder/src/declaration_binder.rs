@@ -14,8 +14,9 @@ use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::binders::{
-    EnumBinder, EnumCaseBinder, ExtensionBinder, FieldBinder, FunctionBinder, ImportBinder,
-    InitializerBinder, ModuleBinder, ProtocolBinder, StructBinder, TerminalBinder, TypeAliasBinder,
+    DeinitBinder, EnumBinder, EnumCaseBinder, ExtensionBinder, FieldBinder, FunctionBinder,
+    ImportBinder, InitializerBinder, ModuleBinder, ProtocolBinder, StructBinder, TerminalBinder,
+    TypeAliasBinder,
 };
 use crate::maps::SourceMap;
 
@@ -138,6 +139,7 @@ impl DeclarationBinderRegistry {
             SyntaxKind::InitializerDeclaration,
             Box::new(InitializerBinder),
         );
+        binders.insert(SyntaxKind::DeinitDeclaration, Box::new(DeinitBinder));
 
         // Register terminal resolvers
         binders.insert(SyntaxKind::Visibility, Box::new(TerminalBinder));

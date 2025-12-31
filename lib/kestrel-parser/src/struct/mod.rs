@@ -11,7 +11,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
-    emit_struct_declaration, field_declaration_parser_internal,
+    deinit_declaration_parser_internal, emit_struct_declaration, field_declaration_parser_internal,
     function_declaration_parser_internal, identifier, import_declaration_parser_internal,
     initializer_declaration_parser_internal, module_declaration_parser_internal, token,
     visibility_parser_internal, StructDeclarationData, TypeDeclarationBodyItem,
@@ -73,7 +73,7 @@ impl StructDeclaration {
             .map(|tok| tok.kind())
     }
 
-    /// Get child declaration items (nested structs, nested enums, imports, modules, fields, functions, initializers)
+    /// Get child declaration items (nested structs, nested enums, imports, modules, fields, functions, initializers, deinit)
     pub fn children(&self) -> Vec<SyntaxNode> {
         self.syntax
             .children()
@@ -90,6 +90,7 @@ impl StructDeclaration {
                                 | SyntaxKind::FieldDeclaration
                                 | SyntaxKind::FunctionDeclaration
                                 | SyntaxKind::InitializerDeclaration
+                                | SyntaxKind::DeinitDeclaration
                         )
                     })
                     .collect()
@@ -100,7 +101,7 @@ impl StructDeclaration {
 
 /// Internal parser for struct body items
 ///
-/// Struct bodies can contain: fields, functions, initializers, nested structs, type aliases, modules, and imports.
+/// Struct bodies can contain: fields, functions, initializers, deinit, nested structs, type aliases, modules, and imports.
 fn struct_body_item_parser_internal<'tokens>(
     struct_parser: impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>>
         + Clone,
@@ -125,6 +126,8 @@ fn struct_body_item_parser_internal<'tokens>(
     let initializer_parser =
         initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
 
+    let deinit_parser = deinit_declaration_parser_internal().map(TypeDeclarationBodyItem::Deinit);
+
     let function_parser =
         function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
 
@@ -138,6 +141,7 @@ fn struct_body_item_parser_internal<'tokens>(
         .or(nested_struct_parser)
         .or(nested_enum_parser)
         .or(initializer_parser)
+        .or(deinit_parser) // deinit has no visibility/attributes, parse after init
         .or(type_alias_parser) // Check type alias before function (both can have visibility)
         .or(function_parser)
         .or(field_parser)
@@ -272,26 +276,26 @@ mod tests {
             has_child(&decl, SyntaxKind::AttributeList),
             "Expected AttributeList as child of StructDeclaration"
         );
-        
+
         // Verify the attribute structure in more detail
         let attr_list = decl
             .syntax
             .children()
             .find(|c| c.kind() == SyntaxKind::AttributeList)
             .expect("AttributeList should exist");
-        
+
         let attr = attr_list
             .children()
             .find(|c| c.kind() == SyntaxKind::Attribute)
             .expect("Attribute should exist in AttributeList");
-        
+
         // Check that we have the @ token and identifier
         let has_at = attr
             .children_with_tokens()
             .filter_map(|c| c.into_token())
             .any(|t| t.kind() == SyntaxKind::At);
         assert!(has_at, "Attribute should have @ token");
-        
+
         let has_name = attr
             .children_with_tokens()
             .filter_map(|c| c.into_token())
@@ -340,6 +344,15 @@ mod tests {
     #[test]
     fn test_struct_with_function() {
         let decl = parse("struct Calculator { func add(a: Int, b: Int) -> Int { } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].kind(), SyntaxKind::FunctionDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_function_body() {
+        // Test function with actual body content (to compare with deinit_with_body)
+        let decl = parse("struct Calculator { func add() { let x = 1; } }");
         let children = decl.children();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].kind(), SyntaxKind::FunctionDeclaration);
@@ -442,5 +455,41 @@ mod tests {
         assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
         assert_eq!(children[1].kind(), SyntaxKind::FieldDeclaration);
         assert_eq!(children[2].kind(), SyntaxKind::FieldDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_deinit() {
+        let decl = parse("struct FileHandle { var fd: Int deinit { } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::DeinitDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_init_and_deinit() {
+        let decl = parse("struct Resource { var handle: Int init() { } deinit { } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::InitializerDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::DeinitDeclaration);
+    }
+
+    #[test]
+    fn test_struct_deinit_with_body() {
+        // Test deinit with actual body content
+        let decl = parse("struct Connection { var socket: Int deinit { let x = 1; } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::DeinitDeclaration);
+
+        // Verify the deinit has a function body
+        let deinit_node = &children[1];
+        let has_body = deinit_node
+            .children()
+            .any(|c| c.kind() == SyntaxKind::FunctionBody);
+        assert!(has_body, "deinit should have a FunctionBody child");
     }
 }

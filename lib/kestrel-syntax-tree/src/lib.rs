@@ -308,6 +308,7 @@ impl From<Token> for SyntaxKind {
             Token::Case => SyntaxKind::Case,
             Token::Consuming => SyntaxKind::Consuming,
             Token::Continue => SyntaxKind::Continue,
+            Token::Deinit => SyntaxKind::Deinit,
             Token::Else => SyntaxKind::Else,
             Token::Enum => SyntaxKind::Enum,
             Token::Extend => SyntaxKind::Extend,
@@ -421,6 +422,7 @@ impl Language for KestrelLanguage {
         const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
         const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
+        const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
         const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
         const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
         const PARAMETER: u16 = SyntaxKind::Parameter as u16;
@@ -523,6 +525,7 @@ impl Language for KestrelLanguage {
         const CASE: u16 = SyntaxKind::Case as u16;
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const CONTINUE: u16 = SyntaxKind::Continue as u16;
+        const DEINIT: u16 = SyntaxKind::Deinit as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const ENUM: u16 = SyntaxKind::Enum as u16;
         const EXTEND: u16 = SyntaxKind::Extend as u16;
@@ -629,6 +632,7 @@ impl Language for KestrelLanguage {
             FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
             INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
+            DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
             FUNCTION_BODY => SyntaxKind::FunctionBody,
             PARAMETER_LIST => SyntaxKind::ParameterList,
             PARAMETER => SyntaxKind::Parameter,
@@ -732,6 +736,7 @@ impl Language for KestrelLanguage {
             CASE => SyntaxKind::Case,
             CONSUMING => SyntaxKind::Consuming,
             CONTINUE => SyntaxKind::Continue,
+            DEINIT => SyntaxKind::Deinit,
             ELSE => SyntaxKind::Else,
             ENUM => SyntaxKind::Enum,
             EXTEND => SyntaxKind::Extend,

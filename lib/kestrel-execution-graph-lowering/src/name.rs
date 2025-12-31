@@ -128,6 +128,11 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         KestrelSymbolKind::Import | KestrelSymbolKind::TypeParameter | KestrelSymbolKind::AssociatedType => {
             // These don't contribute to qualified names
         }
+
+        KestrelSymbolKind::Deinit => {
+            // Deinit blocks are named "deinit"
+            segments.push("deinit".to_string());
+        }
     }
 }
 

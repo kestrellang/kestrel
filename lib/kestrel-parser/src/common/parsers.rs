@@ -16,8 +16,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData,
-    ParameterAccessMode, ParameterData, ReceiverModifier,
+    DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
+    InitializerDeclarationData, ParameterAccessMode, ParameterData, ReceiverModifier,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -541,4 +541,19 @@ pub fn initializer_declaration_parser_internal<'tokens>(
                 }
             },
         )
+}
+
+/// Parser for a deinitializer declaration
+///
+/// Syntax: `deinit { body }`
+/// Deinit blocks are used for RAII-style cleanup when a value goes out of scope.
+/// They have no parameters, attributes, or visibility modifiers.
+///
+/// This is the single source of truth for deinit declaration parsing.
+pub fn deinit_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, DeinitDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    token(Token::Deinit)
+        .then(code_block_parser())
+        .map(|(deinit_span, body)| DeinitDeclarationData { deinit_span, body })
 }

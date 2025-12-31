@@ -44,11 +44,12 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             if let Ok(struct_symbol) = symbol.clone().downcast_arc::<StructSymbol>() {
                 lower_struct(ctx, &struct_symbol);
 
-                // Also lower methods and initializers within the struct
+                // Also lower methods, initializers, and deinit within the struct
                 for child in symbol.metadata().children() {
                     let child_kind = child.metadata().kind();
                     if child_kind == KestrelSymbolKind::Function
                         || child_kind == KestrelSymbolKind::Initializer
+                        || child_kind == KestrelSymbolKind::Deinit
                     {
                         lower_item(ctx, &child);
                     }
@@ -137,6 +138,11 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
 
         KestrelSymbolKind::AssociatedType => {
             // Associated types are handled during protocol lowering
+        }
+
+        KestrelSymbolKind::Deinit => {
+            // Deinit blocks will generate drop instructions in the future
+            // For now, just skip - drop handling is Phase 5.3
         }
     }
 }

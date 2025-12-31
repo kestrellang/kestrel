@@ -8,6 +8,7 @@
 //! - `type_resolution` - Type lookup and generic instantiation errors
 //! - `protocol` - Protocol binding and associated type errors
 //! - `declaration` - Declaration binding errors
+//! - `deinit` - Deinit declaration errors and warnings
 //! - `member_access` - Member access errors
 //! - `call` - Function and method call errors
 //! - `operators` - Operator resolution errors
@@ -22,6 +23,7 @@ mod builtins;
 mod call;
 mod control_flow;
 mod declaration;
+mod deinit;
 mod member_access;
 mod module;
 mod move_tracking;
@@ -37,6 +39,7 @@ pub use builtins::*;
 pub use call::*;
 pub use control_flow::*;
 pub use declaration::*;
+pub use deinit::*;
 pub use member_access::*;
 pub use module::*;
 pub use move_tracking::*;

@@ -169,6 +169,17 @@ pub struct InitializerDeclarationData {
     pub body: Option<CodeBlockData>,
 }
 
+/// Raw parsed data for deinitializer declaration internals
+///
+/// Deinit syntax: `deinit { body }`
+/// The body is required. Deinit blocks have no parameters or visibility.
+/// Deinit runs when a value goes out of scope to clean up resources.
+#[derive(Debug, Clone)]
+pub struct DeinitDeclarationData {
+    pub deinit_span: Span,
+    pub body: CodeBlockData,
+}
+
 /// A single conformance item, which can be positive or negative
 #[derive(Debug, Clone)]
 pub struct ConformanceItemData {
@@ -207,11 +218,12 @@ pub enum TypeDeclarationBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
-    Struct(Box<StructDeclarationData>),  // Boxed to avoid infinite size
-    Enum(Box<EnumDeclarationData>),      // Boxed to avoid infinite size
-    EnumCase(EnumCaseDeclarationData),   // Only valid in enum bodies
-    TypeAlias(TypeAliasDeclarationData), // Associated type bindings
-    Module(Span, Vec<Span>),             // module_span, path_segments
+    Deinit(DeinitDeclarationData),        // deinit { } - only valid in struct bodies
+    Struct(Box<StructDeclarationData>),   // Boxed to avoid infinite size
+    Enum(Box<EnumDeclarationData>),       // Boxed to avoid infinite size
+    EnumCase(EnumCaseDeclarationData),    // Only valid in enum bodies
+    TypeAlias(TypeAliasDeclarationData),  // Associated type bindings
+    Module(Span, Vec<Span>),              // module_span, path_segments
     Import(
         Span,
         Vec<Span>,

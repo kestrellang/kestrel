@@ -192,6 +192,7 @@ impl SemanticBinder {
     fn symbol_kind_to_syntax_kind(kind: KestrelSymbolKind) -> Option<SyntaxKind> {
         match kind {
             KestrelSymbolKind::AssociatedType => Some(SyntaxKind::TypeAliasDeclaration),
+            KestrelSymbolKind::Deinit => Some(SyntaxKind::DeinitDeclaration),
             KestrelSymbolKind::Enum => Some(SyntaxKind::EnumDeclaration),
             KestrelSymbolKind::EnumCase => Some(SyntaxKind::EnumCaseDeclaration),
             KestrelSymbolKind::Extension => Some(SyntaxKind::ExtensionDeclaration),
