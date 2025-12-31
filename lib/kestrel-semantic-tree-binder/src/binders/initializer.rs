@@ -9,6 +9,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::find_child;
@@ -169,6 +170,7 @@ fn resolve_initializer_body(
         local_scope,
         loop_stack: Vec::new(),
         next_loop_id: 0,
+        move_tracker: MoveTracker::new(),
     };
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);

@@ -276,9 +276,9 @@ pub fn enum_declaration_parser_internal<'tokens>(
                         enum_span,
                         name_span,
                         type_params,
-                        conformances: conformances.map(|(colon_span, types)| ConformanceListData {
+                        conformances: conformances.map(|(colon_span, items)| ConformanceListData {
                             colon_span,
-                            conformances: types,
+                            conformances: items,
                         }),
                         where_clause,
                         lbrace_span,

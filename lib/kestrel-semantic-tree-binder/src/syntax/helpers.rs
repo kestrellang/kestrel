@@ -29,7 +29,9 @@ pub fn resolve_conformance_list(
     ctx: &mut BindingContext,
     error_context: NotAProtocolContext,
 ) {
+    use crate::diagnostics::NegativeConformanceNotAllowedError;
     use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
+    use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 
     let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
         Some(node) => node,
@@ -37,18 +39,31 @@ pub fn resolve_conformance_list(
     };
 
     let mut resolved = Vec::new();
+    let mut negative_resolved = Vec::new();
 
     for item in conformance_list.children() {
         if item.kind() != SyntaxKind::ConformanceItem {
             continue;
         }
 
-        let ty_node = match find_child(&item, SyntaxKind::Ty) {
+        // Check if this is a negative conformance (has NegativeConformance child)
+        let is_negative = find_child(&item, SyntaxKind::NegativeConformance).is_some();
+
+        // Find the Ty node - it might be directly under ConformanceItem or under NegativeConformance
+        let ty_node = if is_negative {
+            let neg_node = find_child(&item, SyntaxKind::NegativeConformance).unwrap();
+            find_child(&neg_node, SyntaxKind::Ty)
+        } else {
+            find_child(&item, SyntaxKind::Ty)
+        };
+
+        let ty_node = match ty_node {
             Some(node) => node,
             None => continue,
         };
 
         let span = get_node_span(&ty_node, file_id);
+        let item_span = get_node_span(&item, file_id);
 
         // Use full type resolution (handles type arguments like Add[MyInt])
         let mut type_ctx =
@@ -57,8 +72,31 @@ pub fn resolve_conformance_list(
 
         // Validate that it's a protocol
         match resolved_ty.kind() {
-            TyKind::Protocol { .. } => {
-                resolved.push(resolved_ty);
+            TyKind::Protocol { symbol: protocol_sym, .. } => {
+                if is_negative {
+                    // Validate that this protocol allows negation
+                    let protocol_id = protocol_sym.metadata().id();
+                    let allows_negation = ctx
+                        .model
+                        .builtin_registry()
+                        .protocol_feature(protocol_id)
+                        .map(|feature| {
+                            let def = feature.definition();
+                            matches!(def.kind, BuiltinKind::Protocol { implicit_conformance: true, .. })
+                        })
+                        .unwrap_or(false);
+
+                    if !allows_negation {
+                        ctx.diagnostics.throw(NegativeConformanceNotAllowedError {
+                            span: item_span,
+                            protocol_name: protocol_sym.metadata().name().value.clone(),
+                        });
+                    } else {
+                        negative_resolved.push(resolved_ty);
+                    }
+                } else {
+                    resolved.push(resolved_ty);
+                }
             }
             TyKind::Struct {
                 symbol: struct_sym, ..
@@ -68,11 +106,15 @@ pub fn resolve_conformance_list(
                     name: struct_sym.metadata().name().value.clone(),
                     context: error_context,
                 });
-                resolved.push(Ty::error(span));
+                if !is_negative {
+                    resolved.push(Ty::error(span));
+                }
             }
             TyKind::Error => {
                 // Error already reported by type resolver
-                resolved.push(resolved_ty);
+                if !is_negative {
+                    resolved.push(resolved_ty);
+                }
             }
             _ => {
                 let type_name = format!("{:?}", resolved_ty.kind());
@@ -81,7 +123,9 @@ pub fn resolve_conformance_list(
                     name: type_name,
                     context: error_context,
                 });
-                resolved.push(Ty::error(span));
+                if !is_negative {
+                    resolved.push(Ty::error(span));
+                }
             }
         }
     }
@@ -89,7 +133,7 @@ pub fn resolve_conformance_list(
     // Validate that all parent protocols are also declared
     validate_parent_protocol_conformances(&resolved, symbol, ctx);
 
-    let conformances_behavior = ConformancesBehavior::new(resolved);
+    let conformances_behavior = ConformancesBehavior::with_negatives(resolved, negative_resolved);
     symbol.metadata().add_behavior(conformances_behavior);
 }
 

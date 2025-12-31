@@ -11,6 +11,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
+use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError};
 use crate::resolution::LocalScope;
@@ -240,6 +241,7 @@ fn resolve_function_body(
         local_scope,
         loop_stack: Vec::new(),
         next_loop_id: 0,
+        move_tracker: MoveTracker::new(),
     };
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);

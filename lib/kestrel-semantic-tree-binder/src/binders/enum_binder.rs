@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_syntax_tree::SyntaxNode;
+use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
@@ -55,12 +59,93 @@ impl DeclarationBinder for EnumBinder {
             NotAProtocolContext::Conformance,
         );
 
+        // Note: CopySemanticsBehavior is computed in bind_body after cases are bound
         // Note: Child binding (cases, methods) happens automatically
         // via recursive traversal in SemanticBinder
+    }
+
+    fn bind_body(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        _syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        // Only process enum symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Enum {
+            return;
+        }
+
+        // Compute and attach CopySemanticsBehavior based on conformances and case payload types
+        // This is done in bind_body because enum cases are bound after the enum's signature
+        Self::compute_copy_semantics(symbol, context);
     }
 }
 
 impl EnumBinder {
+    /// Compute and attach CopySemanticsBehavior based on conformances and case payload types.
+    ///
+    /// An enum is NotCopyable if:
+    /// 1. It has explicit `not Copyable` in its conformance list, OR
+    /// 2. Any of its enum cases has a non-copyable payload type
+    ///
+    /// Uses cycle detection to handle recursive enum types.
+    fn compute_copy_semantics(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        context: &BindingContext,
+    ) {
+        let symbol_id = symbol.metadata().id();
+
+        // Use cycle detector to handle recursive types
+        if CycleDetector::enter_ref(context.copy_semantics_cycle_detector, symbol_id).is_err() {
+            // Cycle detected - just return, don't attach behavior
+            return;
+        }
+
+        // Check if the Copyable protocol is registered
+        let copyable_id = match context.model.builtin_registry().copyable_protocol() {
+            Some(id) => id,
+            None => {
+                // Copyable protocol not registered yet; default to copyable
+                symbol.metadata().add_behavior(CopySemanticsBehavior::copyable());
+                CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
+                return;
+            }
+        };
+
+        // Get the ConformancesBehavior to check for negative conformances
+        let has_not_copyable = symbol
+            .metadata()
+            .get_behavior::<ConformancesBehavior>()
+            .map(|conformances| conformances.has_negative_conformance_to(copyable_id))
+            .unwrap_or(false);
+
+        // Check if any enum case has a non-copyable payload type
+        // Enum cases with payloads have a CallableBehavior with parameter types
+        let has_non_copyable_payload = symbol
+            .metadata()
+            .children()
+            .iter()
+            .filter(|child| child.metadata().kind() == KestrelSymbolKind::EnumCase)
+            .any(|case| {
+                case.metadata()
+                    .get_behavior::<CallableBehavior>()
+                    .map(|callable| {
+                        callable.parameters().iter().any(|param| !param.ty.is_copyable())
+                    })
+                    .unwrap_or(false)
+            });
+
+        // Attach the appropriate CopySemanticsBehavior
+        let behavior = if has_not_copyable || has_non_copyable_payload {
+            CopySemanticsBehavior::not_copyable()
+        } else {
+            CopySemanticsBehavior::copyable()
+        };
+
+        symbol.metadata().add_behavior(behavior);
+        CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
+    }
+
     /// Process @builtin attribute on an enum.
     fn process_builtin_attribute(
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,

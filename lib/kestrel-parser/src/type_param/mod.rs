@@ -258,20 +258,34 @@ pub fn where_clause_parser<'tokens>(
         })
 }
 
-/// Parser for conformance list: : Proto1, Proto2[T]
+/// Parser for a single conformance item: Proto or not Proto
+fn conformance_item_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, crate::common::ConformanceItemData, ParserExtra<'tokens>>
+       + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Not)
+                .map_with(|_, e| to_kestrel_span(e.span()))
+                .or_not(),
+        )
+        .then(crate::ty::ty_parser())
+        .map(|(not_span, ty)| crate::common::ConformanceItemData { not_span, ty })
+}
+
+/// Parser for conformance list: : Proto1, Proto2[T], not Copyable
 /// Used after struct/protocol names to declare conformance/inheritance
 pub fn conformance_list_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<crate::ty::TyVariant>), ParserExtra<'tokens>>
+) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<crate::common::ConformanceItemData>), ParserExtra<'tokens>>
        + Clone {
     skip_trivia()
         .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
-            crate::ty::ty_parser()
+            conformance_item_parser()
                 .separated_by(just(Token::Comma))
                 .at_least(1)
                 .collect(),
         )
-        .map(|(colon_span, types)| (colon_span, types))
+        .map(|(colon_span, conformances)| (colon_span, conformances))
 }
 
 /// Emit events for a type parameter list
@@ -349,18 +363,28 @@ fn emit_type_equality(sink: &mut EventSink, equality: TypeEqualityData) {
     sink.finish_node();
 }
 
-/// Emit events for a conformance list: : Proto1, Proto2
+/// Emit events for a conformance list: : Proto1, Proto2, not Copyable
 pub fn emit_conformance_list(
     sink: &mut EventSink,
     colon_span: Span,
-    conformances: &[crate::ty::TyVariant],
+    conformances: &[crate::common::ConformanceItemData],
 ) {
     sink.start_node(SyntaxKind::ConformanceList);
     sink.add_token(SyntaxKind::Colon, colon_span);
 
     for conformance in conformances {
         sink.start_node(SyntaxKind::ConformanceItem);
-        crate::ty::emit_ty_variant(sink, conformance);
+
+        // If this is a negative conformance, wrap in NegativeConformance node
+        if let Some(not_span) = &conformance.not_span {
+            sink.start_node(SyntaxKind::NegativeConformance);
+            sink.add_token(SyntaxKind::Not, not_span.clone());
+            crate::ty::emit_ty_variant(sink, &conformance.ty);
+            sink.finish_node();
+        } else {
+            crate::ty::emit_ty_variant(sink, &conformance.ty);
+        }
+
         sink.finish_node();
     }
 
@@ -587,7 +611,7 @@ mod tests {
         assert_eq!(nested.len(), 2); // String and List[Int]
     }
 
-    fn parse_conformances(source: &str) -> Option<(Span, Vec<crate::ty::TyVariant>)> {
+    fn parse_conformances(source: &str) -> Option<(Span, Vec<crate::common::ConformanceItemData>)> {
         let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -627,5 +651,24 @@ mod tests {
         assert!(result.is_some());
         let (_, conformances) = result.unwrap();
         assert_eq!(conformances.len(), 1);
+    }
+
+    #[test]
+    fn test_conformance_negative() {
+        let result = parse_conformances(": not Copyable");
+        assert!(result.is_some(), "Failed to parse ': not Copyable'");
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 1);
+        assert!(conformances[0].not_span.is_some(), "Expected not_span to be Some");
+    }
+
+    #[test]
+    fn test_conformance_mixed_positive_negative() {
+        let result = parse_conformances(": Resource, not Copyable");
+        assert!(result.is_some(), "Failed to parse ': Resource, not Copyable'");
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 2);
+        assert!(conformances[0].not_span.is_none(), "Resource should have not_span None");
+        assert!(conformances[1].not_span.is_some(), "not Copyable should have not_span Some");
     }
 }

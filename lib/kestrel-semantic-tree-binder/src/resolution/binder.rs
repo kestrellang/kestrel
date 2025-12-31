@@ -44,7 +44,10 @@ pub struct SemanticBinder {
     /// Semantic model used during binding for resolvers
     model: SemanticModel,
     binder_registry: DeclarationBinderRegistry,
+    /// Cycle detector for type alias resolution
     cycle_detector: RefCell<CycleDetector<SymbolId>>,
+    /// Cycle detector for copy semantics computation (handles recursive struct types)
+    copy_semantics_cycle_detector: RefCell<CycleDetector<SymbolId>>,
 }
 
 impl SemanticBinder {
@@ -80,6 +83,7 @@ impl SemanticBinder {
             model,
             binder_registry: DeclarationBinderRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),
+            copy_semantics_cycle_detector: RefCell::new(CycleDetector::new()),
         }
     }
 
@@ -135,6 +139,7 @@ impl SemanticBinder {
                         model: &self.model,
                         diagnostics,
                         type_alias_cycle_detector: &self.cycle_detector,
+                        copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
                         sources: &self.sources,
                     };
                     resolver.bind_signature(symbol, syntax_node, &mut ctx);
@@ -169,6 +174,7 @@ impl SemanticBinder {
                         model: &self.model,
                         diagnostics,
                         type_alias_cycle_detector: &self.cycle_detector,
+                        copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
                         sources: &self.sources,
                     };
                     resolver.bind_body(symbol, syntax_node, &mut ctx);

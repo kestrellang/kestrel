@@ -266,3 +266,24 @@ impl IntoDiagnostic for MissingParentProtocolConformanceError {
             ])
     }
 }
+
+/// Error when trying to use `not` with a protocol that doesn't allow negation.
+pub struct NegativeConformanceNotAllowedError {
+    pub span: Span,
+    pub protocol_name: String,
+}
+
+impl IntoDiagnostic for NegativeConformanceNotAllowedError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "cannot use 'not' with protocol '{}': not a language feature protocol",
+                self.protocol_name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("only builtin protocols with implicit conformance can be negated")])
+            .with_notes(vec![
+                "only protocols marked with @builtin that have implicit conformance (like Copyable) can be negated".to_string(),
+            ])
+    }
+}

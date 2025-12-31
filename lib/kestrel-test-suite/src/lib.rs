@@ -60,6 +60,7 @@ use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
@@ -559,6 +560,12 @@ pub enum Behavior {
     AttributeCount(usize),
     /// Expected number of arguments for a specific attribute
     AttributeArgCount(&'static str, usize),
+    /// Check if symbol has a negative conformance to a specific protocol by name
+    HasNegativeConformance(&'static str),
+    /// Check if symbol conforms to a specific protocol by name
+    ConformsTo(&'static str),
+    /// Check if symbol is copyable (has CopySemanticsBehavior::Copyable)
+    IsCopyable(bool),
 }
 
 impl Behavior {
@@ -795,6 +802,49 @@ impl Behavior {
                     )),
                 }
             }
+            Behavior::HasNegativeConformance(protocol_name) => {
+                let has_neg = has_negative_conformance_to(symbol, protocol_name);
+                if has_neg {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Symbol '{}' does not have negative conformance to '{}'",
+                        path, protocol_name
+                    ))
+                }
+            }
+            Behavior::ConformsTo(protocol_name) => {
+                let conforms = conforms_to_protocol(symbol, protocol_name);
+                if conforms {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Symbol '{}' does not conform to protocol '{}'",
+                        path, protocol_name
+                    ))
+                }
+            }
+            Behavior::IsCopyable(expected) => {
+                let is_copyable = get_is_copyable(symbol);
+                match is_copyable {
+                    Some(actual) if actual == *expected => Ok(()),
+                    Some(actual) => Err(format!(
+                        "Symbol '{}' is_copyable={}, expected {}",
+                        path, actual, expected
+                    )),
+                    None => {
+                        // No CopySemanticsBehavior means the type defaults to copyable
+                        if *expected {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Symbol '{}' has no CopySemanticsBehavior (defaults to copyable), expected not copyable",
+                                path
+                            ))
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -818,6 +868,11 @@ impl std::fmt::Debug for Behavior {
             Behavior::HasAttribute(name) => write!(f, "HasAttribute({})", name),
             Behavior::AttributeCount(n) => write!(f, "AttributeCount({})", n),
             Behavior::AttributeArgCount(name, n) => write!(f, "AttributeArgCount({}, {})", name, n),
+            Behavior::HasNegativeConformance(name) => {
+                write!(f, "HasNegativeConformance({})", name)
+            }
+            Behavior::ConformsTo(name) => write!(f, "ConformsTo({})", name),
+            Behavior::IsCopyable(b) => write!(f, "IsCopyable({})", b),
         }
     }
 }
@@ -1026,4 +1081,56 @@ fn get_attribute_arg_count(
                 .find(|a| a.name == attr_name)
                 .map(|a| a.args.len())
         })
+}
+
+/// Helper to check if a symbol has a negative conformance to a specific protocol by name
+fn has_negative_conformance_to(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    protocol_name: &str,
+) -> bool {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    symbol
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+        .map(|cb| {
+            cb.negative_conformances().iter().any(|ty| {
+                if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                    symbol.metadata().name().value == protocol_name
+                } else {
+                    false
+                }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Helper to check if a symbol conforms to a specific protocol by name
+fn conforms_to_protocol(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    protocol_name: &str,
+) -> bool {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    symbol
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+        .map(|cb| {
+            cb.conformances().iter().any(|ty| {
+                if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                    symbol.metadata().name().value == protocol_name
+                } else {
+                    false
+                }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Helper to check if a symbol is copyable (has CopySemanticsBehavior)
+fn get_is_copyable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    symbol
+        .metadata()
+        .get_behavior::<CopySemanticsBehavior>()
+        .map(|csb| csb.is_copyable())
 }

@@ -262,6 +262,9 @@ fn resolve_if_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
     //   - Else token
     //   - Either CodeBlock or Expression (for else-if)
 
+    // Snapshot move state before the if (for branching)
+    let pre_if_moves = ctx.move_tracker.snapshot();
+
     // Push a new scope for pattern bindings from if-let conditions.
     // Bindings in if-let are visible in subsequent conditions and the then branch,
     // but NOT in the else branch.
@@ -297,15 +300,38 @@ fn resolve_if_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
         .map(|c| resolve_if_then_block(&c, ctx))
         .unwrap_or_else(|| (vec![], None));
 
+    // Snapshot move state after then branch
+    let after_then_moves = ctx.move_tracker.snapshot();
+
     // Pop the scope before resolving the else branch
     // Pattern bindings are NOT visible in the else branch
     ctx.local_scope.pop_scope();
 
+    // Restore move state before resolving else branch
+    ctx.move_tracker.restore(pre_if_moves.clone());
+
     // Find optional else clause (resolved without the if-let bindings)
-    let else_branch = node
+    let else_clause_node = node
         .children()
-        .find(|c| c.kind() == SyntaxKind::ElseClause)
-        .and_then(|else_clause| resolve_else_clause(&else_clause, ctx));
+        .find(|c| c.kind() == SyntaxKind::ElseClause);
+
+    let else_branch = else_clause_node
+        .as_ref()
+        .and_then(|else_clause| resolve_else_clause(else_clause, ctx));
+
+    // Merge move states from both branches
+    if else_branch.is_some() {
+        // Both branches exist - merge then and else states
+        // After resolving else, ctx.move_tracker has the else state
+        let after_else_moves = ctx.move_tracker.snapshot();
+        ctx.move_tracker.restore(after_then_moves);
+        ctx.move_tracker.merge(&after_else_moves);
+    } else {
+        // No else branch - the if might not execute, so merge then with pre-if
+        // (moved in then but not else = maybe-moved)
+        ctx.move_tracker.restore(after_then_moves);
+        ctx.move_tracker.merge(&pre_if_moves);
+    }
 
     Expression::if_expr_with_conditions(conditions, then_statements, then_value, else_branch, span)
 }
@@ -520,6 +546,9 @@ fn resolve_while_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
         return resolve_while_let_expression(node, &condition_node, label_info, ctx);
     }
 
+    // Snapshot move state before the loop
+    let pre_loop_moves = ctx.move_tracker.snapshot();
+
     // Regular while expression
     // Find condition expression
     let condition = node
@@ -543,6 +572,13 @@ fn resolve_while_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
     // Exit the loop context
     ctx.exit_loop();
 
+    // For while loops: the body might not execute (condition false on first check).
+    // So any move inside the body is "maybe moved" after the loop.
+    // Merge the body's move state with the pre-loop state.
+    let after_body_moves = ctx.move_tracker.snapshot();
+    ctx.move_tracker.restore(after_body_moves);
+    ctx.move_tracker.merge(&pre_loop_moves);
+
     Expression::while_loop(loop_id, label_info, condition, body, span)
 }
 
@@ -556,6 +592,9 @@ fn resolve_while_let_expression(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     let span = get_node_span(node, ctx.file_id);
+
+    // Snapshot move state before the loop
+    let pre_loop_moves = ctx.move_tracker.snapshot();
 
     // Enter the loop context with the label
     let label_name = label_info.as_ref().map(|l| l.name.clone());
@@ -599,6 +638,12 @@ fn resolve_while_let_expression(
 
     // Exit the loop context
     ctx.exit_loop();
+
+    // For while-let loops: the body might not execute (pattern might not match).
+    // So any move inside the body is "maybe moved" after the loop.
+    let after_body_moves = ctx.move_tracker.snapshot();
+    ctx.move_tracker.restore(after_body_moves);
+    ctx.move_tracker.merge(&pre_loop_moves);
 
     Expression::while_let(loop_id, label_info, conditions, body, span)
 }
@@ -697,6 +742,11 @@ fn resolve_loop_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -
 
     // Exit the loop context
     ctx.exit_loop();
+
+    // For infinite `loop`: the body always executes at least once.
+    // Any move inside the body means the variable is definitely moved after the loop.
+    // We also need to promote any maybe-moved to moved (for second iteration).
+    ctx.move_tracker.promote_maybe_to_moved();
 
     Expression::loop_expr(loop_id, label_info, body, span)
 }
@@ -1757,14 +1807,33 @@ fn resolve_match_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
     let scrutinee = resolve_expression(&scrutinee_node, ctx);
     let scrutinee_ty = &scrutinee.ty;
 
-    // Collect all match arms
+    // Snapshot move state before match arms (for branching)
+    let pre_match_moves = ctx.move_tracker.snapshot();
+
+    // Collect all match arms and their move states
     let mut arms = Vec::new();
+    let mut arm_move_states = Vec::new();
+
     for child in node.children() {
         if child.kind() == SyntaxKind::MatchArm {
+            // Restore to pre-match state before each arm
+            ctx.move_tracker.restore(pre_match_moves.clone());
+
             if let Some(arm) = resolve_match_arm(&child, scrutinee_ty, ctx) {
                 arms.push(arm);
+                // Capture the move state after this arm
+                arm_move_states.push(ctx.move_tracker.snapshot());
             }
         }
+    }
+
+    // Merge all arm move states
+    // Match is exhaustive, so all arms are valid paths
+    if !arm_move_states.is_empty() {
+        ctx.move_tracker.merge_all(&arm_move_states);
+    } else {
+        // No arms - restore pre-match state
+        ctx.move_tracker.restore(pre_match_moves);
     }
 
     Expression::match_expr(scrutinee, arms, span)

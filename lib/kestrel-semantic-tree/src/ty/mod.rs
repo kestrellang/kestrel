@@ -34,6 +34,7 @@ impl Default for TyId {
     }
 }
 
+use crate::behavior::copy_semantics::CopySemanticsBehavior;
 use crate::language::KestrelLanguage;
 use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::enum_symbol::EnumSymbol;
@@ -1244,6 +1245,70 @@ impl Ty {
                 return_type,
             } => Some((param_info, return_type)),
             _ => None,
+        }
+    }
+
+    // === Copy semantics ===
+
+    /// Check if this type is copyable.
+    ///
+    /// Copyable types can be copied (bitwise copy, original remains valid).
+    /// Non-copyable types can only be moved (original becomes invalid after move).
+    ///
+    /// # Rules
+    ///
+    /// - **Primitives**: Always copyable (`Unit`, `Never`, `Bool`, `String`, `Int`, `Float`)
+    /// - **Composites**: Copyable if all parts are copyable (`Tuple`, `Array`)
+    /// - **Functions**: Always copyable (function pointers/closures are copyable)
+    /// - **User-defined types**: Check `CopySemanticsBehavior`, default to copyable
+    /// - **Special cases**: `Error`, `TypeParameter`, `Protocol`, `TypeAlias`, `Infer` return true
+    pub fn is_copyable(&self) -> bool {
+        match self.kind() {
+            // Primitives are always copyable
+            TyKind::Unit | TyKind::Never | TyKind::Bool | TyKind::String => true,
+            TyKind::Int(_) | TyKind::Float(_) => true,
+
+            // Composites: copyable if all parts are copyable
+            TyKind::Tuple(elements) => elements.iter().all(|e| e.is_copyable()),
+            TyKind::Array(element) => element.is_copyable(),
+
+            // Functions are always copyable
+            TyKind::Function { .. } => true,
+            TyKind::UnresolvedFunction { .. } => true,
+
+            // User-defined types: check CopySemanticsBehavior
+            TyKind::Struct { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_copyable())
+                .unwrap_or(true), // Default to copyable
+
+            TyKind::Enum { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_copyable())
+                .unwrap_or(true), // Default to copyable
+
+            // Error type: return true to avoid cascading errors
+            TyKind::Error => true,
+
+            // Type parameters: will be handled in Phase 7 with generic bounds
+            TyKind::TypeParameter(_) => true,
+
+            // Protocols: protocols themselves aren't values
+            TyKind::Protocol { .. } => true,
+
+            // Type aliases: should be resolved at runtime, return true
+            TyKind::TypeAlias { .. } => true,
+
+            // Associated types: not yet resolved, return true
+            TyKind::AssociatedType { .. } => true,
+
+            // Self type: depends on context, return true for now
+            TyKind::SelfType => true,
+
+            // Infer: type not yet known, will be resolved
+            TyKind::Infer => true,
         }
     }
 }

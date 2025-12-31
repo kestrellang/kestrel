@@ -109,6 +109,9 @@ pub enum Token {
     #[token("import")]
     Import,
 
+    #[token("deinit")]
+    Deinit,
+
     #[token("init")]
     Init,
 

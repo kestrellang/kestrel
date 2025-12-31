@@ -169,11 +169,20 @@ pub struct InitializerDeclarationData {
     pub body: Option<CodeBlockData>,
 }
 
-/// Raw parsed data for a conformance list (: Proto1, Proto2)
+/// A single conformance item, which can be positive or negative
+#[derive(Debug, Clone)]
+pub struct ConformanceItemData {
+    /// If Some, this is a negative conformance (e.g., `not Copyable`)
+    pub not_span: Option<Span>,
+    /// The protocol type
+    pub ty: TyVariant,
+}
+
+/// Raw parsed data for a conformance list (: Proto1, Proto2, not Copyable)
 #[derive(Debug, Clone)]
 pub struct ConformanceListData {
     pub colon_span: Span,
-    pub conformances: Vec<TyVariant>,
+    pub conformances: Vec<ConformanceItemData>,
 }
 
 /// Raw parsed data for struct declaration internals

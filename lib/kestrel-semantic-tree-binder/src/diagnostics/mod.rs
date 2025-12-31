@@ -14,6 +14,7 @@
 //! - `struct_init` - Struct initialization errors
 //! - `control_flow` - Break/continue/label errors
 //! - `pattern` - Pattern matching errors
+//! - `move_tracking` - Use-after-move errors for non-copyable types
 
 mod access_mode;
 mod attributes;
@@ -23,6 +24,7 @@ mod control_flow;
 mod declaration;
 mod member_access;
 mod module;
+mod move_tracking;
 mod operators;
 mod pattern;
 mod protocol;
@@ -37,6 +39,7 @@ pub use control_flow::*;
 pub use declaration::*;
 pub use member_access::*;
 pub use module::*;
+pub use move_tracking::*;
 pub use operators::*;
 pub use pattern::*;
 pub use protocol::*;

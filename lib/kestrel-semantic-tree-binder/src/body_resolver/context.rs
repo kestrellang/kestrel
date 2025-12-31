@@ -21,6 +21,7 @@ use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::get_node_span;
 
 use super::expressions::resolve_expression;
+use super::move_tracker::MoveTracker;
 use super::statements::{resolve_statement, resolve_variable_declaration};
 
 /// Information about an active loop during body resolution
@@ -53,6 +54,8 @@ pub struct BodyResolutionContext<'a> {
     pub(crate) loop_stack: Vec<LoopInfo>,
     /// Next loop ID to assign
     pub(crate) next_loop_id: u32,
+    /// Move tracker for non-copyable values
+    pub(crate) move_tracker: MoveTracker,
 }
 
 impl<'a> BodyResolutionContext<'a> {
@@ -75,6 +78,7 @@ impl<'a> BodyResolutionContext<'a> {
             local_scope,
             loop_stack: Vec::new(),
             next_loop_id: 0,
+            move_tracker: MoveTracker::new(),
         }
     }
 
@@ -120,6 +124,16 @@ impl<'a> BodyResolutionContext<'a> {
     /// Check if we're currently inside a loop.
     pub fn in_loop(&self) -> bool {
         !self.loop_stack.is_empty()
+    }
+
+    /// Get mutable access to the move tracker.
+    pub fn move_tracker_mut(&mut self) -> &mut MoveTracker {
+        &mut self.move_tracker
+    }
+
+    /// Get immutable access to the move tracker.
+    pub fn move_tracker(&self) -> &MoveTracker {
+        &self.move_tracker
     }
 }
 
@@ -429,6 +443,7 @@ pub fn resolve_and_attach_body(
         local_scope,
         loop_stack: Vec::new(),
         next_loop_id: 0,
+        move_tracker: MoveTracker::new(),
     };
 
     // Add parameters to local scope first

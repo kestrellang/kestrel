@@ -68,6 +68,7 @@ pub enum SyntaxKind {
     FieldDeclaration,
     FunctionDeclaration,
     InitializerDeclaration,
+    DeinitDeclaration,
     FunctionBody,
     ParameterList,
     Parameter,
@@ -91,8 +92,9 @@ pub enum SyntaxKind {
     AssociatedTypeTarget, // Iterator.Item or Add[Int].Output (qualified target in type binding)
 
     // Conformance nodes
-    ConformanceList, // : Proto1, Proto2 (after struct/protocol name)
-    ConformanceItem, // Each individual conformance (a type reference)
+    ConformanceList,     // : Proto1, Proto2 (after struct/protocol name)
+    ConformanceItem,     // Each individual conformance (a type reference)
+    NegativeConformance, // not Proto (opt-out of implicit conformance)
 
     // Type nodes
     Ty,
@@ -192,6 +194,7 @@ pub enum SyntaxKind {
     Case,
     Consuming,
     Continue,
+    Deinit,
     Else,
     Enum,
     Extend,
@@ -435,6 +438,7 @@ impl Language for KestrelLanguage {
         const ASSOCIATED_TYPE_TARGET: u16 = SyntaxKind::AssociatedTypeTarget as u16;
         const CONFORMANCE_LIST: u16 = SyntaxKind::ConformanceList as u16;
         const CONFORMANCE_ITEM: u16 = SyntaxKind::ConformanceItem as u16;
+        const NEGATIVE_CONFORMANCE: u16 = SyntaxKind::NegativeConformance as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
         const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
         const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
@@ -642,6 +646,7 @@ impl Language for KestrelLanguage {
             ASSOCIATED_TYPE_TARGET => SyntaxKind::AssociatedTypeTarget,
             CONFORMANCE_LIST => SyntaxKind::ConformanceList,
             CONFORMANCE_ITEM => SyntaxKind::ConformanceItem,
+            NEGATIVE_CONFORMANCE => SyntaxKind::NegativeConformance,
             TY => SyntaxKind::Ty,
             TY_UNIT => SyntaxKind::TyUnit,
             TY_NEVER => SyntaxKind::TyNever,

@@ -1673,8 +1673,14 @@ pub fn validate_argument_access_modes(
                 // Borrow accepts any expression - no validation needed
             }
             ParameterAccessMode::Consuming => {
-                // Consuming accepts any expression - no validation needed
-                // (ownership/copy semantics will be enforced later)
+                // For consuming parameters with non-copyable types, mark the local as moved
+                // so subsequent uses will trigger a use-after-move error
+                if let ExprKind::LocalRef(local_id) = &arg.value.kind {
+                    // Only mark as moved if the type is non-copyable
+                    if !arg.value.ty.is_copyable() {
+                        ctx.move_tracker_mut().mark_moved(*local_id, arg.value.span.clone());
+                    }
+                }
             }
             ParameterAccessMode::Mutating => {
                 // Mutating requires a mutable lvalue

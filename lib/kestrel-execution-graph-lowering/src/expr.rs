@@ -11,7 +11,7 @@ use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::TyKind;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
@@ -19,26 +19,34 @@ use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
 use crate::ty::lower_type;
 
-/// Convert a ParameterAccessMode to a PassingMode.
+/// Convert a ParameterAccessMode to a PassingMode based on type copyability.
 ///
-/// Note: For `consuming` parameters, we currently emit `Copy` because we don't yet
-/// have `not Copyable` support. Once Phase 2 is implemented, this will check the
-/// type's copy semantics and emit `Move` for non-copyable types.
-fn access_mode_to_passing_mode(mode: ParameterAccessMode) -> PassingMode {
+/// For `Consuming` parameters, we check whether the argument type is copyable:
+/// - Copyable types use `PassingMode::Copy` (value is duplicated)
+/// - Non-copyable types use `PassingMode::Move` (value is moved, original becomes invalid)
+fn access_mode_to_passing_mode(mode: ParameterAccessMode, arg_ty: &Ty) -> PassingMode {
     match mode {
         ParameterAccessMode::Borrow => PassingMode::Ref,
         ParameterAccessMode::Mutating => PassingMode::MutRef,
-        // For now, consuming always copies. When `not Copyable` is implemented,
-        // we'll check the type and emit Move for non-copyable types.
-        ParameterAccessMode::Consuming => PassingMode::Copy,
+        ParameterAccessMode::Consuming => {
+            if arg_ty.is_copyable() {
+                PassingMode::Copy
+            } else {
+                PassingMode::Move
+            }
+        }
     }
 }
 
-/// Build CallArgs from values and parameter access modes from a CallableBehavior.
+/// Build CallArgs from values, types, and parameter access modes from a CallableBehavior.
+///
+/// The `arg_types` slice provides the type of each argument, used to determine
+/// whether a `Consuming` parameter should use Copy or Move semantics.
 ///
 /// If behavior is None (e.g., for indirect calls), defaults to Ref for all args.
 fn build_call_args(
     arg_values: Vec<Value>,
+    arg_types: &[&Ty],
     behavior: Option<&CallableBehavior>,
     is_instance_method: bool,
 ) -> Vec<CallArg> {
@@ -65,8 +73,20 @@ fn build_call_args(
                     } else {
                         let param_idx = i - param_offset;
                         if let Some(param) = params.get(param_idx) {
-                            let mode = access_mode_to_passing_mode(param.access_mode());
-                            CallArg::new(value, mode)
+                            // Get the argument type for this position
+                            if let Some(arg_ty) = arg_types.get(i).copied() {
+                                let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
+                                CallArg::new(value, mode)
+                            } else {
+                                // Fallback if type not found (shouldn't happen after type checking)
+                                // Default to Copy for Consuming since most types are copyable
+                                let mode = match param.access_mode() {
+                                    ParameterAccessMode::Borrow => PassingMode::Ref,
+                                    ParameterAccessMode::Mutating => PassingMode::MutRef,
+                                    ParameterAccessMode::Consuming => PassingMode::Copy,
+                                };
+                                CallArg::new(value, mode)
+                            }
                         } else {
                             // Fallback if parameter not found (shouldn't happen after type checking)
                             CallArg::borrow(value)
@@ -781,6 +801,9 @@ fn lower_call(
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
+    
+    // Extract argument types for determining Copy vs Move passing modes
+    let arg_types: Vec<&Ty> = arguments.iter().map(|arg| &arg.value.ty).collect();
 
     // Lower type arguments for generic calls
     let type_args: Vec<_> = substitutions
@@ -843,8 +866,19 @@ fn lower_call(
                             let params = beh.parameters();
                             for (i, value) in arg_values.into_iter().enumerate() {
                                 if let Some(param) = params.get(i) {
-                                    let mode = access_mode_to_passing_mode(param.access_mode());
-                                    call_args.push(CallArg::new(value, mode));
+                                    // Get the argument type for Copy vs Move determination
+                                    if let Some(arg_ty) = arg_types.get(i).copied() {
+                                        let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
+                                        call_args.push(CallArg::new(value, mode));
+                                    } else {
+                                        // Fallback: default to Copy for Consuming
+                                        let mode = match param.access_mode() {
+                                            ParameterAccessMode::Borrow => PassingMode::Ref,
+                                            ParameterAccessMode::Mutating => PassingMode::MutRef,
+                                            ParameterAccessMode::Consuming => PassingMode::Copy,
+                                        };
+                                        call_args.push(CallArg::new(value, mode));
+                                    }
                                 } else {
                                     call_args.push(CallArg::borrow(value));
                                 }
@@ -904,7 +938,7 @@ fn lower_call(
                         
                         // Look up CallableBehavior to get parameter access modes
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
-                        let call_args = build_call_args(arg_values, callable_beh.as_deref(), false);
+                        let call_args = build_call_args(arg_values, &arg_types, callable_beh.as_deref(), false);
                         ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                     }
                 }
@@ -936,16 +970,19 @@ fn lower_call(
             
             // For instance methods on type params, receiver becomes first argument
             // For static methods on type params/assoc types, there's no receiver value
-            let all_args = if !is_instance {
+            let (all_args, all_arg_types): (Vec<Value>, Vec<&Ty>) = if !is_instance {
                 // Static method call on type parameter or associated type: T.create(), T.Item.create()
                 // No receiver value, just the arguments
-                arg_values
+                (arg_values, arg_types)
             } else {
                 // Instance method call: a.add(b) where a: T
                 let receiver_value = lower_expression(ctx, receiver);
                 let mut all_args = vec![receiver_value];
                 all_args.extend(arg_values);
-                all_args
+                // Prepend receiver type to types list
+                let mut all_types = vec![&receiver.ty];
+                all_types.extend(arg_types);
+                (all_args, all_types)
             };
 
             // For methods, we need to find the resolved method from candidates
@@ -956,7 +993,7 @@ fn lower_call(
                     Some(sym) => {
                         // Look up CallableBehavior to get parameter access modes
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
-                        let call_args = build_call_args(all_args, callable_beh.as_deref(), is_instance);
+                        let call_args = build_call_args(all_args, &all_arg_types, callable_beh.as_deref(), is_instance);
                         
                         // Check if this is a witness method call (method on type parameter or associated type)
                         if is_type_param_call || is_static_type_param_call || is_assoc_type_call || is_static_assoc_type_call {
@@ -1062,8 +1099,19 @@ fn lower_call(
                         let params = beh.parameters();
                         for (i, value) in arg_values.into_iter().enumerate() {
                             if let Some(param) = params.get(i) {
-                                let mode = access_mode_to_passing_mode(param.access_mode());
-                                call_args.push(CallArg::new(value, mode));
+                                // Get the argument type for Copy vs Move determination
+                                if let Some(arg_ty) = arg_types.get(i).copied() {
+                                    let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
+                                    call_args.push(CallArg::new(value, mode));
+                                } else {
+                                    // Fallback: default to Copy for Consuming
+                                    let mode = match param.access_mode() {
+                                        ParameterAccessMode::Borrow => PassingMode::Ref,
+                                        ParameterAccessMode::Mutating => PassingMode::MutRef,
+                                        ParameterAccessMode::Consuming => PassingMode::Copy,
+                                    };
+                                    call_args.push(CallArg::new(value, mode));
+                                }
                             } else {
                                 call_args.push(CallArg::borrow(value));
                             }

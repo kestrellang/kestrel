@@ -154,9 +154,9 @@ pub fn protocol_declaration_parser_internal<'tokens>(
                     protocol_span,
                     name_span,
                     type_params,
-                    inherited: inherited.map(|(colon_span, types)| ConformanceListData {
+                    inherited: inherited.map(|(colon_span, items)| ConformanceListData {
                         colon_span,
-                        conformances: types,
+                        conformances: items,
                     }),
                     where_clause,
                     lbrace_span,

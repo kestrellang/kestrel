@@ -14,11 +14,13 @@
 //! - [`operators`]: Unary/binary operators and Pratt parsing
 //! - [`paths`]: Path expression resolution (variables, functions, qualified names)
 //! - [`utils`]: Shared utilities (type formatting, signature matching)
+//! - [`move_tracker`]: Move tracking for non-copyable types
 
 mod calls;
 pub(crate) mod context;
 mod expressions;
 mod members;
+pub mod move_tracker;
 mod operators;
 mod paths;
 pub mod patterns;
@@ -27,3 +29,4 @@ mod utils;
 
 // Re-export main public interface
 pub use context::{BodyResolutionContext, resolve_and_attach_body, resolve_function_body};
+pub use move_tracker::MoveTracker;

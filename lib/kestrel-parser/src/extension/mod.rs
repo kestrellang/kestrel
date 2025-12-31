@@ -114,9 +114,9 @@ pub fn extension_declaration_parser_internal<'tokens>(
                 ExtensionDeclarationData {
                     extend_span,
                     target_type,
-                    conformances: conformances.map(|(colon_span, types)| ConformanceListData {
+                    conformances: conformances.map(|(colon_span, items)| ConformanceListData {
                         colon_span,
-                        conformances: types,
+                        conformances: items,
                     }),
                     where_clause,
                     lbrace_span,
