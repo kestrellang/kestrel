@@ -720,4 +720,41 @@ mod tests {
             "Should have 3 ExprImplicitMemberAccess (.Pending, .Active, .Complete)"
         );
     }
+
+    #[test]
+    fn test_function_with_deinit_statement() {
+        // Test parsing a full source file with a function containing a deinit statement
+        let source = r#"module Test
+            func example() {
+                var x: Int = 42;
+                deinit x;
+            }
+        "#;
+
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.events();
+        
+        // Check for parse errors
+        let errors: Vec<_> = events.iter()
+            .filter_map(|e| match e {
+                crate::event::Event::Error { message, .. } => Some(message.clone()),
+                _ => None
+            })
+            .collect();
+        
+        assert!(errors.is_empty(), "Got parse errors: {:?}", errors);
+
+        // Check that we have a DeinitStatement in the tree
+        let has_deinit = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::DeinitStatement)
+        });
+        assert!(has_deinit, "Should have DeinitStatement in syntax tree");
+    }
 }

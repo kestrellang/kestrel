@@ -328,4 +328,37 @@ mod tests {
         assert!(decl.parameter_list().is_some());
         assert!(decl.return_type().is_some());
     }
+
+    #[test]
+    fn test_function_with_deinit_statement() {
+        let source = "func example() { let x: Int = 0; deinit x; }";
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_function_declaration(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.into_events();
+        
+        // Check for parse errors
+        let errors: Vec<_> = events.iter()
+            .filter_map(|e| match e {
+                crate::event::Event::Error { message, .. } => Some(message.clone()),
+                _ => None
+            })
+            .collect();
+        
+        assert!(errors.is_empty(), "Got parse errors: {:?}", errors);
+
+        let tree = TreeBuilder::new(source, events).build();
+        let decl = FunctionDeclaration {
+            syntax: tree,
+            span: Span::from(0..source.len()),
+        };
+
+        assert_eq!(decl.name(), Some("example".to_string()));
+        assert!(decl.body().is_some(), "Function should have a body");
+    }
 }

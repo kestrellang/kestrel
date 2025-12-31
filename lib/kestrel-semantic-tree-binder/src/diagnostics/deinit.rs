@@ -1,9 +1,13 @@
 //! Deinit-related diagnostic errors.
 //!
-//! Errors and warnings related to deinit declarations and RAII semantics.
+//! Errors and warnings related to deinit declarations, deinit statements, and RAII semantics.
 
 use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
 use kestrel_span::Span;
+
+// =============================================================================
+// DEINIT DECLARATION ERRORS
+// =============================================================================
 
 /// Error when a struct has multiple deinit declarations.
 pub struct DuplicateDeinitError {
@@ -55,6 +59,52 @@ impl IntoDiagnostic for CopyableWithDeinitWarning {
             .with_message("deinit will run for each copy")])
             .with_notes(vec![
                 "consider marking the struct as `not Copyable` if it manages resources".to_string(),
+            ])
+    }
+}
+
+// =============================================================================
+// DEINIT STATEMENT ERRORS
+// =============================================================================
+
+/// Error when trying to deinit an undeclared variable.
+pub struct DeinitUndeclaredError {
+    /// Span of the deinit statement
+    pub span: Span,
+    /// Name of the variable
+    pub name: String,
+}
+
+impl IntoDiagnostic for DeinitUndeclaredError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("cannot deinit undeclared variable `{}`", self.name))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not found in this scope"),
+            ])
+    }
+}
+
+/// Error when trying to deinit an already moved value.
+pub struct DeinitAlreadyMovedError {
+    /// Span of the deinit statement
+    pub span: Span,
+    /// Name of the variable
+    pub name: String,
+    /// Span where the move occurred
+    pub moved_at: Span,
+}
+
+impl IntoDiagnostic for DeinitAlreadyMovedError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("cannot deinit `{}`: value has already been moved", self.name))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("deinit attempted here"),
+                Label::secondary(self.moved_at.file_id, self.moved_at.range())
+                    .with_message("value moved here"),
             ])
     }
 }

@@ -118,6 +118,7 @@ pub enum SyntaxKind {
     ExpressionStatement, // expression;
     VariableDeclaration, // let/var name: Type = expr;
     GuardLetStatement,   // guard let pattern = expr else { block }
+    DeinitStatement,     // deinit identifier; - explicit destructor call
     GuardLetCondition,   // let pattern = expr (in guard-let condition chain)
 
     // Expression nodes
@@ -458,6 +459,7 @@ impl Language for KestrelLanguage {
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
         const GUARD_LET_STATEMENT: u16 = SyntaxKind::GuardLetStatement as u16;
         const GUARD_LET_CONDITION: u16 = SyntaxKind::GuardLetCondition as u16;
+        const DEINIT_STATEMENT: u16 = SyntaxKind::DeinitStatement as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
@@ -669,6 +671,7 @@ impl Language for KestrelLanguage {
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
             GUARD_LET_STATEMENT => SyntaxKind::GuardLetStatement,
             GUARD_LET_CONDITION => SyntaxKind::GuardLetCondition,
+            DEINIT_STATEMENT => SyntaxKind::DeinitStatement,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,
             EXPR_INTEGER => SyntaxKind::ExprInteger,

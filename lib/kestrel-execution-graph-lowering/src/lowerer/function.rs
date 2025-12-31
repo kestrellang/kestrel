@@ -399,6 +399,9 @@ fn collect_closure_local_ids_from_stmt(stmt: &Statement, ids: &mut HashSet<Local
                 collect_closure_local_ids_from_expr(expr, ids);
             }
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit statement doesn't contain closures
+        }
     }
 }
 

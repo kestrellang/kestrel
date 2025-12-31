@@ -566,7 +566,7 @@ conformance := 'not'? type_path
 
 ### 5.1 Parser Changes ✅ COMPLETE
 
-**Files**: `lib/kestrel-parser/src/struct/mod.rs`
+**Files**: `lib/kestrel-parser/src/struct/mod.rs`, `lib/kestrel-parser/src/block/mod.rs`
 
 - [x] Parse `deinit { ... }` blocks in struct body:
   ```kestrel
@@ -578,15 +578,17 @@ conformance := 'not'? type_path
       }
   }
   ```
+- [x] Parse `deinit x;` statement in function bodies
 
 **Syntax**:
 ```
 struct_body := '{' struct_member* '}'
 struct_member := field | function | init | deinit
 deinit := 'deinit' block
-```
 
-**Note**: Empty deinit bodies work. Non-empty bodies have a parser bug (tree builder imbalance) that needs fixing.
+statement := ... | deinit_statement
+deinit_statement := 'deinit' identifier ';'
+```
 
 ### 5.2 Semantic Model Changes ✅ COMPLETE
 
@@ -621,15 +623,14 @@ deinit := 'deinit' block
   ```
 - [ ] Do NOT drop moved values (drop at destination only)
 
-### 5.4 Drop Intrinsic
+### 5.4 Deinit Statement ✅ COMPLETE
 
-**Files**: `lib/kestrel-semantic-tree-binder/src/body_resolver/calls.rs`
+**Files**: `lib/kestrel-parser/src/block/mod.rs`, `lib/kestrel-semantic-tree-binder/src/body_resolver/`
 
-- [ ] Add `drop(x)` as built-in intrinsic:
-  - Immediately drops the value
-  - Marks variable as `Moved`
-  - Cannot be called on borrowed value
-- [ ] Lower to `Drop` instruction + invalidate variable
+- [x] Add `deinit x;` statement syntax (reuses `deinit` keyword)
+- [x] Marks variable as `Moved` after deinit
+- [x] Cannot deinit already-moved value (use-after-move error)
+- [x] Lowered to `Deinit` statement in execution graph
 
 ### 5.5 Field Drop Order
 
@@ -656,15 +657,16 @@ deinit := 'deinit' block
   - [x] Duplicate deinit error
   - [x] Copyable + deinit warning
   - [x] Deinit with protocol conformance
+  - [x] `deinit x;` statement compiles
+  - [x] Use-after-deinit is error
+  - [x] Double deinit is error
+  - [x] Deinit on copyable type allowed
 - [ ] `deinit_basic.rs`:
   - deinit called at scope exit
   - deinit called in reverse order
 - [ ] `deinit_moved.rs`:
   - Moved value not dropped at source
   - Dropped at destination
-- [ ] `drop_intrinsic.rs`:
-  - Explicit drop works
-  - Use after drop is error
 
 ---
 

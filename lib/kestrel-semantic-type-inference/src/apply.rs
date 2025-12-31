@@ -60,6 +60,13 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
                 else_block: resolved_else_block,
             }
         }
+        StatementKind::Deinit { local_id, name } => {
+            // Deinit statement doesn't contain types that need resolution
+            StatementKind::Deinit {
+                local_id: *local_id,
+                name: name.clone(),
+            }
+        }
     };
 
     Statement::new(kind, stmt.span.clone())

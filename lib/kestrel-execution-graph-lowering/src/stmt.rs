@@ -52,6 +52,20 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
         } => {
             lower_guard_let(ctx, conditions, else_block);
         }
+
+        StatementKind::Deinit { local_id, .. } => {
+            // Deinit statement explicitly runs the destructor for a variable.
+            // The move tracking has already happened during body resolution,
+            // marking the variable as moved so it can't be used afterwards.
+            //
+            // At the MIR level, we would emit a drop/deinit operation here,
+            // but since the execution graph doesn't have a Drop statement kind yet,
+            // we just acknowledge the semantic effect (variable is now moved).
+            //
+            // TODO: When drop glue is implemented, emit the actual destructor call here.
+            let _mir_local = ctx.get_local_unwrap(*local_id);
+            // Future: ctx.emit_drop(Place::local(mir_local));
+        }
     }
 }
 

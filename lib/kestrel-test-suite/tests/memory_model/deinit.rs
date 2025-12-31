@@ -304,3 +304,154 @@ mod deinit_with_features {
         );
     }
 }
+
+// =============================================================================
+// DEINIT STATEMENT (deinit x;)
+// =============================================================================
+
+mod deinit_statement {
+    use super::*;
+
+    #[test]
+    fn basic_deinit_statement_compiles() {
+        // The `deinit x;` statement should compile
+        Test::new(
+            r#"module Test
+            func example() {
+                var x = 42;
+                deinit x;
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn deinit_statement_marks_variable_as_moved() {
+        // Using a variable after `deinit x;` should error (use after move)
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func getId(h: Handle) -> Int {
+                return h.fd
+            }
+            
+            func example() {
+                var handle = Handle(fd: 42);
+                deinit handle;
+                let x = getId(h: handle);  // Error: use after deinit
+            }
+        "#,
+        )
+        .expect(HasError("moved"));
+    }
+
+    #[test]
+    fn deinit_undeclared_variable_error() {
+        // Trying to deinit an undeclared variable should error
+        Test::new(
+            r#"module Test
+            func example() {
+                deinit unknown;
+            }
+        "#,
+        )
+        .expect(HasError("undeclared"));
+    }
+
+    #[test]
+    fn deinit_already_moved_variable_error() {
+        // Trying to deinit an already-moved variable should error
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func consume(consuming h: Handle) {}
+            
+            func example() {
+                var handle = Handle(fd: 42);
+                consume(handle);  // handle is moved here (no label for single param)
+                deinit handle;    // Error: already moved
+            }
+        "#,
+        )
+        .expect(HasError("moved"));
+    }
+
+    #[test]
+    fn deinit_copyable_type_allowed() {
+        // Deinit on copyable types is allowed (though unusual)
+        Test::new(
+            r#"module Test
+            func example() {
+                var x = 42;
+                deinit x;
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    // TODO: This test documents future behavior. Currently, after deinit,
+    // the variable is marked as moved and cannot be reassigned. In the future,
+    // we may want to allow reassignment after explicit deinit.
+    // #[test]
+    // fn deinit_then_reassign() {
+    //     // After deinit, the variable can be reassigned and used again
+    //     Test::new(
+    //         r#"module Test
+    //         @builtin(.Copyable)
+    //         protocol Copyable {}
+    //         
+    //         struct Handle: not Copyable {
+    //             var fd: Int
+    //             deinit {}
+    //         }
+    //         
+    //         func example() -> Int {
+    //             var handle = Handle(fd: 42);
+    //             deinit handle;
+    //             handle = Handle(fd: 100);  // Reassign
+    //             return handle.fd           // Use new value
+    //         }
+    //     "#,
+    //     )
+    //     .expect(Compiles);
+    // }
+
+    #[test]
+    fn double_deinit_error() {
+        // Can't deinit the same variable twice
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example() {
+                var handle = Handle(fd: 42);
+                deinit handle;
+                deinit handle;  // Error: already moved
+            }
+        "#,
+        )
+        .expect(HasError("moved"));
+    }
+}

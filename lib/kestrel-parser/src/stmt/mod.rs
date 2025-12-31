@@ -68,6 +68,17 @@ pub struct VariableDeclarationData {
     pub semicolon: Span,
 }
 
+/// Raw parsed data for a deinit statement: deinit identifier;
+#[derive(Debug, Clone)]
+pub struct DeinitStatementData {
+    /// Span of 'deinit' keyword
+    pub deinit_span: Span,
+    /// Span of the identifier being deinited
+    pub identifier_span: Span,
+    /// Semicolon span
+    pub semicolon: Span,
+}
+
 /// Internal enum to distinguish between statement variants during parsing
 #[derive(Debug, Clone)]
 pub enum StmtVariant {
@@ -75,6 +86,8 @@ pub enum StmtVariant {
     VariableDeclaration(VariableDeclarationData),
     /// Expression statement: expr;
     Expression(ExprVariant, Span), // (expression, semicolon_span)
+    /// Deinit statement: deinit identifier;
+    Deinit(DeinitStatementData),
 }
 
 /// Parser that skips trivia tokens
@@ -152,22 +165,48 @@ fn expression_statement_parser<'tokens>(
     )
 }
 
+/// Parser for deinit statement
+///
+/// Syntax: deinit identifier ;
+fn deinit_statement_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, DeinitStatementData, ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(|((deinit_span, identifier_span), semicolon)| DeinitStatementData {
+            deinit_span,
+            identifier_span,
+            semicolon,
+        })
+}
+
 /// Parser for statements
 ///
 /// Currently supports:
 /// - Variable declarations: let/var name: Type = expr;
 /// - Expression statements: expr;
+/// - Deinit statements: deinit identifier;
 pub fn stmt_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone {
     // Variable declaration starts with let or var
     let var_decl = variable_declaration_parser().map(StmtVariant::VariableDeclaration);
 
+    // Deinit statement: deinit identifier;
+    let deinit_stmt = deinit_statement_parser().map(StmtVariant::Deinit);
+
     // Expression statement is any expression followed by semicolon
     let expr_stmt =
         expression_statement_parser().map(|(expr, semi)| StmtVariant::Expression(expr, semi));
 
-    // Try variable declaration first, then expression statement
-    var_decl.or(expr_stmt)
+    // Try variable declaration first, then deinit statement, then expression statement
+    var_decl.or(deinit_stmt).or(expr_stmt)
 }
 
 /// Emit events for any statement variant
@@ -178,6 +217,9 @@ pub fn emit_stmt_variant(sink: &mut EventSink, variant: &StmtVariant) {
         }
         StmtVariant::Expression(expr, semicolon) => {
             emit_expression_statement(sink, expr, semicolon.clone());
+        }
+        StmtVariant::Deinit(data) => {
+            emit_deinit_statement(sink, data);
         }
     }
 }
@@ -225,6 +267,19 @@ fn emit_expression_statement(sink: &mut EventSink, expr: &ExprVariant, semicolon
     sink.add_token(SyntaxKind::Semicolon, semicolon);
 
     sink.finish_node(); // Finish ExpressionStatement
+    sink.finish_node(); // Finish Statement
+}
+
+/// Emit events for a deinit statement
+fn emit_deinit_statement(sink: &mut EventSink, data: &DeinitStatementData) {
+    sink.start_node(SyntaxKind::Statement);
+    sink.start_node(SyntaxKind::DeinitStatement);
+
+    sink.add_token(SyntaxKind::Deinit, data.deinit_span.clone());
+    sink.add_token(SyntaxKind::Identifier, data.identifier_span.clone());
+    sink.add_token(SyntaxKind::Semicolon, data.semicolon.clone());
+
+    sink.finish_node(); // Finish DeinitStatement
     sink.finish_node(); // Finish Statement
 }
 

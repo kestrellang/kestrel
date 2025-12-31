@@ -34,6 +34,9 @@ pub fn resolve_statement(
             SyntaxKind::GuardLetStatement => {
                 return resolve_guard_let_statement(&child, ctx);
             }
+            SyntaxKind::DeinitStatement => {
+                return resolve_deinit_statement(&child, ctx);
+            }
             SyntaxKind::Expression => {
                 let expr = resolve_expression(&child, ctx);
                 let span = get_node_span(&child, ctx.file_id);
@@ -243,4 +246,66 @@ fn resolve_guard_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         value,
         span,
     }
+}
+
+/// Resolve a deinit statement: `deinit identifier;`
+///
+/// This statement explicitly runs the destructor for a variable and marks it as moved.
+/// The variable cannot be used after this point.
+pub fn resolve_deinit_statement(
+    deinit_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Statement> {
+    use crate::diagnostics::{DeinitUndeclaredError, DeinitAlreadyMovedError};
+    use kestrel_reporting::IntoDiagnostic;
+
+    let span = get_node_span(deinit_node, ctx.file_id);
+
+    // Extract the identifier name from the DeinitStatement node
+    let name = deinit_node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string())?;
+
+    // Look up the variable in the local scope
+    let local_id = match ctx.local_scope.lookup(&name) {
+        Some(id) => id,
+        None => {
+            // Variable not found
+            let error = DeinitUndeclaredError {
+                span: span.clone(),
+                name: name.clone(),
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+            return None;
+        }
+    };
+
+    // Check if the variable has already been moved
+    if let Some(moved_at) = ctx.move_tracker.get_move_span(local_id) {
+        let error = DeinitAlreadyMovedError {
+            span: span.clone(),
+            name: name.clone(),
+            moved_at,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return None;
+    }
+
+    // Also check for maybe-moved
+    if let Some(moved_at) = ctx.move_tracker.get_maybe_move_span(local_id) {
+        let error = DeinitAlreadyMovedError {
+            span: span.clone(),
+            name: name.clone(),
+            moved_at,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+        return None;
+    }
+
+    // Mark the variable as moved (consumed by deinit)
+    ctx.move_tracker.mark_moved(local_id, span.clone());
+
+    Some(Statement::deinit(local_id, name, span))
 }

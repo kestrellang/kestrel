@@ -1059,6 +1059,10 @@ fn statement_references_local(
             }
             false
         }
+        StatementKind::Deinit { local_id: deinit_id, .. } => {
+            // The deinit statement references the variable being deinited
+            *deinit_id == local_id
+        }
     }
 }
 
@@ -1604,6 +1608,9 @@ where
             if let Some(yield_expr) = &else_block.yield_expr {
                 collect_captures_from_expression(yield_expr, process);
             }
+        }
+        StatementKind::Deinit { .. } => {
+            // Deinit statement doesn't contain expressions that could capture variables
         }
     }
 }

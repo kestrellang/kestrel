@@ -129,6 +129,9 @@ fn walk_statement(
                     walk_expression(yield_expr, analyzers, model, ctx);
                 }
             }
+            StatementKind::Deinit { .. } => {
+                // Deinit statement has no nested expressions to walk
+            }
         }
     }
 
