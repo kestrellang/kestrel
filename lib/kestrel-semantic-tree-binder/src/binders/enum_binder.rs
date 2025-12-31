@@ -28,7 +28,12 @@ impl DeclarationBinder for EnumBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
-        // 2. Resolve generics (type parameters + where clause)
+        // 2. Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
+        // 3. Resolve generics (type parameters + where clause)
         let generics_behavior = crate::binders::utils::generics::resolve_generics(
             syntax, &source, file_id, symbol_id, context,
         );

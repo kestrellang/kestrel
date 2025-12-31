@@ -1,3 +1,4 @@
+pub mod attributes;
 pub mod behavior;
 pub mod error;
 pub mod expr;

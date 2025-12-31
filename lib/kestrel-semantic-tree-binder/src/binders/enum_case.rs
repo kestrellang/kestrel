@@ -35,7 +35,12 @@ impl DeclarationBinder for EnumCaseBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
-        // 2. Check if case has parameters (associated values)
+        // 2. Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
+        // 3. Check if case has parameters (associated values)
         // Look for EnumCaseParameterList in the syntax
         let has_parameters = syntax
             .children()

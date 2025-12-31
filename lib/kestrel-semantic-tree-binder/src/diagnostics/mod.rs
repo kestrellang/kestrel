@@ -16,6 +16,7 @@
 //! - `pattern` - Pattern matching errors
 
 mod access_mode;
+mod attributes;
 mod call;
 mod control_flow;
 mod declaration;
@@ -28,6 +29,7 @@ mod struct_init;
 mod type_resolution;
 
 pub use access_mode::*;
+pub use attributes::*;
 pub use call::*;
 pub use control_flow::*;
 pub use declaration::*;

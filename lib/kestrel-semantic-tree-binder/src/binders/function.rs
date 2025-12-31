@@ -35,6 +35,11 @@ impl DeclarationBinder for FunctionBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that
         // T.Item paths can find the protocol bounds for T

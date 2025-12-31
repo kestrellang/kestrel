@@ -9,11 +9,12 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    AssociatedTypeBoundsData, AssociatedTypeTargetData, EnumCaseDeclarationData,
-    EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData, FieldDeclarationData,
-    FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
-    ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructDeclarationData,
-    TypeAliasDeclarationData, TypeDeclarationBodyItem,
+    AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,
+    AttributeArgsData, AttributeData, EnumCaseDeclarationData, EnumDeclarationData,
+    ExtensionBodyItem, ExtensionDeclarationData, FieldDeclarationData, FunctionDeclarationData,
+    InitializerDeclarationData, ParameterAccessMode, ParameterData, ProtocolBodyItem,
+    ProtocolDeclarationData, ReceiverModifier, StructDeclarationData, TypeAliasDeclarationData,
+    TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -111,6 +112,95 @@ pub fn emit_import_declaration(
     }
 
     sink.finish_node();
+}
+
+// =============================================================================
+// Attribute Emitters
+// =============================================================================
+
+/// Emit events for a single attribute argument value
+fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
+    match value {
+        AttributeArgValue::String(span) => {
+            sink.add_token(SyntaxKind::String, span.clone());
+        }
+        AttributeArgValue::Integer(span) => {
+            sink.add_token(SyntaxKind::Integer, span.clone());
+        }
+        AttributeArgValue::Float(span) => {
+            sink.add_token(SyntaxKind::Float, span.clone());
+        }
+        AttributeArgValue::Bool(span) => {
+            sink.add_token(SyntaxKind::Boolean, span.clone());
+        }
+        AttributeArgValue::ImplicitMember { dot_span, name_span } => {
+            sink.add_token(SyntaxKind::Dot, dot_span.clone());
+            sink.add_token(SyntaxKind::Identifier, name_span.clone());
+        }
+        AttributeArgValue::Path(segments) => {
+            for (i, span) in segments.iter().enumerate() {
+                if i > 0 {
+                    // Emit dot between segments (approximate span)
+                    let prev_end = segments[i - 1].end;
+                    sink.add_token(SyntaxKind::Dot, Span::from(prev_end..prev_end + 1));
+                }
+                sink.add_token(SyntaxKind::Identifier, span.clone());
+            }
+        }
+    }
+}
+
+/// Emit events for a single attribute argument
+fn emit_attribute_arg(sink: &mut EventSink, arg: &AttributeArgData) {
+    sink.start_node(SyntaxKind::AttributeArg);
+    
+    if let Some(label_span) = &arg.label {
+        sink.add_token(SyntaxKind::Identifier, label_span.clone());
+        if let Some(colon_span) = &arg.colon {
+            sink.add_token(SyntaxKind::Colon, colon_span.clone());
+        }
+    }
+    
+    emit_attribute_arg_value(sink, &arg.value);
+    
+    sink.finish_node();
+}
+
+/// Emit events for attribute arguments (the parenthesized list)
+fn emit_attribute_args(sink: &mut EventSink, args: &AttributeArgsData) {
+    sink.start_node(SyntaxKind::AttributeArgs);
+    sink.add_token(SyntaxKind::LParen, args.lparen_span.clone());
+    
+    for arg in &args.args {
+        emit_attribute_arg(sink, arg);
+    }
+    
+    sink.add_token(SyntaxKind::RParen, args.rparen_span.clone());
+    sink.finish_node();
+}
+
+/// Emit events for a single attribute
+fn emit_attribute(sink: &mut EventSink, attr: &AttributeData) {
+    sink.start_node(SyntaxKind::Attribute);
+    sink.add_token(SyntaxKind::At, attr.at_span.clone());
+    sink.add_token(SyntaxKind::Identifier, attr.name_span.clone());
+    
+    if let Some(args) = &attr.args {
+        emit_attribute_args(sink, args);
+    }
+    
+    sink.finish_node();
+}
+
+/// Emit events for an attribute list (zero or more attributes)
+pub fn emit_attribute_list(sink: &mut EventSink, attributes: &[AttributeData]) {
+    if !attributes.is_empty() {
+        sink.start_node(SyntaxKind::AttributeList);
+        for attr in attributes {
+            emit_attribute(sink, attr);
+        }
+        sink.finish_node();
+    }
 }
 
 // =============================================================================
@@ -221,6 +311,7 @@ pub fn emit_function_body(sink: &mut EventSink, block: &crate::block::CodeBlockD
 pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclarationData) {
     sink.start_node(SyntaxKind::FunctionDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     emit_static_modifier(sink, data.is_static);
 
@@ -263,6 +354,7 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
 pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) {
     sink.start_node(SyntaxKind::FieldDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     emit_static_modifier(sink, data.is_static);
 
@@ -290,6 +382,7 @@ pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) 
 pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDeclarationData) {
     sink.start_node(SyntaxKind::InitializerDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Init, data.init_span);
     emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
@@ -307,6 +400,7 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
 pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData) {
     sink.start_node(SyntaxKind::StructDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Struct, data.struct_span);
     emit_name(sink, data.name_span);
@@ -361,6 +455,7 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
 pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclarationData) {
     sink.start_node(SyntaxKind::ProtocolDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Protocol, data.protocol_span);
     emit_name(sink, data.name_span);
@@ -558,6 +653,7 @@ pub fn emit_enum_case_parameter_list(
 /// This is the single source of truth for enum case declaration emission.
 pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
     sink.start_node(SyntaxKind::EnumCaseDeclaration);
+    emit_attribute_list(sink, &data.attributes);
     sink.add_token(SyntaxKind::Case, data.case_span);
     emit_name(sink, data.name_span);
 
@@ -574,6 +670,7 @@ pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
 pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
     sink.start_node(SyntaxKind::EnumDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
 
     if let Some(indirect_span) = data.indirect {

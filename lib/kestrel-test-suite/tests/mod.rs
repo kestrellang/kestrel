@@ -2,6 +2,7 @@
 //!
 //! This test suite is organized by semantic domain:
 //!
+//! - `attributes/` - Attribute system (@attribute syntax and semantics)
 //! - `declarations/` - Symbol declarations (structs, functions, protocols, type aliases, imports)
 //! - `types/` - Type system (generics, literals)
 //! - `expressions/` - Expression resolution (literals, operators, paths, calls, field access)
@@ -12,6 +13,7 @@
 //! - `inference/` - Type inference
 //! - `framework/` - Test framework features
 
+mod attributes;
 mod declarations;
 mod execution_graph;
 mod expressions;

@@ -16,9 +16,10 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode,
-    ParameterData, ReceiverModifier,
+    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData,
+    ParameterAccessMode, ParameterData, ReceiverModifier,
 };
+use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::{TyVariant, ty_parser};
@@ -391,13 +392,14 @@ pub fn function_body_parser<'tokens>(
 
 /// Parser for a function declaration
 ///
-/// Syntax: `(visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
+/// Syntax: `(@attr)* (visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
 ///
 /// This is the single source of truth for function declaration parsing.
 pub fn function_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, FunctionDeclarationData, ParserExtra<'tokens>>
        + Clone {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(static_parser())
         .then(receiver_modifier_parser())
         .then(token(Token::Func))
@@ -418,7 +420,13 @@ pub fn function_declaration_parser_internal<'tokens>(
                                 (
                                     (
                                         (
-                                            (((visibility, is_static), receiver_modifier), fn_span),
+                                            (
+                                                (
+                                                    ((attributes, visibility), is_static),
+                                                    receiver_modifier,
+                                                ),
+                                                fn_span,
+                                            ),
                                             name_span,
                                         ),
                                         type_params,
@@ -436,6 +444,7 @@ pub fn function_declaration_parser_internal<'tokens>(
                 body,
             )| {
                 FunctionDeclarationData {
+                    attributes,
                     visibility,
                     is_static,
                     receiver_modifier,
@@ -455,14 +464,15 @@ pub fn function_declaration_parser_internal<'tokens>(
 
 /// Parser for a field declaration
 ///
-/// Syntax: `(visibility)? (static)? let/var name: Type (;)?`
+/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (;)?`
 ///
 /// This is the single source of truth for field declaration parsing.
 /// An optional trailing semicolon is allowed for inline field declarations.
 pub fn field_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, FieldDeclarationData, ParserExtra<'tokens>>
        + Clone {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(static_parser())
         .then(let_var_parser())
         .then(identifier())
@@ -473,7 +483,10 @@ pub fn field_declaration_parser_internal<'tokens>(
             |(
                 (
                     (
-                        (((visibility, is_static), (mutability_span, is_mutable)), name_span),
+                        (
+                            (((attributes, visibility), is_static), (mutability_span, is_mutable)),
+                            name_span,
+                        ),
                         colon_span,
                     ),
                     ty,
@@ -481,6 +494,7 @@ pub fn field_declaration_parser_internal<'tokens>(
                 semicolon,
             )| {
                 FieldDeclarationData {
+                    attributes,
                     visibility,
                     is_static,
                     mutability_span,
@@ -496,7 +510,7 @@ pub fn field_declaration_parser_internal<'tokens>(
 
 /// Parser for an initializer declaration
 ///
-/// Syntax: `(visibility)? init(params) { body }?`
+/// Syntax: `(@attr)* (visibility)? init(params) { body }?`
 /// Body is optional for protocol initializer declarations.
 ///
 /// This is the single source of truth for initializer declaration parsing.
@@ -507,15 +521,17 @@ pub fn initializer_declaration_parser_internal<'tokens>(
     InitializerDeclarationData,
     ParserExtra<'tokens>,
 > + Clone {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(token(Token::Init))
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
         .then(function_body_parser())
         .map(
-            |(((((visibility, init_span), lparen), parameters), rparen), body)| {
+            |((((((attributes, visibility), init_span), lparen), parameters), rparen), body)| {
                 InitializerDeclarationData {
+                    attributes,
                     visibility,
                     init_span,
                     lparen,

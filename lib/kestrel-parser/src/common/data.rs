@@ -10,6 +10,60 @@ use crate::block::CodeBlockData;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
+// =============================================================================
+// Attribute Data Structures
+// =============================================================================
+
+/// Value types that can appear in attribute arguments
+#[derive(Debug, Clone)]
+pub enum AttributeArgValue {
+    /// String literal: `"value"`
+    String(Span),
+    /// Integer literal: `42`
+    Integer(Span),
+    /// Float literal: `3.14`
+    Float(Span),
+    /// Boolean literal: `true` or `false`
+    Bool(Span),
+    /// Implicit member access: `.option`
+    ImplicitMember {
+        dot_span: Span,
+        name_span: Span,
+    },
+    /// Path: `SomeType` or `Module.Type`
+    Path(Vec<Span>), // segments (identifiers only, dots are implicit between them)
+}
+
+/// Raw parsed data for a single attribute argument
+#[derive(Debug, Clone)]
+pub struct AttributeArgData {
+    /// Optional label (e.g., `iOS` in `iOS: 15.0`)
+    pub label: Option<Span>,
+    /// Optional colon after label
+    pub colon: Option<Span>,
+    /// The value expression
+    pub value: AttributeArgValue,
+}
+
+/// Raw parsed data for attribute arguments (the contents of the parentheses)
+#[derive(Debug, Clone)]
+pub struct AttributeArgsData {
+    pub lparen_span: Span,
+    pub args: Vec<AttributeArgData>,
+    pub rparen_span: Span,
+}
+
+/// Raw parsed data for a single attribute
+#[derive(Debug, Clone)]
+pub struct AttributeData {
+    /// The @ token span
+    pub at_span: Span,
+    /// The attribute name span
+    pub name_span: Span,
+    /// Optional arguments in parentheses
+    pub args: Option<AttributeArgsData>,
+}
+
 /// Access mode for function parameters.
 ///
 /// Determines how the caller's value is passed and what the callee can do with it.
@@ -69,6 +123,7 @@ pub enum ReceiverModifier {
 /// Used by both function declarations and protocol method declarations.
 #[derive(Debug, Clone)]
 pub struct FunctionDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub is_static: Option<Span>,
     /// Receiver modifier (mutating/consuming) with its span
@@ -87,6 +142,7 @@ pub struct FunctionDeclarationData {
 /// Raw parsed data for field declaration internals
 #[derive(Debug, Clone)]
 pub struct FieldDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub is_static: Option<Span>,
     pub mutability_span: Span,
@@ -104,6 +160,7 @@ pub struct FieldDeclarationData {
 /// Body is optional for protocol initializer declarations.
 #[derive(Debug, Clone)]
 pub struct InitializerDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub init_span: Span,
     pub lparen: Span,
@@ -122,6 +179,7 @@ pub struct ConformanceListData {
 /// Raw parsed data for struct declaration internals
 #[derive(Debug, Clone)]
 pub struct StructDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub struct_span: Span,
     pub name_span: Span,
@@ -169,6 +227,7 @@ pub struct EnumCaseParameterData {
 /// Raw parsed data for enum case declaration
 #[derive(Debug, Clone)]
 pub struct EnumCaseDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub case_span: Span,
     pub name_span: Span,
     pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>, // (lparen, params, rparen)
@@ -177,6 +236,7 @@ pub struct EnumCaseDeclarationData {
 /// Raw parsed data for enum declaration
 #[derive(Debug, Clone)]
 pub struct EnumDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub indirect: Option<Span>,
     pub enum_span: Span,
@@ -192,6 +252,7 @@ pub struct EnumDeclarationData {
 /// Raw parsed data for protocol declaration internals
 #[derive(Debug, Clone)]
 pub struct ProtocolDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub protocol_span: Span,
     pub name_span: Span,

@@ -31,6 +31,11 @@ impl DeclarationBinder for ProtocolBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
         // Resolve inherited protocols FIRST, before where clause
         // This is needed so that where clause can reference associated types from inherited protocols
         // e.g., protocol SortedIterator: Iterator where Iterator.Item: Comparable { }

@@ -29,6 +29,11 @@ impl DeclarationBinder for StructBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
         // Extract type parameters and resolve where clause bounds
         let generics_behavior =
             crate::binders::utils::generics::resolve_generics(syntax, &source, file_id, symbol_id, context);

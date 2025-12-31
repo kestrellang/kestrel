@@ -39,6 +39,13 @@ pub enum SyntaxKind {
     Root,
     SourceFile,
     DeclarationItem,
+
+    // Attribute nodes
+    Attribute,     // @name or @name(args)
+    AttributeList, // Zero or more attributes before a declaration
+    AttributeArgs, // (arg, arg, ...) argument list
+    AttributeArg,  // Single argument: value or label: value
+
     ProtocolDeclaration,
     ProtocolBody,
     StructDeclaration,
@@ -384,6 +391,11 @@ impl Language for KestrelLanguage {
         const ROOT: u16 = SyntaxKind::Root as u16;
         const SOURCE_FILE: u16 = SyntaxKind::SourceFile as u16;
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
+        // Attribute nodes
+        const ATTRIBUTE: u16 = SyntaxKind::Attribute as u16;
+        const ATTRIBUTE_LIST: u16 = SyntaxKind::AttributeList as u16;
+        const ATTRIBUTE_ARGS: u16 = SyntaxKind::AttributeArgs as u16;
+        const ATTRIBUTE_ARG: u16 = SyntaxKind::AttributeArg as u16;
         const PROTOCOL_DECLARATION: u16 = SyntaxKind::ProtocolDeclaration as u16;
         const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
         const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
@@ -574,14 +586,23 @@ impl Language for KestrelLanguage {
         const CARET: u16 = SyntaxKind::Caret as u16;
         const LESS: u16 = SyntaxKind::Less as u16;
         const GREATER: u16 = SyntaxKind::Greater as u16;
+        const AT: u16 = SyntaxKind::At as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
         const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
         const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
+        const DOT_DOT: u16 = SyntaxKind::DotDot as u16;
+        const TY_OPTIONAL: u16 = SyntaxKind::TyOptional as u16;
+        const ERROR: u16 = SyntaxKind::Error as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
             SOURCE_FILE => SyntaxKind::SourceFile,
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
+            // Attribute nodes
+            ATTRIBUTE => SyntaxKind::Attribute,
+            ATTRIBUTE_LIST => SyntaxKind::AttributeList,
+            ATTRIBUTE_ARGS => SyntaxKind::AttributeArgs,
+            ATTRIBUTE_ARG => SyntaxKind::AttributeArg,
             PROTOCOL_DECLARATION => SyntaxKind::ProtocolDeclaration,
             PROTOCOL_BODY => SyntaxKind::ProtocolBody,
             STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
@@ -630,6 +651,7 @@ impl Language for KestrelLanguage {
             TY_ARRAY => SyntaxKind::TyArray,
             TY_LIST => SyntaxKind::TyList,
             TY_INFERRED => SyntaxKind::TyInferred,
+            TY_OPTIONAL => SyntaxKind::TyOptional,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,
             CODE_BLOCK => SyntaxKind::CodeBlock,
@@ -752,6 +774,7 @@ impl Language for KestrelLanguage {
             // Operators
             DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
             DOT_DOT_LESS => SyntaxKind::DotDotLess,
+            DOT_DOT => SyntaxKind::DotDot,
             LESS_LESS => SyntaxKind::LessLess,
             GREATER_GREATER => SyntaxKind::GreaterGreater,
             LESS_EQUALS => SyntaxKind::LessEquals,
@@ -772,9 +795,11 @@ impl Language for KestrelLanguage {
             CARET => SyntaxKind::Caret,
             LESS => SyntaxKind::Less,
             GREATER => SyntaxKind::Greater,
+            AT => SyntaxKind::At,
             WHITESPACE => SyntaxKind::Whitespace,
             LINE_COMMENT => SyntaxKind::LineComment,
             BLOCK_COMMENT => SyntaxKind::BlockComment,
+            ERROR => SyntaxKind::Error,
             _ => SyntaxKind::Error,
         }
     }

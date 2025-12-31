@@ -553,6 +553,12 @@ pub enum Behavior {
     ImplementsProtocol(&'static str, &'static str),
     /// Check if method does NOT implement any protocol method
     ImplementsProtocolNone,
+    /// Check if symbol has a specific attribute by name
+    HasAttribute(&'static str),
+    /// Expected number of attributes on the symbol
+    AttributeCount(usize),
+    /// Expected number of arguments for a specific attribute
+    AttributeArgCount(&'static str, usize),
 }
 
 impl Behavior {
@@ -755,6 +761,40 @@ impl Behavior {
                 }
                 Ok(())
             }
+            Behavior::HasAttribute(attr_name) => {
+                let has_attr = get_has_attribute(symbol, attr_name);
+                if !has_attr {
+                    return Err(format!(
+                        "Symbol '{}' does not have attribute '@{}'",
+                        path, attr_name
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::AttributeCount(expected) => {
+                let count = get_attribute_count(symbol);
+                if count != *expected {
+                    return Err(format!(
+                        "Symbol '{}' has {} attribute(s), expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::AttributeArgCount(attr_name, expected) => {
+                let count = get_attribute_arg_count(symbol, attr_name);
+                match count {
+                    Some(actual) if actual == *expected => Ok(()),
+                    Some(actual) => Err(format!(
+                        "Symbol '{}' attribute '@{}' has {} argument(s), expected {}",
+                        path, attr_name, actual, expected
+                    )),
+                    None => Err(format!(
+                        "Symbol '{}' does not have attribute '@{}'",
+                        path, attr_name
+                    )),
+                }
+            }
         }
     }
 }
@@ -775,6 +815,9 @@ impl std::fmt::Debug for Behavior {
             Behavior::ChildCount(n) => write!(f, "ChildCount({})", n),
             Behavior::ImplementsProtocol(p, m) => write!(f, "ImplementsProtocol({}, {})", p, m),
             Behavior::ImplementsProtocolNone => write!(f, "ImplementsProtocolNone"),
+            Behavior::HasAttribute(name) => write!(f, "HasAttribute({})", name),
+            Behavior::AttributeCount(n) => write!(f, "AttributeCount({})", n),
+            Behavior::AttributeArgCount(name, n) => write!(f, "AttributeArgCount({}, {})", name, n),
         }
     }
 }
@@ -943,4 +986,44 @@ fn find_symbol_by_id(
     }
 
     None
+}
+
+/// Helper to check if a symbol has a specific attribute by name
+fn get_has_attribute(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>, attr_name: &str) -> bool {
+    use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+
+    symbol
+        .metadata()
+        .get_behavior::<AttributesBehavior>()
+        .map(|ab| ab.attributes().iter().any(|a| a.name == attr_name))
+        .unwrap_or(false)
+}
+
+/// Helper to get the number of attributes on a symbol
+fn get_attribute_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
+    use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+
+    symbol
+        .metadata()
+        .get_behavior::<AttributesBehavior>()
+        .map(|ab| ab.attributes().len())
+        .unwrap_or(0)
+}
+
+/// Helper to get the number of arguments for a specific attribute
+fn get_attribute_arg_count(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    attr_name: &str,
+) -> Option<usize> {
+    use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+
+    symbol
+        .metadata()
+        .get_behavior::<AttributesBehavior>()
+        .and_then(|ab| {
+            ab.attributes()
+                .iter()
+                .find(|a| a.name == attr_name)
+                .map(|a| a.args.len())
+        })
 }

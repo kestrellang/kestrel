@@ -8,6 +8,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
     emit_struct_declaration, field_declaration_parser_internal,
@@ -149,7 +150,8 @@ pub fn struct_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
 {
     recursive(|struct_parser| {
-        visibility_parser_internal()
+        attribute_list_parser()
+            .then(visibility_parser_internal())
             .then(token(Token::Struct))
             .then(identifier())
             .then(type_parameter_list_parser().or_not())
@@ -168,7 +170,10 @@ pub fn struct_declaration_parser_internal<'tokens>(
                         (
                             (
                                 (
-                                    (((visibility, struct_span), name_span), type_params),
+                                    (
+                                        (((attributes, visibility), struct_span), name_span),
+                                        type_params,
+                                    ),
                                     conformances,
                                 ),
                                 where_clause,
@@ -180,6 +185,7 @@ pub fn struct_declaration_parser_internal<'tokens>(
                     rbrace_span,
                 )| {
                     StructDeclarationData {
+                        attributes,
                         visibility,
                         struct_span,
                         name_span,
@@ -255,6 +261,42 @@ mod tests {
         assert_eq!(decl.name(), Some("Foo".to_string()));
         assert_eq!(decl.visibility(), None);
         assert_eq!(decl.syntax.kind(), SyntaxKind::StructDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_attribute() {
+        let decl = parse("@dummy struct Point { }");
+        assert_eq!(decl.name(), Some("Point".to_string()));
+        // Check for AttributeList as a child
+        assert!(
+            has_child(&decl, SyntaxKind::AttributeList),
+            "Expected AttributeList as child of StructDeclaration"
+        );
+        
+        // Verify the attribute structure in more detail
+        let attr_list = decl
+            .syntax
+            .children()
+            .find(|c| c.kind() == SyntaxKind::AttributeList)
+            .expect("AttributeList should exist");
+        
+        let attr = attr_list
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Attribute)
+            .expect("Attribute should exist in AttributeList");
+        
+        // Check that we have the @ token and identifier
+        let has_at = attr
+            .children_with_tokens()
+            .filter_map(|c| c.into_token())
+            .any(|t| t.kind() == SyntaxKind::At);
+        assert!(has_at, "Attribute should have @ token");
+        
+        let has_name = attr
+            .children_with_tokens()
+            .filter_map(|c| c.into_token())
+            .any(|t| t.kind() == SyntaxKind::Identifier && t.text() == "dummy");
+        assert!(has_name, "Attribute should have 'dummy' identifier");
     }
 
     #[test]

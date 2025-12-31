@@ -34,6 +34,11 @@ impl DeclarationBinder for InitializerBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
         // Extract and resolve parameters from syntax
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
             syntax,
