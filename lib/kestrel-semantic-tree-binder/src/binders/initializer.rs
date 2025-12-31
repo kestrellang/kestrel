@@ -17,7 +17,7 @@ use kestrel_syntax_tree::utils::find_child;
 pub struct InitializerBinder;
 
 impl DeclarationBinder for InitializerBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
@@ -59,7 +59,30 @@ impl DeclarationBinder for InitializerBinder {
         );
         symbol.metadata().add_behavior(resolved_callable);
 
-        // Resolve initializer body
+        // NOTE: Body resolution is deferred to bind_body() to handle forward references
+    }
+
+    fn bind_body(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        // Only process initializer symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Initializer {
+            return;
+        }
+
+        // Get the CallableBehavior to extract resolved parameters
+        let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
+            return;
+        };
+        let resolved_params = callable.parameters().to_vec();
+
+        let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
+
+        // Resolve initializer body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
             resolve_initializer_body(
                 symbol,

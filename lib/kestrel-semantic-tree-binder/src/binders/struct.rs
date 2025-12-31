@@ -13,7 +13,7 @@ use crate::syntax::helpers::resolve_conformance_list;
 pub struct StructBinder;
 
 impl DeclarationBinder for StructBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,

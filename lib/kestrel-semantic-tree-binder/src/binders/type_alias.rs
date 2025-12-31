@@ -38,7 +38,7 @@ enum TypeAliasContext {
 pub struct TypeAliasBinder;
 
 impl DeclarationBinder for TypeAliasBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,

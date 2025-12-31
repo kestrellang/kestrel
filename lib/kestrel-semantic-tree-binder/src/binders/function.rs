@@ -18,7 +18,7 @@ use kestrel_syntax_tree::utils::{find_child, get_node_span};
 pub struct FunctionBinder;
 
 impl DeclarationBinder for FunctionBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
@@ -70,6 +70,29 @@ impl DeclarationBinder for FunctionBinder {
             None => CallableBehavior::new(resolved_params.clone(), resolved_return, span),
         };
         symbol.metadata().add_behavior(resolved_callable);
+
+        // NOTE: Body resolution is deferred to bind_body() to handle forward references
+    }
+
+    fn bind_body(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        // Only process function symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Function {
+            return;
+        }
+
+        // Get the CallableBehavior to extract resolved parameters
+        let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
+            return;
+        };
+        let resolved_params = callable.parameters().to_vec();
+
+        let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve function body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {

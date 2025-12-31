@@ -19,7 +19,7 @@ use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxCont
 pub struct EnumCaseBinder;
 
 impl DeclarationBinder for EnumCaseBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,

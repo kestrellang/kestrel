@@ -17,7 +17,7 @@ use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_n
 pub struct FieldBinder;
 
 impl DeclarationBinder for FieldBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,

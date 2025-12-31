@@ -27,7 +27,7 @@ use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_spa
 pub struct ExtensionBinder;
 
 impl DeclarationBinder for ExtensionBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,

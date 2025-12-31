@@ -13,7 +13,7 @@ use crate::syntax::helpers::resolve_conformance_list;
 pub struct EnumBinder;
 
 impl DeclarationBinder for EnumBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,

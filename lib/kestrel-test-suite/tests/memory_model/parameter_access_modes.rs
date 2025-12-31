@@ -628,20 +628,20 @@ mod method_interaction {
     #[test]
     fn mutating_method_with_mutating_param() {
         // A mutating method can call a function with mutating parameter on its field
-        // Note: reset must be declared before Shape to avoid forward reference issue
+        // This tests forward references: reset is declared AFTER Shape
         Test::new(
             r#"module Test
             struct Point { var x: Int; var y: Int }
-            func reset(mutating p: Point) {
-                p.x = 0;
-                p.y = 0;
-            }
             struct Shape {
                 var origin: Point
                 
                 mutating func resetOrigin() {
                     reset(self.origin)
                 }
+            }
+            func reset(mutating p: Point) {
+                p.x = 0;
+                p.y = 0;
             }
         "#,
         )
@@ -651,19 +651,19 @@ mod method_interaction {
     #[test]
     fn non_mutating_method_cannot_pass_field_to_mutating() {
         // A non-mutating method cannot pass its field to a mutating parameter
-        // Note: reset must be declared before Shape to avoid forward reference issue
+        // This tests forward references: reset is declared AFTER Shape
         Test::new(
             r#"module Test
             struct Point { var x: Int; var y: Int }
-            func reset(mutating p: Point) {
-                p.x = 0;
-            }
             struct Shape {
                 var origin: Point
                 
                 func tryReset() {
                     reset(self.origin)
                 }
+            }
+            func reset(mutating p: Point) {
+                p.x = 0;
             }
         "#,
         )

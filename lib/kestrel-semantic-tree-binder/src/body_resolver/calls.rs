@@ -831,11 +831,11 @@ pub fn resolve_struct_instantiation(
 
     // Verify it's a struct
     if symbol.metadata().kind() != KestrelSymbolKind::Struct {
-        // Not a struct - check if it's a function (might be a forward reference issue)
+        // Not a struct - check if it's a function.
+        // NOTE: With two-pass binding, CallableBehavior should always be available
+        // for functions, so they should resolve as SymbolRef not TypeRef. This
+        // fallback handles any edge cases where that doesn't happen.
         if symbol.metadata().kind() == KestrelSymbolKind::Function {
-            // This is actually a function call, but it was resolved as TypeRef because
-            // the CallableBehavior wasn't attached yet (forward reference issue).
-            // Try to resolve it as a function if the CallableBehavior is available.
             if let Some(callable) = get_callable_behavior(&symbol) {
                 // Validate access modes for arguments
                 validate_argument_access_modes(&callable, &arguments, &span, ctx);
@@ -845,8 +845,6 @@ pub fn resolve_struct_instantiation(
                 let callee = Expression::symbol_ref(symbol_id, fn_ty, false, span.clone());
                 return Expression::call(callee, arguments, return_ty, span);
             }
-            // If CallableBehavior is not available, this is a forward reference
-            // that can't be resolved yet. Fall through to error.
         }
         // TODO: Add proper error diagnostic
         return Expression::error(span);
