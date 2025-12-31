@@ -2,10 +2,14 @@
 //!
 //! This module provides functions to extract and resolve attributes from syntax nodes.
 
-use crate::diagnostics::UnknownAttributeWarning;
+use crate::diagnostics::{
+    BuiltinInvalidArgumentError, BuiltinRequiresArgumentError, UnknownAttributeWarning,
+    UnknownLanguageFeatureError,
+};
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::attributes::{Attribute, AttributeArg};
+use kestrel_semantic_tree::attributes::{Attribute, AttributeArg, AttributeKind};
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
@@ -192,6 +196,86 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str) -> Option<AttributeArg> 
     } else {
         // Unable to extract meaningful data
         None
+    }
+}
+
+/// Result of parsing a `@builtin(.Feature)` attribute.
+pub enum BuiltinParseResult {
+    /// Successfully parsed: contains the language feature
+    Success(LanguageFeature),
+    /// Not a builtin attribute
+    NotBuiltin,
+    /// Error occurred during parsing (diagnostic already emitted)
+    Error,
+}
+
+/// Parse a `@builtin(.Feature)` attribute from an AttributesBehavior.
+///
+/// This function checks if the attributes contain a `@builtin` attribute,
+/// validates its arguments, and returns the parsed `LanguageFeature`.
+///
+/// # Arguments
+/// * `attributes` - The resolved attributes behavior
+/// * `source` - The source text (needed to extract implicit member name)
+/// * `diagnostics` - The diagnostic context for emitting errors
+///
+/// # Returns
+/// - `BuiltinParseResult::Success(feature)` if a valid builtin attribute was found
+/// - `BuiltinParseResult::NotBuiltin` if no builtin attribute is present
+/// - `BuiltinParseResult::Error` if a builtin attribute is present but invalid
+pub fn parse_builtin_attribute(
+    attributes: &AttributesBehavior,
+    source: &str,
+    diagnostics: &mut DiagnosticContext,
+) -> BuiltinParseResult {
+    // Find the @builtin attribute
+    let Some(attr) = attributes.get_kind(AttributeKind::Builtin) else {
+        return BuiltinParseResult::NotBuiltin;
+    };
+
+    // Validate: must have exactly one argument
+    if attr.args.is_empty() {
+        diagnostics.throw(BuiltinRequiresArgumentError {
+            span: attr.span.clone(),
+        });
+        return BuiltinParseResult::Error;
+    }
+
+    let arg = &attr.args[0];
+
+    // Validate: argument must be unlabeled (no `label: .Value` syntax)
+    if arg.is_labeled() {
+        diagnostics.throw(BuiltinInvalidArgumentError {
+            span: arg.span.clone(),
+        });
+        return BuiltinParseResult::Error;
+    }
+
+    // Extract the feature name from the source using the value span
+    // The argument should be `.FeatureName` (implicit member syntax)
+    let arg_text = &source[arg.value_span.range()];
+
+    // Must start with '.' for implicit member syntax
+    if !arg_text.starts_with('.') {
+        diagnostics.throw(BuiltinInvalidArgumentError {
+            span: arg.span.clone(),
+        });
+        return BuiltinParseResult::Error;
+    }
+
+    // Extract the feature name (everything after the '.')
+    let feature_name = &arg_text[1..];
+
+    // Parse the feature name
+    match LanguageFeature::from_name(feature_name) {
+        Some(feature) => BuiltinParseResult::Success(feature),
+        None => {
+            diagnostics.throw(UnknownLanguageFeatureError {
+                span: arg.value_span.clone(),
+                name: feature_name.to_string(),
+            });
+            BuiltinParseResult::Error
+        }
     }
 }
 

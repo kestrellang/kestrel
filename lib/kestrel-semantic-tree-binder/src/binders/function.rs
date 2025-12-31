@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
@@ -9,13 +10,56 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
+use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError};
 use crate::resolution::LocalScope;
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
 pub struct FunctionBinder;
+
+impl FunctionBinder {
+    /// Process @builtin attribute on a function.
+    fn process_builtin_attribute(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        attributes: &AttributesBehavior,
+        source: &str,
+        context: &mut BindingContext,
+    ) {
+        let feature = match parse_builtin_attribute(attributes, source, context.diagnostics) {
+            BuiltinParseResult::Success(f) => f,
+            BuiltinParseResult::NotBuiltin | BuiltinParseResult::Error => return,
+        };
+
+        let definition = feature.definition();
+        let attr_span = attributes
+            .get_kind(kestrel_semantic_tree::attributes::AttributeKind::Builtin)
+            .map(|a| a.span.clone())
+            .unwrap_or_else(|| symbol.metadata().span().clone());
+
+        // Validate: feature must expect a function
+        if !definition.kind.is_function() {
+            context.diagnostics.throw(BuiltinWrongKindError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+                expected_kind: definition.kind.kind_name().to_string(),
+                actual_kind: "function".to_string(),
+            });
+            return;
+        }
+
+        // Register the builtin
+        let symbol_id = symbol.metadata().id();
+        if !context.model.builtin_registry().register_function(feature, symbol_id) {
+            context.diagnostics.throw(DuplicateBuiltinError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+            });
+        }
+    }
+}
 
 impl DeclarationBinder for FunctionBinder {
     fn bind_signature(
@@ -38,7 +82,10 @@ impl DeclarationBinder for FunctionBinder {
         // Resolve attributes
         let attributes_behavior =
             crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
-        symbol.metadata().add_behavior(attributes_behavior);
+        symbol.metadata().add_behavior(attributes_behavior.clone());
+
+        // Process @builtin attribute if present
+        Self::process_builtin_attribute(symbol, &attributes_behavior, &source, context);
 
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that

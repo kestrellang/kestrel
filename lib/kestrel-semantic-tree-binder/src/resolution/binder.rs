@@ -10,6 +10,7 @@ use std::sync::Arc;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ExtensionRegistry, SemanticModel, SymbolRegistry};
 use kestrel_semantic_tree::behavior::callable::CallableSignature;
+use kestrel_semantic_tree::builtins::BuiltinRegistry;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -38,6 +39,8 @@ pub struct SemanticBinder {
     registry: SymbolRegistry,
     /// Shared extension registry
     extension_registry: ExtensionRegistry,
+    /// Shared builtin registry
+    builtin_registry: Arc<BuiltinRegistry>,
     /// Semantic model used during binding for resolvers
     model: SemanticModel,
     binder_registry: DeclarationBinderRegistry,
@@ -55,7 +58,8 @@ impl SemanticBinder {
     }
 
     fn from_model(model: SemanticModel) -> Self {
-        let (root, syntax_map, sources, registry, extension_registry) = model.into_parts();
+        let (root, syntax_map, sources, registry, extension_registry, builtin_registry) =
+            model.into_parts();
 
         let model = SemanticModel::with_registries(
             root.clone(),
@@ -63,6 +67,7 @@ impl SemanticBinder {
             sources.clone(),
             registry.clone(),
             extension_registry.clone(),
+            builtin_registry.clone(),
         );
 
         Self {
@@ -71,6 +76,7 @@ impl SemanticBinder {
             sources,
             registry,
             extension_registry,
+            builtin_registry,
             model,
             binder_registry: DeclarationBinderRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),
@@ -104,6 +110,7 @@ impl SemanticBinder {
             self.sources.clone(),
             self.registry.clone(),
             self.extension_registry.clone(),
+            self.builtin_registry.clone(),
         )
     }
 

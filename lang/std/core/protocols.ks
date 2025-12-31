@@ -109,8 +109,10 @@ public protocol Cloneable {
     func clone() -> Self
 }
 
-// NonCopyable - marker protocol for move-only types
-public protocol NonCopyable {}
+// Copyable - marker protocol for types that can be implicitly copied
+// Types implicitly conform to Copyable unless opted out with `not Copyable`
+@builtin(.Copyable)
+public protocol Copyable {}
 
 // Defaultable - types with a default value
 public protocol Defaultable {

@@ -15,6 +15,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::extension_registry::ExtensionRegistry;
 use crate::query::Query;
 use crate::registry::SymbolRegistry;
+use kestrel_semantic_tree::builtins::BuiltinRegistry;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 
 /// The semantic model for a Kestrel program.
@@ -33,6 +34,8 @@ pub struct SemanticModel {
     registry: SymbolRegistry,
     /// Extension registry for extension lookups
     extension_registry: ExtensionRegistry,
+    /// Builtin registry for language feature lookups
+    builtin_registry: Arc<BuiltinRegistry>,
 }
 
 impl SemanticModel {
@@ -53,6 +56,7 @@ impl SemanticModel {
             sources,
             registry,
             extension_registry: ExtensionRegistry::new(),
+            builtin_registry: Arc::new(BuiltinRegistry::new()),
         }
     }
 
@@ -66,6 +70,7 @@ impl SemanticModel {
         sources: HashMap<String, String>,
         registry: SymbolRegistry,
         extension_registry: ExtensionRegistry,
+        builtin_registry: Arc<BuiltinRegistry>,
     ) -> Self {
         Self {
             root,
@@ -73,6 +78,7 @@ impl SemanticModel {
             sources,
             registry,
             extension_registry,
+            builtin_registry,
         }
     }
 
@@ -85,6 +91,7 @@ impl SemanticModel {
         HashMap<String, String>,
         SymbolRegistry,
         ExtensionRegistry,
+        Arc<BuiltinRegistry>,
     ) {
         (
             self.root,
@@ -92,6 +99,7 @@ impl SemanticModel {
             self.sources,
             self.registry,
             self.extension_registry,
+            self.builtin_registry,
         )
     }
 
@@ -132,6 +140,13 @@ impl SemanticModel {
     /// Register an extension (called during binding).
     pub fn register_extension(&self, target_id: SymbolId, extension: Arc<ExtensionSymbol>) {
         self.extension_registry.register(target_id, extension);
+    }
+
+    /// Get the builtin registry.
+    ///
+    /// Exposed for queries and binding phase to access.
+    pub fn builtin_registry(&self) -> &Arc<BuiltinRegistry> {
+        &self.builtin_registry
     }
 
     /// Debug print the semantic model (symbol hierarchy).

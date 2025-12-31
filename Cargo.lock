@@ -376,6 +376,7 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-syntax-tree",
+ "parking_lot",
  "semantic-tree",
 ]
 

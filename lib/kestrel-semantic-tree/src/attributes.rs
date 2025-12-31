@@ -11,6 +11,10 @@ use kestrel_span::Span;
 /// semantic meaning that the compiler needs to recognize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AttributeKind {
+    /// `@builtin(.Feature)` - Marks a symbol as a language builtin.
+    /// The argument specifies which language feature this symbol implements.
+    Builtin,
+
     /// `@dummy` - A placeholder attribute for testing the infrastructure.
     /// This attribute is recognized but has no semantic effect.
     Dummy,
@@ -24,6 +28,7 @@ impl AttributeKind {
     /// Get the attribute kind from a name string.
     pub fn from_name(name: &str) -> Self {
         match name {
+            "builtin" => AttributeKind::Builtin,
             "dummy" => AttributeKind::Dummy,
             _ => AttributeKind::Unknown,
         }

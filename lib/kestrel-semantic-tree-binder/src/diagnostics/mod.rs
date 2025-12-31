@@ -17,6 +17,7 @@
 
 mod access_mode;
 mod attributes;
+mod builtins;
 mod call;
 mod control_flow;
 mod declaration;
@@ -30,6 +31,7 @@ mod type_resolution;
 
 pub use access_mode::*;
 pub use attributes::*;
+pub use builtins::*;
 pub use call::*;
 pub use control_flow::*;
 pub use declaration::*;

@@ -14,6 +14,7 @@
 //! - `framework/` - Test framework features
 
 mod attributes;
+mod builtins;
 mod declarations;
 mod execution_graph;
 mod expressions;

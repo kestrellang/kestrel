@@ -9,3 +9,4 @@ kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = { workspace = true }
+parking_lot = { workspace = true }

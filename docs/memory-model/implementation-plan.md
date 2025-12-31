@@ -208,15 +208,15 @@ Note: Argument validation and duplicate detection are deferred until specific at
 
 ---
 
-## Phase 3: Builtin Protocols
+## Phase 3: Builtin Protocols ✅ COMPLETE
 
 **Goal**: Define the `@builtin` attribute and language feature protocol system.
 
 ### 3.1 Language Feature Enum
 
-**Files**: `lib/kestrel-semantic-tree/src/`
+**Files**: `lib/kestrel-semantic-tree/src/builtins.rs`
 
-- [ ] Create `LanguageFeature` enum:
+- [x] Create `LanguageFeature` enum:
   ```rust
   /// Built-in language features that protocols can represent.
   /// These are special protocols with compiler-known semantics.
@@ -234,120 +234,136 @@ Note: Argument validation and duplicate detection are deferred until specific at
   }
   ```
 
-- [ ] Create `LanguageFeatureConfig`:
+- [x] Create `BuiltinKind` enum and `BuiltinDefinition` struct:
   ```rust
-  /// Configuration for a language feature protocol.
-  #[derive(Debug, Clone)]
-  pub struct LanguageFeatureConfig {
-      /// The feature this protocol represents.
+  /// What kind of symbol a builtin expects, with kind-specific configuration.
+  pub enum BuiltinKind {
+      Protocol { implicit_conformance: bool, must_be_marker: bool },
+      Struct,
+      Enum,
+      Function,
+      Variable,
+  }
+  
+  pub struct BuiltinDefinition {
       pub feature: LanguageFeature,
-      /// Whether types implicitly conform (true for Copyable).
-      pub implicit_conformance: bool,
-      /// Whether `not` is allowed in conformance lists.
-      pub allows_negation: bool,
+      pub kind: BuiltinKind,
   }
   
   impl LanguageFeature {
-      pub fn config(&self) -> LanguageFeatureConfig {
-          match self {
-              LanguageFeature::Copyable => LanguageFeatureConfig {
-                  feature: LanguageFeature::Copyable,
-                  implicit_conformance: true,
-                  allows_negation: true,
-              },
-          }
-      }
+      pub fn definition(&self) -> BuiltinDefinition { ... }
   }
   ```
 
-### 3.2 Builtin Protocol Registry
+### 3.2 Builtin Registry
 
-**Files**: `lib/kestrel-semantic-tree/src/`, `lib/kestrel-semantic-model/src/`
+**Files**: `lib/kestrel-semantic-tree/src/builtins.rs`, `lib/kestrel-semantic-model/src/model.rs`
 
-- [ ] Create `BuiltinRegistry`:
+- [x] Create `BuiltinRegistry` with separate maps per symbol kind:
   ```rust
-  /// Registry that tracks which protocols are language features.
+  /// Registry for builtin language features.
+  /// Maintains separate maps for each symbol kind.
   pub struct BuiltinRegistry {
-      /// Map from language feature to the protocol symbol ID.
-      features: HashMap<LanguageFeature, SymbolId>,
-      /// Reverse map from protocol symbol ID to feature.
-      protocols: HashMap<SymbolId, LanguageFeature>,
+      protocols: RwLock<HashMap<LanguageFeature, SymbolId>>,
+      protocol_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+      structs: RwLock<HashMap<LanguageFeature, SymbolId>>,
+      struct_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+      enums: RwLock<HashMap<LanguageFeature, SymbolId>>,
+      enum_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+      functions: RwLock<HashMap<LanguageFeature, SymbolId>>,
+      function_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+      variables: RwLock<HashMap<LanguageFeature, SymbolId>>,
+      variable_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
   }
   
   impl BuiltinRegistry {
-      /// Register a protocol as a language feature.
-      pub fn register(&mut self, feature: LanguageFeature, protocol_id: SymbolId);
-      
-      /// Get the protocol for a language feature.
-      pub fn protocol_for(&self, feature: LanguageFeature) -> Option<SymbolId>;
-      
-      /// Check if a protocol is a language feature.
-      pub fn feature_for(&self, protocol_id: SymbolId) -> Option<LanguageFeature>;
-      
-      /// Check if a protocol allows negation in conformance lists.
-      pub fn allows_negation(&self, protocol_id: SymbolId) -> bool;
+      pub fn register_protocol(&self, feature: LanguageFeature, id: SymbolId) -> bool;
+      pub fn register_struct(&self, feature: LanguageFeature, id: SymbolId) -> bool;
+      pub fn register_enum(&self, feature: LanguageFeature, id: SymbolId) -> bool;
+      pub fn register_function(&self, feature: LanguageFeature, id: SymbolId) -> bool;
+      pub fn register_variable(&self, feature: LanguageFeature, id: SymbolId) -> bool;
+      pub fn copyable_protocol(&self) -> Option<SymbolId>;
+      // ... other accessors
   }
   ```
 
-- [ ] Integrate into `SemanticModel`:
+- [x] Integrate into `SemanticModel`:
   ```rust
   impl SemanticModel {
-      pub fn builtin_registry(&self) -> &BuiltinRegistry;
-      
-      /// Convenience: get the Copyable protocol.
-      pub fn copyable_protocol(&self) -> Option<SymbolId> {
-          self.builtin_registry().protocol_for(LanguageFeature::Copyable)
-      }
+      pub fn builtin_registry(&self) -> &Arc<BuiltinRegistry>;
   }
   ```
 
 ### 3.3 Builtin Attribute Processing
 
-**Files**: `lib/kestrel-semantic-tree-binder/src/`
+**Files**: `lib/kestrel-semantic-tree-binder/src/binders/`
 
-- [ ] Extend `AttributeResolver` to handle `@builtin`:
-  - Parse `.Copyable` (or other feature variants) as argument
-  - Validate protocol shape (marker protocols only for now)
-  - Return `AttributeArgs::Builtin { feature }`
+- [x] Add `AttributeKind::Builtin` to recognized attributes
 
-- [ ] Update `ProtocolBinder`:
+- [x] Create `parse_builtin_attribute()` helper in `binders/utils/attributes.rs`:
+  - Validates attribute has arguments
+  - Validates argument is implicit member syntax (`.Feature`)
+  - Parses feature name and returns `LanguageFeature`
+  - Emits appropriate errors for invalid formats
+
+- [x] Update `ProtocolBinder`:
   - After resolving attributes, check for `@builtin`
   - If present, validate:
-    - Protocol must be a marker (no required methods)
-    - Feature must not already be registered
+    - Feature expects a protocol
+    - If `must_be_marker`, protocol has no functions/associated types
+    - Feature not already registered
   - Register in `BuiltinRegistry`
+
+- [x] Update `StructBinder`, `EnumBinder`, `FunctionBinder`:
+  - Check for `@builtin` attribute
+  - Validate feature expects the correct symbol kind
+  - Register in appropriate registry map
 
 ### 3.4 Standard Library Update
 
 **Files**: `lang/std/core/protocols.ks`
 
-- [ ] Add `Copyable` protocol:
+- [x] Add `Copyable` protocol:
   ```kestrel
   @builtin(.Copyable)
   public protocol Copyable {}
   ```
 
-- [ ] Deprecate or remove `NonCopyable`:
-  - Option A: Remove entirely (breaking change)
-  - Option B: Keep as alias, emit deprecation warning
+- [x] Remove `NonCopyable` protocol (replaced by `not Copyable` syntax in Phase 4)
 
 ### 3.5 Diagnostics
 
-- [ ] "@builtin requires a language feature argument"
-- [ ] "unknown language feature `.{name}`"
-- [ ] "@builtin can only be applied to protocols"
-- [ ] "protocol `{name}` cannot be @builtin: must be a marker protocol"
-- [ ] "language feature `{feature}` is already defined by protocol `{other}`"
+**Files**: `lib/kestrel-semantic-tree-binder/src/diagnostics/builtins.rs`
+
+- [x] `BuiltinRequiresArgumentError` - "@builtin requires a language feature argument"
+- [x] `BuiltinInvalidArgumentError` - "@builtin expected implicit member syntax (.Feature)"
+- [x] `UnknownLanguageFeatureError` - "unknown language feature `.{name}`"
+- [x] `BuiltinWrongKindError` - "@builtin(.{feature}) can only be applied to a {expected_kind}"
+- [x] `BuiltinMustBeMarkerError` - "@builtin(.{feature}) must be a marker protocol"
+- [x] `DuplicateBuiltinError` - "language feature `.{feature}` is already defined by another symbol"
 
 ### 3.6 Tests
 
 **Files**: `lib/kestrel-test-suite/tests/builtins/`
 
-- [ ] `builtin_protocol.rs`:
-  - `@builtin(.Copyable)` on protocol
-  - Query `copyable_protocol()` returns the right symbol
-  - Error on non-marker protocol with @builtin
-  - Error on duplicate @builtin for same feature
+- [x] `protocols.rs` - 17 tests covering:
+  - Success: `@builtin(.Copyable)` on marker protocol
+  - Success: `@builtin(.ExpressibleByIntLiteral)` on non-marker protocol
+  - Success: Multiple builtin protocols in same module
+  - Success: Builtin with public visibility
+  - Error: `@builtin` without argument
+  - Error: `@builtin()` with empty parens
+  - Error: Unknown language feature
+  - Error: Misspelled language feature
+  - Error: Builtin protocol on struct
+  - Error: Builtin protocol on enum
+  - Error: Builtin protocol on function
+  - Error: Copyable on protocol with method (non-marker)
+  - Error: Copyable on protocol with associated type (non-marker)
+  - Error: Duplicate Copyable builtin
+  - Error: String argument instead of implicit member
+  - Error: Integer argument instead of implicit member
+  - Error: Labeled argument
 
 ---
 
@@ -819,8 +835,8 @@ protocol Cloneable: Copyable {
 Recommended order of implementation:
 
 1. **Phase 1** - Foundation, required by everything else ✅ COMPLETE
-2. **Phase 2** - Attributes: foundation for builtin system
-3. **Phase 3** - Builtin protocols: defines `@builtin(.Copyable)`
+2. **Phase 2** - Attributes: foundation for builtin system ✅ COMPLETE
+3. **Phase 3** - Builtin protocols: defines `@builtin(.Copyable)` ✅ COMPLETE
 4. **Phase 4** - Copyable/not Copyable: core value proposition
 5. **Phase 5** - Drop semantics: RAII is critical per requirements
 6. **Phase 7** - Generics before Cloneable (standard library needs this)
