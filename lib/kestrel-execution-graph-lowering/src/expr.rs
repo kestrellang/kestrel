@@ -4,8 +4,9 @@
 //! a MIR Value (either a Place or an Immediate), potentially generating
 //! statements and new basic blocks along the way.
 
-use kestrel_execution_graph::{BinOp, Callee, Immediate, Place, Rvalue, UnOp, Value};
+use kestrel_execution_graph::{BinOp, Callee, CallArg, Immediate, PassingMode, Place, Rvalue, UnOp, Value};
 use kestrel_semantic_model::SymbolFor;
+use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
@@ -17,6 +18,69 @@ use crate::error::LoweringError;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
 use crate::ty::lower_type;
+
+/// Convert a ParameterAccessMode to a PassingMode.
+///
+/// Note: For `consuming` parameters, we currently emit `Copy` because we don't yet
+/// have `not Copyable` support. Once Phase 2 is implemented, this will check the
+/// type's copy semantics and emit `Move` for non-copyable types.
+fn access_mode_to_passing_mode(mode: ParameterAccessMode) -> PassingMode {
+    match mode {
+        ParameterAccessMode::Borrow => PassingMode::Ref,
+        ParameterAccessMode::Mutating => PassingMode::MutRef,
+        // For now, consuming always copies. When `not Copyable` is implemented,
+        // we'll check the type and emit Move for non-copyable types.
+        ParameterAccessMode::Consuming => PassingMode::Copy,
+    }
+}
+
+/// Build CallArgs from values and parameter access modes from a CallableBehavior.
+///
+/// If behavior is None (e.g., for indirect calls), defaults to Ref for all args.
+fn build_call_args(
+    arg_values: Vec<Value>,
+    behavior: Option<&CallableBehavior>,
+    is_instance_method: bool,
+) -> Vec<CallArg> {
+    match behavior {
+        Some(beh) => {
+            let params = beh.parameters();
+            
+            // For instance methods, we need to skip the implicit self parameter
+            // when matching argument indices to parameter indices.
+            // Instance method arguments: [receiver, arg0, arg1, ...]
+            // Parameter list: [param0, param1, ...] (receiver is not in params)
+            let param_offset = if is_instance_method { 1 } else { 0 };
+            
+            arg_values
+                .into_iter()
+                .enumerate()
+                .map(|(i, value)| {
+                    // For instance methods, the first arg (receiver) uses ReceiverKind
+                    // which we handle separately. Skip it in the parameter lookup.
+                    if is_instance_method && i == 0 {
+                        // Receiver - use Ref for now (borrowing receiver)
+                        // TODO: Check ReceiverKind for mutating/consuming receivers
+                        CallArg::borrow(value)
+                    } else {
+                        let param_idx = i - param_offset;
+                        if let Some(param) = params.get(param_idx) {
+                            let mode = access_mode_to_passing_mode(param.access_mode());
+                            CallArg::new(value, mode)
+                        } else {
+                            // Fallback if parameter not found (shouldn't happen after type checking)
+                            CallArg::borrow(value)
+                        }
+                    }
+                })
+                .collect()
+        }
+        None => {
+            // No behavior available - default to Ref for all arguments
+            arg_values.into_iter().map(CallArg::borrow).collect()
+        }
+    }
+}
 
 /// Lower an expression to a MIR Value.
 ///
@@ -768,9 +832,26 @@ fn lower_call(
                         // Emit: %self_ref = ref var %result
                         ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
                         
-                        // Build args: self_ref first, then the user-provided arguments
-                        let mut all_args = vec![Value::Place(self_ref_place)];
-                        all_args.extend(arg_values);
+                        // Look up CallableBehavior to get parameter access modes for user args
+                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+                        
+                        // Build call args: self_ref first (always MutRef), then user args with their modes
+                        let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
+                        
+                        // Add user-provided arguments with their access modes
+                        if let Some(beh) = callable_beh {
+                            let params = beh.parameters();
+                            for (i, value) in arg_values.into_iter().enumerate() {
+                                if let Some(param) = params.get(i) {
+                                    let mode = access_mode_to_passing_mode(param.access_mode());
+                                    call_args.push(CallArg::new(value, mode));
+                                } else {
+                                    call_args.push(CallArg::borrow(value));
+                                }
+                            }
+                        } else {
+                            call_args.extend(arg_values.into_iter().map(CallArg::borrow));
+                        }
                         
                         // Create a temp for the unit return value of init (we discard it)
                         let unit_ty = ctx.mir.ty_unit();
@@ -785,7 +866,7 @@ fn lower_call(
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &expr.ty);
                                     let mir_callee = Callee::witness(protocol_name, "init", for_type);
-                                    ctx.emit_call(unit_place, mir_callee, all_args);
+                                    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                                 } else {
                                     ctx.emit_error(LoweringError::internal(
                                         "init's parent is not a protocol for type parameter init",
@@ -808,7 +889,7 @@ fn lower_call(
                             } else {
                                 Callee::direct_generic(func_name, type_args.clone())
                             };
-                            ctx.emit_call(unit_place, mir_callee, all_args);
+                            ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                         }
                         
                         // result_place now contains the initialized struct
@@ -820,7 +901,11 @@ fn lower_call(
                         } else {
                             Callee::direct_generic(func_name, type_args)
                         };
-                        ctx.emit_call(result_place.clone(), mir_callee, arg_values);
+                        
+                        // Look up CallableBehavior to get parameter access modes
+                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+                        let call_args = build_call_args(arg_values, callable_beh.as_deref(), false);
+                        ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                     }
                 }
                 None => {
@@ -846,9 +931,12 @@ fn lower_call(
             let is_assoc_type_call = matches!(receiver.ty.kind(), TyKind::AssociatedType { .. });
             let is_static_assoc_type_call = matches!(receiver.kind, ExprKind::AssociatedTypeRef);
 
+            // Determine if this is an instance method call (has receiver value)
+            let is_instance = !(is_static_type_param_call || is_static_assoc_type_call);
+            
             // For instance methods on type params, receiver becomes first argument
             // For static methods on type params/assoc types, there's no receiver value
-            let all_args = if is_static_type_param_call || is_static_assoc_type_call {
+            let all_args = if !is_instance {
                 // Static method call on type parameter or associated type: T.create(), T.Item.create()
                 // No receiver value, just the arguments
                 arg_values
@@ -866,6 +954,10 @@ fn lower_call(
                 let method_symbol = ctx.model.query(SymbolFor { id: method_id });
                 match method_symbol {
                     Some(sym) => {
+                        // Look up CallableBehavior to get parameter access modes
+                        let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+                        let call_args = build_call_args(all_args, callable_beh.as_deref(), is_instance);
+                        
                         // Check if this is a witness method call (method on type parameter or associated type)
                         if is_type_param_call || is_static_type_param_call || is_assoc_type_call || is_static_assoc_type_call {
                             // Get the protocol from the method's parent
@@ -875,7 +967,7 @@ fn lower_call(
                                     let for_type = lower_type(ctx, &receiver.ty);
                                     let mir_callee =
                                         Callee::witness(protocol_name, method_name.clone(), for_type);
-                                    ctx.emit_call(result_place.clone(), mir_callee, all_args);
+                                    ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                                 } else {
                                     // Method's parent is not a protocol - shouldn't happen
                                     ctx.emit_error(LoweringError::internal(
@@ -902,7 +994,7 @@ fn lower_call(
                             } else {
                                 Callee::direct_generic(func_name, type_args.clone())
                             };
-                            ctx.emit_call(result_place.clone(), mir_callee, all_args);
+                            ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                         }
                     }
                     None => {
@@ -953,9 +1045,32 @@ fn lower_call(
                     // Emit: %self_ref = ref var %result
                     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
                     
-                    // Build args: self_ref first, then the user-provided arguments
-                    let mut all_args = vec![Value::Place(self_ref_place)];
-                    all_args.extend(arg_values);
+                    // Try to find the initializer symbol to get its CallableBehavior
+                    // Look for an "init" child of the type symbol
+                    let init_beh = sym.metadata().children().iter()
+                        .find(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::Initializer
+                                && child.metadata().name().value == "init"
+                        })
+                        .and_then(|init_sym| init_sym.metadata().get_behavior::<CallableBehavior>());
+                    
+                    // Build call args: self_ref first (always MutRef), then user args with their modes
+                    let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
+                    
+                    // Add user-provided arguments with their access modes
+                    if let Some(beh) = &init_beh {
+                        let params = beh.parameters();
+                        for (i, value) in arg_values.into_iter().enumerate() {
+                            if let Some(param) = params.get(i) {
+                                let mode = access_mode_to_passing_mode(param.access_mode());
+                                call_args.push(CallArg::new(value, mode));
+                            } else {
+                                call_args.push(CallArg::borrow(value));
+                            }
+                        }
+                    } else {
+                        call_args.extend(arg_values.into_iter().map(CallArg::borrow));
+                    }
                     
                     // Create a temp for the unit return value of init (we discard it)
                     let unit_ty = ctx.mir.ty_unit();
@@ -968,7 +1083,7 @@ fn lower_call(
                     } else {
                         Callee::direct_generic(init_name, type_args)
                     };
-                    ctx.emit_call(unit_place, mir_callee, all_args);
+                    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                     
                     // result_place now contains the initialized struct
                     // (init wrote to it via the self_ref)

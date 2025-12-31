@@ -841,4 +841,125 @@ mod mir_passing_modes {
                 }),
         );
     }
+
+    #[test]
+    fn mir_mutating_parameter_emits_mutref() {
+        // mutating parameters should emit MutRef passing mode
+        Test::new(
+            r#"module Test
+            struct Point { var x: Int; var y: Int }
+            func reset(mutating p: Point) {
+                p.x = 0;
+            }
+            func caller() {
+                var pt = Point(x: 1, y: 2);
+                reset(pt)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::CallWithModes {
+                        callee: "Test.reset".to_string(),
+                        arg_modes: vec![PassingMode::MutRef],
+                    })
+                }),
+        );
+    }
+
+    #[test]
+    fn mir_consuming_parameter_emits_copy() {
+        // consuming parameters should emit Copy passing mode (for now, until not Copyable)
+        Test::new(
+            r#"module Test
+            struct Point { var x: Int; var y: Int }
+            func consume(consuming p: Point) -> Int {
+                p.x
+            }
+            func caller() -> Int {
+                let pt = Point(x: 1, y: 2);
+                consume(pt)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::CallWithModes {
+                        callee: "Test.consume".to_string(),
+                        arg_modes: vec![PassingMode::Copy],
+                    })
+                }),
+        );
+    }
+
+    #[test]
+    fn mir_mixed_modes_in_call() {
+        // Multiple parameters with different access modes
+        Test::new(
+            r#"module Test
+            struct Point { var x: Int; var y: Int }
+            func process(a: Point, mutating b: Point, consuming c: Point) -> Int {
+                b.x = a.x;
+                c.x
+            }
+            func caller() -> Int {
+                let pt1 = Point(x: 1, y: 2);
+                var pt2 = Point(x: 3, y: 4);
+                let pt3 = Point(x: 5, y: 6);
+                process(pt1, pt2, pt3)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::CallWithModes {
+                        callee: "Test.process".to_string(),
+                        arg_modes: vec![PassingMode::Ref, PassingMode::MutRef, PassingMode::Copy],
+                    })
+                }),
+        );
+    }
+
+    #[test]
+    fn mir_method_with_mutating_param() {
+        // Instance method with additional mutating parameter
+        Test::new(
+            r#"module Test
+            struct Point { 
+                var x: Int
+                var y: Int 
+                
+                func copyXTo(mutating other: Point) {
+                    other.x = self.x;
+                }
+            }
+            func caller() {
+                let pt1 = Point(x: 1, y: 2);
+                var pt2 = Point(x: 3, y: 4);
+                pt1.copyXTo(pt2)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::CallWithModes {
+                        callee: "Test.Point.copyXTo".to_string(),
+                        // self (Ref) + other (MutRef)
+                        arg_modes: vec![PassingMode::Ref, PassingMode::MutRef],
+                    })
+                }),
+        );
+    }
 }
