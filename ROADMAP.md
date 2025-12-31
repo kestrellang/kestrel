@@ -436,17 +436,52 @@
 
 ## Phase 11: Memory Model
 
-- [ ] Value vs Reference Semantics
-  - [ ] Structs as value types (copy semantics)
-  - [ ] Reference types if needed
-- [ ] Ownership Strategy
-  - [ ] Reference counting, or
-  - [ ] Ownership/borrowing, or
-  - [ ] Garbage collection
-- [ ] Existential Types
-  - [ ] Protocol types as values (boxing + witness table)
-  - [ ] `any Protocol` syntax
-  - [ ] Dynamic dispatch via witness tables
+See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-plan.md) for detailed implementation plan.
+
+### Phase 11.1: Parameter Access Modes + MIR Foundation
+- [ ] Parser: `consuming`/`mutating` keywords on parameters
+- [ ] Semantic model: `AccessMode` enum (Borrow, Mutating, Consuming)
+- [ ] Call-site validation: `mutating` requires `var`, track moved variables
+- [ ] MIR: `PassingMode` enum (Ref, MutRef, Copy, Move) on Call args
+- [ ] Diagnostics: "cannot pass let to mutating", "use of moved value"
+
+### Phase 11.2: Copyable / not Copyable
+- [ ] Parser: `not Copyable` in struct conformance list
+- [ ] Semantic model: `CopySemantics` (Copyable, NotCopyable) on structs
+- [ ] Inference: not Copyable if any field is not Copyable
+- [ ] Move tracking: use-after-move errors for not Copyable types
+- [ ] MIR: emit Copy vs Move based on type's CopySemantics
+
+### Phase 11.3: Drop Semantics (RAII)
+- [ ] Parser: `deinit { }` blocks in structs
+- [ ] Semantic model: `DeinitSymbol`, at most one per struct
+- [ ] MIR: `Drop` instruction, insert at scope exit (reverse order)
+- [ ] Conditional drops for maybe-moved variables (drop flags)
+- [ ] `drop(x)` intrinsic for early drop
+- [ ] Temporaries drop at end of statement
+
+### Phase 11.4: Cloneable Protocol
+- [ ] Define `Cloneable: Copyable` protocol with `clone() -> Self`
+- [ ] For Cloneable types, copy calls `clone()` instead of bitwise copy
+- [ ] MIR: `Clone` instruction or lower to method call
+- [ ] Compiler-derived Cloneable when all fields are Cloneable
+
+### Phase 11.5: Generics Integration
+- [ ] Parser: `[T: not Copyable]` syntax in generic bounds
+- [ ] Default `[T]` = `[T: Copyable]` (can copy T values)
+- [ ] `[T: not Copyable]` relaxes bound (cannot copy, only move)
+- [ ] Conditional conformance: `Box[T]` Copyable iff `T` Copyable
+
+### Phase 11.6: Law of Exclusivity
+- [ ] Track active borrows during body resolution
+- [ ] Conflict detection: mutable + any = error
+- [ ] Closure capture borrow tracking
+- [ ] Diagnostics: "cannot borrow while already borrowed"
+
+### Phase 11.7: Existential Types (Future)
+- [ ] Protocol types as values (boxing + witness table)
+- [ ] `any Protocol` syntax
+- [ ] Dynamic dispatch via witness tables
 
 ## Phase 12: Code Generation
 
