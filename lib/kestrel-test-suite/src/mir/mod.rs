@@ -49,7 +49,7 @@ pub use witness::MirWitness;
 pub use protocol::MirProtocol;
 
 // Re-export useful types from kestrel-execution-graph
-pub use kestrel_execution_graph::{BinOp, CastKind, UnOp};
+pub use kestrel_execution_graph::{BinOp, CastKind, PassingMode, UnOp};
 
 /// Entry point for MIR expectations.
 pub struct Mir;

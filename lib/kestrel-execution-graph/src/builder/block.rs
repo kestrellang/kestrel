@@ -1,7 +1,8 @@
 //! Block builder.
 
 use crate::function::{
-    BasicBlock, BinOp, Callee, Immediate, Place, Rvalue, Statement, Terminator, UnOp, Value,
+    BasicBlock, BinOp, Callee, CallArg, Immediate, Place, Rvalue, Statement, Terminator, UnOp,
+    Value,
 };
 use crate::id::{Block, Function, Id, QualifiedName, Statement as StatementMarker, Ty};
 use crate::MirContext;
@@ -114,11 +115,25 @@ impl<'ctx> BlockBuilder<'ctx> {
     }
 
     /// Add a call with return value: `dest = call callee(args...)`
+    ///
+    /// For convenience, all arguments default to `PassingMode::Ref` (borrow).
+    /// Use `assign_call_with_modes` for explicit control.
     pub fn assign_call(
         &mut self,
         dest: Place,
         callee: Callee,
         args: Vec<Value>,
+    ) -> Id<StatementMarker> {
+        let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
+        self.assign(dest, Rvalue::Call { callee, args: call_args })
+    }
+
+    /// Add a call with return value and explicit passing modes.
+    pub fn assign_call_with_modes(
+        &mut self,
+        dest: Place,
+        callee: Callee,
+        args: Vec<CallArg>,
     ) -> Id<StatementMarker> {
         self.assign(dest, Rvalue::Call { callee, args })
     }
@@ -134,7 +149,16 @@ impl<'ctx> BlockBuilder<'ctx> {
     }
 
     /// Add a call statement (unit return): `call callee(args...)`
+    ///
+    /// For convenience, all arguments default to `PassingMode::Ref` (borrow).
+    /// Use `call_with_modes` for explicit control.
     pub fn call(&mut self, callee: Callee, args: Vec<Value>) -> Id<StatementMarker> {
+        let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
+        self.add_statement(Statement::call(callee, call_args))
+    }
+
+    /// Add a call statement (unit return) with explicit passing modes.
+    pub fn call_with_modes(&mut self, callee: Callee, args: Vec<CallArg>) -> Id<StatementMarker> {
         self.add_statement(Statement::call(callee, args))
     }
 

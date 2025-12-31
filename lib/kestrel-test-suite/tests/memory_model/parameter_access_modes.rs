@@ -772,3 +772,73 @@ mod edge_cases {
         .expect(HasError("mutating"));
     }
 }
+
+// =============================================================================
+// MIR TESTS - Verify passing modes are emitted in MIR
+// =============================================================================
+
+mod mir_passing_modes {
+    use super::*;
+    use kestrel_test_suite::mir::*;
+
+    #[test]
+    fn mir_call_has_passing_modes() {
+        // Verify that calls in MIR include passing mode information
+        // For now, all arguments default to Ref (borrow)
+        Test::new(
+            r#"module Test
+            struct Point { var x: Int; var y: Int }
+            func process(p: Point) -> Int {
+                p.x
+            }
+            func caller() -> Int {
+                let pt = Point(x: 1, y: 2);
+                process(pt)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::CallWithModes {
+                        callee: "Test.process".to_string(),
+                        arg_modes: vec![PassingMode::Ref],
+                    })
+                }),
+        );
+    }
+
+    #[test]
+    fn mir_method_call_has_passing_modes() {
+        // Method calls also have passing modes (self arg is Ref by default)
+        Test::new(
+            r#"module Test
+            struct Point { 
+                var x: Int
+                var y: Int 
+                
+                func magnitude() -> Int {
+                    self.x + self.y
+                }
+            }
+            func caller() -> Int {
+                let pt = Point(x: 1, y: 2);
+                pt.magnitude()
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::CallWithModes {
+                        callee: "Test.Point.magnitude".to_string(),
+                        arg_modes: vec![PassingMode::Ref], // self is Ref
+                    })
+                }),
+        );
+    }
+}

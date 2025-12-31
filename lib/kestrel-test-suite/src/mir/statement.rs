@@ -1,7 +1,7 @@
 //! Statement patterns for MIR testing.
 
 use kestrel_execution_graph::{
-    BinOp, Callee, CastKind, MirContext, Rvalue, StatementData, StatementKind, UnOp,
+    BinOp, Callee, CastKind, MirContext, PassingMode, Rvalue, StatementData, StatementKind, UnOp,
 };
 
 /// Pattern for matching statements in MIR.
@@ -75,6 +75,13 @@ pub enum StatementPattern {
 
     /// Type cast
     Cast { kind: CastKind },
+
+    /// Call with specific passing modes for arguments
+    /// Each element specifies the expected passing mode for that argument position
+    CallWithModes {
+        callee: String,
+        arg_modes: Vec<PassingMode>,
+    },
 
     /// String operations
     StrPtr,
@@ -273,6 +280,32 @@ impl StatementPattern {
                 }
             }
 
+            StatementPattern::CallWithModes { callee, arg_modes } => {
+                if let Rvalue::Call {
+                    callee: actual_callee,
+                    args,
+                } = rvalue
+                {
+                    // Check callee name matches
+                    if !self.callee_matches_name(actual_callee, callee, ctx) {
+                        return false;
+                    }
+                    // Check argument count matches
+                    if args.len() != arg_modes.len() {
+                        return false;
+                    }
+                    // Check each argument's passing mode
+                    for (arg, expected_mode) in args.iter().zip(arg_modes.iter()) {
+                        if arg.mode != *expected_mode {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+
             StatementPattern::StrPtr => matches!(rvalue, Rvalue::StrPtr(_)),
             StatementPattern::StrLen => matches!(rvalue, Rvalue::StrLen(_)),
             StatementPattern::StrFromParts => matches!(rvalue, Rvalue::StrFromParts { .. }),
@@ -364,6 +397,10 @@ impl StatementPattern {
                 format!("apply partial {}({} captures)", func, capture_count)
             }
             StatementPattern::Cast { kind } => format!("cast {:?}", kind),
+            StatementPattern::CallWithModes { callee, arg_modes } => {
+                let modes_str: Vec<_> = arg_modes.iter().map(|m| m.as_str()).collect();
+                format!("call {}({})", callee, modes_str.join(", "))
+            }
             StatementPattern::StrPtr => "str.ptr".to_string(),
             StatementPattern::StrLen => "str.len".to_string(),
             StatementPattern::StrFromParts => "str.from_parts".to_string(),

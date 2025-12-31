@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use kestrel_execution_graph::{
-    BasicBlock, Block, Callee, CallArg, Function, Id, Immediate, Local, MirContext, PassingMode,
-    Place, QualifiedName, Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
+    BasicBlock, Block, Callee, CallArg, Function, Id, Immediate, Local, MirContext, Place,
+    QualifiedName, Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
 };
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;
@@ -388,11 +388,24 @@ impl<'a> LoweringContext<'a> {
     // === Call Emission ===
 
     /// Emit a call that assigns its result to a place.
-    pub fn emit_call(
+    ///
+    /// For now, all arguments default to `PassingMode::Ref` (borrow).
+    /// This will be updated when parameter access modes are available during lowering.
+    pub fn emit_call(&mut self, dest: Place, callee: Callee, args: Vec<Value>) {
+        // Convert values to CallArgs with default Ref passing mode
+        let call_args: Vec<CallArg> = args
+            .into_iter()
+            .map(|v| CallArg::borrow(v))
+            .collect();
+        self.emit_assign(dest, Rvalue::Call { callee, args: call_args });
+    }
+
+    /// Emit a call with explicit passing modes for each argument.
+    pub fn emit_call_with_modes(
         &mut self,
         dest: Place,
         callee: Callee,
-        args: Vec<Value>,
+        args: Vec<CallArg>,
     ) {
         self.emit_assign(dest, Rvalue::Call { callee, args });
     }
@@ -414,7 +427,19 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Emit a call to a unit-returning function (no result assignment needed).
+    ///
+    /// For now, all arguments default to `PassingMode::Ref` (borrow).
     pub fn emit_call_unit(&mut self, callee: Callee, args: Vec<Value>) {
+        // Convert values to CallArgs with default Ref passing mode
+        let call_args: Vec<CallArg> = args
+            .into_iter()
+            .map(|v| CallArg::borrow(v))
+            .collect();
+        self.emit_statement(StatementKind::Call { callee, args: call_args });
+    }
+
+    /// Emit a call to a unit-returning function with explicit passing modes.
+    pub fn emit_call_unit_with_modes(&mut self, callee: Callee, args: Vec<CallArg>) {
         self.emit_statement(StatementKind::Call { callee, args });
     }
 }
