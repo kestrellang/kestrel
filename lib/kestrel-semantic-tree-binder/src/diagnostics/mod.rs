@@ -3,6 +3,7 @@
 //! This module provides structured error types that implement `IntoDiagnostic`,
 //! organized by category:
 //!
+//! - `access_mode` - Parameter access mode validation errors (mutating/consuming)
 //! - `module` - Module declaration errors
 //! - `type_resolution` - Type lookup and generic instantiation errors
 //! - `protocol` - Protocol binding and associated type errors
@@ -14,6 +15,7 @@
 //! - `control_flow` - Break/continue/label errors
 //! - `pattern` - Pattern matching errors
 
+mod access_mode;
 mod call;
 mod control_flow;
 mod declaration;
@@ -25,6 +27,7 @@ mod protocol;
 mod struct_init;
 mod type_resolution;
 
+pub use access_mode::*;
 pub use call::*;
 pub use control_flow::*;
 pub use declaration::*;

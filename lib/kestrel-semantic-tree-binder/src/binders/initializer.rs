@@ -113,17 +113,22 @@ fn resolve_initializer_body(
     }
 
     // Add parameters to local scope
+    // Mutability depends on access mode:
+    // - Borrow: immutable (read-only)
+    // - Mutating: mutable (read-write, but caller keeps ownership)
+    // - Consuming: mutable (takes ownership, can modify)
     for param in params {
+        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
+        let is_mutable = match param.access_mode {
+            ParameterAccessMode::Borrow => false,
+            ParameterAccessMode::Mutating => true,
+            ParameterAccessMode::Consuming => true,
+        };
         // Add to local scope
-        local_scope.bind(
-            param_name.clone(),
-            param_ty.clone(),
-            false,
-            param_span.clone(),
-        );
+        local_scope.bind(param_name.clone(), param_ty.clone(), is_mutable, param_span.clone());
     }
 
     // Create body resolution context

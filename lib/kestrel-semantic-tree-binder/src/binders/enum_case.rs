@@ -114,6 +114,8 @@ fn resolve_enum_case_parameter(
     let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
     Some(Parameter {
+        // Enum case parameters use default borrow mode
+        access_mode: kestrel_semantic_tree::behavior::callable::ParameterAccessMode::Borrow,
         // Enum case parameters always have labels (like init parameters)
         label: Some(Spanned::new(label_text.clone(), label_span.clone())),
         bind_name: Spanned::new(label_text, label_span),

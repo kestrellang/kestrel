@@ -10,18 +10,40 @@ use crate::block::CodeBlockData;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
+/// Access mode for function parameters.
+///
+/// Determines how the caller's value is passed and what the callee can do with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterAccessMode {
+    /// Read-only access (default). Caller retains ownership.
+    /// Syntax: `x: T`
+    Borrow,
+    /// Read-write access. Caller retains ownership but must use `var` binding.
+    /// Syntax: `mutating x: T`
+    Mutating,
+    /// Takes ownership (move or copy depending on Copyable).
+    /// Syntax: `consuming x: T`
+    Consuming,
+}
+
 /// Raw parsed data for a single parameter
 ///
-/// Parameter syntax: `(label)? bind_name: Type`
+/// Parameter syntax: `(access_mode)? (label)? bind_name: Type`
+/// - `access_mode` is an optional access mode (mutating/consuming)
 /// - `label` is an optional external parameter name (used by callers)
 /// - `bind_name` is the internal parameter name (used in function body)
 /// - If only one name is provided, it's used as both label and bind_name
 ///
 /// # Examples
-/// - `x: Int` → label=None, bind_name=x
-/// - `with x: Int` → label="with", bind_name=x
+/// - `x: Int` → access_mode=None, label=None, bind_name=x
+/// - `with x: Int` → access_mode=None, label="with", bind_name=x
+/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
+/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
 #[derive(Debug, Clone)]
 pub struct ParameterData {
+    /// Optional access mode (mutating/consuming)
+    /// If None, the default is borrow (read-only)
+    pub access_mode: Option<(ParameterAccessMode, Span)>,
     /// Optional label (external name for callers)
     /// If None, bind_name is used as the label
     pub label: Option<Span>,

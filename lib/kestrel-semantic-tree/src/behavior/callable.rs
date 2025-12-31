@@ -29,17 +29,42 @@ pub enum ReceiverKind {
     Initializing,
 }
 
+/// Access mode for function parameters.
+///
+/// Determines how the caller's value is passed and what the callee can do with it.
+/// This is distinct from `ReceiverKind` which is only for `self` in methods.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ParameterAccessMode {
+    /// Read-only access (default). Caller retains ownership.
+    /// Syntax: `x: T` (no keyword, this is the default)
+    #[default]
+    Borrow,
+
+    /// Read-write access. Caller retains ownership but must use `var` binding.
+    /// Syntax: `mutating x: T`
+    Mutating,
+
+    /// Takes ownership (move or copy depending on Copyable).
+    /// Syntax: `consuming x: T`
+    Consuming,
+}
+
 /// Represents a function parameter with optional label for overload resolution.
 ///
 /// Parameters support Swift-style labeled arguments:
 /// - `label` is the external name used by callers (optional)
 /// - `bind_name` is the internal name used in the function body
+/// - `access_mode` determines how the value is passed (borrow/mutating/consuming)
 ///
 /// Examples:
-/// - `x: Int` -> label=None, bind_name="x"
-/// - `with x: Int` -> label="with", bind_name="x"
+/// - `x: Int` -> access_mode=Borrow, label=None, bind_name="x"
+/// - `with x: Int` -> access_mode=Borrow, label="with", bind_name="x"
+/// - `mutating x: Int` -> access_mode=Mutating, label=None, bind_name="x"
+/// - `consuming point p: Point` -> access_mode=Consuming, label="point", bind_name="p"
 #[derive(Debug, Clone)]
 pub struct CallableParameter {
+    /// Access mode for this parameter (borrow/mutating/consuming)
+    pub access_mode: ParameterAccessMode,
     /// Optional external label for callers
     pub label: Option<Name>,
     /// Internal binding name used in function body
@@ -49,22 +74,54 @@ pub struct CallableParameter {
 }
 
 impl CallableParameter {
-    /// Create a new parameter without a label
+    /// Create a new parameter without a label (default borrow mode)
     pub fn new(bind_name: Name, ty: Ty) -> Self {
         Self {
+            access_mode: ParameterAccessMode::Borrow,
             label: None,
             bind_name,
             ty,
         }
     }
 
-    /// Create a new parameter with a label
+    /// Create a new parameter with a label (default borrow mode)
     pub fn with_label(label: Name, bind_name: Name, ty: Ty) -> Self {
         Self {
+            access_mode: ParameterAccessMode::Borrow,
             label: Some(label),
             bind_name,
             ty,
         }
+    }
+
+    /// Create a new parameter with access mode and no label
+    pub fn with_access_mode(access_mode: ParameterAccessMode, bind_name: Name, ty: Ty) -> Self {
+        Self {
+            access_mode,
+            label: None,
+            bind_name,
+            ty,
+        }
+    }
+
+    /// Create a new parameter with access mode and label
+    pub fn with_access_mode_and_label(
+        access_mode: ParameterAccessMode,
+        label: Name,
+        bind_name: Name,
+        ty: Ty,
+    ) -> Self {
+        Self {
+            access_mode,
+            label: Some(label),
+            bind_name,
+            ty,
+        }
+    }
+
+    /// Get the access mode for this parameter
+    pub fn access_mode(&self) -> ParameterAccessMode {
+        self.access_mode
     }
 
     /// Get the external label if present.
@@ -83,6 +140,16 @@ impl CallableParameter {
     /// Check if this parameter has an explicit label
     pub fn has_label(&self) -> bool {
         self.label.is_some()
+    }
+
+    /// Check if this parameter is mutating
+    pub fn is_mutating(&self) -> bool {
+        self.access_mode == ParameterAccessMode::Mutating
+    }
+
+    /// Check if this parameter is consuming
+    pub fn is_consuming(&self) -> bool {
+        self.access_mode == ParameterAccessMode::Consuming
     }
 }
 

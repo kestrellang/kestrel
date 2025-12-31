@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use kestrel_execution_graph::{
-    BasicBlock, Block, Callee, Function, Id, Immediate, Local, MirContext, Place, QualifiedName,
-    Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
+    BasicBlock, Block, Callee, CallArg, Function, Id, Immediate, Local, MirContext, PassingMode,
+    Place, QualifiedName, Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
 };
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;

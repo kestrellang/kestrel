@@ -9,11 +9,11 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    AssociatedTypeBoundsData, AssociatedTypeTargetData, ExtensionBodyItem,
-    ExtensionDeclarationData, FieldDeclarationData, FunctionDeclarationData,
-    InitializerDeclarationData, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
-    ReceiverModifier, TypeDeclarationBodyItem, StructDeclarationData, TypeAliasDeclarationData,
-    EnumDeclarationData, EnumCaseDeclarationData,
+    AssociatedTypeBoundsData, AssociatedTypeTargetData, EnumCaseDeclarationData,
+    EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData, FieldDeclarationData,
+    FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructDeclarationData,
+    TypeAliasDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -174,6 +174,16 @@ pub fn emit_parameter_list(
 /// Emit events for a single parameter
 pub fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
     sink.start_node(SyntaxKind::Parameter);
+
+    // Emit access mode if present (mutating/consuming)
+    if let Some((mode, span)) = param.access_mode {
+        let kind = match mode {
+            ParameterAccessMode::Borrow => unreachable!("Borrow is default, not emitted"),
+            ParameterAccessMode::Mutating => SyntaxKind::Mutating,
+            ParameterAccessMode::Consuming => SyntaxKind::Consuming,
+        };
+        sink.add_token(kind, span);
+    }
 
     if let Some(label_span) = param.label {
         emit_name(sink, label_span);

@@ -6,12 +6,89 @@ use crate::metadata::{Metadata, Prior};
 use crate::MirContext;
 use std::fmt;
 
+/// How an argument is passed to a function.
+///
+/// This enum captures the calling convention semantics for each argument,
+/// based on the parameter's access mode and the argument type's copy semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PassingMode {
+    /// Borrow - immutable reference (default access mode).
+    /// The callee receives a reference and cannot modify the value.
+    Ref,
+
+    /// Mutating - mutable reference.
+    /// The callee receives a mutable reference and can modify the value in place.
+    MutRef,
+
+    /// Copy - value is copied, original retained.
+    /// Used for `consuming` parameters when the type is `Copyable`.
+    Copy,
+
+    /// Move - value is moved, original invalidated.
+    /// Used for `consuming` parameters when the type is `not Copyable`.
+    Move,
+}
+
+impl PassingMode {
+    /// Get the string representation for printing.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PassingMode::Ref => "ref",
+            PassingMode::MutRef => "mut",
+            PassingMode::Copy => "copy",
+            PassingMode::Move => "move",
+        }
+    }
+}
+
+impl fmt::Display for PassingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// A statement in a basic block.
 #[derive(Debug, Clone)]
 pub struct Statement {
     pub meta: Metadata,
     pub priors: Vec<Prior<Statement>>,
     pub kind: StatementKind,
+}
+
+/// An argument to a function call, with its value and passing mode.
+#[derive(Debug, Clone)]
+pub struct CallArg {
+    /// The argument value.
+    pub value: Value,
+    /// How the argument is passed.
+    pub mode: PassingMode,
+}
+
+impl CallArg {
+    /// Create a new call argument.
+    pub fn new(value: Value, mode: PassingMode) -> Self {
+        Self { value, mode }
+    }
+
+    /// Create a ref (borrow) argument.
+    pub fn borrow(value: Value) -> Self {
+        Self::new(value, PassingMode::Ref)
+    }
+
+    /// Create a mut ref (mutating) argument.
+    pub fn mutating(value: Value) -> Self {
+        Self::new(value, PassingMode::MutRef)
+    }
+
+    /// Create a copy argument.
+    pub fn copy(value: Value) -> Self {
+        Self::new(value, PassingMode::Copy)
+    }
+
+    /// Create a move argument.
+    pub fn moving(value: Value) -> Self {
+        Self::new(value, PassingMode::Move)
+    }
 }
 
 /// The different kinds of statements.
@@ -21,7 +98,7 @@ pub enum StatementKind {
     Assign { dest: Place, rvalue: Rvalue },
 
     /// `call func(args...)` (unit return, no assignment)
-    Call { callee: Callee, args: Vec<Value> },
+    Call { callee: Callee, args: Vec<CallArg> },
 }
 
 /// The right-hand side of an assignment.
@@ -74,7 +151,7 @@ pub enum Rvalue {
     },
 
     /// `call func(args...)` with return value
-    Call { callee: Callee, args: Vec<Value> },
+    Call { callee: Callee, args: Vec<CallArg> },
 
     /// Type cast
     Cast {
@@ -237,7 +314,7 @@ impl Statement {
     }
 
     /// Create a new call statement (unit return).
-    pub fn call(callee: Callee, args: Vec<Value>) -> Self {
+    pub fn call(callee: Callee, args: Vec<CallArg>) -> Self {
         Self {
             meta: Metadata::new(),
             priors: Vec::new(),
@@ -274,7 +351,7 @@ impl fmt::Display for StatementDisplay<'_> {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", arg.display(self.ctx))?;
+                    write!(f, "{} {}", arg.mode, arg.value.display(self.ctx))?;
                 }
                 write!(f, ")")
             }
@@ -331,7 +408,7 @@ impl fmt::Display for RvalueDisplay<'_> {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", arg.display(self.ctx))?;
+                    write!(f, "{} {}", arg.mode, arg.value.display(self.ctx))?;
                 }
                 write!(f, ")")
             }

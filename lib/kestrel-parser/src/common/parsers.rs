@@ -16,8 +16,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterData,
-    ReceiverModifier,
+    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode,
+    ParameterData, ReceiverModifier,
 };
 use crate::block::{CodeBlockData, code_block_parser};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
@@ -269,11 +269,41 @@ pub fn let_var_parser<'tokens>(
 // Parameter Parsers
 // =============================================================================
 
-/// Parser for a single parameter: `(label)? bind_name: Type`
+/// Parser for optional parameter access mode (mutating/consuming)
+///
+/// Parses an optional `mutating` or `consuming` keyword before a parameter.
 ///
 /// # Examples
-/// - `x: Int` → label=None, bind_name=x
-/// - `with x: Int` → label="with", bind_name=x
+/// - `mutating x: Int` → `Some((ParameterAccessMode::Mutating, span))`
+/// - `consuming x: Int` → `Some((ParameterAccessMode::Consuming, span))`
+/// - `x: Int` → `None` (defaults to borrow)
+fn parameter_access_mode_parser<'tokens>(
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    Option<(ParameterAccessMode, Span)>,
+    ParserExtra<'tokens>,
+> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Mutating)
+                .map_with(|_, e| {
+                    Some((ParameterAccessMode::Mutating, to_kestrel_span(e.span())))
+                })
+                .or(just(Token::Consuming).map_with(|_, e| {
+                    Some((ParameterAccessMode::Consuming, to_kestrel_span(e.span())))
+                })),
+        )
+        .or(empty().to(None))
+}
+
+/// Parser for a single parameter: `(access_mode)? (label)? bind_name: Type`
+///
+/// # Examples
+/// - `x: Int` → access_mode=None, label=None, bind_name=x
+/// - `with x: Int` → access_mode=None, label="with", bind_name=x
+/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
+/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
 pub(crate) fn parameter_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone
 {
@@ -282,24 +312,27 @@ pub(crate) fn parameter_parser<'tokens>(
         Token::Identifier = e => to_kestrel_span(e.span()),
     });
 
-    // Labeled parameter: label name: Type
-    let labeled = ident
-        .clone()
+    // Labeled parameter: (access_mode)? label name: Type
+    let labeled = parameter_access_mode_parser()
+        .then(ident.clone())
         .then(ident.clone())
         .then(trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(ty_parser())
-        .map(|(((label, bind_name), colon), ty)| ParameterData {
+        .map(|((((access_mode, label), bind_name), colon), ty)| ParameterData {
+            access_mode,
             label: Some(label),
             bind_name,
             colon,
             ty,
         });
 
-    // Unlabeled parameter: name: Type
-    let unlabeled = ident
+    // Unlabeled parameter: (access_mode)? name: Type
+    let unlabeled = parameter_access_mode_parser()
+        .then(ident)
         .then(trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(ty_parser())
-        .map(|((bind_name, colon), ty)| ParameterData {
+        .map(|(((access_mode, bind_name), colon), ty)| ParameterData {
+            access_mode,
             label: None,
             bind_name,
             colon,

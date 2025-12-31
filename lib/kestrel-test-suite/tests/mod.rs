@@ -18,6 +18,7 @@ mod expressions;
 mod framework;
 mod inference;
 mod instantiation;
+mod memory_model;
 mod patterns;
 mod statements;
 mod types;

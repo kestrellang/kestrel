@@ -1,3 +1,4 @@
+use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Spanned;
@@ -29,6 +30,22 @@ pub(crate) fn resolve_parameters_from_syntax(
         .collect()
 }
 
+/// Extract access mode from a parameter syntax node.
+///
+/// Looks for `Mutating` or `Consuming` tokens as direct children of the parameter node.
+fn extract_access_mode(param_node: &SyntaxNode) -> ParameterAccessMode {
+    for child in param_node.children_with_tokens() {
+        if let Some(token) = child.as_token() {
+            match token.kind() {
+                SyntaxKind::Mutating => return ParameterAccessMode::Mutating,
+                SyntaxKind::Consuming => return ParameterAccessMode::Consuming,
+                _ => {}
+            }
+        }
+    }
+    ParameterAccessMode::Borrow
+}
+
 fn resolve_single_parameter(
     param_node: &SyntaxNode,
     source: &str,
@@ -37,6 +54,9 @@ fn resolve_single_parameter(
     ctx: &mut BindingContext,
     implicit_labels: bool,
 ) -> Option<Parameter> {
+    // Extract access mode first (mutating/consuming keyword)
+    let access_mode = extract_access_mode(param_node);
+
     let name_nodes: Vec<SyntaxNode> = param_node
         .children()
         .filter(|child| child.kind() == SyntaxKind::Name)
@@ -71,6 +91,11 @@ fn resolve_single_parameter(
         Ty::infer(get_node_span(param_node, file_id))
     };
 
-    Some(Parameter { label, bind_name, ty })
+    Some(Parameter {
+        access_mode,
+        label,
+        bind_name,
+        ty,
+    })
 }
 
