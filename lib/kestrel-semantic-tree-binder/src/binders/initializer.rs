@@ -36,18 +36,16 @@ impl DeclarationBinder for InitializerBinder {
         let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve attributes
-        let attributes_behavior =
-            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+            syntax,
+            &source,
+            context.diagnostics,
+        );
         symbol.metadata().add_behavior(attributes_behavior);
 
         // Extract and resolve parameters from syntax
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
-            syntax,
-            &source,
-            file_id,
-            symbol_id,
-            context,
-            true,
+            syntax, &source, file_id, symbol_id, context, true,
         );
 
         // Initializers return unit type - they don't return a value
@@ -111,7 +109,9 @@ fn resolve_initializer_body(
     source: &str,
     file_id: usize,
 ) {
-    use crate::body_resolver::context::{create_local_scope_for_body, resolve_body_and_attach_executable};
+    use crate::body_resolver::context::{
+        create_local_scope_for_body, resolve_body_and_attach_executable,
+    };
     use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 
@@ -157,21 +157,24 @@ fn resolve_initializer_body(
             ParameterAccessMode::Consuming => true,
         };
         // Add to local scope
-        local_scope.bind(param_name.clone(), param_ty.clone(), is_mutable, param_span.clone());
+        local_scope.bind(
+            param_name.clone(),
+            param_ty.clone(),
+            is_mutable,
+            param_span.clone(),
+        );
     }
 
     // Create body resolution context
-    let mut body_ctx = BodyResolutionContext {
-        model: context.model,
-        diagnostics: context.diagnostics,
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
         source,
         file_id,
-        function_id: symbol.metadata().id(),
+        symbol.metadata().id(),
         local_scope,
-        loop_stack: Vec::new(),
-        next_loop_id: 0,
-        move_tracker: MoveTracker::new(),
-    };
+        None, // Initializer doesn't have its own where clause
+    );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }

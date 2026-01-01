@@ -799,15 +799,12 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.caller")
-                .any_block(|b| {
-                    b.has_statement(StatementPattern::CallWithModes {
-                        callee: "Test.process".to_string(),
-                        arg_modes: vec![PassingMode::Ref],
-                    })
-                }),
-        );
+        .expect(Mir::mir_function("Test.caller").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.process".to_string(),
+                arg_modes: vec![PassingMode::Ref],
+            })
+        }));
     }
 
     #[test]
@@ -831,15 +828,12 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.caller")
-                .any_block(|b| {
-                    b.has_statement(StatementPattern::CallWithModes {
-                        callee: "Test.Point.magnitude".to_string(),
-                        arg_modes: vec![PassingMode::Ref], // self is Ref
-                    })
-                }),
-        );
+        .expect(Mir::mir_function("Test.caller").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.Point.magnitude".to_string(),
+                arg_modes: vec![PassingMode::Ref], // self is Ref
+            })
+        }));
     }
 
     #[test]
@@ -859,15 +853,12 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.caller")
-                .any_block(|b| {
-                    b.has_statement(StatementPattern::CallWithModes {
-                        callee: "Test.reset".to_string(),
-                        arg_modes: vec![PassingMode::MutRef],
-                    })
-                }),
-        );
+        .expect(Mir::mir_function("Test.caller").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.reset".to_string(),
+                arg_modes: vec![PassingMode::MutRef],
+            })
+        }));
     }
 
     #[test]
@@ -887,15 +878,12 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.caller")
-                .any_block(|b| {
-                    b.has_statement(StatementPattern::CallWithModes {
-                        callee: "Test.consume".to_string(),
-                        arg_modes: vec![PassingMode::Copy],
-                    })
-                }),
-        );
+        .expect(Mir::mir_function("Test.caller").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Copy],
+            })
+        }));
     }
 
     #[test]
@@ -918,15 +906,12 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.caller")
-                .any_block(|b| {
-                    b.has_statement(StatementPattern::CallWithModes {
-                        callee: "Test.process".to_string(),
-                        arg_modes: vec![PassingMode::Ref, PassingMode::MutRef, PassingMode::Copy],
-                    })
-                }),
-        );
+        .expect(Mir::mir_function("Test.caller").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.process".to_string(),
+                arg_modes: vec![PassingMode::Ref, PassingMode::MutRef, PassingMode::Copy],
+            })
+        }));
     }
 
     #[test]
@@ -951,15 +936,12 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.caller")
-                .any_block(|b| {
-                    b.has_statement(StatementPattern::CallWithModes {
-                        callee: "Test.Point.copyXTo".to_string(),
-                        // self (Ref) + other (MutRef)
-                        arg_modes: vec![PassingMode::Ref, PassingMode::MutRef],
-                    })
-                }),
-        );
+        .expect(Mir::mir_function("Test.caller").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.Point.copyXTo".to_string(),
+                // self (Ref) + other (MutRef)
+                arg_modes: vec![PassingMode::Ref, PassingMode::MutRef],
+            })
+        }));
     }
 }

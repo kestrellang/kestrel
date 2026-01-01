@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -11,11 +12,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
-use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError};
-use crate::resolution::LocalScope;
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
@@ -53,7 +53,11 @@ impl FunctionBinder {
 
         // Register the builtin
         let symbol_id = symbol.metadata().id();
-        if !context.model.builtin_registry().register_function(feature, symbol_id) {
+        if !context
+            .model
+            .builtin_registry()
+            .register_function(feature, symbol_id)
+        {
             context.diagnostics.throw(DuplicateBuiltinError {
                 span: attr_span,
                 feature_name: feature.name().to_string(),
@@ -81,8 +85,11 @@ impl DeclarationBinder for FunctionBinder {
         let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve attributes
-        let attributes_behavior =
-            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+            syntax,
+            &source,
+            context.diagnostics,
+        );
         symbol.metadata().add_behavior(attributes_behavior.clone());
 
         // Process @builtin attribute if present
@@ -91,18 +98,14 @@ impl DeclarationBinder for FunctionBinder {
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that
         // T.Item paths can find the protocol bounds for T
-        let generics_behavior =
-            crate::binders::utils::generics::resolve_generics(syntax, &source, file_id, symbol_id, context);
+        let generics_behavior = crate::binders::utils::generics::resolve_generics(
+            syntax, &source, file_id, symbol_id, context,
+        );
         symbol.metadata().add_behavior(generics_behavior);
 
         // Now extract and resolve parameters from syntax (T.Item will work)
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
-            syntax,
-            &source,
-            file_id,
-            symbol_id,
-            context,
-            false,
+            syntax, &source, file_id, symbol_id, context, false,
         );
 
         // Extract and resolve return type from syntax (T.Item will work)
@@ -170,7 +173,9 @@ fn resolve_function_body(
     source: &str,
     file_id: usize,
 ) {
-    use crate::body_resolver::context::{create_local_scope_for_body, resolve_body_and_attach_executable};
+    use crate::body_resolver::context::{
+        create_local_scope_for_body, resolve_body_and_attach_executable,
+    };
     use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -231,18 +236,22 @@ fn resolve_function_body(
         local_scope.bind(param_name, param_ty, is_mutable, param_span);
     }
 
+    // Get the where clause from the function's generics behavior
+    let where_clause = symbol
+        .metadata()
+        .get_behavior::<GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
     // Create body resolution context
-    let mut body_ctx = BodyResolutionContext {
-        model: context.model,
-        diagnostics: context.diagnostics,
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
         source,
         file_id,
-        function_id: symbol.metadata().id(),
+        symbol.metadata().id(),
         local_scope,
-        loop_stack: Vec::new(),
-        next_loop_id: 0,
-        move_tracker: MoveTracker::new(),
-    };
+        where_clause,
+    );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }

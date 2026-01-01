@@ -1,5 +1,5 @@
 use kestrel_span::Span;
-use semantic_tree::symbol::SymbolId;
+use semantic_tree::symbol::{Symbol, SymbolId};
 
 use super::Ty;
 
@@ -53,6 +53,8 @@ impl WhereClause {
                     ..
                 } if *id == param_id => Some(bounds),
                 Constraint::TypeBound { .. } => None,
+                // Negative bounds don't contribute positive bounds
+                Constraint::NegativeBound { .. } => None,
                 // Inherited associated type bounds don't apply to type parameters
                 Constraint::InheritedAssociatedTypeBound { .. } => None,
                 // Type equality constraints don't contribute bounds
@@ -60,6 +62,40 @@ impl WhereClause {
             })
             .flatten()
             .collect()
+    }
+
+    /// Get all negative bounds for a specific type parameter
+    pub fn negative_bounds_for(&self, param_id: SymbolId) -> Vec<&Ty> {
+        self.constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::NegativeBound {
+                    param: Some(id),
+                    bound,
+                    ..
+                } if *id == param_id => Some(bound),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Check if a type parameter has a `not Copyable` bound
+    pub fn has_not_copyable(&self, param_id: SymbolId) -> bool {
+        self.constraints.iter().any(|c| match c {
+            Constraint::NegativeBound {
+                param: Some(id),
+                bound,
+                ..
+            } if *id == param_id => {
+                // Check if the bound is the Copyable protocol
+                if let crate::ty::TyKind::Protocol { symbol, .. } = bound.kind() {
+                    symbol.metadata().name().value == "Copyable"
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        })
     }
 
     /// Get all equality constraints in this where clause
@@ -92,6 +128,21 @@ pub enum Constraint {
         param_span: Span,
         /// The bounds that the type parameter must satisfy
         bounds: Vec<Ty>,
+    },
+    /// A negative bound constraint: `T: not Copyable`
+    ///
+    /// This indicates that a type parameter does NOT satisfy a protocol bound.
+    /// Currently only used for `not Copyable` to relax the implicit Copyable requirement.
+    NegativeBound {
+        /// The SymbolId of the type parameter being constrained.
+        /// None if the type parameter name was not found in the declared parameters.
+        param: Option<SymbolId>,
+        /// The name of the type parameter as written in source (for error reporting)
+        param_name: String,
+        /// The span of the type parameter name (for error reporting)
+        param_span: Span,
+        /// The negated bound (the protocol this type does NOT need to satisfy)
+        bound: Ty,
     },
     /// A constraint on an inherited protocol's associated type: `Iterator.Item: Comparable`
     ///
@@ -159,10 +210,38 @@ impl Constraint {
         Constraint::TypeEquality { left, right, span }
     }
 
+    /// Create a negative bound constraint with a resolved parameter
+    ///
+    /// Used for where clauses like `T: not Copyable`
+    pub fn negative_bound(
+        param: SymbolId,
+        param_name: String,
+        param_span: Span,
+        bound: Ty,
+    ) -> Self {
+        Constraint::NegativeBound {
+            param: Some(param),
+            param_name,
+            param_span,
+            bound,
+        }
+    }
+
+    /// Create a negative bound constraint with an unresolved (undeclared) parameter
+    pub fn unresolved_negative_bound(param_name: String, param_span: Span, bound: Ty) -> Self {
+        Constraint::NegativeBound {
+            param: None,
+            param_name,
+            param_span,
+            bound,
+        }
+    }
+
     /// Get the type parameter this constraint applies to (if resolved)
     pub fn param_id(&self) -> Option<SymbolId> {
         match self {
             Constraint::TypeBound { param, .. } => *param,
+            Constraint::NegativeBound { param, .. } => *param,
             Constraint::InheritedAssociatedTypeBound { .. } => None,
             Constraint::TypeEquality { .. } => None,
         }
@@ -172,6 +251,7 @@ impl Constraint {
     pub fn param_name(&self) -> &str {
         match self {
             Constraint::TypeBound { param_name, .. } => param_name,
+            Constraint::NegativeBound { param_name, .. } => param_name,
             Constraint::InheritedAssociatedTypeBound { path, .. } => path,
             Constraint::TypeEquality { .. } => "",
         }
@@ -181,6 +261,7 @@ impl Constraint {
     pub fn param_span(&self) -> &Span {
         match self {
             Constraint::TypeBound { param_span, .. } => param_span,
+            Constraint::NegativeBound { param_span, .. } => param_span,
             Constraint::InheritedAssociatedTypeBound { span, .. } => span,
             Constraint::TypeEquality { span, .. } => span,
         }
@@ -190,6 +271,7 @@ impl Constraint {
     pub fn is_unresolved(&self) -> bool {
         match self {
             Constraint::TypeBound { param, .. } => param.is_none(),
+            Constraint::NegativeBound { param, .. } => param.is_none(),
             // Inherited associated type bounds are always resolved (they've been validated)
             Constraint::InheritedAssociatedTypeBound { .. } => false,
             // Type equality constraints are always resolved
@@ -207,10 +289,16 @@ impl Constraint {
         matches!(self, Constraint::TypeEquality { .. })
     }
 
+    /// Check if this is a negative bound constraint
+    pub fn is_negative_bound(&self) -> bool {
+        matches!(self, Constraint::NegativeBound { .. })
+    }
+
     /// Get the type parameter ID this constraint applies to (if resolved)
     pub fn type_parameter_id(&self) -> Option<SymbolId> {
         match self {
             Constraint::TypeBound { param, .. } => *param,
+            Constraint::NegativeBound { param, .. } => *param,
             _ => None,
         }
     }
@@ -220,7 +308,16 @@ impl Constraint {
         match self {
             Constraint::TypeBound { bounds, .. } => bounds,
             Constraint::InheritedAssociatedTypeBound { bounds, .. } => bounds,
+            Constraint::NegativeBound { .. } => &[],
             Constraint::TypeEquality { .. } => &[],
+        }
+    }
+
+    /// Get the negative bound for this constraint (None for non-negative-bound constraints)
+    pub fn negative_bound_ty(&self) -> Option<&Ty> {
+        match self {
+            Constraint::NegativeBound { bound, .. } => Some(bound),
+            _ => None,
         }
     }
 }

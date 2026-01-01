@@ -58,7 +58,11 @@ pub struct Ty {
 
 impl fmt::Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn fmt_list(f: &mut fmt::Formatter<'_>, mut first: bool, items: impl Iterator<Item = Ty>) -> fmt::Result {
+        fn fmt_list(
+            f: &mut fmt::Formatter<'_>,
+            mut first: bool,
+            items: impl Iterator<Item = Ty>,
+        ) -> fmt::Result {
             for item in items {
                 if !first {
                     f.write_str(", ")?;
@@ -117,9 +121,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -137,9 +141,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -157,9 +161,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -177,9 +181,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -195,26 +199,24 @@ impl fmt::Display for Ty {
             TyKind::UnresolvedFunction {
                 param_info,
                 return_type,
-            } => {
-                match param_info {
-                    ParamInfo::Unconstrained => {
-                        write!(f, "(...) -> {}", return_type)
-                    }
-                    ParamInfo::ImplicitIt { it_type } => {
-                        write!(f, "({}) -> {}", it_type, return_type)
-                    }
-                    ParamInfo::Explicit { param_types } => {
-                        f.write_char('(')?;
-                        for (i, p) in param_types.iter().enumerate() {
-                            if i > 0 {
-                                f.write_str(", ")?;
-                            }
-                            write!(f, "{}", p)?;
-                        }
-                        write!(f, ") -> {}", return_type)
-                    }
+            } => match param_info {
+                ParamInfo::Unconstrained => {
+                    write!(f, "(...) -> {}", return_type)
                 }
-            }
+                ParamInfo::ImplicitIt { it_type } => {
+                    write!(f, "({}) -> {}", it_type, return_type)
+                }
+                ParamInfo::Explicit { param_types } => {
+                    f.write_char('(')?;
+                    for (i, p) in param_types.iter().enumerate() {
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
+                        write!(f, "{}", p)?;
+                    }
+                    write!(f, ") -> {}", return_type)
+                }
+            },
         }
     }
 }
@@ -1292,7 +1294,8 @@ impl Ty {
             // Error type: return true to avoid cascading errors
             TyKind::Error => true,
 
-            // Type parameters: will be handled in Phase 7 with generic bounds
+            // Type parameters: by default assume copyable (implicit Copyable bound)
+            // Use is_copyable_with_where_clause for context-aware check
             TyKind::TypeParameter(_) => true,
 
             // Protocols: protocols themselves aren't values
@@ -1309,6 +1312,28 @@ impl Ty {
 
             // Infer: type not yet known, will be resolved
             TyKind::Infer => true,
+        }
+    }
+
+    /// Check if this type is copyable within a where clause context.
+    ///
+    /// This is like `is_copyable()` but takes a where clause into account for type parameters.
+    /// A type parameter `T` is:
+    /// - Copyable by default (implicit `Copyable` bound)
+    /// - Not copyable if it has a `T: not Copyable` constraint in the where clause
+    ///
+    /// For concrete types, this behaves the same as `is_copyable()`.
+    pub fn is_copyable_in_context(&self, where_clause: &WhereClause) -> bool {
+        match self.kind() {
+            // Type parameters: check for `not Copyable` bound
+            TyKind::TypeParameter(param) => {
+                let param_id = param.metadata().id();
+                // If there's a `not Copyable` bound, the type parameter is not copyable
+                !where_clause.has_not_copyable(param_id)
+            }
+
+            // For all other types, delegate to the regular is_copyable check
+            _ => self.is_copyable(),
         }
     }
 }

@@ -112,7 +112,6 @@ mod basic_deinit {
                 .has(Behavior::HasDeinit(true)),
         );
     }
-
 }
 
 // =============================================================================
@@ -417,12 +416,12 @@ mod deinit_statement {
     //         r#"module Test
     //         @builtin(.Copyable)
     //         protocol Copyable {}
-    //         
+    //
     //         struct Handle: not Copyable {
     //             var fd: Int
     //             deinit {}
     //         }
-    //         
+    //
     //         func example() -> Int {
     //             var handle = Handle(fd: 42);
     //             deinit handle;
@@ -532,7 +531,11 @@ mod automatic_deinit {
         .expect(
             MirFunction::new("Test.example")
                 // Should have deinit calls for both h1 and h2
-                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::DeinitCall {
+                        ty: "Test.Handle".to_string(),
+                    })
+                }),
         );
     }
 
@@ -559,7 +562,11 @@ mod automatic_deinit {
         .expect(
             MirFunction::new("Test.example")
                 // Should have the explicit deinit call
-                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::DeinitCall {
+                        ty: "Test.Handle".to_string(),
+                    })
+                }),
         );
     }
 
@@ -583,10 +590,11 @@ mod automatic_deinit {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
-        );
+        .expect(MirFunction::new("Test.example").any_block(|b| {
+            b.has_statement(StatementPattern::DeinitCall {
+                ty: "Test.Handle".to_string(),
+            })
+        }));
     }
 
     #[test]
@@ -611,10 +619,11 @@ mod automatic_deinit {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
-        );
+        .expect(MirFunction::new("Test.example").any_block(|b| {
+            b.has_statement(StatementPattern::DeinitCall {
+                ty: "Test.Handle".to_string(),
+            })
+        }));
     }
 
     #[test]
@@ -643,7 +652,11 @@ mod automatic_deinit {
         .expect(
             MirFunction::new("Test.example")
                 // Both branches should have deinit calls for their Handle
-                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::DeinitCall {
+                        ty: "Test.Handle".to_string(),
+                    })
+                }),
         );
     }
 
@@ -673,7 +686,11 @@ mod automatic_deinit {
         .expect(
             MirFunction::new("Test.example")
                 // Should NOT have a Deinit for handle (it was moved to consume)
-                .no_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+                .no_block(|b| {
+                    b.has_statement(StatementPattern::Deinit {
+                        local: "handle".to_string(),
+                    })
+                }),
         );
     }
 
@@ -849,7 +866,11 @@ mod automatic_deinit {
                 // Should NOT have a DeinitIf for handle
                 .no_block(|b| b.has_statement(StatementPattern::AnyDeinitIf))
                 // Should NOT have a Deinit for handle either
-                .no_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+                .no_block(|b| {
+                    b.has_statement(StatementPattern::Deinit {
+                        local: "handle".to_string(),
+                    })
+                }),
         );
     }
 
@@ -885,7 +906,11 @@ mod automatic_deinit {
         .expect(
             MirFunction::new("Test.example")
                 // Should have regular deinit call for handle
-                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() }))
+                .any_block(|b| {
+                    b.has_statement(StatementPattern::DeinitCall {
+                        ty: "Test.Handle".to_string(),
+                    })
+                })
                 // Should NOT have DeinitIf for handle
                 .no_block(|b| b.has_statement(StatementPattern::AnyDeinitIf)),
         );
@@ -967,14 +992,14 @@ mod enum_deinit {
     //         r#"module Test
     //         @builtin(.Copyable)
     //         protocol Copyable {}
-    //         
+    //
     //         enum Resource: not Copyable {
     //             case active(val: Int)
     //             case inactive
-    //             
+    //
     //             deinit {}
     //         }
-    //         
+    //
     //         func example() {
     //             let r = Resource.active(val: 42);
     //         }

@@ -93,7 +93,9 @@ fn attach_deinit_behavior_to_parent(
     }
 
     // Attach the DeinitBehavior to the parent struct
-    parent.metadata().add_behavior(DeinitBehavior::new(deinit_id));
+    parent
+        .metadata()
+        .add_behavior(DeinitBehavior::new(deinit_id));
 }
 
 /// Resolve a deinit's body and attach ExecutableBehavior to the symbol
@@ -104,7 +106,9 @@ fn resolve_deinit_body(
     source: &str,
     file_id: usize,
 ) {
-    use crate::body_resolver::context::{create_local_scope_for_body, resolve_body_and_attach_executable};
+    use crate::body_resolver::context::{
+        create_local_scope_for_body, resolve_body_and_attach_executable,
+    };
     use crate::body_resolver::BodyResolutionContext;
 
     // Downcast to DeinitSymbol
@@ -137,17 +141,15 @@ fn resolve_deinit_body(
     // Deinit has no parameters - just the implicit self
 
     // Create body resolution context
-    let mut body_ctx = BodyResolutionContext {
-        model: context.model,
-        diagnostics: context.diagnostics,
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
         source,
         file_id,
-        function_id: symbol.metadata().id(),
+        symbol.metadata().id(),
         local_scope,
-        loop_stack: Vec::new(),
-        next_loop_id: 0,
-        move_tracker: MoveTracker::new(),
-    };
+        None, // Deinit doesn't have its own where clause
+    );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }

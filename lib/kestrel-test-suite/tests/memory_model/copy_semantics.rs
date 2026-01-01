@@ -219,14 +219,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.consume".to_string(),
-                    arg_modes: vec![PassingMode::Copy],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Copy],
+            })
+        }));
     }
 
     #[test]
@@ -251,14 +249,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.consume".to_string(),
-                    arg_modes: vec![PassingMode::Move],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Move],
+            })
+        }));
     }
 
     #[test]
@@ -283,14 +279,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.borrow_it".to_string(),
-                    arg_modes: vec![PassingMode::Ref],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.borrow_it".to_string(),
+                arg_modes: vec![PassingMode::Ref],
+            })
+        }));
     }
 
     #[test]
@@ -312,14 +306,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.consume".to_string(),
-                    arg_modes: vec![PassingMode::Copy],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Copy],
+            })
+        }));
     }
 
     #[test]
@@ -344,14 +336,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.consume".to_string(),
-                    arg_modes: vec![PassingMode::Move],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Move],
+            })
+        }));
     }
 
     #[test]
@@ -369,14 +359,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.consume".to_string(),
-                    arg_modes: vec![PassingMode::Copy],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Copy],
+            })
+        }));
     }
 
     #[test]
@@ -406,14 +394,12 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.mixed".to_string(),
-                    arg_modes: vec![PassingMode::Copy, PassingMode::Move],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.mixed".to_string(),
+                arg_modes: vec![PassingMode::Copy, PassingMode::Move],
+            })
+        }));
     }
 }
 
@@ -445,7 +431,9 @@ mod rvalue_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Test.test").any_block(|b| b.has_statement(StatementPattern::Copy)));
+        .expect(
+            Mir::mir_function("Test.test").any_block(|b| b.has_statement(StatementPattern::Copy)),
+        );
     }
 
     #[test]
@@ -472,14 +460,12 @@ mod rvalue_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").any_block(|b| {
-                b.has_statement(StatementPattern::CallWithModes {
-                    callee: "Test.consume".to_string(),
-                    arg_modes: vec![PassingMode::Move],
-                })
-            }),
-        );
+        .expect(Mir::mir_function("Test.test").any_block(|b| {
+            b.has_statement(StatementPattern::CallWithModes {
+                callee: "Test.consume".to_string(),
+                arg_modes: vec![PassingMode::Move],
+            })
+        }));
     }
 }
 

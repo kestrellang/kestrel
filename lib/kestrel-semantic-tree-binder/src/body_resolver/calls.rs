@@ -208,8 +208,13 @@ fn extract_type_arguments_from_callee(
 
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
-            let mut resolver =
-                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.file_id, ctx.function_id);
+            let mut resolver = TypeResolver::new(
+                ctx.model,
+                ctx.diagnostics,
+                ctx.source,
+                ctx.file_id,
+                ctx.function_id,
+            );
             let ty = resolver.resolve(&child);
             type_args.push(ty);
         }
@@ -220,7 +225,10 @@ fn extract_type_arguments_from_callee(
 }
 
 /// Resolve an argument list node into CallArguments
-pub(crate) fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
+pub(crate) fn resolve_argument_list(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<CallArgument> {
     let mut arguments = Vec::new();
 
     for child in node.children() {
@@ -284,7 +292,6 @@ pub fn resolve_call(
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-
     // Clone callee.kind to avoid borrow issues
     let callee_kind = callee.kind.clone();
     let callee_ty = callee.ty.clone();
@@ -538,7 +545,10 @@ fn resolve_single_function_call(
     use super::utils::substitute_self;
     use kestrel_semantic_tree::behavior::typed::TypedBehavior;
     let self_replacement: Option<Ty> = symbol.metadata().parent().and_then(|parent| {
-        parent.metadata().get_behavior::<TypedBehavior>().map(|typed| typed.ty().clone())
+        parent
+            .metadata()
+            .get_behavior::<TypedBehavior>()
+            .map(|typed| typed.ty().clone())
     });
 
     // Get return type and substitutions, applying explicit type arguments if provided
@@ -654,13 +664,14 @@ fn resolve_single_function_call(
         } else if symbol.as_any().downcast_ref::<EnumCaseSymbol>().is_some() {
             // Enum case - check if callee already has concrete types from qualified path
             // e.g., Result[Int, Bool].Ok already has substitutions applied
-            let from_qualified_path = if let TyKind::Function { return_type, .. } = callee.ty.kind() {
+            let from_qualified_path = if let TyKind::Function { return_type, .. } = callee.ty.kind()
+            {
                 // Check if the return type is a concrete enum (not just type parameters)
                 if let TyKind::Enum { substitutions, .. } = return_type.kind() {
                     // Check if substitutions contain concrete types (not just type parameters)
-                    let has_concrete_subs = substitutions.iter().any(|(_, ty)| {
-                        !matches!(ty.kind(), TyKind::TypeParameter(_))
-                    });
+                    let has_concrete_subs = substitutions
+                        .iter()
+                        .any(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
                     if has_concrete_subs {
                         // Use the already-substituted return type from the callee
                         Some((return_type.as_ref().clone(), substitutions.clone()))
@@ -673,7 +684,7 @@ fn resolve_single_function_call(
             } else {
                 None
             };
-            
+
             if let Some((ret_ty, subs)) = from_qualified_path {
                 (ret_ty, subs)
             } else if let Some(parent) = symbol.metadata().parent() {
@@ -683,10 +694,12 @@ fn resolve_single_function_call(
 
                     if !type_params.is_empty() {
                         // Collect argument types
-                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let arg_types: Vec<Ty> =
+                            arguments.iter().map(|a| a.value.ty.clone()).collect();
 
                         // Infer type arguments from argument types
-                        let substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
+                        let substitutions =
+                            infer_type_arguments(&type_params, &callable, &arg_types);
 
                         // Apply substitution to return type
                         let return_ty = substitute_type(callable.return_type(), &substitutions);
@@ -726,7 +739,13 @@ fn resolve_single_function_call(
         callee
     };
 
-    Expression::generic_call(instantiated_callee, arguments, call_substitutions, return_ty, span)
+    Expression::generic_call(
+        instantiated_callee,
+        arguments,
+        call_substitutions,
+        return_ty,
+        span,
+    )
 }
 
 /// Collect a single overload description from a symbol.
@@ -839,7 +858,7 @@ pub fn resolve_struct_instantiation(
             if let Some(callable) = get_callable_behavior(&symbol) {
                 // Validate access modes for arguments
                 validate_argument_access_modes(&callable, &arguments, &span, ctx);
-                
+
                 let return_ty = callable.return_type().clone();
                 let fn_ty = callable.function_type();
                 let callee = Expression::symbol_ref(symbol_id, fn_ty, false, span.clone());
@@ -917,11 +936,8 @@ fn resolve_explicit_init_call(
                 let init_id = init_sym.metadata().id();
 
                 // Build the function type for the initializer
-                let param_tys: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| p.ty.clone())
-                    .collect();
+                let param_tys: Vec<Ty> =
+                    callable.parameters().iter().map(|p| p.ty.clone()).collect();
                 let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
 
                 let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
@@ -1101,8 +1117,12 @@ pub fn resolve_method_call(
                     let resolved_receiver_ty = match &receiver.kind {
                         ExprKind::TypeRef(type_symbol_id) => {
                             // For static methods, get the actual struct type from the symbol
-                            if let Some(type_sym) = ctx.model.query(SymbolFor { id: *type_symbol_id }) {
-                                if let Some(typed) = type_sym.metadata().get_behavior::<TypedBehavior>() {
+                            if let Some(type_sym) = ctx.model.query(SymbolFor {
+                                id: *type_symbol_id,
+                            }) {
+                                if let Some(typed) =
+                                    type_sym.metadata().get_behavior::<TypedBehavior>()
+                                {
                                     typed.ty().clone()
                                 } else {
                                     receiver.ty.clone()
@@ -1115,7 +1135,8 @@ pub fn resolve_method_call(
                     };
 
                     // Get return type, substituting Self with the resolved receiver type
-                    let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
+                    let mut return_ty =
+                        substitute_self(callable.return_type(), &resolved_receiver_ty);
                     let mut call_substitutions = Substitutions::new();
                     if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Add receiver's substitutions to call_substitutions
@@ -1129,7 +1150,8 @@ pub fn resolve_method_call(
                     // This handles the case like Box.wrap(42) where T needs to be inferred from the argument
                     // Also handles Box[Int].wrap(42) where substitutions are already available
                     if explicit_type_args.is_none() {
-                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let arg_types: Vec<Ty> =
+                            arguments.iter().map(|a| a.value.ty.clone()).collect();
                         let mut inferred_any = false;
                         for (param, arg_ty) in callable.parameters().iter().zip(arg_types.iter()) {
                             if let TyKind::TypeParameter(type_param) = param.ty.kind() {
@@ -1498,10 +1520,7 @@ enum MutabilityClassification {
     /// Expression is a mutable lvalue (var binding or mutable field chain)
     Mutable,
     /// Expression is an immutable local binding (let)
-    ImmutableLocal {
-        name: String,
-        span: Span,
-    },
+    ImmutableLocal { name: String, span: Span },
     /// Expression is an immutable field (let field)
     ImmutableField {
         field_name: String,
@@ -1522,10 +1541,7 @@ enum MutabilityClassification {
 /// This walks the expression tree to determine:
 /// - Whether it's an lvalue (can be assigned to)
 /// - If so, whether it's mutable throughout the entire access chain
-fn classify_mutability(
-    expr: &Expression,
-    ctx: &BodyResolutionContext,
-) -> MutabilityClassification {
+fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> MutabilityClassification {
     match &expr.kind {
         // Local variable reference
         ExprKind::LocalRef(local_id) => {
@@ -1677,8 +1693,10 @@ pub fn validate_argument_access_modes(
                 // so subsequent uses will trigger a use-after-move error
                 if let ExprKind::LocalRef(local_id) = &arg.value.kind {
                     // Only mark as moved if the type is non-copyable
-                    if !arg.value.ty.is_copyable() {
-                        ctx.move_tracker_mut().mark_moved(*local_id, arg.value.span.clone());
+                    // Use context-aware check that considers `T: not Copyable` bounds
+                    if !arg.value.ty.is_copyable_in_context(ctx.where_clause()) {
+                        ctx.move_tracker_mut()
+                            .mark_moved(*local_id, arg.value.span.clone());
                     }
                 }
             }

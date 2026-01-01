@@ -8,11 +8,13 @@ use std::sync::Arc;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::local::LocalContainer;
+use kestrel_semantic_tree::ty::WhereClause;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -56,6 +58,8 @@ pub struct BodyResolutionContext<'a> {
     pub(crate) next_loop_id: u32,
     /// Move tracker for non-copyable values
     pub(crate) move_tracker: MoveTracker,
+    /// Where clause for the current function (for copyability checking of type parameters)
+    where_clause: WhereClause,
 }
 
 impl<'a> BodyResolutionContext<'a> {
@@ -68,6 +72,14 @@ impl<'a> BodyResolutionContext<'a> {
         function: Arc<FunctionSymbol>,
     ) -> Self {
         let function_id = function.metadata().id();
+
+        // Get the where clause from the function's generics behavior
+        let where_clause = function
+            .metadata()
+            .get_behavior::<GenericsBehavior>()
+            .map(|g| g.where_clause().clone())
+            .unwrap_or_else(WhereClause::new);
+
         let local_scope = LocalScope::new(function);
         BodyResolutionContext {
             model,
@@ -79,7 +91,39 @@ impl<'a> BodyResolutionContext<'a> {
             loop_stack: Vec::new(),
             next_loop_id: 0,
             move_tracker: MoveTracker::new(),
+            where_clause,
         }
+    }
+
+    /// Create a new body resolution context for a non-function symbol (e.g., initializer, deinit)
+    ///
+    /// This is used when the symbol is not a FunctionSymbol but still needs body resolution.
+    pub fn new_with_scope(
+        model: &'a SemanticModel,
+        diagnostics: &'a mut DiagnosticContext,
+        source: &'a str,
+        file_id: usize,
+        symbol_id: SymbolId,
+        local_scope: LocalScope,
+        where_clause: Option<WhereClause>,
+    ) -> Self {
+        BodyResolutionContext {
+            model,
+            diagnostics,
+            source,
+            file_id,
+            function_id: symbol_id,
+            local_scope,
+            loop_stack: Vec::new(),
+            next_loop_id: 0,
+            move_tracker: MoveTracker::new(),
+            where_clause: where_clause.unwrap_or_else(WhereClause::new),
+        }
+    }
+
+    /// Get the where clause for the current function
+    pub fn where_clause(&self) -> &WhereClause {
+        &self.where_clause
     }
 
     /// Enter a loop, returning its LoopId.
@@ -276,18 +320,14 @@ fn try_extract_yield_expression(
 
 /// Check if a syntax kind could potentially be a yield expression.
 fn can_syntax_kind_be_yield(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::ExprIf
-            | SyntaxKind::ExprMatch
-    )
+    matches!(kind, SyntaxKind::ExprIf | SyntaxKind::ExprMatch)
     // Note: ExprLoop and ExprWhile are NOT included because:
     // - loop without break-with-value returns Never
     // - while always returns () (no else branch concept)
 }
 
 /// Check if an expression node can be used as a yield expression.
-/// 
+///
 /// This checks structural properties to determine if the expression can produce a value:
 /// - If-expressions: only if they have an else branch
 /// - Match expressions: always (they're exhaustive)
@@ -319,7 +359,7 @@ fn can_be_yield_expression(expr_node: &SyntaxNode) -> bool {
 }
 
 /// Check if an if-expression can be used as a yield expression.
-/// 
+///
 /// An if-expression can only be a yield expression if:
 /// 1. It has a complete else chain (all branches covered)
 /// 2. The branches end with value expressions (not statements like return/let)
@@ -331,8 +371,10 @@ fn can_be_yield_expression(expr_node: &SyntaxNode) -> bool {
 /// - `if x { a } else if y { b } else { c }` - YES if all are expressions
 fn has_else_branch(if_node: &SyntaxNode) -> bool {
     // Find the then block (CodeBlock after condition)
-    let then_block = if_node.children().find(|child| child.kind() == SyntaxKind::CodeBlock);
-    
+    let then_block = if_node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::CodeBlock);
+
     // Check if then block ends with a value expression
     if let Some(then) = then_block {
         if !block_ends_with_value_expression(&then) {
@@ -341,10 +383,12 @@ fn has_else_branch(if_node: &SyntaxNode) -> bool {
     } else {
         return false;
     }
-    
+
     // Find the ElseClause
-    let else_clause = if_node.children().find(|child| child.kind() == SyntaxKind::ElseClause);
-    
+    let else_clause = if_node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::ElseClause);
+
     match else_clause {
         None => false, // No else at all
         Some(else_node) => {
@@ -368,13 +412,13 @@ fn has_else_branch(if_node: &SyntaxNode) -> bool {
 }
 
 /// Check if a code block ends with a value expression (not a statement).
-/// 
+///
 /// A block ends with a value expression if its last child is an Expression
 /// without a trailing semicolon, or a statement-like expression (if/match with else).
 fn block_ends_with_value_expression(block: &SyntaxNode) -> bool {
     // Get the last significant child
     let children: Vec<_> = block.children().collect();
-    
+
     if let Some(last) = children.last() {
         match last.kind() {
             SyntaxKind::Expression => {
@@ -389,7 +433,9 @@ fn block_ends_with_value_expression(block: &SyntaxNode) -> bool {
                         SyntaxKind::ExpressionStatement => {
                             // Recurse
                             for inner in child.children() {
-                                if inner.kind() == SyntaxKind::Expression && !has_trailing_semicolon(&inner) {
+                                if inner.kind() == SyntaxKind::Expression
+                                    && !has_trailing_semicolon(&inner)
+                                {
                                     return can_be_yield_expression(&inner);
                                 }
                             }
@@ -408,7 +454,7 @@ fn block_ends_with_value_expression(block: &SyntaxNode) -> bool {
                 // let/var statements are not value expressions
                 false
             }
-            _ => false
+            _ => false,
         }
     } else {
         false
@@ -434,17 +480,21 @@ pub fn resolve_and_attach_body(
         create_local_scope_for_body(function_symbol.clone(), "__body_resolver_temp")
     };
 
-    let mut ctx = BodyResolutionContext {
+    // Get the where clause from the function's generics behavior
+    let where_clause = function_symbol
+        .metadata()
+        .get_behavior::<GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
+    let mut ctx = BodyResolutionContext::new_with_scope(
         model,
         diagnostics,
         source,
         file_id,
-        function_id: function_symbol.metadata().id(),
+        function_symbol.metadata().id(),
         local_scope,
-        loop_stack: Vec::new(),
-        next_loop_id: 0,
-        move_tracker: MoveTracker::new(),
-    };
+        where_clause,
+    );
 
     // Add parameters to local scope first
     // Mutability depends on access mode:

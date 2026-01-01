@@ -661,57 +661,66 @@ protocol Cloneable: Copyable {
 
 ---
 
-## Phase 7: Generics Integration
+## Phase 7: Generics Integration ✅ COMPLETE
 
-**Goal**: `[T: not Copyable]` syntax for generic bounds.
+**Goal**: `where T: not Copyable` syntax for generic bounds in where clauses.
 
-### 7.1 Parser Changes
+### 7.1 Parser Changes ✅ COMPLETE
 
-**Files**: `lib/kestrel-parser/src/common/parsers.rs` (generic bounds)
+**Files**: `lib/kestrel-parser/src/type_param/mod.rs`
 
-- [ ] Parse `not Copyable` in generic bounds:
+- [x] Parse `not Copyable` in where clause bounds:
   ```kestrel
-  struct List[T: not Copyable] { ... }
-  func wrap[T: not Copyable](consuming item: T) -> Box[T]
+  func process[T](consuming x: T) where T: not Copyable { }
+  struct Box[T] where T: not Copyable { var value: T }
   ```
-- [ ] `[T]` = implicit `Copyable` bound
-- [ ] `[T: Copyable]` = explicit `Copyable` bound
-- [ ] `[T: not Copyable]` = no copyability requirement
+- [x] Add `NegativeTypeBoundData` for negative bounds
+- [x] Update `where_constraint_parser` to handle negative bounds
+- [x] Emit `TypeBound` with `NegativeConformance` child
 
-### 7.2 Semantic Model Changes
+### 7.2 Semantic Model Changes ✅ COMPLETE
 
-- [ ] Add `CopyabilityBound` to generic parameters:
+**Files**: `lib/kestrel-semantic-tree/src/ty/where_clause.rs`, `lib/kestrel-semantic-tree/src/ty/mod.rs`
+
+- [x] Add `Constraint::NegativeBound` variant:
   ```rust
-  pub enum CopyabilityBound {
-      Copyable,     // T: Copyable (default)
-      NoCopyBound,  // T: not Copyable (relaxed)
+  NegativeBound {
+      param: Option<SymbolId>,
+      param_name: String,
+      param_span: Span,
+      bound: Ty,
   }
   ```
-- [ ] Validate operations on type parameters:
-  - In `[T]` context: can copy T values
-  - In `[T: not Copyable]` context: cannot copy T values
+- [x] Add `WhereClause::has_not_copyable(param_id)` method
+- [x] Add `Ty::is_copyable_in_context(where_clause)` method
+- [x] Type parameters are copyable by default (implicit Copyable bound)
+- [x] Type parameters with `not Copyable` bound are not copyable in context
 
-### 7.3 Conditional Conformance
+### 7.3 Body Resolution Changes ✅ COMPLETE
+
+**Files**: `lib/kestrel-semantic-tree-binder/src/body_resolver/context.rs`, `lib/kestrel-semantic-tree-binder/src/body_resolver/calls.rs`
+
+- [x] Add `where_clause` field to `BodyResolutionContext`
+- [x] Update move tracking to use `is_copyable_in_context()`
+- [x] Update `validate_argument_access_modes` for context-aware copyability check
+
+### 7.4 Tests ✅ COMPLETE
+
+**Files**: `lib/kestrel-test-suite/tests/memory_model/generic_copyability.rs`
+
+- [x] Parsing tests for `where T: not Copyable`
+- [x] Semantic tests for type parameter copyability
+- [x] Function call tests with generic type parameters
+- [x] Struct generic tests
+
+### 7.5 Future Work (Conditional Conformance)
+
+The following items are deferred to a future phase:
 
 - [ ] `Box[T]` is `Copyable` when `T: Copyable`
 - [ ] Requires tracking conditional bounds on generic types
 - [ ] Query: "is `Box[Int]` Copyable?" -> Yes (Int is Copyable)
 - [ ] Query: "is `Box[FileHandle]` Copyable?" -> No (FileHandle is not Copyable)
-
-### 7.4 Validation
-
-- [ ] Error: "cannot copy value of type `T`; `T` may not be `Copyable`"
-- [ ] Error: "type `FileHandle` does not satisfy bound `Copyable` required by `duplicate[T]`"
-
-### 7.5 Tests
-
-- [ ] `generic_copyability.rs`:
-  - Default bound allows copy
-  - not Copyable prevents copy
-  - Calling with non-copyable type errors if bound requires Copyable
-- [ ] `conditional_conformance.rs`:
-  - Box[Int] is Copyable
-  - Box[FileHandle] is not Copyable
 
 ---
 
@@ -785,7 +794,7 @@ Recommended order of implementation:
 3. **Phase 3** - Builtin protocols: defines `@builtin(.Copyable)` ✅ COMPLETE
 4. **Phase 4** - Copyable/not Copyable: core value proposition ✅ COMPLETE
 5. **Phase 5** - Drop semantics: RAII is critical per requirements ✅ COMPLETE
-6. **Phase 7** - Generics before Cloneable (standard library needs this)
+6. **Phase 7** - Generics `where T: not Copyable` ✅ COMPLETE
 7. **Phase 6** - Cloneable builds on Copyable infrastructure
 8. **Phase 8** - Can be done in parallel with later phases
 
