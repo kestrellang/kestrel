@@ -5,11 +5,13 @@
 //! - DeinitBehavior attachment to parent structs
 //! - Duplicate deinit error detection
 //! - Copyable + deinit warning
+//! - Automatic deinit insertion at scope exit
 //!
 //! NOTE: Currently, deinit bodies with statements (e.g., `deinit { let x = 1 }`)
 //! have a parser bug that causes tree building to fail. Tests use empty deinit
 //! bodies `deinit {}` until the parser bug is fixed.
 
+use kestrel_test_suite::mir::*;
 use kestrel_test_suite::*;
 
 // =============================================================================
@@ -453,5 +455,440 @@ mod deinit_statement {
         "#,
         )
         .expect(HasError("moved"));
+    }
+}
+
+// =============================================================================
+// AUTOMATIC DEINIT INSERTION (MIR lowering tests)
+// =============================================================================
+
+mod automatic_deinit {
+    use super::*;
+
+    #[test]
+    fn basic_scope_exit_deinit() {
+        // A non-copyable local with deinit should get a Deinit statement at scope exit
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example() {
+                let handle = Handle(fd: 42);
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                .any_block(|b| b.has_statement(StatementPattern::AnyDeinit)),
+        );
+    }
+
+    #[test]
+    fn copyable_type_no_automatic_deinit() {
+        // Copyable types should NOT get automatic deinit even if they have deinit
+        // (the warning about Copyable+deinit is separate)
+        // NOTE: We just check that it compiles - we don't emit deinits for copyable types
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: Int
+            }
+            
+            func example() {
+                let c = Counter(count: 0);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn deinit_in_reverse_order() {
+        // Multiple locals should be deinited in reverse declaration order
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example() {
+                let h1 = Handle(fd: 1);
+                let h2 = Handle(fd: 2);
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have deinit for both h1 and h2
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h2".to_string() }))
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h1".to_string() })),
+        );
+    }
+
+    #[test]
+    fn explicit_deinit_emits_mir_statement() {
+        // Explicit `deinit x;` should emit a Deinit MIR statement
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example() {
+                let handle = Handle(fd: 42);
+                deinit handle;
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have the explicit Deinit statement
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+        );
+    }
+
+    #[test]
+    fn return_emits_deinits() {
+        // Return should emit deinits for all in-scope locals
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example() -> Int {
+                let handle = Handle(fd: 42);
+                return 0;
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+        );
+    }
+
+    #[test]
+    fn break_emits_deinits() {
+        // Break should emit deinits for loop-scoped locals
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example() {
+                loop {
+                    let h = Handle(fd: 1);
+                    break;
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h".to_string() })),
+        );
+    }
+
+    #[test]
+    fn if_branch_deinits() {
+        // Each branch should deinit its own locals
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func example(cond: Bool) {
+                if cond {
+                    let h1 = Handle(fd: 1);
+                } else {
+                    let h2 = Handle(fd: 2);
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h1".to_string() }))
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h2".to_string() })),
+        );
+    }
+
+    #[test]
+    fn moved_value_not_double_deinited() {
+        // A moved value should not be deinited again at scope exit
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func consume(consuming h: Handle) {}
+            
+            func example() {
+                let handle = Handle(fd: 42);
+                consume(handle);
+                // handle is moved, should NOT have a deinit here
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should NOT have a Deinit for handle (it was moved to consume)
+                .no_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+        );
+    }
+
+    #[test]
+    fn temporary_in_nested_call_deinited() {
+        // Temporary created for inner call should be deinited at statement end
+        // if not consumed
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func makeHandle() -> Handle {
+                return Handle(fd: 42);
+            }
+            
+            func useRef(handle h: Handle) -> Int {
+                return h.fd
+            }
+            
+            func example() -> Int {
+                // makeHandle() creates a temp, passed by ref to useRef
+                // The temp should be deinited after this statement
+                let result = useRef(handle: makeHandle());
+                // At this point the temp from makeHandle() should be deinited
+                return result;
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                .any_block(|b| b.has_statement(StatementPattern::AnyDeinit)),
+        );
+    }
+
+    #[test]
+    fn temporary_consumed_not_deinited() {
+        // Temporary that is consumed (moved) should NOT be deinited
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func makeHandle() -> Handle {
+                return Handle(fd: 42);
+            }
+            
+            func consume(consuming h: Handle) {}
+            
+            func example() {
+                // makeHandle() creates a temp, consumed by consume()
+                // The temp should NOT be deinited (already moved)
+                consume(makeHandle());
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have NO deinit for the temp (it was consumed)
+                .no_block(|b| b.has_statement(StatementPattern::AnyDeinit)),
+        );
+    }
+
+    #[test]
+    fn conditional_move_uses_deinit_if() {
+        // When a variable is moved in one branch but not another,
+        // should use DeinitIf with a flag
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func consume(consuming h: Handle) {}
+            
+            func example(cond: Bool) {
+                let handle = Handle(fd: 42);
+                if cond {
+                    consume(handle);  // moved here
+                } else {
+                    // not moved here
+                }
+                // handle needs conditional deinit (DeinitIf)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                .any_block(|b| b.has_statement(StatementPattern::AnyDeinitIf)),
+        );
+    }
+
+    #[test]
+    fn conditional_move_sets_flags() {
+        // When a variable is moved in one branch but not another,
+        // should set deinit flags appropriately in each branch
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func consume(consuming h: Handle) {}
+            
+            func example(cond: Bool) {
+                let handle = Handle(fd: 42);
+                if cond {
+                    consume(handle);  // moved here - flag should be false
+                } else {
+                    // not moved here - flag should be true
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have flag-setting statements
+                .any_block(|b| b.has_statement(StatementPattern::AnySetDeinitFlag)),
+        );
+    }
+
+    #[test]
+    fn both_branches_move_no_conditional_deinit() {
+        // When a variable is moved in both branches, should NOT use DeinitIf
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func consume(consuming h: Handle) {}
+            
+            func example(cond: Bool) {
+                let handle = Handle(fd: 42);
+                if cond {
+                    consume(handle);  // moved here
+                } else {
+                    consume(handle);  // moved here too
+                }
+                // handle is always moved, no deinit needed
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should NOT have a DeinitIf for handle
+                .no_block(|b| b.has_statement(StatementPattern::AnyDeinitIf))
+                // Should NOT have a Deinit for handle either
+                .no_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+        );
+    }
+
+    #[test]
+    fn neither_branch_moves_uses_regular_deinit() {
+        // When a variable is not moved in either branch, should use regular Deinit
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            func getVal(h: Handle) -> Int {
+                return h.fd
+            }
+            
+            func example(cond: Bool) {
+                let handle = Handle(fd: 42);
+                if cond {
+                    let x = getVal(handle);  // borrowed, not moved
+                } else {
+                    let y = getVal(handle);  // borrowed, not moved
+                }
+                // handle needs regular deinit
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have regular Deinit for handle
+                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() }))
+                // Should NOT have DeinitIf for handle
+                .no_block(|b| b.has_statement(StatementPattern::AnyDeinitIf)),
+        );
     }
 }

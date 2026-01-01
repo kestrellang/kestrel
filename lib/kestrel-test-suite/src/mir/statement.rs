@@ -93,6 +93,20 @@ pub enum StatementPattern {
     PtrToRef,
     PtrToRefMut,
     RefToPtr,
+
+    /// Deinit operations
+    /// Unconditional deinit of a local
+    Deinit { local: String },
+    /// Any unconditional deinit
+    AnyDeinit,
+    /// Conditional deinit
+    DeinitIf { local: String, flag: String },
+    /// Any conditional deinit
+    AnyDeinitIf,
+    /// Set deinit flag to a specific value
+    SetDeinitFlag { flag: String, value: bool },
+    /// Any set deinit flag
+    AnySetDeinitFlag,
 }
 
 impl StatementPattern {
@@ -101,6 +115,11 @@ impl StatementPattern {
         match &stmt.kind {
             StatementKind::Assign { dest, rvalue } => self.matches_assign(dest, rvalue, ctx),
             StatementKind::Call { callee, args: _ } => self.matches_call(callee, ctx),
+            StatementKind::Deinit { place } => self.matches_deinit(place, ctx),
+            StatementKind::DeinitIf { place, flag } => self.matches_deinit_if(place, flag, ctx),
+            StatementKind::SetDeinitFlag { flag, value } => {
+                self.matches_set_deinit_flag(flag, *value, ctx)
+            }
         }
     }
 
@@ -313,6 +332,14 @@ impl StatementPattern {
             StatementPattern::PtrToRef => matches!(rvalue, Rvalue::PtrToRef(_)),
             StatementPattern::PtrToRefMut => matches!(rvalue, Rvalue::PtrToRefMut(_)),
             StatementPattern::RefToPtr => matches!(rvalue, Rvalue::RefToPtr(_)),
+
+            // Deinit patterns don't match assignments
+            StatementPattern::Deinit { .. }
+            | StatementPattern::AnyDeinit
+            | StatementPattern::DeinitIf { .. }
+            | StatementPattern::AnyDeinitIf
+            | StatementPattern::SetDeinitFlag { .. }
+            | StatementPattern::AnySetDeinitFlag => false,
         }
     }
 
@@ -363,6 +390,72 @@ impl StatementPattern {
         }
     }
 
+    fn matches_deinit(&self, place: &kestrel_execution_graph::Place, ctx: &MirContext) -> bool {
+        match self {
+            StatementPattern::AnyDeinit => true,
+            StatementPattern::Deinit { local } => {
+                if let kestrel_execution_graph::PlaceKind::Local(local_id) = &place.kind {
+                    let actual_local = ctx.local(*local_id);
+                    actual_local.name == *local
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn matches_deinit_if(
+        &self,
+        place: &kestrel_execution_graph::Place,
+        flag: &kestrel_execution_graph::Id<kestrel_execution_graph::Local>,
+        ctx: &MirContext,
+    ) -> bool {
+        match self {
+            StatementPattern::AnyDeinitIf => true,
+            StatementPattern::DeinitIf {
+                local: expected_local,
+                flag: expected_flag,
+            } => {
+                let local_matches =
+                    if let kestrel_execution_graph::PlaceKind::Local(local_id) = &place.kind {
+                        let actual_local = ctx.local(*local_id);
+                        actual_local.name == *expected_local
+                    } else {
+                        false
+                    };
+                let flag_matches = {
+                    let actual_flag = ctx.local(*flag);
+                    actual_flag.name == *expected_flag
+                };
+                local_matches && flag_matches
+            }
+            _ => false,
+        }
+    }
+
+    fn matches_set_deinit_flag(
+        &self,
+        flag: &kestrel_execution_graph::Id<kestrel_execution_graph::Local>,
+        value: bool,
+        ctx: &MirContext,
+    ) -> bool {
+        match self {
+            StatementPattern::AnySetDeinitFlag => true,
+            StatementPattern::SetDeinitFlag {
+                flag: expected_flag,
+                value: expected_value,
+            } => {
+                let flag_matches = {
+                    let actual_flag = ctx.local(*flag);
+                    actual_flag.name == *expected_flag
+                };
+                flag_matches && value == *expected_value
+            }
+            _ => false,
+        }
+    }
+
     /// Format this pattern for display in error messages.
     pub(crate) fn display(&self) -> String {
         match self {
@@ -408,6 +501,16 @@ impl StatementPattern {
             StatementPattern::PtrToRef => "ptr.to.ref".to_string(),
             StatementPattern::PtrToRefMut => "ptr.to.ref_var".to_string(),
             StatementPattern::RefToPtr => "ref.to.ptr".to_string(),
+            StatementPattern::Deinit { local } => format!("deinit %{}", local),
+            StatementPattern::AnyDeinit => "any deinit".to_string(),
+            StatementPattern::DeinitIf { local, flag } => {
+                format!("deinit %{} if %{}", local, flag)
+            }
+            StatementPattern::AnyDeinitIf => "any conditional deinit".to_string(),
+            StatementPattern::SetDeinitFlag { flag, value } => {
+                format!("%{} = {}", flag, value)
+            }
+            StatementPattern::AnySetDeinitFlag => "any set deinit flag".to_string(),
         }
     }
 }

@@ -24,6 +24,7 @@ enum FunctionExpectation {
     HasWhereClause,
     Block(usize, MirBlock),
     AnyBlock(MirBlock),
+    NoBlock(MirBlock),
     Calls(String),
     DoesNotCall(String),
     CallsEscaping,
@@ -115,6 +116,13 @@ impl MirFunction {
     pub fn any_block(mut self, f: impl FnOnce(MirBlock) -> MirBlock) -> Self {
         let block = f(MirBlock::new());
         self.expectations.push(FunctionExpectation::AnyBlock(block));
+        self
+    }
+
+    /// Expect that NO block matches the given expectation.
+    pub fn no_block(mut self, f: impl FnOnce(MirBlock) -> MirBlock) -> Self {
+        let block = f(MirBlock::new());
+        self.expectations.push(FunctionExpectation::NoBlock(block));
         self
     }
 
@@ -327,6 +335,19 @@ impl MirFunction {
                 }
             }
 
+            FunctionExpectation::NoBlock(block_exp) => {
+                // Ensure NO block matches the expectation
+                for (idx, &block_id) in def.blocks.iter().enumerate() {
+                    let block = mir_ctx.mir.block(block_id);
+                    if block_exp.check(idx, block, &def.blocks, mir_ctx.mir).is_ok() {
+                        return Err(format!(
+                            "Function '{}': block bb{} should NOT match the expectation, but it does",
+                            self.name, idx
+                        ));
+                    }
+                }
+            }
+
             FunctionExpectation::Calls(callee) => {
                 if !self.function_calls(def, callee, mir_ctx) {
                     return Err(format!(
@@ -446,6 +467,10 @@ impl MirFunction {
                 callee: actual_callee,
                 ..
             } => self.callee_is(actual_callee, callee, mir_ctx),
+            // Deinit statements don't involve function calls
+            StatementKind::Deinit { .. }
+            | StatementKind::DeinitIf { .. }
+            | StatementKind::SetDeinitFlag { .. } => false,
         }
     }
 
@@ -474,6 +499,10 @@ impl MirFunction {
                             return true;
                         }
                     }
+                    // Deinit statements don't involve function calls
+                    StatementKind::Deinit { .. }
+                    | StatementKind::DeinitIf { .. }
+                    | StatementKind::SetDeinitFlag { .. } => {}
                 }
             }
         }
@@ -504,6 +533,10 @@ impl MirFunction {
                             return true;
                         }
                     }
+                    // Deinit statements don't involve function calls
+                    StatementKind::Deinit { .. }
+                    | StatementKind::DeinitIf { .. }
+                    | StatementKind::SetDeinitFlag { .. } => {}
                 }
             }
         }

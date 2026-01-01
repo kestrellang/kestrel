@@ -4,7 +4,7 @@
 //! a MIR Value (either a Place or an Immediate), potentially generating
 //! statements and new basic blocks along the way.
 
-use kestrel_execution_graph::{BinOp, Callee, CallArg, Immediate, PassingMode, Place, Rvalue, UnOp, Value};
+use kestrel_execution_graph::{BinOp, Callee, CallArg, Id, Immediate, Local, PassingMode, Place, Rvalue, UnOp, Value};
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::expr::{
@@ -98,6 +98,26 @@ fn build_call_args(
         None => {
             // No behavior available - default to Ref for all arguments
             arg_values.into_iter().map(CallArg::borrow).collect()
+        }
+    }
+}
+
+/// Extract the local ID from a Value if it's a simple local reference.
+/// Returns None for complex places (field access, etc.) or immediates.
+fn try_get_local_from_value(value: &Value) -> Option<Id<Local>> {
+    match value {
+        Value::Place(place) => place.as_local(),
+        _ => None,
+    }
+}
+
+/// Mark locals as moved for any arguments passed with Move mode.
+fn mark_moved_args(ctx: &mut LoweringContext, call_args: &[CallArg]) {
+    for arg in call_args {
+        if arg.mode == PassingMode::Move {
+            if let Some(local) = try_get_local_from_value(&arg.value) {
+                ctx.mark_moved(local);
+            }
         }
     }
 }
@@ -277,6 +297,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             // Find the target loop and jump to its exit block
             if let Some(loop_info) = ctx.find_loop(*loop_id) {
                 let exit_block = loop_info.exit_block;
+                // Emit deinits for scopes between current and target loop
+                ctx.emit_deinits_to_loop(*loop_id);
                 ctx.emit_jump(exit_block);
             } else {
                 ctx.emit_error(LoweringError::internal(
@@ -292,6 +314,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             // Find the target loop and jump to its header block
             if let Some(loop_info) = ctx.find_loop(*loop_id) {
                 let header_block = loop_info.header_block;
+                // Emit deinits for scopes between current and target loop
+                ctx.emit_deinits_to_loop(*loop_id);
                 ctx.emit_jump(header_block);
             } else {
                 ctx.emit_error(LoweringError::internal(
@@ -309,6 +333,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             } else {
                 Value::Immediate(Immediate::unit())
             };
+            // Emit deinits for all scopes before returning
+            ctx.emit_all_scope_deinits();
             ctx.emit_return(ret_value);
             // Return a unit value even though this is never used (block is terminated)
             Value::Immediate(Immediate::unit())
@@ -348,14 +374,14 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 .collect();
 
             // Get the array element type from the expression type
-            let element_ty = match expr.ty.kind() {
-                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => lower_type(ctx, elem_ty),
+            let (element_ty, elem_sem_ty) = match expr.ty.kind() {
+                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => (lower_type(ctx, elem_ty), Some(elem_ty)),
                 _ => {
                     ctx.emit_error(LoweringError::internal(
                         "array literal with non-array type",
                         Some(expr.span.clone()),
                     ));
-                    ctx.mir.ty_error()
+                    (ctx.mir.ty_error(), None)
                 }
             };
 
@@ -363,6 +389,13 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             let result_ty = lower_type(ctx, &expr.ty);
             let result_local = ctx.create_temp("array", result_ty);
             let result_place = Place::local(result_local);
+
+            // Track the temp for deinit if array element type needs deinit
+            if let Some(elem_ty) = elem_sem_ty {
+                if ctx.type_needs_deinit(elem_ty) {
+                    ctx.track_statement_temp(result_local);
+                }
+            }
 
             ctx.emit_assign(
                 result_place.clone(),
@@ -386,6 +419,12 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             let result_ty = lower_type(ctx, &expr.ty);
             let result_local = ctx.create_temp("tuple", result_ty);
             let result_place = Place::local(result_local);
+
+            // Track the temp for deinit if any tuple element type needs deinit
+            let needs_deinit = elements.iter().any(|e| ctx.type_needs_deinit(&e.ty));
+            if needs_deinit {
+                ctx.track_statement_temp(result_local);
+            }
 
             ctx.emit_assign(result_place.clone(), Rvalue::Tuple(element_values));
 
@@ -458,6 +497,11 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     // Create result and emit enum variant construction
                     let result_local = ctx.create_temp("enum", enum_ty);
                     let result_place = Place::local(result_local);
+                    
+                    // Track the temp for deinit if the enum type needs deinit
+                    if ctx.type_needs_deinit(&expr.ty) {
+                        ctx.track_statement_temp(result_local);
+                    }
                     
                     ctx.emit_assign(
                         result_place.clone(),
@@ -769,6 +813,11 @@ fn lower_struct_init(
     let result_local = ctx.create_temp("struct", mir_ty);
     let result_place = Place::local(result_local);
 
+    // Track the temp for deinit at statement end if the struct type needs deinit
+    if ctx.type_needs_deinit(struct_type) {
+        ctx.track_statement_temp(result_local);
+    }
+
     // Lower the field values
     let fields: Vec<(String, Value)> = arguments
         .iter()
@@ -815,6 +864,11 @@ fn lower_call(
     let result_ty = lower_type(ctx, &expr.ty);
     let result_local = ctx.create_temp("call", result_ty);
     let result_place = Place::local(result_local);
+
+    // Track the temp for deinit at statement end if the return type needs deinit
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
 
     // Determine the callee and emit the call
     match &callee.kind {
@@ -892,6 +946,9 @@ fn lower_call(
                         let unit_local = ctx.create_temp("init_ret", unit_ty);
                         let unit_place = Place::local(unit_local);
                         
+                        // Mark moved args before the call (call_args is consumed)
+                        mark_moved_args(ctx, &call_args);
+                        
                         if is_type_param_init {
                             // Protocol initializer on type parameter: T() where T: Factory
                             // The parent of the init symbol should be the protocol
@@ -939,6 +996,7 @@ fn lower_call(
                         // Look up CallableBehavior to get parameter access modes
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
                         let call_args = build_call_args(arg_values, &arg_types, callable_beh.as_deref(), false);
+                        mark_moved_args(ctx, &call_args);
                         ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                     }
                 }
@@ -994,6 +1052,9 @@ fn lower_call(
                         // Look up CallableBehavior to get parameter access modes
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
                         let call_args = build_call_args(all_args, &all_arg_types, callable_beh.as_deref(), is_instance);
+                        
+                        // Mark moved args before the call (call_args is consumed)
+                        mark_moved_args(ctx, &call_args);
                         
                         // Check if this is a witness method call (method on type parameter or associated type)
                         if is_type_param_call || is_static_type_param_call || is_assoc_type_call || is_static_assoc_type_call {
@@ -1131,6 +1192,7 @@ fn lower_call(
                     } else {
                         Callee::direct_generic(init_name, type_args)
                     };
+                    mark_moved_args(ctx, &call_args);
                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                     
                     // result_place now contains the initialized struct
@@ -1237,6 +1299,16 @@ fn collect_symbol_name_parts(
 /// 1. First evaluate all let-conditions, checking patterns
 /// 2. If all patterns match, evaluate boolean conditions
 /// 3. If all pass, execute then-branch; otherwise else-branch
+///
+/// # Branch Merging for Conditional Deinit
+///
+/// When a variable from a parent scope is moved in one branch but not the other,
+/// we need to emit conditional deinit (DeinitIf) at scope exit. This is handled by:
+/// 1. Capturing a snapshot of deinit statuses before entering branches
+/// 2. Lowering each branch and capturing post-branch statuses
+/// 3. Computing which variables diverged and creating deinit flags
+/// 4. Emitting SetDeinitFlag statements at the end of each branch
+/// 5. Updating parent scope statuses to MaybeMoved for divergent variables
 fn lower_if(
     ctx: &mut LoweringContext,
     conditions: &[IfCondition],
@@ -1250,21 +1322,30 @@ fn lower_if(
     let result_local = ctx.create_temp("if_result", result_ty);
     let result_place = Place::local(result_local);
 
+    // Track the temp for deinit if the result type needs deinit
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
     // Create the join block where both branches converge
     let join_block = ctx.create_block();
     
     // Create the else block
-    let else_block = ctx.create_block();
+    let else_block_id = ctx.create_block();
 
     // Lower the condition chain
     // This will emit all pattern tests and boolean conditions, eventually
     // jumping to either then_block_start or else_block
     let then_block_start = ctx.create_block();
     
-    lower_condition_chain(ctx, conditions, 0, then_block_start, else_block);
+    // Capture snapshot of parent scope deinit statuses BEFORE entering branches
+    let before_statuses = ctx.snapshot_parent_deinit_statuses();
+    
+    lower_condition_chain(ctx, conditions, 0, then_block_start, else_block_id);
 
-    // Lower then branch
+    // === Lower then branch ===
     ctx.set_current_block(then_block_start);
+    ctx.enter_scope();
     for stmt in then_branch {
         lower_statement(ctx, stmt);
         if ctx.is_block_terminated() {
@@ -1272,22 +1353,48 @@ fn lower_if(
         }
     }
 
-    if !ctx.is_block_terminated() {
+    // Evaluate then value before capturing statuses (might cause moves)
+    let _then_result_value = if !ctx.is_block_terminated() {
         if let Some(value_expr) = then_value {
-            let then_result = lower_expression(ctx, value_expr);
+            let result = lower_expression(ctx, value_expr);
             if !ctx.is_block_terminated() {
-                ctx.emit_assign_value(result_place.clone(), then_result);
-                ctx.emit_jump(join_block);
+                ctx.emit_assign_value(result_place.clone(), result);
             }
+            true
         } else {
             // No then value - assign unit
             ctx.emit_imm(result_place.clone(), Immediate::unit());
-            ctx.emit_jump(join_block);
+            true
         }
-    }
+    } else {
+        false
+    };
+    
+    // Capture then branch's view of parent scope statuses (before exiting branch scope)
+    let then_statuses = ctx.snapshot_parent_deinit_statuses();
+    let then_final_terminated = ctx.is_block_terminated();
+    
+    // Get the then scope info for branch-local deinits
+    let then_scope = ctx.exit_scope_no_emit();
 
-    // Lower else branch
-    ctx.set_current_block(else_block);
+    // Track the block where we need to emit flag settings for then branch
+    let then_final_block = ctx.current_block();
+
+    // === Lower else branch ===
+    // IMPORTANT: Restore parent scope statuses to pre-then-branch state.
+    // The then branch may have marked variables as Moved in the parent scope,
+    // but the else branch should see them as still Valid (the "before" state).
+    ctx.restore_deinit_statuses(&before_statuses);
+    
+    ctx.set_current_block(else_block_id);
+    ctx.enter_scope();
+    
+    // Track whether else branch is terminated
+    let else_statuses;
+    let else_scope;
+    let else_final_block;
+    let else_final_terminated;
+    
     match else_branch {
         Some(ElseBranch::Block { statements, value }) => {
             for stmt in statements {
@@ -1302,28 +1409,103 @@ fn lower_if(
                     let else_result = lower_expression(ctx, value_expr);
                     if !ctx.is_block_terminated() {
                         ctx.emit_assign_value(result_place.clone(), else_result);
-                        ctx.emit_jump(join_block);
                     }
                 } else {
                     ctx.emit_imm(result_place.clone(), Immediate::unit());
-                    ctx.emit_jump(join_block);
                 }
             }
+            
+            else_statuses = ctx.snapshot_parent_deinit_statuses();
+            else_final_terminated = ctx.is_block_terminated();
+            else_scope = ctx.exit_scope_no_emit();
+            else_final_block = ctx.current_block();
         }
 
         Some(ElseBranch::ElseIf(else_if_expr)) => {
+            // ElseIf is a nested if expression which will handle its own scopes
             let else_result = lower_expression(ctx, else_if_expr);
+            
             if !ctx.is_block_terminated() {
                 ctx.emit_assign_value(result_place.clone(), else_result);
-                ctx.emit_jump(join_block);
             }
+            
+            else_statuses = ctx.snapshot_parent_deinit_statuses();
+            else_final_terminated = ctx.is_block_terminated();
+            else_scope = ctx.exit_scope_no_emit();
+            else_final_block = ctx.current_block();
         }
 
         None => {
             // No else branch - result is unit
             ctx.emit_imm(result_place.clone(), Immediate::unit());
+            
+            else_statuses = ctx.snapshot_parent_deinit_statuses();
+            else_final_terminated = ctx.is_block_terminated();
+            else_scope = ctx.exit_scope_no_emit();
+            else_final_block = ctx.current_block();
+        }
+    }
+
+    // === Compute branch merge for parent-scope locals ===
+    // Only do this if at least one branch is not terminated
+    // (if both are terminated, no code after the if will run)
+    let merge_result = if !then_final_terminated || !else_final_terminated {
+        Some(ctx.compute_branch_merge(&before_statuses, &then_statuses, &else_statuses))
+    } else {
+        None
+    };
+
+    // === Emit flag settings and deinits for then branch ===
+    if let Some(then_block) = then_final_block {
+        if !then_final_terminated {
+            ctx.set_current_block(then_block);
+            
+            // Emit flag settings for divergent parent-scope locals
+            if let Some(ref merge) = merge_result {
+                for &flag in &merge.then_flag_false {
+                    ctx.set_deinit_flag(flag, false);
+                }
+                for &flag in &merge.then_flag_true {
+                    ctx.set_deinit_flag(flag, true);
+                }
+            }
+            
+            // Emit deinits for branch-local variables
+            if let Some(ref scope) = then_scope {
+                ctx.emit_scope_deinits(scope);
+            }
+            
             ctx.emit_jump(join_block);
         }
+    }
+
+    // === Emit flag settings and deinits for else branch ===
+    if let Some(else_block) = else_final_block {
+        if !else_final_terminated {
+            ctx.set_current_block(else_block);
+            
+            // Emit flag settings for divergent parent-scope locals
+            if let Some(ref merge) = merge_result {
+                for &flag in &merge.else_flag_false {
+                    ctx.set_deinit_flag(flag, false);
+                }
+                for &flag in &merge.else_flag_true {
+                    ctx.set_deinit_flag(flag, true);
+                }
+            }
+            
+            // Emit deinits for branch-local variables
+            if let Some(ref scope) = else_scope {
+                ctx.emit_scope_deinits(scope);
+            }
+            
+            ctx.emit_jump(join_block);
+        }
+    }
+
+    // === Apply status updates to parent scopes ===
+    if let Some(merge) = merge_result {
+        ctx.apply_merge_updates(merge.updates);
     }
 
     // Continue with join block
@@ -1816,19 +1998,13 @@ fn lower_while(
     body: &[kestrel_semantic_tree::stmt::Statement],
     _expr: &Expression,
 ) -> Value {
-    use crate::context::LoopInfo;
-
     // Create blocks
     let header_block = ctx.create_block();
     let body_block = ctx.create_block();
     let exit_block = ctx.create_block();
 
     // Push loop info for break/continue
-    ctx.push_loop(LoopInfo {
-        loop_id,
-        header_block,
-        exit_block,
-    });
+    ctx.push_loop(loop_id, header_block, exit_block);
 
     // Jump to header
     ctx.emit_jump(header_block);
@@ -1838,8 +2014,9 @@ fn lower_while(
     let cond_value = lower_expression(ctx, condition);
     ctx.emit_branch(cond_value, body_block, exit_block);
 
-    // Body
+    // Body - enter a new scope for the loop body
     ctx.set_current_block(body_block);
+    ctx.enter_scope();
     for stmt in body {
         lower_statement(ctx, stmt);
         if ctx.is_block_terminated() {
@@ -1847,9 +2024,13 @@ fn lower_while(
         }
     }
 
-    // Jump back to header (if not terminated by break/return)
+    // Exit the loop body scope (emits deinits) before jumping back to header
     if !ctx.is_block_terminated() {
+        ctx.exit_scope();
         ctx.emit_jump(header_block);
+    } else {
+        // Block was terminated (by break/return/continue) - scope cleanup happens there
+        ctx.exit_scope_no_emit();
     }
 
     // Pop loop info
@@ -1869,25 +2050,20 @@ fn lower_loop(
     body: &[kestrel_semantic_tree::stmt::Statement],
     _expr: &Expression,
 ) -> Value {
-    use crate::context::LoopInfo;
-
     // Create blocks: header (body entry) and exit
     // For infinite loops, header IS the body - no condition check
     let header_block = ctx.create_block();
     let exit_block = ctx.create_block();
 
     // Push loop info for break/continue
-    ctx.push_loop(LoopInfo {
-        loop_id,
-        header_block,
-        exit_block,
-    });
+    ctx.push_loop(loop_id, header_block, exit_block);
 
     // Jump to header (body entry)
     ctx.emit_jump(header_block);
 
-    // Body
+    // Body - enter a new scope for the loop body
     ctx.set_current_block(header_block);
+    ctx.enter_scope();
     for stmt in body {
         lower_statement(ctx, stmt);
         if ctx.is_block_terminated() {
@@ -1895,9 +2071,13 @@ fn lower_loop(
         }
     }
 
-    // Jump back to header (infinite loop) if not terminated by break/return
+    // Exit the loop body scope (emits deinits) before jumping back to header
     if !ctx.is_block_terminated() {
+        ctx.exit_scope();
         ctx.emit_jump(header_block);
+    } else {
+        // Block was terminated (by break/return/continue) - scope cleanup happens there
+        ctx.exit_scope_no_emit();
     }
 
     // Pop loop info
@@ -1943,8 +2123,6 @@ fn lower_while_let(
     conditions: &[IfCondition],
     body: &[kestrel_semantic_tree::stmt::Statement],
 ) -> Value {
-    use crate::context::LoopInfo;
-
     // Create blocks
     let header_block = ctx.create_block();
     let body_block = ctx.create_block();
@@ -1952,11 +2130,7 @@ fn lower_while_let(
 
     // Push loop info for break/continue
     // Note: continue should jump to header_block to re-evaluate the condition
-    ctx.push_loop(LoopInfo {
-        loop_id,
-        header_block,
-        exit_block,
-    });
+    ctx.push_loop(loop_id, header_block, exit_block);
 
     // Jump to header
     ctx.emit_jump(header_block);
@@ -1968,8 +2142,9 @@ fn lower_while_let(
     ctx.set_current_block(header_block);
     lower_while_let_condition_chain(ctx, conditions, 0, body_block, exit_block);
 
-    // Body
+    // Body - enter a new scope for the loop body
     ctx.set_current_block(body_block);
+    ctx.enter_scope();
     for stmt in body {
         lower_statement(ctx, stmt);
         if ctx.is_block_terminated() {
@@ -1977,9 +2152,13 @@ fn lower_while_let(
         }
     }
 
-    // Jump back to header (if not terminated by break/return)
+    // Exit the loop body scope (emits deinits) before jumping back to header
     if !ctx.is_block_terminated() {
+        ctx.exit_scope();
         ctx.emit_jump(header_block);
+    } else {
+        // Block was terminated (by break/return/continue) - scope cleanup happens there
+        ctx.exit_scope_no_emit();
     }
 
     // Pop loop info

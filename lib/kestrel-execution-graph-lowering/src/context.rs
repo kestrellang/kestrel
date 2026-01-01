@@ -8,9 +8,12 @@ use kestrel_execution_graph::{
 };
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
+use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::symbol::local::LocalId;
-use semantic_tree::symbol::SymbolId;
+use kestrel_semantic_tree::ty::TyKind;
+use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::error::LoweringError;
 use crate::LoweringResult;
@@ -25,6 +28,42 @@ pub struct LoopInfo {
     pub header_block: Id<Block>,
     /// The exit block (where to jump on break).
     pub exit_block: Id<Block>,
+    /// Index into scope_stack where this loop's scope begins.
+    /// Used to emit deinits for break/continue.
+    pub scope_depth: usize,
+}
+
+// =============================================================================
+// Deinit/Drop Tracking
+// =============================================================================
+
+/// Tracks a local variable's deinit status during lowering.
+///
+/// This is used to determine whether a variable needs to have its destructor
+/// called at scope exit, and whether that call should be conditional.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeinitStatus {
+    /// Value is definitely valid and needs deinit at scope exit.
+    Valid,
+    /// Value was definitely moved, no deinit needed.
+    Moved,
+    /// Value was conditionally moved in one branch but not another.
+    /// The flag is a Bool local that is true if the value needs deinit.
+    MaybeMoved { flag: Id<Local> },
+}
+
+/// Information about a lexical scope for deinit insertion.
+///
+/// Each lexical scope (function body, if branch, loop body, block expression, etc.)
+/// tracks which locals were declared in it and their deinit status.
+#[derive(Debug, Clone)]
+pub struct ScopeInfo {
+    /// Locals declared in this scope, in declaration order.
+    /// At scope exit, these are deinited in reverse order.
+    pub locals: Vec<Id<Local>>,
+    /// Current deinit status of each local in scope.
+    /// Only locals that need deinit (non-Copyable with deinit behavior) are tracked here.
+    pub deinit_status: HashMap<Id<Local>, DeinitStatus>,
 }
 
 /// The central context for lowering semantic tree to MIR.
@@ -35,6 +74,7 @@ pub struct LoopInfo {
 /// - Current function state
 /// - Local variable mappings
 /// - Loop stack for break/continue
+/// - Scope stack for deinit tracking
 /// - Collected diagnostics
 pub struct LoweringContext<'a> {
     /// The semantic model providing queries and context.
@@ -57,6 +97,14 @@ pub struct LoweringContext<'a> {
     /// Stack of active loops for break/continue resolution.
     loop_stack: Vec<LoopInfo>,
 
+    /// Stack of lexical scopes for deinit tracking.
+    /// Each scope tracks locals declared in it and their deinit status.
+    scope_stack: Vec<ScopeInfo>,
+
+    /// Temporaries created during current statement evaluation.
+    /// These are deinited at the end of each statement.
+    statement_temps: Vec<Id<Local>>,
+
     /// The current block being built.
     current_block: Option<Id<Block>>,
 
@@ -69,6 +117,9 @@ pub struct LoweringContext<'a> {
     /// Counter for generating unique closure indices within a function.
     /// Reset when entering a new function.
     closure_counter: u32,
+
+    /// Counter for generating unique deinit flag names.
+    deinit_flag_counter: u32,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -81,10 +132,13 @@ impl<'a> LoweringContext<'a> {
             local_map: HashMap::new(),
             type_param_map: HashMap::new(),
             loop_stack: Vec::new(),
+            scope_stack: Vec::new(),
+            statement_temps: Vec::new(),
             current_block: None,
             diagnostics: Vec::new(),
             temp_counter: 0,
             closure_counter: 0,
+            deinit_flag_counter: 0,
         }
     }
 
@@ -115,9 +169,12 @@ impl<'a> LoweringContext<'a> {
         self.current_function = Some(func_id);
         self.local_map.clear();
         self.loop_stack.clear();
+        self.scope_stack.clear();
+        self.statement_temps.clear();
         self.current_block = None;
         self.temp_counter = 0;
         self.closure_counter = 0;
+        self.deinit_flag_counter = 0;
     }
 
     /// Exit the current function.
@@ -125,6 +182,8 @@ impl<'a> LoweringContext<'a> {
         self.current_function = None;
         self.local_map.clear();
         self.loop_stack.clear();
+        self.scope_stack.clear();
+        self.statement_temps.clear();
         self.current_block = None;
     }
 
@@ -179,8 +238,14 @@ impl<'a> LoweringContext<'a> {
     // === Loop Stack ===
 
     /// Push a loop onto the stack.
-    pub fn push_loop(&mut self, info: LoopInfo) {
-        self.loop_stack.push(info);
+    /// The loop's scope_depth is set to the current scope stack depth.
+    pub fn push_loop(&mut self, loop_id: LoopId, header_block: Id<Block>, exit_block: Id<Block>) {
+        self.loop_stack.push(LoopInfo {
+            loop_id,
+            header_block,
+            exit_block,
+            scope_depth: self.scope_stack.len(),
+        });
     }
 
     /// Pop a loop from the stack.
@@ -442,4 +507,524 @@ impl<'a> LoweringContext<'a> {
     pub fn emit_call_unit_with_modes(&mut self, callee: Callee, args: Vec<CallArg>) {
         self.emit_statement(StatementKind::Call { callee, args });
     }
+
+    // ==========================================================================
+    // Scope Management for Deinit
+    // ==========================================================================
+
+    /// Enter a new lexical scope.
+    ///
+    /// Call this when entering a block expression, if branch, loop body, etc.
+    pub fn enter_scope(&mut self) {
+        self.scope_stack.push(ScopeInfo {
+            locals: Vec::new(),
+            deinit_status: HashMap::new(),
+        });
+    }
+
+    /// Exit the current scope, emitting deinits for all tracked locals.
+    ///
+    /// Locals are deinited in reverse declaration order.
+    pub fn exit_scope(&mut self) {
+        if let Some(scope) = self.scope_stack.pop() {
+            self.emit_scope_deinits(&scope);
+        }
+    }
+
+    /// Exit the current scope WITHOUT emitting deinits.
+    ///
+    /// Returns the scope info for later processing (e.g., branch merging).
+    pub fn exit_scope_no_emit(&mut self) -> Option<ScopeInfo> {
+        self.scope_stack.pop()
+    }
+
+    /// Get the current scope depth.
+    pub fn scope_depth(&self) -> usize {
+        self.scope_stack.len()
+    }
+
+    /// Emit deinit statements for a scope's locals in reverse declaration order.
+    pub fn emit_scope_deinits(&mut self, scope: &ScopeInfo) {
+        // Skip if block is already terminated
+        if self.is_block_terminated() {
+            return;
+        }
+
+        // Deinit in reverse declaration order
+        for &local in scope.locals.iter().rev() {
+            if let Some(status) = scope.deinit_status.get(&local) {
+                match status {
+                    DeinitStatus::Valid => {
+                        self.emit_statement(StatementKind::Deinit {
+                            place: Place::local(local),
+                        });
+                    }
+                    DeinitStatus::MaybeMoved { flag } => {
+                        self.emit_statement(StatementKind::DeinitIf {
+                            place: Place::local(local),
+                            flag: *flag,
+                        });
+                    }
+                    DeinitStatus::Moved => {
+                        // Already moved, no deinit needed
+                    }
+                }
+            }
+        }
+    }
+
+    /// Emit deinits for ALL scopes (for return/panic).
+    ///
+    /// Scopes are processed from innermost to outermost.
+    pub fn emit_all_scope_deinits(&mut self) {
+        // Collect scopes to avoid borrow issues
+        let scopes: Vec<ScopeInfo> = self.scope_stack.iter().rev().cloned().collect();
+        for scope in scopes {
+            self.emit_scope_deinits(&scope);
+        }
+    }
+
+    /// Emit deinits for scopes between current depth and target loop.
+    ///
+    /// Used for break/continue to clean up inner scopes before jumping.
+    pub fn emit_deinits_to_loop(&mut self, loop_id: LoopId) {
+        let target_depth = self
+            .find_loop(loop_id)
+            .map(|l| l.scope_depth)
+            .unwrap_or(0);
+
+        // Emit deinits for scopes from current down to (but not including) target
+        let scopes: Vec<ScopeInfo> = self
+            .scope_stack
+            .iter()
+            .skip(target_depth)
+            .rev()
+            .cloned()
+            .collect();
+
+        for scope in scopes {
+            self.emit_scope_deinits(&scope);
+        }
+    }
+
+    // ==========================================================================
+    // Local Tracking for Deinit
+    // ==========================================================================
+
+    /// Register a local as declared in the current scope.
+    ///
+    /// If `needs_deinit` is true, the local will be tracked for deinit at scope exit.
+    pub fn track_local(&mut self, local: Id<Local>, needs_deinit: bool) {
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.locals.push(local);
+            if needs_deinit {
+                scope.deinit_status.insert(local, DeinitStatus::Valid);
+            }
+        }
+    }
+
+    /// Mark a local as moved (no deinit needed).
+    ///
+    /// Searches all scopes from innermost to outermost.
+    pub fn mark_moved(&mut self, local: Id<Local>) {
+        for scope in self.scope_stack.iter_mut().rev() {
+            if scope.deinit_status.contains_key(&local) {
+                scope.deinit_status.insert(local, DeinitStatus::Moved);
+                return;
+            }
+        }
+    }
+
+    /// Mark a local as maybe-moved (needs conditional deinit).
+    ///
+    /// Creates a deinit flag if one doesn't exist. Returns the flag local.
+    pub fn mark_maybe_moved(&mut self, local: Id<Local>) -> Id<Local> {
+        // First check if it already has a MaybeMoved status with a flag
+        for scope in self.scope_stack.iter() {
+            if let Some(DeinitStatus::MaybeMoved { flag }) = scope.deinit_status.get(&local) {
+                return *flag;
+            }
+        }
+
+        // Create a new flag
+        let flag = self.create_deinit_flag();
+
+        // Update status in the appropriate scope
+        for scope in self.scope_stack.iter_mut().rev() {
+            if scope.deinit_status.contains_key(&local) {
+                scope
+                    .deinit_status
+                    .insert(local, DeinitStatus::MaybeMoved { flag });
+                return flag;
+            }
+        }
+
+        flag
+    }
+
+    /// Create a new deinit flag local (Bool type, initialized to true).
+    fn create_deinit_flag(&mut self) -> Id<Local> {
+        let name = format!("__deinit_flag_{}", self.deinit_flag_counter);
+        self.deinit_flag_counter += 1;
+        let ty_bool = self.mir.ty_bool();
+        let flag = self.create_local(&name, ty_bool);
+
+        // Initialize to true (needs deinit)
+        self.emit_statement(StatementKind::SetDeinitFlag { flag, value: true });
+
+        flag
+    }
+
+    /// Get the deinit status of a local, searching all scopes.
+    pub fn get_deinit_status(&self, local: Id<Local>) -> Option<&DeinitStatus> {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(status) = scope.deinit_status.get(&local) {
+                return Some(status);
+            }
+        }
+        None
+    }
+
+    /// Update the deinit status of a local in the appropriate scope.
+    pub fn update_deinit_status(&mut self, local: Id<Local>, status: DeinitStatus) {
+        for scope in self.scope_stack.iter_mut().rev() {
+            if scope.deinit_status.contains_key(&local) {
+                scope.deinit_status.insert(local, status);
+                return;
+            }
+        }
+    }
+
+    // ==========================================================================
+    // Temporary Tracking
+    // ==========================================================================
+
+    /// Register a temporary for end-of-statement cleanup.
+    ///
+    /// Call this when creating a temp that holds a non-Copyable value.
+    /// The temp is also added to the current scope's deinit tracking so that
+    /// `mark_moved()` can properly update its status when it's consumed.
+    pub fn track_statement_temp(&mut self, local: Id<Local>) {
+        self.statement_temps.push(local);
+        // Also track in current scope for move detection
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.deinit_status.insert(local, DeinitStatus::Valid);
+        }
+    }
+
+    /// Emit deinits for statement temporaries and clear the list.
+    ///
+    /// Called at the end of each statement.
+    pub fn emit_temp_deinits(&mut self) {
+        if self.is_block_terminated() {
+            self.statement_temps.clear();
+            return;
+        }
+
+        // Deinit in reverse order
+        for local in self.statement_temps.drain(..).rev().collect::<Vec<_>>() {
+            // Check if temp was moved
+            let status = self.get_deinit_status(local).cloned();
+            match status {
+                Some(DeinitStatus::Valid) | None => {
+                    // If not tracked or still valid, deinit it
+                    // (temps might not be in scope_stack if they don't need tracking)
+                    self.emit_statement(StatementKind::Deinit {
+                        place: Place::local(local),
+                    });
+                }
+                Some(DeinitStatus::MaybeMoved { flag }) => {
+                    self.emit_statement(StatementKind::DeinitIf {
+                        place: Place::local(local),
+                        flag,
+                    });
+                }
+                Some(DeinitStatus::Moved) => {
+                    // Already moved, no deinit needed
+                }
+            }
+        }
+    }
+
+    // ==========================================================================
+    // Type Queries for Deinit
+    // ==========================================================================
+
+    /// Check if a semantic type needs deinit at scope exit.
+    ///
+    /// A type needs deinit if:
+    /// 1. It has a `DeinitBehavior` (custom destructor), AND
+    /// 2. It is NOT Copyable (Copyable types are handled differently)
+    pub fn type_needs_deinit(&self, ty: &kestrel_semantic_tree::ty::Ty) -> bool {
+        match ty.kind() {
+            TyKind::Struct { symbol, .. } => {
+                let meta = symbol.metadata();
+
+                // Check if it has deinit
+                let has_deinit = meta.get_behavior::<DeinitBehavior>().is_some();
+                if !has_deinit {
+                    return false;
+                }
+
+                // Check if it's NOT copyable
+                let is_copyable = meta
+                    .get_behavior::<CopySemanticsBehavior>()
+                    .map(|b: std::sync::Arc<CopySemanticsBehavior>| b.is_copyable())
+                    .unwrap_or(true); // Default is copyable
+
+                !is_copyable
+            }
+            // Enums with deinit - TODO: Phase 5.6
+            TyKind::Enum { .. } => false,
+            // Primitives, functions, references, etc. don't need deinit
+            _ => false,
+        }
+    }
+
+    // ==========================================================================
+    // Branch Merging for Conditional Drops
+    // ==========================================================================
+
+    /// Merge deinit status from two branches (if/else, match arms).
+    ///
+    /// For each local that was tracked before the branch:
+    /// - If moved in both branches → stays Moved
+    /// - If valid in both branches → stays Valid
+    /// - If moved in one but not other → becomes MaybeMoved
+    ///
+    /// Returns a list of (local, new_status) updates to apply to the parent scope.
+    pub fn merge_branch_scopes(
+        &mut self,
+        then_scope: &ScopeInfo,
+        else_scope: &ScopeInfo,
+    ) -> Vec<(Id<Local>, DeinitStatus)> {
+        // First, collect all the locals and their statuses without mutation
+        let mut to_check: Vec<(Id<Local>, DeinitStatus, DeinitStatus, DeinitStatus)> = Vec::new();
+
+        for parent_scope in &self.scope_stack {
+            for (&local, parent_status) in &parent_scope.deinit_status {
+                let then_status = then_scope
+                    .deinit_status
+                    .get(&local)
+                    .cloned()
+                    .unwrap_or_else(|| parent_status.clone());
+                let else_status = else_scope
+                    .deinit_status
+                    .get(&local)
+                    .cloned()
+                    .unwrap_or_else(|| parent_status.clone());
+
+                to_check.push((local, parent_status.clone(), then_status, else_status));
+            }
+        }
+
+        // Now process, which may require mutation (creating flags)
+        let mut updates = Vec::new();
+        for (local, parent_status, then_status, else_status) in to_check {
+            let new_status = self.merge_statuses(&then_status, &else_status, local);
+            if new_status != parent_status {
+                updates.push((local, new_status));
+            }
+        }
+
+        updates
+    }
+
+    /// Merge two deinit statuses from different branches.
+    fn merge_statuses(
+        &mut self,
+        a: &DeinitStatus,
+        b: &DeinitStatus,
+        _local: Id<Local>,
+    ) -> DeinitStatus {
+        match (a, b) {
+            // Same status → keep it
+            (DeinitStatus::Valid, DeinitStatus::Valid) => DeinitStatus::Valid,
+            (DeinitStatus::Moved, DeinitStatus::Moved) => DeinitStatus::Moved,
+
+            // If either is MaybeMoved, result is MaybeMoved (keep existing flag)
+            (DeinitStatus::MaybeMoved { flag }, _) | (_, DeinitStatus::MaybeMoved { flag }) => {
+                DeinitStatus::MaybeMoved { flag: *flag }
+            }
+
+            // One moved, one valid → MaybeMoved (create new flag)
+            (DeinitStatus::Valid, DeinitStatus::Moved)
+            | (DeinitStatus::Moved, DeinitStatus::Valid) => {
+                // Create a flag for this local
+                let flag = self.create_deinit_flag();
+                DeinitStatus::MaybeMoved { flag }
+            }
+        }
+    }
+
+    /// Set a deinit flag to a specific value.
+    ///
+    /// Used when entering a branch where we know the move status.
+    pub fn set_deinit_flag(&mut self, flag: Id<Local>, value: bool) {
+        self.emit_statement(StatementKind::SetDeinitFlag { flag, value });
+    }
+
+    // ==========================================================================
+    // Branch Merging Support for Conditional Deinits
+    // ==========================================================================
+
+    /// Snapshot the deinit status of all tracked locals in parent scopes.
+    ///
+    /// Call this before lowering a branch to capture the "before" state.
+    /// Returns a map of local -> status for all tracked locals.
+    pub fn snapshot_parent_deinit_statuses(&self) -> HashMap<Id<Local>, DeinitStatus> {
+        let mut snapshot = HashMap::new();
+        for scope in &self.scope_stack {
+            for (&local, status) in &scope.deinit_status {
+                snapshot.insert(local, status.clone());
+            }
+        }
+        snapshot
+    }
+
+    /// Get the current deinit status of a local from the parent scopes.
+    ///
+    /// This returns the status without needing to exit the scope.
+    pub fn get_current_deinit_status(&self, local: Id<Local>) -> Option<DeinitStatus> {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(status) = scope.deinit_status.get(&local) {
+                return Some(status.clone());
+            }
+        }
+        None
+    }
+
+    /// Apply status updates to parent scopes after branch merging.
+    ///
+    /// Takes a list of (local, new_status) pairs and updates the parent scopes.
+    pub fn apply_merge_updates(&mut self, updates: Vec<(Id<Local>, DeinitStatus)>) {
+        for (local, new_status) in updates {
+            self.update_deinit_status(local, new_status);
+        }
+    }
+
+    /// Restore deinit statuses from a snapshot.
+    ///
+    /// This is used to reset parent scope statuses after lowering one branch,
+    /// before lowering the other branch. This ensures each branch sees the
+    /// same "before" state.
+    pub fn restore_deinit_statuses(&mut self, snapshot: &HashMap<Id<Local>, DeinitStatus>) {
+        for (&local, status) in snapshot {
+            self.update_deinit_status(local, status.clone());
+        }
+    }
+
+    /// Create a deinit flag without initializing it.
+    ///
+    /// Returns the flag local. The caller is responsible for setting the initial value
+    /// in the appropriate branches.
+    pub fn create_deinit_flag_uninit(&mut self) -> Id<Local> {
+        let name = format!("__deinit_flag_{}", self.deinit_flag_counter);
+        self.deinit_flag_counter += 1;
+        let ty_bool = self.mir.ty_bool();
+        self.create_local(&name, ty_bool)
+    }
+
+    /// Merge deinit statuses from two branches for parent-scope locals.
+    ///
+    /// Given snapshots of status before entering branches and after each branch,
+    /// this determines which locals need conditional deinit and creates flags as needed.
+    ///
+    /// Returns:
+    /// - Updates to apply to parent scopes
+    /// - Locals that need flag=false in then branch
+    /// - Locals that need flag=true in then branch
+    /// - Locals that need flag=false in else branch
+    /// - Locals that need flag=true in else branch
+    pub fn compute_branch_merge(
+        &mut self,
+        before: &HashMap<Id<Local>, DeinitStatus>,
+        then_statuses: &HashMap<Id<Local>, DeinitStatus>,
+        else_statuses: &HashMap<Id<Local>, DeinitStatus>,
+    ) -> BranchMergeResult {
+        let mut updates = Vec::new();
+        let mut then_flag_false = Vec::new();
+        let mut then_flag_true = Vec::new();
+        let mut else_flag_false = Vec::new();
+        let mut else_flag_true = Vec::new();
+
+        for (&local, before_status) in before {
+            let then_status = then_statuses.get(&local).unwrap_or(before_status);
+            let else_status = else_statuses.get(&local).unwrap_or(before_status);
+
+            // Check if there's divergence
+            match (then_status, else_status) {
+                (DeinitStatus::Valid, DeinitStatus::Valid) => {
+                    // Both valid - no change needed
+                }
+                (DeinitStatus::Moved, DeinitStatus::Moved) => {
+                    // Both moved - update parent to Moved
+                    if *before_status != DeinitStatus::Moved {
+                        updates.push((local, DeinitStatus::Moved));
+                    }
+                }
+                (DeinitStatus::Valid, DeinitStatus::Moved) => {
+                    // Moved in else, valid in then -> need conditional deinit
+                    let flag = self.create_deinit_flag_uninit();
+                    updates.push((local, DeinitStatus::MaybeMoved { flag }));
+                    then_flag_true.push(flag); // then: still valid, needs deinit
+                    else_flag_false.push(flag); // else: moved, no deinit
+                }
+                (DeinitStatus::Moved, DeinitStatus::Valid) => {
+                    // Moved in then, valid in else -> need conditional deinit
+                    let flag = self.create_deinit_flag_uninit();
+                    updates.push((local, DeinitStatus::MaybeMoved { flag }));
+                    then_flag_false.push(flag); // then: moved, no deinit
+                    else_flag_true.push(flag); // else: still valid, needs deinit
+                }
+                // If either is already MaybeMoved, keep the flag
+                (DeinitStatus::MaybeMoved { flag }, DeinitStatus::Valid) => {
+                    then_flag_true.push(*flag); // might have been set in nested if
+                    else_flag_true.push(*flag);
+                }
+                (DeinitStatus::Valid, DeinitStatus::MaybeMoved { flag }) => {
+                    then_flag_true.push(*flag);
+                    else_flag_true.push(*flag); // might have been set in nested if
+                }
+                (DeinitStatus::MaybeMoved { flag }, DeinitStatus::Moved) => {
+                    else_flag_false.push(*flag);
+                }
+                (DeinitStatus::Moved, DeinitStatus::MaybeMoved { flag }) => {
+                    then_flag_false.push(*flag);
+                }
+                (DeinitStatus::MaybeMoved { flag: f1 }, DeinitStatus::MaybeMoved { flag: f2 }) => {
+                    // Both maybe moved - this is complex, use the first flag
+                    // In practice, they should be the same flag if from the same source
+                    if f1 != f2 {
+                        // Different flags - this shouldn't happen in well-formed code
+                        // but just in case, we keep f1
+                    }
+                    let _ = f2; // suppress warning
+                }
+            }
+        }
+
+        BranchMergeResult {
+            updates,
+            then_flag_false,
+            then_flag_true,
+            else_flag_false,
+            else_flag_true,
+        }
+    }
+}
+
+/// Result of computing branch merge for deinit flags.
+#[derive(Debug)]
+pub struct BranchMergeResult {
+    /// Updates to apply to parent scopes
+    pub updates: Vec<(Id<Local>, DeinitStatus)>,
+    /// Flags to set to false at end of then branch
+    pub then_flag_false: Vec<Id<Local>>,
+    /// Flags to set to true at end of then branch
+    pub then_flag_true: Vec<Id<Local>>,
+    /// Flags to set to false at end of else branch
+    pub else_flag_false: Vec<Id<Local>>,
+    /// Flags to set to true at end of else branch
+    pub else_flag_true: Vec<Id<Local>>,
 }

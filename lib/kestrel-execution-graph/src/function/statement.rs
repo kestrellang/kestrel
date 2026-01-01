@@ -1,7 +1,7 @@
 //! Statements (operations within basic blocks).
 
 use crate::function::{Immediate, Place, Value};
-use crate::id::{Id, QualifiedName, Ty};
+use crate::id::{Id, Local, QualifiedName, Ty};
 use crate::metadata::{Metadata, Prior};
 use crate::MirContext;
 use std::fmt;
@@ -99,6 +99,22 @@ pub enum StatementKind {
 
     /// `call func(args...)` (unit return, no assignment)
     Call { callee: Callee, args: Vec<CallArg> },
+
+    /// `deinit <place>` - unconditionally run destructor
+    ///
+    /// Used when a value is definitely valid at scope exit.
+    Deinit { place: Place },
+
+    /// `deinit <place> if <flag>` - conditionally run destructor
+    ///
+    /// Used when a value may have been moved in one branch but not another.
+    /// The flag is a Bool local that is true if the value needs to be deinited.
+    DeinitIf { place: Place, flag: Id<Local> },
+
+    /// `<flag> = true/false` - set a deinit flag
+    ///
+    /// Used to track whether a value was moved in a branch.
+    SetDeinitFlag { flag: Id<Local>, value: bool },
 }
 
 /// The right-hand side of an assignment.
@@ -354,6 +370,17 @@ impl fmt::Display for StatementDisplay<'_> {
                     write!(f, "{} {}", arg.mode, arg.value.display(self.ctx))?;
                 }
                 write!(f, ")")
+            }
+            StatementKind::Deinit { place } => {
+                write!(f, "deinit {}", place.display(self.ctx))
+            }
+            StatementKind::DeinitIf { place, flag } => {
+                let flag_name = &self.ctx.local(*flag).name;
+                write!(f, "deinit {} if %{}", place.display(self.ctx), flag_name)
+            }
+            StatementKind::SetDeinitFlag { flag, value } => {
+                let flag_name = &self.ctx.local(*flag).name;
+                write!(f, "%{} = {}", flag_name, value)
             }
         }
     }

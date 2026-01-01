@@ -1,8 +1,9 @@
 //! Statement lowering - converts semantic statements to MIR.
 
-use kestrel_execution_graph::{Immediate, Place, Rvalue, Value};
+use kestrel_execution_graph::{Immediate, Place, Rvalue, StatementKind as MirStatementKind, Value};
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{Expression, IfCondition};
+use kestrel_semantic_tree::pattern::PatternKind;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 
 use crate::context::LoweringContext;
@@ -14,6 +15,7 @@ use crate::ty::lower_type;
 ///
 /// This handles let/var bindings, expression statements, and guard-let.
 /// The generated MIR statements are added to the current block.
+/// Temporary values are tracked and deinited at statement end.
 pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
     // Don't process if block is already terminated
     if ctx.is_block_terminated() {
@@ -30,20 +32,38 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
                 // don't try to do the pattern binding
                 if !ctx.is_block_terminated() {
                     lower_pattern(ctx, pattern, init_value);
+
+                    // Track the local for deinit if needed
+                    if let PatternKind::Local { local_id, .. } = &pattern.kind {
+                        let mir_local = ctx.get_local_unwrap(*local_id);
+                        let needs_deinit = ctx.type_needs_deinit(&pattern.ty);
+                        ctx.track_local(mir_local, needs_deinit);
+                    }
                 }
             } else {
                 // No initializer - the local is created but uninitialized
                 // In MIR, we don't need to do anything here - the local was
                 // already created during function setup
                 //
-                // TODO: Consider emitting an undef or zero initialization
+                // Still track it for scope purposes, but it doesn't need deinit
+                // since it's uninitialized
+                if let PatternKind::Local { local_id, .. } = &pattern.kind {
+                    let mir_local = ctx.get_local_unwrap(*local_id);
+                    ctx.track_local(mir_local, false);
+                }
             }
+
+            // Emit deinits for temporaries created during this statement
+            ctx.emit_temp_deinits();
         }
 
         StatementKind::Expr(expr) => {
             // Lower the expression for its side effects
             // The result is discarded
             let _value = lower_expression(ctx, expr);
+
+            // Emit deinits for temporaries created during this statement
+            ctx.emit_temp_deinits();
         }
 
         StatementKind::GuardLet {
@@ -51,20 +71,24 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
             else_block,
         } => {
             lower_guard_let(ctx, conditions, else_block);
+            // Note: temp deinits are handled within guard_let due to control flow
         }
 
         StatementKind::Deinit { local_id, .. } => {
             // Deinit statement explicitly runs the destructor for a variable.
-            // The move tracking has already happened during body resolution,
-            // marking the variable as moved so it can't be used afterwards.
-            //
-            // At the MIR level, we would emit a drop/deinit operation here,
-            // but since the execution graph doesn't have a Drop statement kind yet,
-            // we just acknowledge the semantic effect (variable is now moved).
-            //
-            // TODO: When drop glue is implemented, emit the actual destructor call here.
-            let _mir_local = ctx.get_local_unwrap(*local_id);
-            // Future: ctx.emit_drop(Place::local(mir_local));
+            // Emit the deinit instruction and mark the variable as moved.
+            let mir_local = ctx.get_local_unwrap(*local_id);
+
+            // Emit the deinit instruction
+            ctx.emit_statement(MirStatementKind::Deinit {
+                place: Place::local(mir_local),
+            });
+
+            // Mark as moved so scope exit doesn't double-deinit
+            ctx.mark_moved(mir_local);
+
+            // Emit deinits for temporaries (though unlikely for `deinit x;`)
+            ctx.emit_temp_deinits();
         }
     }
 }
