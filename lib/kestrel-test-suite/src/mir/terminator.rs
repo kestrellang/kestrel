@@ -1,6 +1,6 @@
 //! Terminator patterns for MIR testing.
 
-use kestrel_execution_graph::{BasicBlock, Id, Block, MirContext, TerminatorKind};
+use kestrel_execution_graph::{BasicBlock, Block, Id, MirContext, TerminatorKind};
 
 /// Pattern for matching terminators in MIR.
 #[derive(Debug, Clone)]
@@ -18,7 +18,10 @@ pub enum TerminatorPattern {
     Branch,
 
     /// branch to specific blocks (0-indexed)
-    BranchTo { then_block: usize, else_block: usize },
+    BranchTo {
+        then_block: usize,
+        else_block: usize,
+    },
 
     /// switch on discriminant
     Switch,
@@ -67,12 +70,16 @@ impl TerminatorPattern {
                     && block_index(*actual_else, all_blocks) == Some(*expected_else)
             }
             (TerminatorPattern::Switch, TerminatorKind::Switch { .. }) => true,
-            (TerminatorPattern::SwitchCases(expected_cases), TerminatorKind::Switch { cases, .. }) => {
+            (
+                TerminatorPattern::SwitchCases(expected_cases),
+                TerminatorKind::Switch { cases, .. },
+            ) => {
                 if cases.len() != expected_cases.len() {
                     return false;
                 }
                 // Check that all expected case names are present
-                let actual_case_names: Vec<_> = cases.iter().map(|(name, _)| name.clone()).collect();
+                let actual_case_names: Vec<_> =
+                    cases.iter().map(|(name, _)| name.clone()).collect();
                 expected_cases.iter().all(|e| actual_case_names.contains(e))
             }
             (TerminatorPattern::Panic, TerminatorKind::Panic(_)) => true,

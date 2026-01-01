@@ -94,7 +94,7 @@ mod semantic {
             }
         "#,
         )
-        .expect(Error::contains("use of moved value"));
+        .expect(HasError("use of moved value"));
     }
 
     #[test]
@@ -131,7 +131,7 @@ mod semantic {
             }
         "#,
         )
-        .expect(Error::contains("use of moved value"));
+        .expect(HasError("use of moved value"));
     }
 }
 

@@ -54,7 +54,8 @@ impl IntoDiagnostic for MaybeMovedError {
             ])
             .with_notes(vec![
                 "value was moved in one branch but not another".to_string(),
-                "help: ensure value is moved in all branches, or clone before the conditional".to_string(),
+                "help: ensure value is moved in all branches, or clone before the conditional"
+                    .to_string(),
             ])
     }
 }

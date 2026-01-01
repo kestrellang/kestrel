@@ -36,9 +36,7 @@ impl IntoDiagnostic for CannotPassLetToMutatingError {
                 Label::secondary(self.binding_span.file_id, self.binding_span.range())
                     .with_message("binding declared as 'let' here"),
             ])
-            .with_notes(vec![
-                "help: consider declaring as 'var' instead".to_string(),
-            ])
+            .with_notes(vec!["help: consider declaring as 'var' instead".to_string()])
     }
 }
 
@@ -58,14 +56,14 @@ pub struct CannotPassImmutableFieldToMutatingError {
 
 impl IntoDiagnostic for CannotPassImmutableFieldToMutatingError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let mut labels = vec![Label::primary(
-            self.argument_span.file_id,
-            self.argument_span.range(),
-        )
-        .with_message(format!(
-            "cannot pass to 'mutating' parameter '{}'",
-            self.parameter_name
-        ))];
+        let mut labels =
+            vec![
+                Label::primary(self.argument_span.file_id, self.argument_span.range())
+                    .with_message(format!(
+                        "cannot pass to 'mutating' parameter '{}'",
+                        self.parameter_name
+                    )),
+            ];
 
         if let Some(ref field_span) = self.field_span {
             labels.push(

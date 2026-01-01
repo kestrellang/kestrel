@@ -4,7 +4,10 @@
 //! a MIR Value (either a Place or an Immediate), potentially generating
 //! statements and new basic blocks along the way.
 
-use kestrel_execution_graph::{BinOp, Callee, CallArg, Id, Immediate, Local, PassingMode, Place, Rvalue, UnOp, Value};
+use kestrel_execution_graph::{
+    BinOp, CallArg, Callee, Id, Immediate, Local, PassingMode, Place, QualifiedNameData, Rvalue,
+    UnOp, Value,
+};
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::expr::{
@@ -24,6 +27,10 @@ use crate::ty::lower_type;
 /// For `Consuming` parameters, we check whether the argument type is copyable:
 /// - Copyable types use `PassingMode::Copy` (value is duplicated)
 /// - Non-copyable types use `PassingMode::Move` (value is moved, original becomes invalid)
+///
+/// Note: This function does NOT handle Cloneable types - those require emitting
+/// a witness call before the function call, which is done separately in
+/// `build_call_args_with_cloning`.
 fn access_mode_to_passing_mode(mode: ParameterAccessMode, arg_ty: &Ty) -> PassingMode {
     match mode {
         ParameterAccessMode::Borrow => PassingMode::Ref,
@@ -38,13 +45,66 @@ fn access_mode_to_passing_mode(mode: ParameterAccessMode, arg_ty: &Ty) -> Passin
     }
 }
 
+/// The qualified name for the Cloneable protocol: std.core.protocols.Cloneable
+const CLONEABLE_PROTOCOL_SEGMENTS: &[&str] = &["std", "core", "protocols", "Cloneable"];
+
+/// Emit a clone call for a Cloneable type.
+///
+/// For Cloneable types being passed to `consuming` parameters:
+/// 1. Create a temp for the cloned value
+/// 2. Emit a witness call: `%cloned = call witness_method Cloneable.clone for T (ref %original)`
+/// 3. Return the cloned value
+///
+/// The caller is responsible for checking `is_cloneable()` before calling this.
+fn emit_clone_call(ctx: &mut LoweringContext, value: &Value, ty: &Ty) -> Value {
+    // Get the MIR type for the argument
+    let mir_ty = lower_type(ctx, ty);
+
+    // Create a temp for the cloned value
+    let cloned_local = ctx.create_temp("cloned", mir_ty);
+    let cloned_place = Place::local(cloned_local);
+
+    // Build the Cloneable protocol qualified name
+    let protocol_name = ctx.mir.intern_name(QualifiedNameData::new(
+        CLONEABLE_PROTOCOL_SEGMENTS
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    ));
+
+    // Create the witness callee: witness_method Cloneable.clone for T
+    let callee = Callee::witness(protocol_name, "clone", mir_ty);
+
+    // The clone method takes `self` by borrow (ref), so pass with PassingMode::Ref
+    let call_args = vec![CallArg::borrow(value.clone())];
+
+    // Emit the call: %cloned = call witness_method Cloneable.clone for T (ref %original)
+    ctx.emit_call_with_modes(cloned_place.clone(), callee, call_args);
+
+    // Track the cloned temp for deinit if the type needs it
+    // (The cloned value is a new value we own, so it might need deinit at statement end
+    // if it's not consumed. However, since we're immediately passing it to a function,
+    // we typically don't need to track it here - it will be moved to the callee.)
+
+    Value::Place(cloned_place)
+}
+
 /// Build CallArgs from values, types, and parameter access modes from a CallableBehavior.
 ///
+/// This version handles Cloneable types by emitting witness calls to `Cloneable.clone`
+/// for `consuming` parameters where the argument type is Cloneable but not Copyable.
+///
+/// For `consuming` parameters:
+/// - Copyable types → PassingMode::Copy (bitwise copy)
+/// - Cloneable types → emit clone call, then PassingMode::Move the cloned value
+/// - Non-copyable, non-cloneable types → PassingMode::Move (original moved)
+///
 /// The `arg_types` slice provides the type of each argument, used to determine
-/// whether a `Consuming` parameter should use Copy or Move semantics.
+/// whether a `Consuming` parameter should use Copy, Clone, or Move semantics.
 ///
 /// If behavior is None (e.g., for indirect calls), defaults to Ref for all args.
 fn build_call_args(
+    ctx: &mut LoweringContext,
     arg_values: Vec<Value>,
     arg_types: &[&Ty],
     behavior: Option<&CallableBehavior>,
@@ -53,13 +113,13 @@ fn build_call_args(
     match behavior {
         Some(beh) => {
             let params = beh.parameters();
-            
+
             // For instance methods, we need to skip the implicit self parameter
             // when matching argument indices to parameter indices.
             // Instance method arguments: [receiver, arg0, arg1, ...]
             // Parameter list: [param0, param1, ...] (receiver is not in params)
             let param_offset = if is_instance_method { 1 } else { 0 };
-            
+
             arg_values
                 .into_iter()
                 .enumerate()
@@ -75,6 +135,17 @@ fn build_call_args(
                         if let Some(param) = params.get(param_idx) {
                             // Get the argument type for this position
                             if let Some(arg_ty) = arg_types.get(i).copied() {
+                                // Check if this is a consuming parameter with a cloneable type
+                                if param.access_mode() == ParameterAccessMode::Consuming
+                                    && arg_ty.is_cloneable()
+                                {
+                                    // For Cloneable types, emit a clone call and move the result
+                                    let cloned_value = emit_clone_call(ctx, &value, arg_ty);
+                                    // Clone was emitted - move the cloned value
+                                    return CallArg::new(cloned_value, PassingMode::Move);
+                                }
+
+                                // Standard handling: use access_mode_to_passing_mode
                                 let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
                                 CallArg::new(value, mode)
                             } else {
@@ -368,14 +439,14 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         // === Other ===
         ExprKind::Array(elements) => {
             // Lower each element
-            let element_values: Vec<Value> = elements
-                .iter()
-                .map(|e| lower_expression(ctx, e))
-                .collect();
+            let element_values: Vec<Value> =
+                elements.iter().map(|e| lower_expression(ctx, e)).collect();
 
             // Get the array element type from the expression type
             let (element_ty, elem_sem_ty) = match expr.ty.kind() {
-                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => (lower_type(ctx, elem_ty), Some(elem_ty)),
+                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => {
+                    (lower_type(ctx, elem_ty), Some(elem_ty))
+                }
                 _ => {
                     ctx.emit_error(LoweringError::internal(
                         "array literal with non-array type",
@@ -410,10 +481,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         ExprKind::Tuple(elements) => {
             // Lower each element
-            let element_values: Vec<Value> = elements
-                .iter()
-                .map(|e| lower_expression(ctx, e))
-                .collect();
+            let element_values: Vec<Value> =
+                elements.iter().map(|e| lower_expression(ctx, e)).collect();
 
             // Create result local and emit tuple construction
             let result_ty = lower_type(ctx, &expr.ty);
@@ -490,19 +559,19 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             match case_symbol {
                 Some(sym) => {
                     let variant_name = sym.metadata().name().value.clone();
-                    
+
                     // Get the enum type from the expression type
                     let enum_ty = lower_type(ctx, &expr.ty);
-                    
+
                     // Create result and emit enum variant construction
                     let result_local = ctx.create_temp("enum", enum_ty);
                     let result_place = Place::local(result_local);
-                    
+
                     // Track the temp for deinit if the enum type needs deinit
                     if ctx.type_needs_deinit(&expr.ty) {
                         ctx.track_statement_temp(result_local);
                     }
-                    
+
                     ctx.emit_assign(
                         result_place.clone(),
                         Rvalue::EnumVariant {
@@ -511,7 +580,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                             payload: vec![],
                         },
                     );
-                    
+
                     Value::Place(result_place)
                 }
                 None => {
@@ -716,7 +785,7 @@ fn lower_primitive_method_call(
             let result_ty = lower_type(ctx, &expr.ty);
             let result_local = ctx.create_temp("str", result_ty);
             let result_place = Place::local(result_local);
-            
+
             ctx.emit_assign(result_place.clone(), Rvalue::IntToString(receiver_value));
             return Value::Place(result_place);
         }
@@ -850,7 +919,7 @@ fn lower_call(
         .iter()
         .map(|arg| lower_expression(ctx, &arg.value))
         .collect();
-    
+
     // Extract argument types for determining Copy vs Move passing modes
     let arg_types: Vec<&Ty> = arguments.iter().map(|arg| &arg.value.ty).collect();
 
@@ -879,13 +948,13 @@ fn lower_call(
             match symbol {
                 Some(sym) => {
                     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-                    
+
                     let kind = sym.metadata().kind();
-                    
+
                     if kind == KestrelSymbolKind::EnumCase {
                         // Enum case with associated values
                         let variant_name = sym.metadata().name().value.clone();
-                        
+
                         ctx.emit_assign(
                             result_place.clone(),
                             Rvalue::EnumVariant {
@@ -897,24 +966,27 @@ fn lower_call(
                     } else if kind == KestrelSymbolKind::Initializer {
                         // Initializer call - need to allocate self and pass as first arg
                         // Initializers have signature: func Type.init(self: &var Type, params...) -> ()
-                        
+
                         // Check if return type is a type parameter (T() where T: Factory)
                         let is_type_param_init = matches!(expr.ty.kind(), TyKind::TypeParameter(_));
-                        
+
                         // Create a mutable reference to the result place
                         let ref_ty = ctx.mir.ty_ref_mut(result_ty);
                         let self_ref_local = ctx.create_temp("self_ref", ref_ty);
                         let self_ref_place = Place::local(self_ref_local);
-                        
+
                         // Emit: %self_ref = ref var %result
-                        ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
-                        
+                        ctx.emit_assign(
+                            self_ref_place.clone(),
+                            Rvalue::RefMut(result_place.clone()),
+                        );
+
                         // Look up CallableBehavior to get parameter access modes for user args
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
-                        
+
                         // Build call args: self_ref first (always MutRef), then user args with their modes
                         let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
-                        
+
                         // Add user-provided arguments with their access modes
                         if let Some(beh) = callable_beh {
                             let params = beh.parameters();
@@ -922,7 +994,10 @@ fn lower_call(
                                 if let Some(param) = params.get(i) {
                                     // Get the argument type for Copy vs Move determination
                                     if let Some(arg_ty) = arg_types.get(i).copied() {
-                                        let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
+                                        let mode = access_mode_to_passing_mode(
+                                            param.access_mode(),
+                                            arg_ty,
+                                        );
                                         call_args.push(CallArg::new(value, mode));
                                     } else {
                                         // Fallback: default to Copy for Consuming
@@ -940,15 +1015,15 @@ fn lower_call(
                         } else {
                             call_args.extend(arg_values.into_iter().map(CallArg::borrow));
                         }
-                        
+
                         // Create a temp for the unit return value of init (we discard it)
                         let unit_ty = ctx.mir.ty_unit();
                         let unit_local = ctx.create_temp("init_ret", unit_ty);
                         let unit_place = Place::local(unit_local);
-                        
+
                         // Mark moved args before the call (call_args is consumed)
                         mark_moved_args(ctx, &call_args);
-                        
+
                         if is_type_param_init {
                             // Protocol initializer on type parameter: T() where T: Factory
                             // The parent of the init symbol should be the protocol
@@ -956,7 +1031,8 @@ fn lower_call(
                                 if parent.metadata().kind() == KestrelSymbolKind::Protocol {
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &expr.ty);
-                                    let mir_callee = Callee::witness(protocol_name, "init", for_type);
+                                    let mir_callee =
+                                        Callee::witness(protocol_name, "init", for_type);
                                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                                 } else {
                                     ctx.emit_error(LoweringError::internal(
@@ -982,7 +1058,7 @@ fn lower_call(
                             };
                             ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                         }
-                        
+
                         // result_place now contains the initialized struct
                     } else {
                         // Regular function call
@@ -992,10 +1068,16 @@ fn lower_call(
                         } else {
                             Callee::direct_generic(func_name, type_args)
                         };
-                        
+
                         // Look up CallableBehavior to get parameter access modes
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
-                        let call_args = build_call_args(arg_values, &arg_types, callable_beh.as_deref(), false);
+                        let call_args = build_call_args(
+                            ctx,
+                            arg_values,
+                            &arg_types,
+                            callable_beh.as_deref(),
+                            false,
+                        );
                         mark_moved_args(ctx, &call_args);
                         ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                     }
@@ -1025,7 +1107,7 @@ fn lower_call(
 
             // Determine if this is an instance method call (has receiver value)
             let is_instance = !(is_static_type_param_call || is_static_assoc_type_call);
-            
+
             // For instance methods on type params, receiver becomes first argument
             // For static methods on type params/assoc types, there's no receiver value
             let (all_args, all_arg_types): (Vec<Value>, Vec<&Ty>) = if !is_instance {
@@ -1051,21 +1133,38 @@ fn lower_call(
                     Some(sym) => {
                         // Look up CallableBehavior to get parameter access modes
                         let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
-                        let call_args = build_call_args(all_args, &all_arg_types, callable_beh.as_deref(), is_instance);
-                        
+                        let call_args = build_call_args(
+                            ctx,
+                            all_args,
+                            &all_arg_types,
+                            callable_beh.as_deref(),
+                            is_instance,
+                        );
+
                         // Mark moved args before the call (call_args is consumed)
                         mark_moved_args(ctx, &call_args);
-                        
+
                         // Check if this is a witness method call (method on type parameter or associated type)
-                        if is_type_param_call || is_static_type_param_call || is_assoc_type_call || is_static_assoc_type_call {
+                        if is_type_param_call
+                            || is_static_type_param_call
+                            || is_assoc_type_call
+                            || is_static_assoc_type_call
+                        {
                             // Get the protocol from the method's parent
                             if let Some(parent) = sym.metadata().parent() {
                                 if parent.metadata().kind() == KestrelSymbolKind::Protocol {
                                     let protocol_name = qualified_name_for_symbol(ctx, &parent);
                                     let for_type = lower_type(ctx, &receiver.ty);
-                                    let mir_callee =
-                                        Callee::witness(protocol_name, method_name.clone(), for_type);
-                                    ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+                                    let mir_callee = Callee::witness(
+                                        protocol_name,
+                                        method_name.clone(),
+                                        for_type,
+                                    );
+                                    ctx.emit_call_with_modes(
+                                        result_place.clone(),
+                                        mir_callee,
+                                        call_args,
+                                    );
                                 } else {
                                     // Method's parent is not a protocol - shouldn't happen
                                     ctx.emit_error(LoweringError::internal(
@@ -1121,7 +1220,7 @@ fn lower_call(
             // 3. Pass the reference as the first argument
             // 4. Call the init (which returns unit)
             // 5. Return the struct value
-            
+
             let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
             match symbol {
                 Some(sym) => {
@@ -1130,31 +1229,36 @@ fn lower_call(
                     collect_symbol_name_parts(&sym, &mut name_parts);
                     name_parts.push("init".to_string());
 
-                    let init_name = ctx.mir.intern_name(
-                        kestrel_execution_graph::QualifiedNameData::new(name_parts),
-                    );
-                    
+                    let init_name = ctx
+                        .mir
+                        .intern_name(kestrel_execution_graph::QualifiedNameData::new(name_parts));
+
                     // Create a mutable reference to the result place
                     // The ref type is &var T where T is the struct type
                     let ref_ty = ctx.mir.ty_ref_mut(result_ty);
                     let self_ref_local = ctx.create_temp("self_ref", ref_ty);
                     let self_ref_place = Place::local(self_ref_local);
-                    
+
                     // Emit: %self_ref = ref var %result
                     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
-                    
+
                     // Try to find the initializer symbol to get its CallableBehavior
                     // Look for an "init" child of the type symbol
-                    let init_beh = sym.metadata().children().iter()
+                    let init_beh = sym
+                        .metadata()
+                        .children()
+                        .iter()
                         .find(|child| {
                             child.metadata().kind() == KestrelSymbolKind::Initializer
                                 && child.metadata().name().value == "init"
                         })
-                        .and_then(|init_sym| init_sym.metadata().get_behavior::<CallableBehavior>());
-                    
+                        .and_then(|init_sym| {
+                            init_sym.metadata().get_behavior::<CallableBehavior>()
+                        });
+
                     // Build call args: self_ref first (always MutRef), then user args with their modes
                     let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
-                    
+
                     // Add user-provided arguments with their access modes
                     if let Some(beh) = &init_beh {
                         let params = beh.parameters();
@@ -1162,7 +1266,8 @@ fn lower_call(
                             if let Some(param) = params.get(i) {
                                 // Get the argument type for Copy vs Move determination
                                 if let Some(arg_ty) = arg_types.get(i).copied() {
-                                    let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
+                                    let mode =
+                                        access_mode_to_passing_mode(param.access_mode(), arg_ty);
                                     call_args.push(CallArg::new(value, mode));
                                 } else {
                                     // Fallback: default to Copy for Consuming
@@ -1180,12 +1285,12 @@ fn lower_call(
                     } else {
                         call_args.extend(arg_values.into_iter().map(CallArg::borrow));
                     }
-                    
+
                     // Create a temp for the unit return value of init (we discard it)
                     let unit_ty = ctx.mir.ty_unit();
                     let unit_local = ctx.create_temp("init_ret", unit_ty);
                     let unit_place = Place::local(unit_local);
-                    
+
                     // Call the init function
                     let mir_callee = if type_args.is_empty() {
                         Callee::direct(init_name)
@@ -1194,13 +1299,16 @@ fn lower_call(
                     };
                     mark_moved_args(ctx, &call_args);
                     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
-                    
+
                     // result_place now contains the initialized struct
                     // (init wrote to it via the self_ref)
                 }
                 None => {
                     ctx.emit_error(LoweringError::internal(
-                        format!("type symbol not found for initializer call: {:?}", symbol_id),
+                        format!(
+                            "type symbol not found for initializer call: {:?}",
+                            symbol_id
+                        ),
                         Some(expr.span.clone()),
                     ));
                     return Value::Immediate(Immediate::error());
@@ -1213,7 +1321,11 @@ fn lower_call(
             let mir_local = ctx.get_local_unwrap(*local_id);
             let callee_place = Place::local(mir_local);
             // Closures are "thick" callables
-            ctx.emit_call(result_place.clone(), Callee::Thick(callee_place), arg_values);
+            ctx.emit_call(
+                result_place.clone(),
+                Callee::Thick(callee_place),
+                arg_values,
+            );
         }
 
         _ => {
@@ -1250,7 +1362,9 @@ fn lower_call(
 
 /// Collect name segments from a symbol (helper for TypeRef init calls).
 fn collect_symbol_name_parts(
-    symbol: &std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    symbol: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
     parts: &mut Vec<String>,
 ) {
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -1329,7 +1443,7 @@ fn lower_if(
 
     // Create the join block where both branches converge
     let join_block = ctx.create_block();
-    
+
     // Create the else block
     let else_block_id = ctx.create_block();
 
@@ -1337,10 +1451,10 @@ fn lower_if(
     // This will emit all pattern tests and boolean conditions, eventually
     // jumping to either then_block_start or else_block
     let then_block_start = ctx.create_block();
-    
+
     // Capture snapshot of parent scope deinit statuses BEFORE entering branches
     let before_statuses = ctx.snapshot_parent_deinit_statuses();
-    
+
     lower_condition_chain(ctx, conditions, 0, then_block_start, else_block_id);
 
     // === Lower then branch ===
@@ -1369,11 +1483,11 @@ fn lower_if(
     } else {
         false
     };
-    
+
     // Capture then branch's view of parent scope statuses (before exiting branch scope)
     let then_statuses = ctx.snapshot_parent_deinit_statuses();
     let then_final_terminated = ctx.is_block_terminated();
-    
+
     // Get the then scope info for branch-local deinits
     let then_scope = ctx.exit_scope_no_emit();
 
@@ -1385,16 +1499,16 @@ fn lower_if(
     // The then branch may have marked variables as Moved in the parent scope,
     // but the else branch should see them as still Valid (the "before" state).
     ctx.restore_deinit_statuses(&before_statuses);
-    
+
     ctx.set_current_block(else_block_id);
     ctx.enter_scope();
-    
+
     // Track whether else branch is terminated
     let else_statuses;
     let else_scope;
     let else_final_block;
     let else_final_terminated;
-    
+
     match else_branch {
         Some(ElseBranch::Block { statements, value }) => {
             for stmt in statements {
@@ -1414,7 +1528,7 @@ fn lower_if(
                     ctx.emit_imm(result_place.clone(), Immediate::unit());
                 }
             }
-            
+
             else_statuses = ctx.snapshot_parent_deinit_statuses();
             else_final_terminated = ctx.is_block_terminated();
             else_scope = ctx.exit_scope_no_emit();
@@ -1424,11 +1538,11 @@ fn lower_if(
         Some(ElseBranch::ElseIf(else_if_expr)) => {
             // ElseIf is a nested if expression which will handle its own scopes
             let else_result = lower_expression(ctx, else_if_expr);
-            
+
             if !ctx.is_block_terminated() {
                 ctx.emit_assign_value(result_place.clone(), else_result);
             }
-            
+
             else_statuses = ctx.snapshot_parent_deinit_statuses();
             else_final_terminated = ctx.is_block_terminated();
             else_scope = ctx.exit_scope_no_emit();
@@ -1438,7 +1552,7 @@ fn lower_if(
         None => {
             // No else branch - result is unit
             ctx.emit_imm(result_place.clone(), Immediate::unit());
-            
+
             else_statuses = ctx.snapshot_parent_deinit_statuses();
             else_final_terminated = ctx.is_block_terminated();
             else_scope = ctx.exit_scope_no_emit();
@@ -1459,7 +1573,7 @@ fn lower_if(
     if let Some(then_block) = then_final_block {
         if !then_final_terminated {
             ctx.set_current_block(then_block);
-            
+
             // Emit flag settings for divergent parent-scope locals
             if let Some(ref merge) = merge_result {
                 for &flag in &merge.then_flag_false {
@@ -1469,12 +1583,12 @@ fn lower_if(
                     ctx.set_deinit_flag(flag, true);
                 }
             }
-            
+
             // Emit deinits for branch-local variables
             if let Some(ref scope) = then_scope {
                 ctx.emit_scope_deinits(scope);
             }
-            
+
             ctx.emit_jump(join_block);
         }
     }
@@ -1483,7 +1597,7 @@ fn lower_if(
     if let Some(else_block) = else_final_block {
         if !else_final_terminated {
             ctx.set_current_block(else_block);
-            
+
             // Emit flag settings for divergent parent-scope locals
             if let Some(ref merge) = merge_result {
                 for &flag in &merge.else_flag_false {
@@ -1493,12 +1607,12 @@ fn lower_if(
                     ctx.set_deinit_flag(flag, true);
                 }
             }
-            
+
             // Emit deinits for branch-local variables
             if let Some(ref scope) = else_scope {
                 ctx.emit_scope_deinits(scope);
             }
-            
+
             ctx.emit_jump(join_block);
         }
     }
@@ -1539,7 +1653,7 @@ fn lower_condition_chain(
         IfCondition::Expr(condition_expr) => {
             // Boolean condition: emit branch
             let cond_value = lower_expression(ctx, condition_expr);
-            
+
             // If this is the last condition, branch directly to then/else
             if index == conditions.len() - 1 {
                 ctx.emit_branch(cond_value, then_block, else_block);
@@ -1554,7 +1668,9 @@ fn lower_condition_chain(
 
         IfCondition::Let { pattern, value, .. } => {
             // If-let condition: use pattern matching
-            lower_if_let_condition(ctx, pattern, value, conditions, index, then_block, else_block);
+            lower_if_let_condition(
+                ctx, pattern, value, conditions, index, then_block, else_block,
+            );
         }
     }
 }
@@ -1634,13 +1750,20 @@ fn emit_if_let_decision_tree(
         DecisionTree::Success { bindings, .. } => {
             // Pattern matched! Emit bindings and continue to next condition
             crate::match_lowering::emit_bindings(ctx, bindings, scrutinee);
-            
+
             // Continue with the rest of the condition chain
             lower_condition_chain(ctx, conditions, index + 1, then_block, else_block);
         }
 
-        DecisionTree::Switch { path, ty, cases, default } => {
-            emit_if_let_switch(ctx, path, ty, cases, default, scrutinee, conditions, index, then_block, else_block);
+        DecisionTree::Switch {
+            path,
+            ty,
+            cases,
+            default,
+        } => {
+            emit_if_let_switch(
+                ctx, path, ty, cases, default, scrutinee, conditions, index, then_block, else_block,
+            );
         }
 
         DecisionTree::Guard { .. } => {
@@ -1661,7 +1784,10 @@ fn emit_if_let_switch(
     ctx: &mut LoweringContext,
     path: &kestrel_semantic_pattern_matching::AccessPath,
     ty: &kestrel_semantic_tree::ty::Ty,
-    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
     default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
     scrutinee: &Place,
     conditions: &[IfCondition],
@@ -1676,27 +1802,77 @@ fn emit_if_let_switch(
 
     match ty.kind() {
         TyKind::Bool => {
-            emit_if_let_bool_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_bool_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                then_block,
+                else_block,
+            );
         }
 
         TyKind::Enum { .. } => {
-            emit_if_let_enum_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_enum_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                then_block,
+                else_block,
+            );
         }
 
         TyKind::Int(_) => {
-            emit_if_let_int_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_int_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                then_block,
+                else_block,
+            );
         }
 
         TyKind::String => {
-            emit_if_let_string_switch(ctx, &switch_place, cases, default, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_string_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                conditions,
+                index,
+                then_block,
+                else_block,
+            );
         }
 
         TyKind::Tuple(_) | TyKind::Struct { .. } => {
             // Single constructor types - just recurse into the case
             if let Some((_, subtree)) = cases.first() {
-                emit_if_let_decision_tree(ctx, subtree, scrutinee, conditions, index, then_block, else_block);
+                emit_if_let_decision_tree(
+                    ctx, subtree, scrutinee, conditions, index, then_block, else_block,
+                );
             } else if let Some(default_tree) = default {
-                emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+                emit_if_let_decision_tree(
+                    ctx,
+                    default_tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    then_block,
+                    else_block,
+                );
             } else {
                 ctx.emit_jump(else_block);
             }
@@ -1705,9 +1881,19 @@ fn emit_if_let_switch(
         _ => {
             // For other types, try the default or first case
             if let Some(default_tree) = default {
-                emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+                emit_if_let_decision_tree(
+                    ctx,
+                    default_tree,
+                    scrutinee,
+                    conditions,
+                    index,
+                    then_block,
+                    else_block,
+                );
             } else if let Some((_, tree)) = cases.first() {
-                emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+                emit_if_let_decision_tree(
+                    ctx, tree, scrutinee, conditions, index, then_block, else_block,
+                );
             } else {
                 ctx.emit_jump(else_block);
             }
@@ -1719,7 +1905,10 @@ fn emit_if_let_switch(
 fn emit_if_let_bool_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
-    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
     default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
     scrutinee: &Place,
     conditions: &[IfCondition],
@@ -1730,8 +1919,14 @@ fn emit_if_let_bool_switch(
     use kestrel_semantic_pattern_matching::Constructor;
 
     // Find true and false cases
-    let true_tree = cases.iter().find(|(c, _)| matches!(c, Constructor::True)).map(|(_, t)| t);
-    let false_tree = cases.iter().find(|(c, _)| matches!(c, Constructor::False)).map(|(_, t)| t);
+    let true_tree = cases
+        .iter()
+        .find(|(c, _)| matches!(c, Constructor::True))
+        .map(|(_, t)| t);
+    let false_tree = cases
+        .iter()
+        .find(|(c, _)| matches!(c, Constructor::False))
+        .map(|(_, t)| t);
 
     // Create blocks for each case
     let true_block = ctx.create_block();
@@ -1743,9 +1938,19 @@ fn emit_if_let_bool_switch(
     // Emit true case
     ctx.set_current_block(true_block);
     if let Some(tree) = true_tree {
-        emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx, tree, scrutinee, conditions, index, then_block, else_block,
+        );
     } else if let Some(default_tree) = default {
-        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            then_block,
+            else_block,
+        );
     } else {
         ctx.emit_jump(else_block);
     }
@@ -1753,9 +1958,19 @@ fn emit_if_let_bool_switch(
     // Emit false case
     ctx.set_current_block(false_block);
     if let Some(tree) = false_tree {
-        emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx, tree, scrutinee, conditions, index, then_block, else_block,
+        );
     } else if let Some(default_tree) = default {
-        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            then_block,
+            else_block,
+        );
     } else {
         ctx.emit_jump(else_block);
     }
@@ -1765,7 +1980,10 @@ fn emit_if_let_bool_switch(
 fn emit_if_let_enum_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
-    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
     default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
     scrutinee: &Place,
     conditions: &[IfCondition],
@@ -1798,13 +2016,23 @@ fn emit_if_let_enum_switch(
     // Emit each matched variant's body
     for (block, tree) in case_trees {
         ctx.set_current_block(block);
-        emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx, tree, scrutinee, conditions, index, then_block, else_block,
+        );
     }
 
     // Emit default case: if there's a default tree use it, otherwise go to else
     ctx.set_current_block(default_case_block);
     if let Some(default_tree) = default {
-        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            then_block,
+            else_block,
+        );
     } else {
         ctx.emit_jump(else_block);
     }
@@ -1814,7 +2042,10 @@ fn emit_if_let_enum_switch(
 fn emit_if_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
-    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
     default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
     scrutinee: &Place,
     conditions: &[IfCondition],
@@ -1828,7 +2059,15 @@ fn emit_if_let_int_switch(
     // If no cases, check default
     if cases.is_empty() {
         if let Some(default_tree) = default {
-            emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_decision_tree(
+                ctx,
+                default_tree,
+                scrutinee,
+                conditions,
+                index,
+                then_block,
+                else_block,
+            );
         } else {
             ctx.emit_jump(else_block);
         }
@@ -1859,7 +2098,9 @@ fn emit_if_let_int_switch(
 
                 // Emit match body
                 ctx.set_current_block(match_block);
-                emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+                emit_if_let_decision_tree(
+                    ctx, tree, scrutinee, conditions, index, then_block, else_block,
+                );
 
                 // Continue with next comparison
                 ctx.set_current_block(next_block);
@@ -1909,7 +2150,9 @@ fn emit_if_let_int_switch(
                 ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
 
                 ctx.set_current_block(match_block);
-                emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+                emit_if_let_decision_tree(
+                    ctx, tree, scrutinee, conditions, index, then_block, else_block,
+                );
 
                 ctx.set_current_block(next_block);
             }
@@ -1923,7 +2166,15 @@ fn emit_if_let_int_switch(
 
     // After all cases, check default or go to else
     if let Some(default_tree) = default {
-        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            then_block,
+            else_block,
+        );
     } else {
         ctx.emit_jump(else_block);
     }
@@ -1933,7 +2184,10 @@ fn emit_if_let_int_switch(
 fn emit_if_let_string_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
-    cases: &[(kestrel_semantic_pattern_matching::Constructor, kestrel_semantic_pattern_matching::DecisionTree)],
+    cases: &[(
+        kestrel_semantic_pattern_matching::Constructor,
+        kestrel_semantic_pattern_matching::DecisionTree,
+    )],
     default: &Option<Box<kestrel_semantic_pattern_matching::DecisionTree>>,
     scrutinee: &Place,
     conditions: &[IfCondition],
@@ -1947,7 +2201,15 @@ fn emit_if_let_string_switch(
     // If no cases, check default
     if cases.is_empty() {
         if let Some(default_tree) = default {
-            emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_decision_tree(
+                ctx,
+                default_tree,
+                scrutinee,
+                conditions,
+                index,
+                then_block,
+                else_block,
+            );
         } else {
             ctx.emit_jump(else_block);
         }
@@ -1976,7 +2238,9 @@ fn emit_if_let_string_switch(
             ctx.emit_branch(Value::Place(cmp_place), match_block, next_block);
 
             ctx.set_current_block(match_block);
-            emit_if_let_decision_tree(ctx, tree, scrutinee, conditions, index, then_block, else_block);
+            emit_if_let_decision_tree(
+                ctx, tree, scrutinee, conditions, index, then_block, else_block,
+            );
 
             ctx.set_current_block(next_block);
         }
@@ -1984,7 +2248,15 @@ fn emit_if_let_string_switch(
 
     // After all cases, check default or go to else
     if let Some(default_tree) = default {
-        emit_if_let_decision_tree(ctx, default_tree, scrutinee, conditions, index, then_block, else_block);
+        emit_if_let_decision_tree(
+            ctx,
+            default_tree,
+            scrutinee,
+            conditions,
+            index,
+            then_block,
+            else_block,
+        );
     } else {
         ctx.emit_jump(else_block);
     }
@@ -2212,13 +2484,7 @@ fn lower_while_let_condition_chain(
         IfCondition::Let { pattern, value, .. } => {
             // While-let condition: use pattern matching
             lower_while_let_pattern_condition(
-                ctx,
-                pattern,
-                value,
-                conditions,
-                index,
-                body_block,
-                exit_block,
+                ctx, pattern, value, conditions, index, body_block, exit_block,
             );
         }
     }
@@ -2301,16 +2567,7 @@ fn emit_while_let_decision_tree(
             default,
         } => {
             emit_while_let_switch(
-                ctx,
-                path,
-                ty,
-                cases,
-                default,
-                scrutinee,
-                conditions,
-                index,
-                body_block,
-                exit_block,
+                ctx, path, ty, cases, default, scrutinee, conditions, index, body_block, exit_block,
             );
         }
 
@@ -2408,13 +2665,7 @@ fn emit_while_let_switch(
             // Single constructor types - just recurse into the case
             if let Some((_, subtree)) = cases.first() {
                 emit_while_let_decision_tree(
-                    ctx,
-                    subtree,
-                    scrutinee,
-                    conditions,
-                    index,
-                    body_block,
-                    exit_block,
+                    ctx, subtree, scrutinee, conditions, index, body_block, exit_block,
                 );
             } else if let Some(default_tree) = default {
                 emit_while_let_decision_tree(
@@ -2445,13 +2696,7 @@ fn emit_while_let_switch(
                 );
             } else if let Some((_, tree)) = cases.first() {
                 emit_while_let_decision_tree(
-                    ctx,
-                    tree,
-                    scrutinee,
-                    conditions,
-                    index,
-                    body_block,
-                    exit_block,
+                    ctx, tree, scrutinee, conditions, index, body_block, exit_block,
                 );
             } else {
                 ctx.emit_jump(exit_block);
@@ -2498,13 +2743,7 @@ fn emit_while_let_bool_switch(
     ctx.set_current_block(true_block);
     if let Some(tree) = true_tree {
         emit_while_let_decision_tree(
-            ctx,
-            tree,
-            scrutinee,
-            conditions,
-            index,
-            body_block,
-            exit_block,
+            ctx, tree, scrutinee, conditions, index, body_block, exit_block,
         );
     } else if let Some(default_tree) = default {
         emit_while_let_decision_tree(
@@ -2524,13 +2763,7 @@ fn emit_while_let_bool_switch(
     ctx.set_current_block(false_block);
     if let Some(tree) = false_tree {
         emit_while_let_decision_tree(
-            ctx,
-            tree,
-            scrutinee,
-            conditions,
-            index,
-            body_block,
-            exit_block,
+            ctx, tree, scrutinee, conditions, index, body_block, exit_block,
         );
     } else if let Some(default_tree) = default {
         emit_while_let_decision_tree(
@@ -2587,13 +2820,7 @@ fn emit_while_let_enum_switch(
     for (block, tree) in case_trees {
         ctx.set_current_block(block);
         emit_while_let_decision_tree(
-            ctx,
-            tree,
-            scrutinee,
-            conditions,
-            index,
-            body_block,
-            exit_block,
+            ctx, tree, scrutinee, conditions, index, body_block, exit_block,
         );
     }
 
@@ -2675,13 +2902,7 @@ fn emit_while_let_int_switch(
                 // Emit match body
                 ctx.set_current_block(match_block);
                 emit_while_let_decision_tree(
-                    ctx,
-                    tree,
-                    scrutinee,
-                    conditions,
-                    index,
-                    body_block,
-                    exit_block,
+                    ctx, tree, scrutinee, conditions, index, body_block, exit_block,
                 );
 
                 // Continue with next comparison
@@ -2733,13 +2954,7 @@ fn emit_while_let_int_switch(
 
                 ctx.set_current_block(match_block);
                 emit_while_let_decision_tree(
-                    ctx,
-                    tree,
-                    scrutinee,
-                    conditions,
-                    index,
-                    body_block,
-                    exit_block,
+                    ctx, tree, scrutinee, conditions, index, body_block, exit_block,
                 );
 
                 ctx.set_current_block(next_block);
@@ -2827,13 +3042,7 @@ fn emit_while_let_string_switch(
 
             ctx.set_current_block(match_block);
             emit_while_let_decision_tree(
-                ctx,
-                tree,
-                scrutinee,
-                conditions,
-                index,
-                body_block,
-                exit_block,
+                ctx, tree, scrutinee, conditions, index, body_block, exit_block,
             );
 
             ctx.set_current_block(next_block);

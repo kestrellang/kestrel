@@ -45,9 +45,8 @@ impl IntoDiagnostic for UnknownLanguageFeatureError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("unknown language feature '.{}'", self.name))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message("unknown feature")
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("unknown feature")])
     }
 }
 
@@ -104,5 +103,43 @@ impl IntoDiagnostic for DuplicateBuiltinError {
             ))
             .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
                 .with_message("duplicate builtin definition")])
+    }
+}
+
+/// Error when a builtin protocol method is not inside the required builtin protocol.
+pub struct BuiltinMethodNotInProtocolError {
+    pub span: Span,
+    pub method_feature: String,
+    pub required_protocol_feature: String,
+}
+
+impl IntoDiagnostic for BuiltinMethodNotInProtocolError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "@builtin(.{}) must be on a method inside @builtin(.{}) protocol",
+                self.method_feature, self.required_protocol_feature
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("method not in required protocol")])
+    }
+}
+
+/// Error when a builtin protocol method has the wrong signature.
+pub struct BuiltinMethodWrongSignatureError {
+    pub span: Span,
+    pub method_feature: String,
+    pub expected_signature: String,
+}
+
+impl IntoDiagnostic for BuiltinMethodWrongSignatureError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "@builtin(.{}) method has wrong signature",
+                self.method_feature
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("expected `{}`", self.expected_signature))])
     }
 }

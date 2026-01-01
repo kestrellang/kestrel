@@ -23,30 +23,30 @@
 //! }
 //! ```
 
-mod types;
-mod context;
+mod block;
 mod compiles;
+mod context;
 mod counts;
-mod struct_;
 mod enum_;
 mod function;
-mod block;
-mod statement;
-mod terminator;
-mod witness;
 mod protocol;
+mod statement;
+mod struct_;
+mod terminator;
+mod types;
+mod witness;
 
-pub use types::MirTy;
+pub use block::MirBlock;
 pub use compiles::{MirCompiles, MirFails};
 pub use counts::{MirEnumCount, MirFunctionCount, MirStructCount, MirWitnessCount};
-pub use struct_::MirStruct;
 pub use enum_::MirEnum;
 pub use function::MirFunction;
-pub use block::MirBlock;
-pub use statement::StatementPattern;
-pub use terminator::TerminatorPattern;
-pub use witness::MirWitness;
 pub use protocol::MirProtocol;
+pub use statement::StatementPattern;
+pub use struct_::MirStruct;
+pub use terminator::TerminatorPattern;
+pub use types::MirTy;
+pub use witness::MirWitness;
 
 // Re-export useful types from kestrel-execution-graph
 pub use kestrel_execution_graph::{BinOp, CastKind, PassingMode, UnOp};
@@ -91,7 +91,11 @@ impl Mir {
         if let Some(dot_pos) = parent.rfind('.') {
             let module = &parent[..dot_pos];
             let func = &parent[dot_pos + 1..];
-            MirFunction::new(&format!("{}.\"{}\"", module, format!("{}.closure.{}", func, index)))
+            MirFunction::new(&format!(
+                "{}.\"{}\"",
+                module,
+                format!("{}.closure.{}", func, index)
+            ))
         } else {
             // No dot - just use parent as-is
             MirFunction::new(&format!("\"{}.closure.{}\"", parent, index))
@@ -106,7 +110,11 @@ impl Mir {
         if let Some(dot_pos) = parent.rfind('.') {
             let module = &parent[..dot_pos];
             let func = &parent[dot_pos + 1..];
-            MirStruct::new(&format!("{}.\"{}\"", module, format!("{}.closure.{}.env", func, index)))
+            MirStruct::new(&format!(
+                "{}.\"{}\"",
+                module,
+                format!("{}.closure.{}.env", func, index)
+            ))
         } else {
             MirStruct::new(&format!("\"{}.closure.{}.env\"", parent, index))
         }

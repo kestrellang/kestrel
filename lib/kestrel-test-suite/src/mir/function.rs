@@ -86,8 +86,7 @@ impl MirFunction {
 
     /// Expect the function to have a where clause.
     pub fn has_where_clause(mut self) -> Self {
-        self.expectations
-            .push(FunctionExpectation::HasWhereClause);
+        self.expectations.push(FunctionExpectation::HasWhereClause);
         self
     }
 
@@ -142,8 +141,7 @@ impl MirFunction {
 
     /// Expect the function to make at least one escaping (thick) call.
     pub fn calls_escaping(mut self) -> Self {
-        self.expectations
-            .push(FunctionExpectation::CallsEscaping);
+        self.expectations.push(FunctionExpectation::CallsEscaping);
         self
     }
 
@@ -158,15 +156,13 @@ impl MirFunction {
 
     /// Expect this to be a non-capturing closure (no env struct parameter).
     pub fn is_non_capturing(mut self) -> Self {
-        self.expectations
-            .push(FunctionExpectation::IsNonCapturing);
+        self.expectations.push(FunctionExpectation::IsNonCapturing);
         self
     }
 
     /// Expect this closure to have N captures.
     pub fn has_captures(mut self, n: usize) -> Self {
-        self.expectations
-            .push(FunctionExpectation::CaptureCount(n));
+        self.expectations.push(FunctionExpectation::CaptureCount(n));
         self
     }
 
@@ -339,7 +335,10 @@ impl MirFunction {
                 // Ensure NO block matches the expectation
                 for (idx, &block_id) in def.blocks.iter().enumerate() {
                     let block = mir_ctx.mir.block(block_id);
-                    if block_exp.check(idx, block, &def.blocks, mir_ctx.mir).is_ok() {
+                    if block_exp
+                        .check(idx, block, &def.blocks, mir_ctx.mir)
+                        .is_ok()
+                    {
                         return Err(format!(
                             "Function '{}': block bb{} should NOT match the expectation, but it does",
                             self.name, idx

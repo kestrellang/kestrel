@@ -14,7 +14,10 @@ enum EnumExpectation {
     HasCase(String),
     CaseCount(usize),
     TypeParamCount(usize),
-    CaseHasStruct { case_name: String, struct_name: String },
+    CaseHasStruct {
+        case_name: String,
+        struct_name: String,
+    },
 }
 
 impl MirEnum {

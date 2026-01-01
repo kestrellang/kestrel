@@ -79,10 +79,8 @@ impl IntoDiagnostic for DeinitUndeclaredError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("cannot deinit undeclared variable `{}`", self.name))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("not found in this scope"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("not found in this scope")])
     }
 }
 
@@ -99,7 +97,10 @@ pub struct DeinitAlreadyMovedError {
 impl IntoDiagnostic for DeinitAlreadyMovedError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("cannot deinit `{}`: value has already been moved", self.name))
+            .with_message(format!(
+                "cannot deinit `{}`: value has already been moved",
+                self.name
+            ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
                     .with_message("deinit attempted here"),

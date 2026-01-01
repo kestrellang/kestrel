@@ -1315,6 +1315,68 @@ impl Ty {
         }
     }
 
+    /// Check if this type is cloneable (requires clone() to copy).
+    ///
+    /// Cloneable types must be explicitly cloned to copy - they cannot be bitwise copied.
+    /// This is distinct from copyable types which can be implicitly copied.
+    ///
+    /// # Rules
+    ///
+    /// - **Primitives**: Never cloneable (they are copyable, not cloneable)
+    /// - **Composites**: Cloneable if any part is cloneable (`Tuple`, `Array`)
+    /// - **Functions**: Never cloneable (they are copyable)
+    /// - **User-defined types**: Check `CopySemanticsBehavior` for `Cloneable` semantics
+    /// - **Type parameters**: Not cloneable by default (assumed Copyable)
+    pub fn is_cloneable(&self) -> bool {
+        match self.kind() {
+            // Primitives are copyable, not cloneable
+            TyKind::Unit | TyKind::Never | TyKind::Bool | TyKind::String => false,
+            TyKind::Int(_) | TyKind::Float(_) => false,
+
+            // Composites: cloneable if any part is cloneable
+            TyKind::Tuple(elements) => elements.iter().any(|e| e.is_cloneable()),
+            TyKind::Array(element) => element.is_cloneable(),
+
+            // Functions are copyable, not cloneable
+            TyKind::Function { .. } => false,
+            TyKind::UnresolvedFunction { .. } => false,
+
+            // User-defined types: check CopySemanticsBehavior for Cloneable
+            TyKind::Struct { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_cloneable())
+                .unwrap_or(false), // Default to not cloneable (copyable)
+
+            TyKind::Enum { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_cloneable())
+                .unwrap_or(false), // Default to not cloneable (copyable)
+
+            // Error type: return false to avoid unexpected behavior
+            TyKind::Error => false,
+
+            // Type parameters: by default assume copyable (not cloneable)
+            TyKind::TypeParameter(_) => false,
+
+            // Protocols: protocols themselves aren't values
+            TyKind::Protocol { .. } => false,
+
+            // Type aliases: should be resolved, return false
+            TyKind::TypeAlias { .. } => false,
+
+            // Associated types: not yet resolved, return false
+            TyKind::AssociatedType { .. } => false,
+
+            // Self type: depends on context, return false for now
+            TyKind::SelfType => false,
+
+            // Infer: type not yet known, will be resolved
+            TyKind::Infer => false,
+        }
+    }
+
     /// Check if this type is copyable within a where clause context.
     ///
     /// This is like `is_copyable()` but takes a where clause into account for type parameters.

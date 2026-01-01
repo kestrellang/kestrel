@@ -54,7 +54,8 @@ impl MirBlock {
 
     /// Expect the terminator to match the pattern.
     pub fn terminates_with(mut self, pattern: TerminatorPattern) -> Self {
-        self.expectations.push(BlockExpectation::Terminates(pattern));
+        self.expectations
+            .push(BlockExpectation::Terminates(pattern));
         self
     }
 
@@ -67,8 +68,7 @@ impl MirBlock {
 
     /// Expect exactly N successor blocks.
     pub fn has_successor_count(mut self, n: usize) -> Self {
-        self.expectations
-            .push(BlockExpectation::SuccessorCount(n));
+        self.expectations.push(BlockExpectation::SuccessorCount(n));
         self
     }
 

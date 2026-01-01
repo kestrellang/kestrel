@@ -16,12 +16,15 @@ pub enum LanguageFeature {
     // Protocol builtins - copy semantics
     Copyable,
 
+    // Protocol builtins - clone semantics
+    Cloneable,
+    Clone,
+
     // Protocol builtins - literal expressibility
     ExpressibleByIntLiteral,
     ExpressibleByFloatLiteral,
     ExpressibleByStringLiteral,
     ExpressibleByBoolLiteral,
-
     // Future: Operator protocols
     // Add, Sub, Mul, Div, Rem, Neg,
     // BitAnd, BitOr, BitXor, BitNot,
@@ -34,6 +37,8 @@ impl LanguageFeature {
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "Copyable" => Some(Self::Copyable),
+            "Cloneable" => Some(Self::Cloneable),
+            "Clone" => Some(Self::Clone),
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
@@ -46,6 +51,8 @@ impl LanguageFeature {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Copyable => "Copyable",
+            Self::Cloneable => "Cloneable",
+            Self::Clone => "Clone",
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
@@ -61,6 +68,19 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: true,
                     must_be_marker: true,
+                },
+            },
+            Self::Cloneable => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                },
+            },
+            Self::Clone => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::Cloneable,
                 },
             },
             Self::ExpressibleByIntLiteral => BuiltinDefinition {
@@ -105,6 +125,11 @@ pub enum BuiltinKind {
         /// If true, must be a marker protocol (no required methods/types).
         must_be_marker: bool,
     },
+    /// A builtin protocol method.
+    ProtocolMethod {
+        /// The protocol feature this method belongs to.
+        protocol_feature: LanguageFeature,
+    },
     /// A builtin struct (e.g., Int, Bool, String).
     Struct,
     /// A builtin enum (e.g., Ordering, Optional).
@@ -119,6 +144,11 @@ impl BuiltinKind {
     /// Check if this kind is for a protocol.
     pub fn is_protocol(&self) -> bool {
         matches!(self, Self::Protocol { .. })
+    }
+
+    /// Check if this kind is for a protocol method.
+    pub fn is_protocol_method(&self) -> bool {
+        matches!(self, Self::ProtocolMethod { .. })
     }
 
     /// Check if this kind is for a struct.
@@ -145,6 +175,7 @@ impl BuiltinKind {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Protocol { .. } => "protocol",
+            Self::ProtocolMethod { .. } => "protocol method",
             Self::Struct => "struct",
             Self::Enum => "enum",
             Self::Function => "function",
@@ -187,6 +218,10 @@ pub struct BuiltinRegistry {
     // Variable builtins
     variables: RwLock<HashMap<LanguageFeature, SymbolId>>,
     variable_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+
+    // Method builtins
+    methods: RwLock<HashMap<LanguageFeature, SymbolId>>,
+    method_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
 }
 
 impl BuiltinRegistry {
@@ -229,6 +264,11 @@ impl BuiltinRegistry {
     /// Convenience: Get the Copyable protocol.
     pub fn copyable_protocol(&self) -> Option<SymbolId> {
         self.protocol(LanguageFeature::Copyable)
+    }
+
+    /// Convenience: Get the Cloneable protocol.
+    pub fn cloneable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::Cloneable)
     }
 
     // =========================================================================
@@ -356,6 +396,42 @@ impl BuiltinRegistry {
     }
 
     // =========================================================================
+    // Method methods
+    // =========================================================================
+
+    /// Register a method as a builtin. Returns true if successful,
+    /// false if the feature was already registered.
+    pub fn register_method(&self, feature: LanguageFeature, id: SymbolId) -> bool {
+        let mut methods = self.methods.write();
+        if methods.contains_key(&feature) {
+            return false;
+        }
+        methods.insert(feature, id);
+        self.method_features.write().insert(id, feature);
+        true
+    }
+
+    /// Get the symbol ID for a builtin method.
+    pub fn method(&self, feature: LanguageFeature) -> Option<SymbolId> {
+        self.methods.read().get(&feature).copied()
+    }
+
+    /// Check if a symbol is a builtin method.
+    pub fn is_builtin_method(&self, id: SymbolId) -> bool {
+        self.method_features.read().contains_key(&id)
+    }
+
+    /// Get the feature for a builtin method.
+    pub fn method_feature(&self, id: SymbolId) -> Option<LanguageFeature> {
+        self.method_features.read().get(&id).copied()
+    }
+
+    /// Convenience: Get the Clone method.
+    pub fn clone_method(&self) -> Option<SymbolId> {
+        self.method(LanguageFeature::Clone)
+    }
+
+    // =========================================================================
     // Generic methods
     // =========================================================================
 
@@ -366,5 +442,6 @@ impl BuiltinRegistry {
             || self.enums.read().contains_key(&feature)
             || self.functions.read().contains_key(&feature)
             || self.variables.read().contains_key(&feature)
+            || self.methods.read().contains_key(&feature)
     }
 }

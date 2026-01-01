@@ -54,9 +54,8 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
-use kestrel_parser::{Parser, parse_source_file};
+use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
@@ -64,6 +63,7 @@ use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_binder::{SemanticBinder, SemanticModel};
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -175,7 +175,7 @@ impl Test {
         // Run analyzers (during migration we mirror builder validations here)
         {
             use kestrel_semantic_analyzers::{
-                AnalysisContext, Analyzer, default_analyzers, run_all,
+                default_analyzers, run_all, AnalysisContext, Analyzer,
             };
             let mut owned = default_analyzers();
             let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
@@ -564,8 +564,10 @@ pub enum Behavior {
     HasNegativeConformance(&'static str),
     /// Check if symbol conforms to a specific protocol by name
     ConformsTo(&'static str),
-    /// Check if symbol is copyable (has CopySemanticsBehavior::Copyable)
+    /// Check if symbol is copyable (has CopySemanticsBehavior::Copyable or Cloneable)
     IsCopyable(bool),
+    /// Check if symbol is cloneable (has CopySemanticsBehavior::Cloneable)
+    IsCloneable(bool),
     /// Check if struct has a deinit (has DeinitBehavior)
     HasDeinit(bool),
 }
@@ -847,6 +849,27 @@ impl Behavior {
                     }
                 }
             }
+            Behavior::IsCloneable(expected) => {
+                let is_cloneable = get_is_cloneable(symbol);
+                match is_cloneable {
+                    Some(actual) if actual == *expected => Ok(()),
+                    Some(actual) => Err(format!(
+                        "Symbol '{}' is_cloneable={}, expected {}",
+                        path, actual, expected
+                    )),
+                    None => {
+                        // No CopySemanticsBehavior means the type is not cloneable (just copyable)
+                        if !*expected {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Symbol '{}' has no CopySemanticsBehavior (not cloneable), expected cloneable",
+                                path
+                            ))
+                        }
+                    }
+                }
+            }
             Behavior::HasDeinit(expected) => {
                 let has_deinit = get_has_deinit(symbol);
                 if has_deinit == *expected {
@@ -886,6 +909,7 @@ impl std::fmt::Debug for Behavior {
             }
             Behavior::ConformsTo(name) => write!(f, "ConformsTo({})", name),
             Behavior::IsCopyable(b) => write!(f, "IsCopyable({})", b),
+            Behavior::IsCloneable(b) => write!(f, "IsCloneable({})", b),
             Behavior::HasDeinit(b) => write!(f, "HasDeinit({})", b),
         }
     }
@@ -1008,8 +1032,8 @@ fn get_function_data_behavior(
 fn get_implements_protocol_info(
     symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
 ) -> Option<(String, String)> {
-    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 
     // Look for ImplementsBehavior in the symbol's behaviors
     let impl_behavior = symbol
@@ -1147,6 +1171,14 @@ fn get_is_copyable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<boo
         .metadata()
         .get_behavior::<CopySemanticsBehavior>()
         .map(|csb| csb.is_copyable())
+}
+
+/// Helper to check if a symbol is cloneable (has CopySemanticsBehavior::Cloneable)
+fn get_is_cloneable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    symbol
+        .metadata()
+        .get_behavior::<CopySemanticsBehavior>()
+        .map(|csb| csb.is_cloneable())
 }
 
 /// Helper to check if a struct has a deinit (has DeinitBehavior)

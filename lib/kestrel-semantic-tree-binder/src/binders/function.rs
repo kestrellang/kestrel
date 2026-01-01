@@ -3,6 +3,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -13,7 +14,10 @@ use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::diagnostics::{BuiltinWrongKindError, DuplicateBuiltinError};
+use crate::diagnostics::{
+    BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
+    DuplicateBuiltinError,
+};
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
@@ -27,6 +31,7 @@ impl FunctionBinder {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         attributes: &AttributesBehavior,
         source: &str,
+        syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
         let feature = match parse_builtin_attribute(attributes, source, context.diagnostics) {
@@ -40,6 +45,22 @@ impl FunctionBinder {
             .map(|a| a.span.clone())
             .unwrap_or_else(|| symbol.metadata().span().clone());
 
+        let symbol_id = symbol.metadata().id();
+
+        // Check if this is a protocol method builtin
+        if let BuiltinKind::ProtocolMethod { protocol_feature } = &definition.kind {
+            Self::process_protocol_method_builtin(
+                symbol,
+                feature,
+                *protocol_feature,
+                attr_span,
+                syntax,
+                source,
+                context,
+            );
+            return;
+        }
+
         // Validate: feature must expect a function
         if !definition.kind.is_function() {
             context.diagnostics.throw(BuiltinWrongKindError {
@@ -52,7 +73,6 @@ impl FunctionBinder {
         }
 
         // Register the builtin
-        let symbol_id = symbol.metadata().id();
         if !context
             .model
             .builtin_registry()
@@ -63,6 +83,151 @@ impl FunctionBinder {
                 feature_name: feature.name().to_string(),
             });
         }
+    }
+
+    /// Process @builtin attribute for a protocol method (e.g., @builtin(.Clone)).
+    fn process_protocol_method_builtin(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        feature: LanguageFeature,
+        protocol_feature: LanguageFeature,
+        attr_span: Span,
+        syntax: &SyntaxNode,
+        source: &str,
+        context: &mut BindingContext,
+    ) {
+        let symbol_id = symbol.metadata().id();
+
+        // Validate: parent must be a protocol with @builtin matching the required protocol feature
+        let parent = symbol.metadata().parent();
+        let parent_is_correct_builtin_protocol = parent
+            .as_ref()
+            .filter(|p| p.metadata().kind() == KestrelSymbolKind::Protocol)
+            .and_then(|p| {
+                context
+                    .model
+                    .builtin_registry()
+                    .protocol_feature(p.metadata().id())
+            })
+            .map(|pf| pf == protocol_feature)
+            .unwrap_or(false);
+
+        if !parent_is_correct_builtin_protocol {
+            context.diagnostics.throw(BuiltinMethodNotInProtocolError {
+                span: attr_span,
+                method_feature: feature.name().to_string(),
+                required_protocol_feature: protocol_feature.name().to_string(),
+            });
+            return;
+        }
+
+        // Validate signature based on the specific feature
+        if let Err(expected_signature) =
+            Self::validate_protocol_method_signature(feature, symbol, syntax, source)
+        {
+            context.diagnostics.throw(BuiltinMethodWrongSignatureError {
+                span: attr_span,
+                method_feature: feature.name().to_string(),
+                expected_signature,
+            });
+            return;
+        }
+
+        // Register the builtin method
+        if !context
+            .model
+            .builtin_registry()
+            .register_method(feature, symbol_id)
+        {
+            context.diagnostics.throw(DuplicateBuiltinError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+            });
+        }
+    }
+
+    /// Validate the signature for a builtin protocol method.
+    /// Returns Ok(()) if valid, Err(expected_signature) if invalid.
+    fn validate_protocol_method_signature(
+        feature: LanguageFeature,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        source: &str,
+    ) -> Result<(), String> {
+        match feature {
+            LanguageFeature::Clone => Self::validate_clone_signature(symbol, syntax, source),
+            // Add more protocol method validations here as needed
+            _ => Ok(()), // Unknown method features pass validation by default
+        }
+    }
+
+    /// Validate the signature for @builtin(.Clone): `func clone(self) -> Self`
+    ///
+    /// Requirements:
+    /// - Must be an instance method (has a receiver)
+    /// - Must take no parameters besides self
+    /// - Must return Self
+    fn validate_clone_signature(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        source: &str,
+    ) -> Result<(), String> {
+        let expected = "func clone(self) -> Self".to_string();
+
+        // Check for receiver (must be an instance method)
+        let is_static = syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::StaticModifier);
+
+        if is_static {
+            return Err(expected);
+        }
+
+        // Check parent is a protocol (instance method context)
+        let parent_kind = symbol.metadata().parent().map(|p| p.metadata().kind());
+        if !matches!(parent_kind, Some(KestrelSymbolKind::Protocol)) {
+            return Err(expected);
+        }
+
+        // Check parameters: should have no explicit parameters (only implicit self)
+        // In protocol methods, `self` is implicit for instance methods
+        if let Some(params_node) = find_child(syntax, SyntaxKind::ParameterList) {
+            let param_count = params_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Parameter)
+                .count();
+
+            if param_count > 0 {
+                return Err(expected);
+            }
+        }
+
+        // Check return type: must be Self
+        if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
+            if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
+                // Check if it's a TyPath containing just "Self"
+                if let Some(ty_path) = ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
+                    // Get the text of the type path
+                    let start: usize = ty_path.text_range().start().into();
+                    let end: usize = ty_path.text_range().end().into();
+                    let type_text = source[start..end].trim();
+
+                    if type_text != "Self" {
+                        return Err(expected);
+                    }
+                } else {
+                    // Not a TyPath (could be tuple, function, etc.)
+                    return Err(expected);
+                }
+            } else {
+                // No Ty node in return type
+                return Err(expected);
+            }
+        } else {
+            // No return type specified (returns Unit, not Self)
+            return Err(expected);
+        }
+
+        Ok(())
     }
 }
 
@@ -93,7 +258,7 @@ impl DeclarationBinder for FunctionBinder {
         symbol.metadata().add_behavior(attributes_behavior.clone());
 
         // Process @builtin attribute if present
-        Self::process_builtin_attribute(symbol, &attributes_behavior, &source, context);
+        Self::process_builtin_attribute(symbol, &attributes_behavior, &source, syntax, context);
 
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that

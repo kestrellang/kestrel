@@ -11,26 +11,23 @@ Kestrel's memory model is designed to be an **application language first** that 
 
 ## Features
 
-| Feature | Document | Status |
-|---------|----------|--------|
-| Access Modes | [access-modes.md](access-modes.md) | Phase 1 |
-| Copy Semantics | [copy-semantics.md](copy-semantics.md) | Phase 1 |
-| Cloneable Protocol | [cloneable.md](cloneable.md) | Phase 1 |
-| Generics | [generics.md](generics.md) | Phase 1 |
-| Closures | [closures.md](closures.md) | Phase 1 |
-| Drop Semantics | [drop-semantics.md](drop-semantics.md) | Phase 1 |
-| Limitations | [limitations.md](limitations.md) | - |
+The memory model includes:
+- Implicit Copyable structs (copy-by-default)
+- `not Copyable` opt-out for move-only types
+- `Cloneable` protocol for custom copy behavior
+- `borrow`, `mutating`, `consuming` access modes
+- Copy-by-default generics with `where T: not Copyable` bounds
+- RAII via `deinit` blocks
 
-## The Law of Exclusivity
-
-The foundation of Kestrel's memory safety is the Law of Exclusivity:
-
-> If a variable is being accessed, no other overlapping access to that variable
-> may occur unless both accesses are reads.
-
-This is enforced:
-- **Statically** for local variables, `inout` arguments, and value-type properties
-- **Dynamically** for class properties, global variables, and escaped closures
+| Feature | Document |
+|---------|----------|
+| Access Modes | [access-modes.md](access-modes.md) |
+| Copy Semantics | [copy-semantics.md](copy-semantics.md) |
+| Cloneable Protocol | [cloneable.md](cloneable.md) |
+| Generics | [generics.md](generics.md) |
+| Closures | [closures.md](closures.md) |
+| Drop Semantics | [drop-semantics.md](drop-semantics.md) |
+| Limitations | [limitations.md](limitations.md) |
 
 ## Ownership Model
 
@@ -43,16 +40,5 @@ func consume(consuming point: Point) { ... } // Consuming - takes ownership
 ```
 
 There are no user-facing reference types (`&T`). Borrowing is a calling convention, not a type constructor.
-
-## Phases
-
-### Phase 1: Core Ownership
-- Implicit Copyable structs
-- `not Copyable` opt-out for move-only types
-- `Cloneable` protocol for custom copy behavior
-- `borrow`, `mutating`, `consuming` access modes
-- Copy-by-default generics
-- Law of Exclusivity enforcement
-- RAII via `deinit`
 
 

@@ -121,6 +121,85 @@ mod validation_errors {
         )
         .expect(HasError("not a language feature protocol"));
     }
+
+    #[test]
+    fn cloneable_and_not_copyable_is_conflicting() {
+        // Cloneable refines Copyable, so a type cannot conform to Cloneable while opting out of Copyable
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            protocol Cloneable: Copyable {
+                func clone() -> Self
+            }
+            
+            struct Handle: Cloneable, not Copyable {
+                var fd: Int
+                
+                func clone() -> Handle {
+                    Handle(fd: self.fd)
+                }
+            }
+        "#,
+        )
+        .expect(HasError(
+            "cannot conform to `Cloneable` and opt out of `Copyable`",
+        ));
+    }
+
+    #[test]
+    fn cloneable_and_not_copyable_reversed_order() {
+        // Same as above but with not Copyable first in the list
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            protocol Cloneable: Copyable {
+                func clone() -> Self
+            }
+            
+            struct Handle: not Copyable, Cloneable {
+                var fd: Int
+                
+                func clone() -> Handle {
+                    Handle(fd: self.fd)
+                }
+            }
+        "#,
+        )
+        .expect(HasError(
+            "cannot conform to `Cloneable` and opt out of `Copyable`",
+        ));
+    }
+
+    #[test]
+    fn enum_cloneable_and_not_copyable_is_conflicting() {
+        // Same for enums
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            protocol Cloneable: Copyable {
+                func clone() -> Self
+            }
+            
+            enum State: Cloneable, not Copyable {
+                case Active
+                case Inactive
+                
+                func clone() -> State {
+                    self
+                }
+            }
+        "#,
+        )
+        .expect(HasError(
+            "cannot conform to `Cloneable` and opt out of `Copyable`",
+        ));
+    }
 }
 
 // =============================================================================

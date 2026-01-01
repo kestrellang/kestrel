@@ -26,13 +26,20 @@ pub enum StatementPattern {
     RefMut,
 
     /// Construct a struct (type name pattern)
-    Construct { ty: String },
+    Construct {
+        ty: String,
+    },
 
     /// Create an enum variant
-    EnumVariant { enum_ty: String, variant: String },
+    EnumVariant {
+        enum_ty: String,
+        variant: String,
+    },
 
     /// Create a tuple with specific arity
-    Tuple { arity: usize },
+    Tuple {
+        arity: usize,
+    },
 
     /// Create an array
     Array,
@@ -50,7 +57,9 @@ pub enum StatementPattern {
     AnyUnOp,
 
     /// Direct call to a specific function
-    Call { callee: String },
+    Call {
+        callee: String,
+    },
 
     /// Direct call with type arguments
     CallGeneric {
@@ -59,7 +68,10 @@ pub enum StatementPattern {
     },
 
     /// Witness method call
-    CallWitness { protocol: String, method: String },
+    CallWitness {
+        protocol: String,
+        method: String,
+    },
 
     /// Escaping (thick) call
     CallEscaping,
@@ -68,13 +80,20 @@ pub enum StatementPattern {
     AnyCall,
 
     /// func.to.escaping
-    FuncToEscaping { func: String },
+    FuncToEscaping {
+        func: String,
+    },
 
     /// apply partial
-    ApplyPartial { func: String, capture_count: usize },
+    ApplyPartial {
+        func: String,
+        capture_count: usize,
+    },
 
     /// Type cast
-    Cast { kind: CastKind },
+    Cast {
+        kind: CastKind,
+    },
 
     /// Call with specific passing modes for arguments
     /// Each element specifies the expected passing mode for that argument position
@@ -96,21 +115,31 @@ pub enum StatementPattern {
 
     /// Deinit operations
     /// Unconditional deinit of a local
-    Deinit { local: String },
+    Deinit {
+        local: String,
+    },
     /// Any unconditional deinit
     AnyDeinit,
     /// Conditional deinit
-    DeinitIf { local: String, flag: String },
+    DeinitIf {
+        local: String,
+        flag: String,
+    },
     /// Any conditional deinit
     AnyDeinitIf,
     /// Set deinit flag to a specific value
-    SetDeinitFlag { flag: String, value: bool },
+    SetDeinitFlag {
+        flag: String,
+        value: bool,
+    },
     /// Any set deinit flag
     AnySetDeinitFlag,
 
     /// Deinit call - matches `call Module.Type.deinit(...)` patterns
     /// This is used when a struct/enum has a custom deinit block
-    DeinitCall { ty: String },
+    DeinitCall {
+        ty: String,
+    },
     /// Any deinit call (matches any call to a `.deinit` function)
     AnyDeinitCall,
 }
@@ -282,7 +311,10 @@ impl StatementPattern {
                 }
             }
 
-            StatementPattern::ApplyPartial { func, capture_count } => {
+            StatementPattern::ApplyPartial {
+                func,
+                capture_count,
+            } => {
                 if let Rvalue::ApplyPartial {
                     func: actual_func,
                     captures,
@@ -513,7 +545,10 @@ impl StatementPattern {
             StatementPattern::CallEscaping => "escaping call".to_string(),
             StatementPattern::AnyCall => "any call".to_string(),
             StatementPattern::FuncToEscaping { func } => format!("func.to.escaping {}", func),
-            StatementPattern::ApplyPartial { func, capture_count } => {
+            StatementPattern::ApplyPartial {
+                func,
+                capture_count,
+            } => {
                 format!("apply partial {}({} captures)", func, capture_count)
             }
             StatementPattern::Cast { kind } => format!("cast {:?}", kind),
