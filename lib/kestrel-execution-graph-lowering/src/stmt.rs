@@ -37,7 +37,13 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
                     if let PatternKind::Local { local_id, .. } = &pattern.kind {
                         let mir_local = ctx.get_local_unwrap(*local_id);
                         let needs_deinit = ctx.type_needs_deinit(&pattern.ty);
-                        ctx.track_local(mir_local, needs_deinit);
+                        // Pass the semantic type for field drop order expansion
+                        let ty = if needs_deinit {
+                            Some(pattern.ty.clone())
+                        } else {
+                            None
+                        };
+                        ctx.track_local(mir_local, needs_deinit, ty);
                     }
                 }
             } else {
@@ -49,7 +55,7 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
                 // since it's uninitialized
                 if let PatternKind::Local { local_id, .. } = &pattern.kind {
                     let mir_local = ctx.get_local_unwrap(*local_id);
-                    ctx.track_local(mir_local, false);
+                    ctx.track_local(mir_local, false, None);
                 }
             }
 
@@ -76,13 +82,15 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
 
         StatementKind::Deinit { local_id, .. } => {
             // Deinit statement explicitly runs the destructor for a variable.
-            // Emit the deinit instruction and mark the variable as moved.
+            // This should call the type's deinit function if it has one.
             let mir_local = ctx.get_local_unwrap(*local_id);
 
-            // Emit the deinit instruction
-            ctx.emit_statement(MirStatementKind::Deinit {
-                place: Place::local(mir_local),
-            });
+            // Get the type for proper deinit expansion
+            let ty = ctx.get_local_type(mir_local).cloned();
+
+            // Emit the deinit - this will call deinit functions and drop fields properly
+            let place = Place::local(mir_local);
+            ctx.emit_deinit_for_place(&place, ty.as_ref());
 
             // Mark as moved so scope exit doesn't double-deinit
             ctx.mark_moved(mir_local);

@@ -107,6 +107,12 @@ pub enum StatementPattern {
     SetDeinitFlag { flag: String, value: bool },
     /// Any set deinit flag
     AnySetDeinitFlag,
+
+    /// Deinit call - matches `call Module.Type.deinit(...)` patterns
+    /// This is used when a struct/enum has a custom deinit block
+    DeinitCall { ty: String },
+    /// Any deinit call (matches any call to a `.deinit` function)
+    AnyDeinitCall,
 }
 
 impl StatementPattern {
@@ -339,7 +345,9 @@ impl StatementPattern {
             | StatementPattern::DeinitIf { .. }
             | StatementPattern::AnyDeinitIf
             | StatementPattern::SetDeinitFlag { .. }
-            | StatementPattern::AnySetDeinitFlag => false,
+            | StatementPattern::AnySetDeinitFlag
+            | StatementPattern::DeinitCall { .. }
+            | StatementPattern::AnyDeinitCall => false,
         }
     }
 
@@ -378,6 +386,25 @@ impl StatementPattern {
             }
 
             StatementPattern::CallEscaping => matches!(callee, Callee::Thick(_)),
+
+            StatementPattern::AnyDeinitCall => {
+                if let Callee::Direct { name, .. } = callee {
+                    let callee_name = ctx.name(*name).to_string();
+                    callee_name.ends_with(".deinit")
+                } else {
+                    false
+                }
+            }
+
+            StatementPattern::DeinitCall { ty } => {
+                if let Callee::Direct { name, .. } = callee {
+                    let callee_name = ctx.name(*name).to_string();
+                    let expected = format!("{}.deinit", ty);
+                    callee_name == expected
+                } else {
+                    false
+                }
+            }
 
             _ => false,
         }
@@ -511,6 +538,8 @@ impl StatementPattern {
                 format!("%{} = {}", flag, value)
             }
             StatementPattern::AnySetDeinitFlag => "any set deinit flag".to_string(),
+            StatementPattern::DeinitCall { ty } => format!("call {}.deinit", ty),
+            StatementPattern::AnyDeinitCall => "any deinit call".to_string(),
         }
     }
 }

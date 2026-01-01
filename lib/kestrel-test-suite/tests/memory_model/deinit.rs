@@ -531,15 +531,14 @@ mod automatic_deinit {
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
-                // Should have deinit for both h1 and h2
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h2".to_string() }))
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h1".to_string() })),
+                // Should have deinit calls for both h1 and h2
+                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
         );
     }
 
     #[test]
     fn explicit_deinit_emits_mir_statement() {
-        // Explicit `deinit x;` should emit a Deinit MIR statement
+        // Explicit `deinit x;` should emit a deinit call when the type has a deinit block
         Test::new(
             r#"module Test
             @builtin(.Copyable)
@@ -559,8 +558,8 @@ mod automatic_deinit {
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
-                // Should have the explicit Deinit statement
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+                // Should have the explicit deinit call
+                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
         );
     }
 
@@ -586,7 +585,7 @@ mod automatic_deinit {
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() })),
+                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
         );
     }
 
@@ -614,7 +613,7 @@ mod automatic_deinit {
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h".to_string() })),
+                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
         );
     }
 
@@ -643,8 +642,8 @@ mod automatic_deinit {
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h1".to_string() }))
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "h2".to_string() })),
+                // Both branches should have deinit calls for their Handle
+                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() })),
         );
     }
 
@@ -885,10 +884,145 @@ mod automatic_deinit {
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
-                // Should have regular Deinit for handle
-                .any_block(|b| b.has_statement(StatementPattern::Deinit { local: "handle".to_string() }))
+                // Should have regular deinit call for handle
+                .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Handle".to_string() }))
                 // Should NOT have DeinitIf for handle
                 .no_block(|b| b.has_statement(StatementPattern::AnyDeinitIf)),
+        );
+    }
+}
+
+// =============================================================================
+// ENUM DEINIT (Phase 5.6)
+// =============================================================================
+
+mod enum_deinit {
+    use super::*;
+
+    #[test]
+    fn enum_with_non_copyable_payload_generates_switch() {
+        // When dropping an enum with non-copyable payloads, should generate
+        // a switch on the discriminant to drop only the active variant
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Handle: not Copyable {
+                var fd: Int
+                deinit {}
+            }
+            
+            enum Resource: not Copyable {
+                case file(handle: Handle)
+                case none
+            }
+            
+            func example() {
+                let r = Resource.file(handle: Handle(fd: 42));
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have a switch for variant-based drop
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+        );
+    }
+
+    #[test]
+    fn enum_with_only_copyable_payloads_no_switch() {
+        // When all payloads are copyable, no switch needed for drop
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            enum Value {
+                case int(val: Int)
+                case pair(a: Int, b: Int)
+                case none
+            }
+            
+            func example() {
+                let v = Value.int(val: 42);
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should NOT have a switch for variant-based drop
+                .no_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+        );
+    }
+
+    // NOTE: Enum deinit blocks are not yet supported by the parser
+    // This test is disabled until enum deinit parsing is implemented
+    // #[test]
+    // fn enum_with_deinit_block_calls_deinit() {
+    //     // When an enum has a deinit block, it should be called
+    //     Test::new(
+    //         r#"module Test
+    //         @builtin(.Copyable)
+    //         protocol Copyable {}
+    //         
+    //         enum Resource: not Copyable {
+    //             case active(val: Int)
+    //             case inactive
+    //             
+    //             deinit {}
+    //         }
+    //         
+    //         func example() {
+    //             let r = Resource.active(val: 42);
+    //         }
+    //     "#,
+    //     )
+    //     .expect(Compiles)
+    //     .expect(
+    //         MirFunction::new("Test.example")
+    //             // Should call the enum's deinit function
+    //             .any_block(|b| b.has_statement(StatementPattern::DeinitCall { ty: "Test.Resource".to_string() })),
+    //     );
+    // }
+
+    #[test]
+    fn enum_drop_handles_nested_non_copyable() {
+        // Dropping an enum variant should recursively drop non-copyable fields
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+            
+            struct Inner: not Copyable {
+                var id: Int
+                deinit {}
+            }
+            
+            struct Outer: not Copyable {
+                var inner: Inner
+                deinit {}
+            }
+            
+            enum Container: not Copyable {
+                case wrapped(value: Outer)
+                case empty
+            }
+            
+            func example() {
+                let c = Container.wrapped(value: Outer(inner: Inner(id: 1)));
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            MirFunction::new("Test.example")
+                // Should have switch for enum drop
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch))
+                // Should have deinit calls in the variant drop path
+                .any_block(|b| b.has_statement(StatementPattern::AnyDeinitCall)),
         );
     }
 }

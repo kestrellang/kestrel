@@ -470,7 +470,7 @@ conformance := 'not'? type_path
 
 ---
 
-## Phase 5: Drop Semantics (RAII)
+## Phase 5: Drop Semantics (RAII) ✅ COMPLETE
 
 **Goal**: `deinit` blocks for deterministic resource cleanup.
 
@@ -549,16 +549,20 @@ deinit_statement := 'deinit' identifier ';'
 - [x] Cannot deinit already-moved value (use-after-move error)
 - [x] Lowered to `Deinit` statement in execution graph
 
-### 5.5 Field Drop Order
+### 5.5 Field Drop Order ✅ COMPLETE
 
-- [ ] Struct fields dropped in reverse declaration order
-- [ ] `deinit` body runs BEFORE fields are dropped
-- [ ] `self` is fully valid in `deinit` body
+- [x] Struct fields dropped in reverse declaration order
+- [x] `deinit` body runs BEFORE fields are dropped (call to `Type.deinit` emitted first)
+- [x] `self` is fully valid in `deinit` body
+- [x] Added `emit_deinit_for_place()` helper for proper struct/enum deinit expansion
+- [x] Track semantic types in `ScopeInfo.local_types` for field type lookup
 
-### 5.6 Enum Drop
+### 5.6 Enum Drop ✅ COMPLETE
 
-- [ ] Only drop the active variant's payload
-- [ ] Requires runtime discrimination
+- [x] Only drop the active variant's payload
+- [x] Emit switch on discriminant for runtime discrimination
+- [x] Each variant block drops its associated values in reverse order
+- [x] Enums with only copyable payloads skip switch generation
 
 ### 5.7 Diagnostics ✅ COMPLETE
 
@@ -588,6 +592,13 @@ deinit_statement := 'deinit' identifier ';'
   - [x] `moved_value_not_double_deinited` - Moved value not deinited at scope exit
   - [x] `conditional_move_uses_deinit_if` - Uses DeinitIf for conditional moves
   - [x] `conditional_move_sets_flags` - SetDeinitFlag statements emitted
+- [x] Struct field drop tests:
+  - [x] `struct_deinit_called` - Struct deinit function called before field drops
+  - [x] `struct_fields_deinited_in_reverse_order` - Fields dropped in reverse declaration order
+- [x] Enum drop tests:
+  - [x] `enum_with_non_copyable_payload_generates_switch` - Switch on discriminant
+  - [x] `enum_with_only_copyable_payloads_no_switch` - No switch when not needed
+  - [x] `enum_drop_handles_nested_non_copyable` - Recursive enum deinit
   - [x] `both_branches_move_no_conditional_deinit` - Both branches move → no conditional
   - [x] `neither_branch_moves_uses_regular_deinit` - Neither moves → regular Deinit
   - [x] `temporary_in_nested_call_deinited` - Temps passed by ref get deinited
@@ -773,7 +784,7 @@ Recommended order of implementation:
 2. **Phase 2** - Attributes: foundation for builtin system ✅ COMPLETE
 3. **Phase 3** - Builtin protocols: defines `@builtin(.Copyable)` ✅ COMPLETE
 4. **Phase 4** - Copyable/not Copyable: core value proposition ✅ COMPLETE
-5. **Phase 5** - Drop semantics: RAII is critical per requirements ✅ MOSTLY COMPLETE (5.5, 5.6 remaining)
+5. **Phase 5** - Drop semantics: RAII is critical per requirements ✅ COMPLETE
 6. **Phase 7** - Generics before Cloneable (standard library needs this)
 7. **Phase 6** - Cloneable builds on Copyable infrastructure
 8. **Phase 8** - Can be done in parallel with later phases

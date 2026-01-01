@@ -64,6 +64,8 @@ pub struct ScopeInfo {
     /// Current deinit status of each local in scope.
     /// Only locals that need deinit (non-Copyable with deinit behavior) are tracked here.
     pub deinit_status: HashMap<Id<Local>, DeinitStatus>,
+    /// Semantic types for locals that need deinit (for struct field drop order).
+    pub local_types: HashMap<Id<Local>, kestrel_semantic_tree::ty::Ty>,
 }
 
 /// The central context for lowering semantic tree to MIR.
@@ -519,6 +521,7 @@ impl<'a> LoweringContext<'a> {
         self.scope_stack.push(ScopeInfo {
             locals: Vec::new(),
             deinit_status: HashMap::new(),
+            local_types: HashMap::new(),
         });
     }
 
@@ -553,15 +556,20 @@ impl<'a> LoweringContext<'a> {
         // Deinit in reverse declaration order
         for &local in scope.locals.iter().rev() {
             if let Some(status) = scope.deinit_status.get(&local) {
+                let place = Place::local(local);
+                let ty = scope.local_types.get(&local);
+
                 match status {
                     DeinitStatus::Valid => {
-                        self.emit_statement(StatementKind::Deinit {
-                            place: Place::local(local),
-                        });
+                        self.emit_deinit_for_place(&place, ty);
                     }
                     DeinitStatus::MaybeMoved { flag } => {
+                        // For conditional deinit, we still need to expand struct fields
+                        // but wrap them in the conditional check.
+                        // For now, emit a simple DeinitIf - the expanded form would need
+                        // conditional blocks which adds complexity.
                         self.emit_statement(StatementKind::DeinitIf {
-                            place: Place::local(local),
+                            place,
                             flag: *flag,
                         });
                     }
@@ -614,13 +622,34 @@ impl<'a> LoweringContext<'a> {
     /// Register a local as declared in the current scope.
     ///
     /// If `needs_deinit` is true, the local will be tracked for deinit at scope exit.
-    pub fn track_local(&mut self, local: Id<Local>, needs_deinit: bool) {
+    /// The `ty` parameter is used for proper struct/enum field deinit expansion.
+    pub fn track_local(
+        &mut self,
+        local: Id<Local>,
+        needs_deinit: bool,
+        ty: Option<kestrel_semantic_tree::ty::Ty>,
+    ) {
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.locals.push(local);
             if needs_deinit {
                 scope.deinit_status.insert(local, DeinitStatus::Valid);
+                if let Some(t) = ty {
+                    scope.local_types.insert(local, t);
+                }
             }
         }
+    }
+
+    /// Get the semantic type for a local variable.
+    ///
+    /// Searches all scopes from innermost to outermost.
+    pub fn get_local_type(&self, local: Id<Local>) -> Option<&kestrel_semantic_tree::ty::Ty> {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(ty) = scope.local_types.get(&local) {
+                return Some(ty);
+            }
+        }
+        None
     }
 
     /// Mark a local as moved (no deinit needed).
@@ -751,36 +780,6 @@ impl<'a> LoweringContext<'a> {
     // ==========================================================================
 
     /// Check if a semantic type needs deinit at scope exit.
-    ///
-    /// A type needs deinit if:
-    /// 1. It has a `DeinitBehavior` (custom destructor), AND
-    /// 2. It is NOT Copyable (Copyable types are handled differently)
-    pub fn type_needs_deinit(&self, ty: &kestrel_semantic_tree::ty::Ty) -> bool {
-        match ty.kind() {
-            TyKind::Struct { symbol, .. } => {
-                let meta = symbol.metadata();
-
-                // Check if it has deinit
-                let has_deinit = meta.get_behavior::<DeinitBehavior>().is_some();
-                if !has_deinit {
-                    return false;
-                }
-
-                // Check if it's NOT copyable
-                let is_copyable = meta
-                    .get_behavior::<CopySemanticsBehavior>()
-                    .map(|b: std::sync::Arc<CopySemanticsBehavior>| b.is_copyable())
-                    .unwrap_or(true); // Default is copyable
-
-                !is_copyable
-            }
-            // Enums with deinit - TODO: Phase 5.6
-            TyKind::Enum { .. } => false,
-            // Primitives, functions, references, etc. don't need deinit
-            _ => false,
-        }
-    }
-
     // ==========================================================================
     // Branch Merging for Conditional Drops
     // ==========================================================================
@@ -1010,6 +1009,345 @@ impl<'a> LoweringContext<'a> {
             then_flag_true,
             else_flag_false,
             else_flag_true,
+        }
+    }
+
+    // ==========================================================================
+    // Deinit Emission Helpers (Phase 5.5 - Struct Field Drop, Phase 5.6 - Enum Drop)
+    // ==========================================================================
+
+    /// Check if a type needs deinit (has non-trivial drop).
+    ///
+    /// A type needs deinit if:
+    /// 1. It has a DeinitBehavior (custom deinit block), OR
+    /// 2. It contains fields that need deinit (recursive check), AND
+    /// 3. It is NOT copyable
+    pub fn type_needs_deinit(&self, ty: &kestrel_semantic_tree::ty::Ty) -> bool {
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+        use kestrel_semantic_tree::symbol::field::FieldSymbol;
+        use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+
+        match ty.kind() {
+            TyKind::Struct { symbol, .. } => {
+                let meta = symbol.metadata();
+
+                // Check if copyable - copyable types don't need deinit
+                if let Some(copy_beh) = meta.get_behavior::<CopySemanticsBehavior>() {
+                    if copy_beh.is_copyable() {
+                        return false;
+                    }
+                }
+
+                // Check if has deinit behavior
+                if meta.get_behavior::<DeinitBehavior>().is_some() {
+                    return true;
+                }
+
+                // Check if any field needs deinit
+                let fields: Vec<_> = meta
+                    .children()
+                    .into_iter()
+                    .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                    .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+                    .collect();
+
+                fields.iter().any(|f| self.type_needs_deinit(f.field_type()))
+            }
+
+            TyKind::Enum { symbol, .. } => {
+                let meta = symbol.metadata();
+
+                // Check if copyable - copyable types don't need deinit
+                if let Some(copy_beh) = meta.get_behavior::<CopySemanticsBehavior>() {
+                    if copy_beh.is_copyable() {
+                        return false;
+                    }
+                }
+
+                // Check if has deinit behavior
+                if meta.get_behavior::<DeinitBehavior>().is_some() {
+                    return true;
+                }
+
+                // Check if any variant payload needs deinit
+                self.enum_has_payload_needing_deinit(symbol)
+            }
+
+            // Primitives, references, functions don't need deinit
+            _ => false,
+        }
+    }
+
+    /// Check if any enum case has a payload that needs deinit.
+    fn enum_has_payload_needing_deinit(
+        &self,
+        symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol>,
+    ) -> bool {
+        use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+
+        for case in symbol.cases() {
+            if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>() {
+                for param in callable.parameters() {
+                    if self.type_needs_deinit(&param.ty) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Emit deinit for a place, properly handling struct field drops and enum variant drops.
+    ///
+    /// For structs:
+    /// 1. Call deinit function if present (deinit body runs FIRST)
+    /// 2. Deinit each field that needs deinit, in REVERSE declaration order
+    ///
+    /// For enums:
+    /// 1. Call deinit function if present (deinit body runs FIRST)
+    /// 2. Switch on discriminant and drop only the active variant's payloads
+    ///
+    /// For other types, just emit a simple Deinit.
+    pub fn emit_deinit_for_place(
+        &mut self,
+        place: &Place,
+        ty: Option<&kestrel_semantic_tree::ty::Ty>,
+    ) {
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+        use kestrel_semantic_tree::symbol::field::FieldSymbol;
+        use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+
+        let Some(ty) = ty else {
+            // No type info available, emit simple deinit
+            self.emit_statement(StatementKind::Deinit {
+                place: place.clone(),
+            });
+            return;
+        };
+
+        match ty.kind() {
+            TyKind::Struct { symbol, .. } => {
+                let meta = symbol.metadata();
+
+                // 1. Call deinit function if present (body runs FIRST)
+                if let Some(_deinit_beh) = meta.get_behavior::<DeinitBehavior>() {
+                    let deinit_name = self.build_struct_deinit_function_name(symbol);
+                    let self_ref = Value::Place(place.clone());
+                    let call_args = vec![CallArg::mutating(self_ref)];
+                    self.emit_statement(StatementKind::Call {
+                        callee: Callee::direct(deinit_name),
+                        args: call_args,
+                    });
+                }
+
+                // 2. Get fields in declaration order and deinit in reverse
+                let fields: Vec<_> = meta
+                    .children()
+                    .into_iter()
+                    .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                    .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
+                    .collect();
+
+                // Deinit fields in reverse declaration order
+                for field in fields.iter().rev() {
+                    let field_ty = field.field_type();
+
+                    // Only deinit fields that need it (non-copyable with deinit)
+                    if self.type_needs_deinit(field_ty) {
+                        let field_name = field.metadata().name().value.clone();
+                        let field_place = place.clone().field(&field_name);
+
+                        // Recursively emit deinit for the field
+                        self.emit_deinit_for_place(&field_place, Some(field_ty));
+                    }
+                }
+            }
+
+            TyKind::Enum { symbol, .. } => {
+                let meta = symbol.metadata();
+
+                // 1. Call enum's deinit function if present (body runs FIRST)
+                if let Some(_deinit_beh) = meta.get_behavior::<DeinitBehavior>() {
+                    let deinit_name = self.build_enum_deinit_function_name(symbol);
+                    let self_ref = Value::Place(place.clone());
+                    let call_args = vec![CallArg::mutating(self_ref)];
+                    self.emit_statement(StatementKind::Call {
+                        callee: Callee::direct(deinit_name),
+                        args: call_args,
+                    });
+                }
+
+                // 2. Check if any variant has a payload that needs deinit
+                let cases = symbol.cases();
+                let needs_variant_drop = cases.iter().any(|case| {
+                    if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>() {
+                        callable
+                            .parameters()
+                            .iter()
+                            .any(|p| self.type_needs_deinit(&p.ty))
+                    } else {
+                        false
+                    }
+                });
+
+                if !needs_variant_drop {
+                    // No variant needs drop, we're done
+                    return;
+                }
+
+                // 3. Create blocks for each variant and a join block
+                let join_block = self.create_block();
+                let mut switch_cases = Vec::new();
+                let mut variant_blocks = Vec::new();
+
+                for case in &cases {
+                    let block = self.create_block();
+                    let case_name = case.metadata().name().value.clone();
+                    switch_cases.push((case_name.clone(), block));
+                    variant_blocks.push((case.clone(), case_name, block));
+                }
+
+                // Add default case that jumps to join (for safety)
+                let default_block = self.create_block();
+                switch_cases.push(("_".to_string(), default_block));
+
+                // 4. Emit switch on discriminant
+                self.emit_switch(place.clone(), switch_cases);
+
+                // 5. Emit each variant's drop code
+                for (case, case_name, block) in variant_blocks {
+                    self.set_current_block(block);
+
+                    // Drop each associated value that needs deinit
+                    if let Some(callable) = case.metadata().get_behavior::<CallableBehavior>() {
+                        // Drop fields in reverse order (last declared first)
+                        let params: Vec<_> = callable.parameters().iter().enumerate().collect();
+                        for (i, param) in params.into_iter().rev() {
+                            if self.type_needs_deinit(&param.ty) {
+                                // Access the payload field: enum_place.VariantName.i
+                                let payload_place =
+                                    place.clone().downcast(&case_name).index(i);
+                                self.emit_deinit_for_place(&payload_place, Some(&param.ty));
+                            }
+                        }
+                    }
+
+                    self.emit_jump(join_block);
+                }
+
+                // Default block just jumps to join
+                self.set_current_block(default_block);
+                self.emit_jump(join_block);
+
+                // Continue from join block
+                self.set_current_block(join_block);
+            }
+
+            // For other types that somehow need deinit, emit simple Deinit
+            _ => {
+                self.emit_statement(StatementKind::Deinit {
+                    place: place.clone(),
+                });
+            }
+        }
+    }
+
+    /// Build the qualified name for a struct's deinit function.
+    fn build_struct_deinit_function_name(
+        &mut self,
+        struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+    ) -> Id<QualifiedName> {
+        use kestrel_execution_graph::QualifiedNameData;
+
+        let mut segments = Vec::new();
+        self.collect_struct_name_segments(struct_symbol, &mut segments);
+        segments.push("deinit".to_string());
+        let name_data = QualifiedNameData::new(segments);
+        self.mir.intern_name(name_data)
+    }
+
+    /// Build the qualified name for an enum's deinit function.
+    fn build_enum_deinit_function_name(
+        &mut self,
+        enum_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol>,
+    ) -> Id<QualifiedName> {
+        use kestrel_execution_graph::QualifiedNameData;
+
+        let mut segments = Vec::new();
+        self.collect_enum_name_segments(enum_symbol, &mut segments);
+        segments.push("deinit".to_string());
+        let name_data = QualifiedNameData::new(segments);
+        self.mir.intern_name(name_data)
+    }
+
+    /// Collect name segments for a struct symbol.
+    fn collect_struct_name_segments(
+        &self,
+        symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+        segments: &mut Vec<String>,
+    ) {
+        // First collect parent segments
+        if let Some(parent) = symbol.metadata().parent() {
+            self.collect_parent_name_segments(&parent, segments);
+        }
+
+        // Add the struct name
+        let name = symbol.metadata().name();
+        if name.value != "<root>" {
+            segments.push(name.value.clone());
+        }
+    }
+
+    /// Collect name segments for an enum symbol.
+    fn collect_enum_name_segments(
+        &self,
+        symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol>,
+        segments: &mut Vec<String>,
+    ) {
+        // First collect parent segments
+        if let Some(parent) = symbol.metadata().parent() {
+            self.collect_parent_name_segments(&parent, segments);
+        }
+
+        // Add the enum name
+        let name = symbol.metadata().name();
+        if name.value != "<root>" {
+            segments.push(name.value.clone());
+        }
+    }
+
+    /// Collect name segments from a parent symbol chain.
+    fn collect_parent_name_segments(
+        &self,
+        symbol: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+        segments: &mut Vec<String>,
+    ) {
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+
+        // First collect parent's parent
+        if let Some(parent) = symbol.metadata().parent() {
+            self.collect_parent_name_segments(&parent, segments);
+        }
+
+        let kind = symbol.metadata().kind();
+        let name_value = &symbol.metadata().name().value;
+
+        // Skip root
+        if name_value == "<root>" {
+            return;
+        }
+
+        match kind {
+            KestrelSymbolKind::SourceFile => {}
+            KestrelSymbolKind::Module
+            | KestrelSymbolKind::Struct
+            | KestrelSymbolKind::Enum
+            | KestrelSymbolKind::Protocol
+            | KestrelSymbolKind::TypeAlias
+            | KestrelSymbolKind::Extension => {
+                segments.push(name_value.clone());
+            }
+            _ => {}
         }
     }
 }
