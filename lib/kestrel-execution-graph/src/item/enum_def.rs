@@ -82,7 +82,7 @@ impl fmt::Display for EnumDefDisplay<'_> {
         for case_id in &self.def.cases {
             let case = &self.ctx.enum_cases[*case_id];
             write!(f, "    {}: {}", case.name, self.ctx.name(case.struct_name))?;
-            
+
             // Include type parameters if the enum has any
             if !self.def.type_params.is_empty() {
                 write!(f, "[")?;

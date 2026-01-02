@@ -48,11 +48,17 @@ pub enum MirTy {
     // === Function types ===
     /// Thin function pointer (no environment, FFI-safe).
     /// `func(Args...) -> Ret`
-    FuncThin { params: Vec<Id<Ty>>, ret: Id<Ty> },
+    FuncThin {
+        params: Vec<Id<Ty>>,
+        ret: Id<Ty>,
+    },
 
     /// Thick callable (has environment, can escape).
     /// `func escaping(Args...) -> Ret`
-    FuncThick { params: Vec<Id<Ty>>, ret: Id<Ty> },
+    FuncThick {
+        params: Vec<Id<Ty>>,
+        ret: Id<Ty>,
+    },
 
     /// `Self` - the implementing type in a protocol context.
     /// Only valid in protocol method signatures. During witness lookup,

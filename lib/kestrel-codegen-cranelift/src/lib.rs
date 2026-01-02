@@ -23,6 +23,7 @@ mod error;
 mod function;
 mod intrinsics;
 mod link;
+pub mod monomorphize;
 mod place;
 mod rvalue;
 mod terminator;
@@ -59,12 +60,19 @@ impl CompilationResult {
 }
 
 /// Compile MIR to native object code.
+///
+/// The MIR context is taken as mutable because the collection phase
+/// may intern new types during substitution.
 pub fn compile(
-    mir: &MirContext,
+    mir: &mut MirContext,
     target: &TargetConfig,
     options: &CodegenOptions,
 ) -> Result<CompilationResult, CodegenError> {
-    let mut ctx = CodegenContext::new(mir, target, options)?;
+    // Collection phase: discover all instantiations
+    let mono_set = monomorphize::collect_all(mir)?;
+
+    // Compilation phase
+    let mut ctx = CodegenContext::new(mir, target, options, mono_set)?;
     ctx.compile_all()?;
     let object_bytes = ctx.finish()?;
     Ok(CompilationResult { object_bytes })
@@ -72,7 +80,7 @@ pub fn compile(
 
 /// Compile MIR and link to an executable.
 pub fn compile_and_link(
-    mir: &MirContext,
+    mir: &mut MirContext,
     target: &TargetConfig,
     options: &CodegenOptions,
     output_path: impl AsRef<Path>,

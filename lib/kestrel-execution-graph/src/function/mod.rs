@@ -1,19 +1,19 @@
 //! Function internals: locals, places, values, statements, terminators, blocks.
 
-mod local;
-mod type_param;
-mod place;
+mod basic_block;
 mod immediate;
-mod value;
+mod local;
+mod place;
 mod statement;
 mod terminator;
-mod basic_block;
+mod type_param;
+mod value;
 
-pub use local::*;
-pub use type_param::*;
-pub use place::*;
+pub use basic_block::*;
 pub use immediate::*;
-pub use value::*;
+pub use local::*;
+pub use place::*;
 pub use statement::*;
 pub use terminator::*;
-pub use basic_block::*;
+pub use type_param::*;
+pub use value::*;

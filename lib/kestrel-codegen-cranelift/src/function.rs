@@ -2,6 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
+use crate::monomorphize::Substitution;
 use crate::types::translate_type;
 
 use kestrel_execution_graph::{
@@ -60,6 +61,7 @@ fn get_root_local(place: &Place) -> Option<Id<Local>> {
 pub fn compile_function_body(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     cl_func: &mut CraneliftFunction,
     is_main: bool,
 ) -> Result<(), CodegenError> {
@@ -91,7 +93,7 @@ pub fn compile_function_body(
         }
     } else {
         // Compile the actual function body
-        compile_blocks(ctx, func_def, &mut builder, is_main)?;
+        compile_blocks(ctx, func_def, subst, &mut builder, is_main)?;
     }
 
     builder.finalize();
@@ -102,6 +104,7 @@ pub fn compile_function_body(
 fn compile_blocks(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     builder: &mut FunctionBuilder<'_>,
     is_main: bool,
 ) -> Result<(), CodegenError> {
@@ -155,7 +158,7 @@ fn compile_blocks(
         }
 
         crate::block::compile_block(
-            ctx, func_def, block_id, builder, &block_map, &local_map, is_main,
+            ctx, func_def, subst, block_id, builder, &block_map, &local_map, is_main,
         )?;
     }
 

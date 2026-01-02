@@ -1,5 +1,6 @@
 //! Error types for code generation.
 
+use crate::monomorphize::MonomorphizeError;
 use std::fmt;
 
 /// Errors that can occur during code generation.
@@ -25,6 +26,10 @@ pub enum CodegenError {
     Unsupported(String),
     /// Failed to create data section entry.
     DataSection(String),
+    /// Monomorphization error.
+    Monomorphization(MonomorphizeError),
+    /// Multiple monomorphization errors.
+    MonomorphizationErrors(Vec<MonomorphizeError>),
 }
 
 impl fmt::Display for CodegenError {
@@ -60,7 +65,29 @@ impl fmt::Display for CodegenError {
             CodegenError::DataSection(msg) => {
                 write!(f, "data section error: {}", msg)
             }
+            CodegenError::Monomorphization(e) => {
+                write!(f, "monomorphization error: {}", e)
+            }
+            CodegenError::MonomorphizationErrors(errors) => {
+                writeln!(f, "monomorphization errors:")?;
+                for e in errors {
+                    writeln!(f, "  - {}", e)?;
+                }
+                Ok(())
+            }
         }
+    }
+}
+
+impl From<MonomorphizeError> for CodegenError {
+    fn from(e: MonomorphizeError) -> Self {
+        CodegenError::Monomorphization(e)
+    }
+}
+
+impl From<Vec<MonomorphizeError>> for CodegenError {
+    fn from(errors: Vec<MonomorphizeError>) -> Self {
+        CodegenError::MonomorphizationErrors(errors)
     }
 }
 

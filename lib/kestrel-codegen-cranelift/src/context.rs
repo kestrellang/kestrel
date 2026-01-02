@@ -1,6 +1,9 @@
 //! Code generation context.
 
 use crate::error::CodegenError;
+use crate::monomorphize::{
+    build_substitution, FunctionInstantiation, MonomorphizationSet, Substitution,
+};
 use crate::types::translate_type;
 use crate::CodegenOptions;
 use kestrel_codegen::{mangle_name, Layout, LayoutCache, TargetConfig};
@@ -40,6 +43,8 @@ pub struct CodegenContext<'a> {
     pub func_builder_ctx: FunctionBuilderContext,
     /// Map from string literal content to data section ID.
     pub string_data: HashMap<String, DataId>,
+    /// The set of all instantiations discovered during collection.
+    pub mono_set: MonomorphizationSet,
 }
 
 impl<'a> CodegenContext<'a> {
@@ -48,6 +53,7 @@ impl<'a> CodegenContext<'a> {
         mir: &'a MirContext,
         target: &'a TargetConfig,
         options: &'a CodegenOptions,
+        mono_set: MonomorphizationSet,
     ) -> Result<Self, CodegenError> {
         // Create ISA
         let isa = create_isa(target, options)?;
@@ -74,6 +80,7 @@ impl<'a> CodegenContext<'a> {
             func_ids_by_name: HashMap::new(),
             func_builder_ctx: FunctionBuilderContext::new(),
             string_data: HashMap::new(),
+            mono_set,
         })
     }
 
@@ -89,19 +96,34 @@ impl<'a> CodegenContext<'a> {
     }
 
     /// Declare all functions in the module.
+    ///
+    /// This declares both non-generic functions and all discovered
+    /// instantiations of generic functions.
     fn declare_all_functions(&mut self) -> Result<(), CodegenError> {
-        for (func_id, func_def) in self.mir.functions.iter() {
+        // Collect all instantiations to declare
+        let instantiations: Vec<_> = self.mono_set.functions.iter().cloned().collect();
+
+        for inst in instantiations {
+            let func_def = &self.mir.functions[inst.func_id];
             let is_main = self.is_main(func_def);
 
             // Main function is exported as "main" for the C runtime
-            // Other functions use mangled names
+            // Other functions use mangled names (with type args for generics)
             let (symbol_name, linkage) = if is_main {
                 ("main".to_string(), Linkage::Export)
             } else {
-                (mangle_name(self.mir, func_def.name, &[]), Linkage::Local)
+                (
+                    mangle_name(self.mir, func_def.name, &inst.type_args),
+                    Linkage::Local,
+                )
             };
 
-            let sig = self.create_signature(func_def);
+            // Skip if already declared (can happen with multiple paths to same instantiation)
+            if self.func_ids_by_name.contains_key(&symbol_name) {
+                continue;
+            }
+
+            let sig = self.create_signature_with_subst(func_def, &inst.type_args);
 
             let cl_func_id = self
                 .module
@@ -111,40 +133,53 @@ impl<'a> CodegenContext<'a> {
                     error: e.to_string(),
                 })?;
 
-            self.func_ids.insert(func_id, cl_func_id);
             self.func_ids_by_name.insert(symbol_name, cl_func_id);
         }
         Ok(())
     }
 
     /// Define all functions.
+    ///
+    /// This compiles each instantiation with its corresponding substitution.
     fn define_all_functions(&mut self) -> Result<(), CodegenError> {
-        for (func_id, func_def) in self.mir.functions.iter() {
-            self.compile_function(func_id, func_def)?;
+        // Collect instantiations to define
+        let instantiations: Vec<_> = self.mono_set.functions.iter().cloned().collect();
+
+        for inst in instantiations {
+            self.compile_function_instantiation(&inst)?;
         }
         Ok(())
     }
 
-    /// Compile a single function.
-    fn compile_function(
+    /// Compile a single function instantiation.
+    fn compile_function_instantiation(
         &mut self,
-        func_id: Id<Function>,
-        func_def: &FunctionDef,
+        inst: &FunctionInstantiation,
     ) -> Result<(), CodegenError> {
+        let func_def = &self.mir.functions[inst.func_id];
         let is_main = self.is_main(func_def);
         let symbol_name = if is_main {
             "main".to_string()
         } else {
-            mangle_name(self.mir, func_def.name, &[])
+            mangle_name(self.mir, func_def.name, &inst.type_args)
         };
-        let cl_func_id = self.func_ids[&func_id];
 
-        let sig = self.create_signature(func_def);
+        let cl_func_id = *self.func_ids_by_name.get(&symbol_name).ok_or_else(|| {
+            CodegenError::FunctionDefinition {
+                name: symbol_name.clone(),
+                error: "function not declared".to_string(),
+            }
+        })?;
+
+        // Build the substitution for this instantiation
+        let subst = build_substitution(self.mir, &func_def.type_params, &inst.type_args);
+
+        let sig = self.create_signature_with_subst(func_def, &inst.type_args);
         let mut cl_func =
             CraneliftFunction::with_name_signature(UserFuncName::user(0, cl_func_id.as_u32()), sig);
 
-        // Compile the function body
-        crate::function::compile_function_body(self, func_def, &mut cl_func, is_main)?;
+        // Compile the function body with substitution
+        crate::function::compile_function_body(self, func_def, &subst, &mut cl_func, is_main)?;
 
         // Verify the function before defining it
         if let Err(verifier_errors) =
@@ -181,27 +216,43 @@ impl<'a> CodegenContext<'a> {
         Ok(())
     }
 
-    /// Create a Cranelift signature for a function.
-    fn create_signature(&self, func_def: &FunctionDef) -> Signature {
+    /// Create a Cranelift signature for a function with type argument substitution.
+    fn create_signature_with_subst(
+        &self,
+        func_def: &FunctionDef,
+        type_args: &[Id<Ty>],
+    ) -> Signature {
         let call_conv = self.isa.default_call_conv();
         let mut sig = Signature::new(call_conv);
 
-        // Parameters - all passed by pointer
+        // Build substitution
+        let subst = build_substitution(self.mir, &func_def.type_params, type_args);
+
+        // Parameters - apply substitution to get concrete types
         for &param_id in &func_def.params {
             let param = &self.mir.params[param_id];
-            let cl_type = translate_type(self.mir, param.ty, self.target);
+            // For signature purposes, we need to use the original type if substitution
+            // would fail (readonly mode), but since collection already interned all types,
+            // this should always succeed. If not, fall back to original.
+            let concrete_ty = subst
+                .apply_ty_readonly(self.mir, param.ty)
+                .unwrap_or(param.ty);
+            let cl_type = translate_type(self.mir, concrete_ty, self.target);
             sig.params.push(AbiParam::new(cl_type));
         }
 
         // Return type
         // Special case: main() must return i64 for C runtime even if Kestrel return type is Unit
         let is_main = self.is_main(func_def);
-        let ret_ty = self.mir.ty(func_def.ret);
+        let concrete_ret = subst
+            .apply_ty_readonly(self.mir, func_def.ret)
+            .unwrap_or(func_def.ret);
+        let ret_ty = self.mir.ty(concrete_ret);
         if is_main {
             // C runtime expects int main() - always return i64
             sig.returns.push(AbiParam::new(cl_types::I64));
         } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) {
-            let cl_type = translate_type(self.mir, func_def.ret, self.target);
+            let cl_type = translate_type(self.mir, concrete_ret, self.target);
             sig.returns.push(AbiParam::new(cl_type));
         }
 

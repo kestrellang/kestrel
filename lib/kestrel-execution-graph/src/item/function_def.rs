@@ -228,7 +228,11 @@ impl fmt::Display for FunctionDefDisplay<'_> {
         for (i, block_id) in self.def.blocks.iter().enumerate() {
             let block = &self.ctx.blocks[*block_id];
             writeln!(f, "    bb{}:", i)?;
-            write!(f, "{}", block.display(self.ctx, "        ", &self.def.blocks))?;
+            write!(
+                f,
+                "{}",
+                block.display(self.ctx, "        ", &self.def.blocks)
+            )?;
             if i < self.def.blocks.len() - 1 {
                 writeln!(f)?;
             }

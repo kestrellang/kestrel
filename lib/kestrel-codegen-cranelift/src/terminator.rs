@@ -2,6 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
+use crate::monomorphize::Substitution;
 use crate::place::compile_place_read;
 use crate::rvalue::compile_value;
 
@@ -20,6 +21,7 @@ use std::collections::HashMap;
 pub fn compile_terminator(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     terminator: &Terminator,
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
@@ -53,7 +55,7 @@ pub fn compile_terminator(
                         .ins()
                         .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
                 } else {
-                    let val = compile_value(ctx, func_def, value, builder, local_map)?;
+                    let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
                     builder.ins().return_(&[val]);
                 }
             }
@@ -71,7 +73,7 @@ pub fn compile_terminator(
             then_block,
             else_block,
         } => {
-            let cond = compile_value(ctx, func_def, condition, builder, local_map)?;
+            let cond = compile_value(ctx, func_def, subst, condition, builder, local_map)?;
             let then_cl = block_map
                 .get(then_block)
                 .ok_or_else(|| CodegenError::Unsupported("unknown then block".to_string()))?;

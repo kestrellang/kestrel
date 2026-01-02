@@ -114,7 +114,7 @@ fn compile_source(source: &str, temp_dir: &PathBuf) -> RunResult {
 
     // Lower to MIR
     let root = model.root();
-    let lowering_result = kestrel_execution_graph_lowering::lower_module(&model, &root);
+    let mut lowering_result = kestrel_execution_graph_lowering::lower_module(&model, &root);
 
     if !lowering_result.diagnostics.is_empty() {
         let errors: Vec<_> = lowering_result
@@ -137,7 +137,7 @@ fn compile_source(source: &str, temp_dir: &PathBuf) -> RunResult {
     let options = CodegenOptions::default();
     let exe_path = temp_dir.join("test");
 
-    if let Err(e) = compile_and_link(&lowering_result.mir, &target, &options, &exe_path) {
+    if let Err(e) = compile_and_link(&mut lowering_result.mir, &target, &options, &exe_path) {
         return RunResult {
             exit_code: -1,
             stdout: String::new(),

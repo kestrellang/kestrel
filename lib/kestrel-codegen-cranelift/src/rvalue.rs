@@ -2,6 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
+use crate::monomorphize::{resolve_witness, Substitution};
 use crate::place::compile_place_read;
 use crate::types::translate_type;
 
@@ -25,34 +26,35 @@ use std::collections::HashMap;
 pub fn compile_rvalue(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     rvalue: &Rvalue,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
     match rvalue {
-        Rvalue::Use(imm) => compile_immediate(ctx, imm, builder),
+        Rvalue::Use(imm) => compile_immediate(ctx, subst, imm, builder),
 
         Rvalue::Copy(place) | Rvalue::Move(place) => {
             compile_place_read(ctx, place, builder, local_map)
         }
 
         Rvalue::BinaryOp { op, lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, lhs, builder, local_map)?;
-            let rhs_val = compile_value(ctx, func_def, rhs, builder, local_map)?;
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
             compile_binop(ctx, *op, lhs_val, rhs_val, builder)
         }
 
         Rvalue::UnaryOp { op, operand } => {
-            let operand_val = compile_value(ctx, func_def, operand, builder, local_map)?;
+            let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
             compile_unop(ctx, *op, operand_val, builder)
         }
 
         Rvalue::Call { callee, args } => {
-            compile_call(ctx, func_def, callee, args, builder, local_map)
+            compile_call(ctx, func_def, subst, callee, args, builder, local_map)
         }
 
         Rvalue::Construct { ty, fields } => {
-            compile_construct(ctx, func_def, *ty, fields, builder, local_map)
+            compile_construct(ctx, func_def, subst, *ty, fields, builder, local_map)
         }
 
         Rvalue::EnumVariant {
@@ -60,7 +62,7 @@ pub fn compile_rvalue(
             variant,
             payload,
         } => compile_enum_variant(
-            ctx, func_def, *enum_ty, variant, payload, builder, local_map,
+            ctx, func_def, subst, *enum_ty, variant, payload, builder, local_map,
         ),
 
         Rvalue::Ref(place) | Rvalue::RefMut(place) => compile_ref(ctx, place, builder, local_map),
@@ -68,27 +70,29 @@ pub fn compile_rvalue(
         // Pointer/reference conversions - these are no-ops at runtime
         Rvalue::PtrToRef(value) | Rvalue::PtrToRefMut(value) | Rvalue::RefToPtr(value) => {
             // All three are semantically different but have the same runtime representation
-            compile_value(ctx, func_def, value, builder, local_map)
+            compile_value(ctx, func_def, subst, value, builder, local_map)
         }
 
         Rvalue::PtrOffset { ptr, offset } => {
-            compile_ptr_offset(ctx, func_def, ptr, offset, builder, local_map)
+            compile_ptr_offset(ctx, func_def, subst, ptr, offset, builder, local_map)
         }
 
         Rvalue::Cast {
             kind,
             operand,
             target,
-        } => compile_cast(ctx, func_def, *kind, operand, *target, builder, local_map),
+        } => compile_cast(
+            ctx, func_def, subst, *kind, operand, *target, builder, local_map,
+        ),
 
         // String intrinsics
-        Rvalue::StrPtr(value) => compile_str_ptr(ctx, func_def, value, builder, local_map),
-        Rvalue::StrLen(value) => compile_str_len(ctx, func_def, value, builder, local_map),
+        Rvalue::StrPtr(value) => compile_str_ptr(ctx, func_def, subst, value, builder, local_map),
+        Rvalue::StrLen(value) => compile_str_len(ctx, func_def, subst, value, builder, local_map),
         Rvalue::StrFromParts { ptr, len } => {
-            compile_str_from_parts(ctx, func_def, ptr, len, builder, local_map)
+            compile_str_from_parts(ctx, func_def, subst, ptr, len, builder, local_map)
         }
 
-        Rvalue::Tuple(values) => compile_tuple(ctx, func_def, values, builder, local_map),
+        Rvalue::Tuple(values) => compile_tuple(ctx, func_def, subst, values, builder, local_map),
 
         Rvalue::Array { .. } => Err(CodegenError::Unsupported(
             "arrays not yet supported - use std arrays".into(),
@@ -106,6 +110,7 @@ pub fn compile_rvalue(
 fn compile_construct(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     ty: Id<Ty>,
     fields: &[(String, Value)],
     builder: &mut FunctionBuilder<'_>,
@@ -182,7 +187,7 @@ fn compile_construct(
         })?;
 
         // Compile the field value
-        let value = compile_value(ctx, func_def, field_value, builder, local_map)?;
+        let value = compile_value(ctx, func_def, subst, field_value, builder, local_map)?;
 
         // Check if this is a nested struct - if so, copy the struct data
         let field_mir_ty = ctx.mir.ty(field_ty);
@@ -228,6 +233,7 @@ fn compile_construct(
 fn compile_tuple(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     values: &[Value],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
@@ -283,7 +289,7 @@ fn compile_tuple(
         let elem_ty = element_types[i];
 
         // Compile the element value
-        let val = compile_value(ctx, func_def, value, builder, local_map)?;
+        let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
 
         // Check if this is a nested compound type - if so, copy the data
         let is_compound = if let Some(ty) = elem_ty {
@@ -399,6 +405,7 @@ fn get_immediate_layout(
 fn compile_enum_variant(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     enum_ty: Id<Ty>,
     variant: &str,
     payload: &[Value],
@@ -492,7 +499,7 @@ fn compile_enum_variant(
             let total_offset = payload_base_offset + field_offset as i32;
 
             // Compile the payload value
-            let val = compile_value(ctx, func_def, value, builder, local_map)?;
+            let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
 
             // Check if this is a nested struct
             let field_ty = field_def.ty;
@@ -881,13 +888,14 @@ fn get_struct_field_by_index(
 fn compile_ptr_offset(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     ptr: &Value,
     offset: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let ptr_val = compile_value(ctx, func_def, ptr, builder, local_map)?;
-    let offset_val = compile_value(ctx, func_def, offset, builder, local_map)?;
+    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+    let offset_val = compile_value(ctx, func_def, subst, offset, builder, local_map)?;
 
     // For now, assume offset is in bytes
     // TODO: If we need ptr + n * sizeof(pointee), we'd need the pointee type
@@ -898,19 +906,21 @@ fn compile_ptr_offset(
 pub fn compile_value(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
     match value {
         Value::Place(place) => compile_place_read(ctx, place, builder, local_map),
-        Value::Immediate(imm) => compile_immediate(ctx, imm, builder),
+        Value::Immediate(imm) => compile_immediate(ctx, subst, imm, builder),
     }
 }
 
 /// Compile an immediate value.
 fn compile_immediate(
     ctx: &mut CodegenContext<'_>,
+    subst: &Substitution,
     imm: &Immediate,
     builder: &mut FunctionBuilder<'_>,
 ) -> Result<CraneliftValue, CodegenError> {
@@ -955,8 +965,14 @@ fn compile_immediate(
                 cl_types::I32
             };
 
+            // Apply substitution to type args
+            let concrete_args: Vec<_> = type_args
+                .iter()
+                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty))
+                .collect();
+
             // Look up the function by its mangled name
-            let mangled_name = mangle_name(ctx.mir, *name, type_args);
+            let mangled_name = mangle_name(ctx.mir, *name, &concrete_args);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "function not found for reference: {} (mangled: {})",
@@ -972,9 +988,39 @@ fn compile_immediate(
             Ok(func_ptr)
         }
 
-        ImmediateKind::WitnessMethod { .. } => {
-            // TODO: Witness method references
-            Err(CodegenError::Unsupported("witness methods".to_string()))
+        ImmediateKind::WitnessMethod {
+            protocol,
+            method,
+            for_type,
+        } => {
+            // Apply substitution to for_type
+            let concrete_for_type = subst
+                .apply_ty_readonly(ctx.mir, *for_type)
+                .unwrap_or(*for_type);
+
+            // Resolve the witness to get the concrete function
+            let (impl_name, impl_type_args) =
+                resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
+
+            // Get the function address
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            let mangled_name = mangle_name(ctx.mir, impl_name, &impl_type_args);
+            let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
+                CodegenError::Unsupported(format!(
+                    "witness method function not found: {} (mangled: {})",
+                    ctx.mir.name(impl_name),
+                    mangled_name
+                ))
+            })?;
+
+            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
+            Ok(func_ptr)
         }
 
         ImmediateKind::NullPtr(_) => Ok(builder.ins().iconst(cl_types::I64, 0)),
@@ -1184,6 +1230,7 @@ fn compile_unop(
 pub fn compile_call(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     callee: &Callee,
     args: &[CallArg],
     builder: &mut FunctionBuilder<'_>,
@@ -1191,9 +1238,14 @@ pub fn compile_call(
 ) -> Result<CraneliftValue, CodegenError> {
     match callee {
         Callee::Direct { name, type_args } => {
+            // Apply substitution to type args
+            let concrete_args: Vec<_> = type_args
+                .iter()
+                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty))
+                .collect();
+
             // Look up the Cranelift FuncId for this function.
-            // We need to find the function by matching its qualified name.
-            let mangled_name = mangle_name(ctx.mir, *name, type_args);
+            let mangled_name = mangle_name(ctx.mir, *name, &concrete_args);
 
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
@@ -1209,7 +1261,7 @@ pub fn compile_call(
             // Compile arguments
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
-                let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
                 arg_values.push(val);
             }
 
@@ -1226,20 +1278,58 @@ pub fn compile_call(
             }
         }
 
-        Callee::Thin(place) => compile_thin_call(ctx, func_def, place, args, builder, local_map),
+        Callee::Thin(place) => {
+            compile_thin_call(ctx, func_def, subst, place, args, builder, local_map)
+        }
 
-        Callee::Thick(place) => compile_thick_call(ctx, func_def, place, args, builder, local_map),
+        Callee::Thick(place) => {
+            compile_thick_call(ctx, func_def, subst, place, args, builder, local_map)
+        }
 
         Callee::Witness {
             protocol,
             method,
             for_type,
-        } => Err(CodegenError::Unsupported(format!(
-            "witness method call: {}.{} for {:?}",
-            ctx.mir.name(*protocol),
-            method,
-            for_type
-        ))),
+        } => {
+            // Apply substitution to for_type
+            let concrete_for_type = subst
+                .apply_ty_readonly(ctx.mir, *for_type)
+                .unwrap_or(*for_type);
+
+            // Resolve the witness to get the concrete implementation
+            let (impl_name, impl_type_args) =
+                resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
+
+            // Look up the function
+            let mangled_name = mangle_name(ctx.mir, impl_name, &impl_type_args);
+            let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
+                CodegenError::Unsupported(format!(
+                    "witness method function not found: {} (mangled: {})",
+                    ctx.mir.name(impl_name),
+                    mangled_name
+                ))
+            })?;
+
+            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+
+            // Compile arguments
+            let mut arg_values = Vec::with_capacity(args.len());
+            for arg in args {
+                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                arg_values.push(val);
+            }
+
+            // Emit the call instruction
+            let call_inst = builder.ins().call(func_ref, &arg_values);
+
+            // Get the return value (if any)
+            let results = builder.inst_results(call_inst);
+            if results.is_empty() {
+                Ok(builder.ins().iconst(cl_types::I8, 0))
+            } else {
+                Ok(results[0])
+            }
+        }
     }
 }
 
@@ -1247,13 +1337,14 @@ pub fn compile_call(
 fn compile_cast(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     kind: CastKind,
     operand: &Value,
     target: Id<Ty>,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let val = compile_value(ctx, func_def, operand, builder, local_map)?;
+    let val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
     let target_ty = translate_type(ctx.mir, target, ctx.target);
 
     match kind {
@@ -1319,11 +1410,12 @@ fn compile_cast(
 fn compile_str_ptr(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let str_ptr = compile_value(ctx, func_def, value, builder, local_map)?;
+    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map)?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -1340,11 +1432,12 @@ fn compile_str_ptr(
 fn compile_str_len(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let str_ptr = compile_value(ctx, func_def, value, builder, local_map)?;
+    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map)?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -1364,20 +1457,21 @@ fn compile_str_len(
 fn compile_str_from_parts(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     ptr: &Value,
     len: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let ptr_val = compile_value(ctx, func_def, ptr, builder, local_map)?;
-    let len_val = compile_value(ctx, func_def, len, builder, local_map)?;
+    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+    let len_val = compile_value(ctx, func_def, subst, len, builder, local_map)?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
     } else {
         cl_types::I32
     };
-    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+    let ptr_size: i32 = if ctx.target.is_64bit() { 8 } else { 4 };
 
     // Allocate stack slot for the fat pointer struct (ptr + len)
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -1576,6 +1670,7 @@ fn is_parameter_local(
 fn compile_thin_call(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     place: &Place,
     args: &[CallArg],
     builder: &mut FunctionBuilder<'_>,
@@ -1616,7 +1711,7 @@ fn compile_thin_call(
     // Compile arguments
     let mut arg_values = Vec::with_capacity(args.len());
     for arg in args {
-        let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+        let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
         arg_values.push(val);
     }
 
@@ -1643,6 +1738,7 @@ fn compile_thin_call(
 fn compile_thick_call(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     place: &Place,
     args: &[CallArg],
     builder: &mut FunctionBuilder<'_>,
@@ -1706,7 +1802,7 @@ fn compile_thick_call(
 
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
-                let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
                 arg_values.push(val);
             }
 
@@ -1755,7 +1851,7 @@ fn compile_thick_call(
             let mut arg_values = Vec::with_capacity(args.len() + 1);
             arg_values.push(env_ptr);
             for arg in args {
-                let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
                 arg_values.push(val);
             }
 

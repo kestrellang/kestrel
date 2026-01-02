@@ -37,9 +37,9 @@ impl PassResult {
 
     /// Check if there are any errors.
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| {
-            d.severity == Severity::Error || d.severity == Severity::Bug
-        })
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error || d.severity == Severity::Bug)
     }
 
     /// Merge another result into this one.

@@ -81,7 +81,10 @@ impl<'ctx> FunctionBuilder<'ctx> {
         if def.where_clause.is_none() {
             def.where_clause = Some(WhereClause::new());
         }
-        def.where_clause.as_mut().unwrap().add_constraint(constraint);
+        def.where_clause
+            .as_mut()
+            .unwrap()
+            .add_constraint(constraint);
     }
 
     /// Add a new basic block to this function.

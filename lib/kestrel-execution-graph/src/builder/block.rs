@@ -1,7 +1,7 @@
 //! Block builder.
 
 use crate::function::{
-    BasicBlock, BinOp, Callee, CallArg, Immediate, Place, Rvalue, Statement, Terminator, UnOp,
+    BasicBlock, BinOp, CallArg, Callee, Immediate, Place, Rvalue, Statement, Terminator, UnOp,
     Value,
 };
 use crate::id::{Block, Function, Id, QualifiedName, Statement as StatementMarker, Ty};
@@ -125,7 +125,13 @@ impl<'ctx> BlockBuilder<'ctx> {
         args: Vec<Value>,
     ) -> Id<StatementMarker> {
         let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
-        self.assign(dest, Rvalue::Call { callee, args: call_args })
+        self.assign(
+            dest,
+            Rvalue::Call {
+                callee,
+                args: call_args,
+            },
+        )
     }
 
     /// Add a call with return value and explicit passing modes.

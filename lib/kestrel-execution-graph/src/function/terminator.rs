@@ -60,7 +60,11 @@ impl Terminator {
     }
 
     /// Create a branch terminator.
-    pub fn branch(condition: impl Into<Value>, then_block: Id<Block>, else_block: Id<Block>) -> Self {
+    pub fn branch(
+        condition: impl Into<Value>,
+        then_block: Id<Block>,
+        else_block: Id<Block>,
+    ) -> Self {
         Self {
             meta: Metadata::new(),
             kind: TerminatorKind::Branch {
@@ -136,9 +140,8 @@ struct TerminatorDisplay<'a> {
 
 impl fmt::Display for TerminatorDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let block_index = |id: Id<Block>| -> usize {
-            self.blocks.iter().position(|&b| b == id).unwrap_or(0)
-        };
+        let block_index =
+            |id: Id<Block>| -> usize { self.blocks.iter().position(|&b| b == id).unwrap_or(0) };
 
         match &self.term.kind {
             TerminatorKind::Return(v) => {

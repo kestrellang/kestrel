@@ -2,6 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
+use crate::monomorphize::Substitution;
 use crate::place::compile_place_read;
 use crate::rvalue::{compile_call, compile_rvalue};
 use crate::terminator::compile_terminator;
@@ -17,6 +18,7 @@ use std::collections::HashMap;
 pub fn compile_block(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     block_id: Id<Block>,
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
@@ -28,13 +30,13 @@ pub fn compile_block(
     // Compile each statement
     for &stmt_id in &block.statements {
         let stmt = ctx.mir.statement(stmt_id);
-        compile_statement(ctx, func_def, &stmt.kind, builder, local_map)?;
+        compile_statement(ctx, func_def, subst, &stmt.kind, builder, local_map)?;
     }
 
     // Compile the terminator
     if let Some(ref terminator) = block.terminator {
         compile_terminator(
-            ctx, func_def, terminator, builder, block_map, local_map, is_main,
+            ctx, func_def, subst, terminator, builder, block_map, local_map, is_main,
         )?;
     } else {
         // Block has no terminator - this is dead code (unreachable)
@@ -51,19 +53,20 @@ pub fn compile_block(
 fn compile_statement(
     ctx: &mut CodegenContext<'_>,
     func_def: &FunctionDef,
+    subst: &Substitution,
     stmt: &StatementKind,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<(), CodegenError> {
     match stmt {
         StatementKind::Assign { dest, rvalue } => {
-            let value = compile_rvalue(ctx, func_def, rvalue, builder, local_map)?;
+            let value = compile_rvalue(ctx, func_def, subst, rvalue, builder, local_map)?;
             crate::place::compile_place_write(ctx, dest, value, builder, local_map)?;
         }
 
         StatementKind::Call { callee, args } => {
             // Call without using the result - we just discard the return value
-            let _ = compile_call(ctx, func_def, callee, args, builder, local_map)?;
+            let _ = compile_call(ctx, func_def, subst, callee, args, builder, local_map)?;
         }
 
         StatementKind::Deinit { place: _ } => {

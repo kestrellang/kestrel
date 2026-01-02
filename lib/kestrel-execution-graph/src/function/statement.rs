@@ -497,7 +497,10 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 write!(f, ")")
             }
-            Rvalue::Array { element_ty, elements } => {
+            Rvalue::Array {
+                element_ty,
+                elements,
+            } => {
                 write!(f, "array[{}] [", self.ctx.ty(*element_ty).display(self.ctx))?;
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -507,8 +510,17 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 write!(f, "]")
             }
-            Rvalue::EnumVariant { enum_ty, variant, payload } => {
-                write!(f, "enum {}.{}", self.ctx.ty(*enum_ty).display(self.ctx), variant)?;
+            Rvalue::EnumVariant {
+                enum_ty,
+                variant,
+                payload,
+            } => {
+                write!(
+                    f,
+                    "enum {}.{}",
+                    self.ctx.ty(*enum_ty).display(self.ctx),
+                    variant
+                )?;
                 if !payload.is_empty() {
                     write!(f, "(")?;
                     for (i, val) in payload.iter().enumerate() {

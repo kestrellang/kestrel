@@ -128,7 +128,12 @@ impl fmt::Display for ProtocolDefDisplay<'_> {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}: {}", param_name, self.ctx.ty(*param_ty).display(self.ctx))?;
+                write!(
+                    f,
+                    "{}: {}",
+                    param_name,
+                    self.ctx.ty(*param_ty).display(self.ctx)
+                )?;
             }
             writeln!(f, ") -> {}", self.ctx.ty(method.ret).display(self.ctx))?;
         }
