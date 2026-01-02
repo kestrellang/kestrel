@@ -6,7 +6,7 @@ use crate::place::compile_place_read;
 use crate::rvalue::{compile_call, compile_rvalue};
 use crate::terminator::compile_terminator;
 
-use kestrel_execution_graph::{Block, FunctionDef, Id, Local, StatementKind};
+use kestrel_execution_graph::{Block, FunctionDef, Id, Local, Place, StatementKind};
 
 use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::{FunctionBuilder, Variable};
@@ -66,16 +66,49 @@ fn compile_statement(
             let _ = compile_call(ctx, func_def, callee, args, builder, local_map)?;
         }
 
-        StatementKind::Deinit { place } => {
-            // TODO: Implement destructor calls
+        StatementKind::Deinit { place: _ } => {
+            // NOTE: During MIR lowering, deinit is expanded into explicit:
+            // 1. Calls to the type's deinit method (if it has one)
+            // 2. Recursive deinit for struct fields / enum payloads
+            //
+            // So by the time we reach codegen, StatementKind::Deinit is only emitted
+            // for types that don't need any actual cleanup (no deinit method, no fields
+            // that need deinit). In that case, it's a no-op.
+            //
+            // If we need to support "raw" Deinit statements in the future (e.g., for
+            // types where we don't have semantic info), we would need to look up the
+            // deinit method from the MIR type and emit a call here.
         }
 
-        StatementKind::DeinitIf { place, flag } => {
-            // TODO: Implement conditional destructor calls
+        StatementKind::DeinitIf { place: _, flag } => {
+            // Conditional deinit: check flag, call destructor if true.
+            //
+            // Similar to Deinit above, the MIR lowering has already expanded any
+            // deinit method calls. The DeinitIf statement itself is emitted when a
+            // value might have been moved in one branch but not another.
+            //
+            // Since the lowering already expands deinit method calls (with proper
+            // conditionals using branch blocks), this statement is effectively a no-op
+            // in the current design.
+            //
+            // We still need to "use" the flag to avoid unused variable warnings in the
+            // generated code, but since we don't actually emit anything for deinit,
+            // we can just read the flag value without acting on it.
+            let _flag_value = compile_place_read(ctx, &Place::local(*flag), builder, local_map)?;
         }
 
         StatementKind::SetDeinitFlag { flag, value } => {
-            // TODO: Implement deinit flag setting
+            // Set a deinit flag to true (needs deinit) or false (was moved, no deinit needed).
+            //
+            // Deinit flags are Bool locals. Bool is represented as i8 (0 = false, 1 = true).
+            let bool_value = builder
+                .ins()
+                .iconst(cranelift_codegen::ir::types::I8, if *value { 1 } else { 0 });
+
+            let var = local_map.get(flag).ok_or_else(|| {
+                CodegenError::Unsupported("unknown deinit flag local".to_string())
+            })?;
+            builder.def_var(*var, bool_value);
         }
     }
 

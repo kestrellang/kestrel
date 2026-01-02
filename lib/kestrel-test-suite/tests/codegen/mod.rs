@@ -12,6 +12,7 @@ mod control_flow;
 mod enums;
 mod functions;
 mod loops;
+mod raii;
 mod structs;
 
 /// Result of running a compiled program.
