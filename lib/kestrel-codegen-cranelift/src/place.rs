@@ -93,13 +93,13 @@ pub fn compile_place_read(
             // Load the field value from parent_ptr + offset
             let field_cl_ty = translate_type(ctx.mir, field_ty, ctx.target);
 
-            // Check if the field is itself a struct (compound type)
+            // Check if the field is itself a compound type (struct or tuple)
             let field_mir_ty = ctx.mir.ty(field_ty);
-            let is_struct_field =
-                matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+            let is_compound_field = matches!(field_mir_ty, MirTy::Tuple(_))
+                || (matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty));
 
-            if is_struct_field {
-                // For struct fields, return a pointer to the nested struct
+            if is_compound_field {
+                // For compound fields, return a pointer to the nested struct/tuple
                 if field_offset == 0 {
                     Ok(parent_ptr)
                 } else {
@@ -364,12 +364,12 @@ fn get_field_by_index(
             // Calculate offset by summing sizes of previous elements
             let mut offset = 0usize;
             for (i, elem_ty) in elements.iter().enumerate() {
+                let elem_layout = ctx.layouts.layout_of(*elem_ty);
+                // Align to this element's alignment
+                offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
                 if i == index {
                     return Ok((offset, *elem_ty));
                 }
-                let elem_layout = ctx.layouts.layout_of(*elem_ty);
-                // Align to next element
-                offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
                 offset += elem_layout.size;
             }
 

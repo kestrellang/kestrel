@@ -88,6 +88,12 @@ pub fn compile_rvalue(
             compile_str_from_parts(ctx, func_def, ptr, len, builder, local_map)
         }
 
+        Rvalue::Tuple(values) => compile_tuple(ctx, func_def, values, builder, local_map),
+
+        Rvalue::Array { .. } => Err(CodegenError::Unsupported(
+            "arrays not yet supported - use std arrays".into(),
+        )),
+
         // TODO: Implement remaining rvalues
         _ => Err(CodegenError::Unsupported(format!("rvalue: {:?}", rvalue))),
     }
@@ -213,6 +219,177 @@ fn compile_construct(
 
     // Return the pointer to the struct
     Ok(ptr)
+}
+
+/// Compile a tuple construction.
+///
+/// Allocates stack space for the tuple, stores each element at its offset,
+/// and returns a pointer to the stack slot.
+fn compile_tuple(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    values: &[Value],
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    // Calculate tuple layout by laying out elements sequentially
+    let mut offsets = Vec::with_capacity(values.len());
+    let mut element_layouts = Vec::with_capacity(values.len());
+    let mut element_types = Vec::with_capacity(values.len());
+    let mut current_offset = 0usize;
+    let mut max_align = 1usize;
+
+    // First pass: compute element layouts and offsets
+    for value in values {
+        let (elem_layout, elem_ty) = get_value_layout(ctx, value, local_map)?;
+
+        // Align to element's alignment
+        current_offset = (current_offset + elem_layout.align - 1) & !(elem_layout.align - 1);
+        offsets.push(current_offset);
+        element_layouts.push(elem_layout);
+        element_types.push(elem_ty);
+
+        current_offset += elem_layout.size;
+        max_align = max_align.max(elem_layout.align);
+    }
+
+    // Pad to overall alignment
+    let total_size = (current_offset + max_align - 1) & !(max_align - 1);
+    // Ensure minimum size of 1 byte for empty tuples
+    let total_size = if total_size == 0 { 1 } else { total_size };
+    let max_align = if max_align == 0 { 1 } else { max_align };
+
+    // Allocate stack slot for the tuple
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        total_size as u32,
+        max_align as u8,
+    ));
+
+    // Get pointer type for the target
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    // Get pointer to the stack slot
+    let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Store each element at its offset
+    for (i, value) in values.iter().enumerate() {
+        let offset = offsets[i];
+        let elem_layout = element_layouts[i];
+        let elem_ty = element_types[i];
+
+        // Compile the element value
+        let val = compile_value(ctx, func_def, value, builder, local_map)?;
+
+        // Check if this is a nested compound type - if so, copy the data
+        let is_compound = if let Some(ty) = elem_ty {
+            let elem_mir_ty = ctx.mir.ty(ty);
+            matches!(elem_mir_ty, MirTy::Named { .. } | MirTy::Tuple(_))
+                && (is_struct_type(ctx, ty) || matches!(elem_mir_ty, MirTy::Tuple(_)))
+        } else {
+            false
+        };
+
+        if is_compound {
+            // Value is a pointer to the nested compound type - copy its contents
+            let dest_ptr = if offset == 0 {
+                ptr
+            } else {
+                builder.ins().iadd_imm(ptr, offset as i64)
+            };
+            // Copy the data word by word
+            let words = (elem_layout.size + 7) / 8;
+            for w in 0..words {
+                let word_offset = (w * 8) as i32;
+                let word = builder
+                    .ins()
+                    .load(cl_types::I64, MemFlags::new(), val, word_offset);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), word, dest_ptr, word_offset);
+            }
+        } else {
+            // Store primitive value directly
+            builder
+                .ins()
+                .store(MemFlags::new(), val, ptr, offset as i32);
+        }
+    }
+
+    // Return the pointer to the tuple
+    Ok(ptr)
+}
+
+/// Get the layout of a value and optionally its type ID.
+/// Returns (Layout, Option<type_id>).
+fn get_value_layout(
+    ctx: &mut CodegenContext<'_>,
+    value: &Value,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<(kestrel_codegen::Layout, Option<Id<Ty>>), CodegenError> {
+    match value {
+        Value::Place(place) => {
+            let ty = get_place_type(ctx, place, local_map)?;
+            let layout = ctx.layouts.layout_of(ty);
+            Ok((layout, Some(ty)))
+        }
+        Value::Immediate(imm) => {
+            let layout = get_immediate_layout(ctx, imm)?;
+            Ok((layout, None))
+        }
+    }
+}
+
+/// Get the layout of an immediate value.
+fn get_immediate_layout(
+    ctx: &mut CodegenContext<'_>,
+    imm: &Immediate,
+) -> Result<kestrel_codegen::Layout, CodegenError> {
+    use kestrel_codegen::Layout;
+
+    match &imm.kind {
+        ImmediateKind::IntLiteral { bits, .. } => {
+            let layout = match bits {
+                IntBits::I8 => Layout::new(1, 1),
+                IntBits::I16 => Layout::new(2, 2),
+                IntBits::I32 => Layout::new(4, 4),
+                IntBits::I64 => Layout::new(8, 8),
+            };
+            Ok(layout)
+        }
+        ImmediateKind::FloatLiteral { bits, .. } => {
+            let layout = match bits {
+                FloatBits::F16 => Layout::new(2, 2),
+                FloatBits::F32 => Layout::new(4, 4),
+                FloatBits::F64 => Layout::new(8, 8),
+            };
+            Ok(layout)
+        }
+        ImmediateKind::BoolLiteral(_) => Ok(Layout::new(1, 1)),
+        ImmediateKind::Unit => Ok(Layout::new(0, 1)),
+        ImmediateKind::StringLiteral(_) => {
+            // String is a fat pointer: { ptr, len }
+            let ptr_size = ctx.target.pointer_size();
+            Ok(Layout::new(ptr_size * 2, ptr_size))
+        }
+        ImmediateKind::NullPtr(ty) => {
+            let layout = ctx.layouts.layout_of(*ty);
+            Ok(layout)
+        }
+        ImmediateKind::FunctionRef { .. } => {
+            // Function references are pointer-sized
+            let ptr_size = ctx.target.pointer_size();
+            Ok(Layout::new(ptr_size, ptr_size))
+        }
+        ImmediateKind::WitnessMethod { .. } => {
+            Err(CodegenError::Unsupported("witness method layout".into()))
+        }
+        ImmediateKind::Error => Err(CodegenError::Unsupported("error immediate".into())),
+    }
 }
 
 /// Compile an enum variant construction.
@@ -651,12 +828,12 @@ fn get_field_by_index(
             // Calculate offset by summing sizes of previous elements
             let mut offset = 0usize;
             for (i, elem_ty) in elements.iter().enumerate() {
+                let elem_layout = ctx.layouts.layout_of(*elem_ty);
+                // Align to this element's alignment
+                offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
                 if i == index {
                     return Ok((offset, *elem_ty));
                 }
-                let elem_layout = ctx.layouts.layout_of(*elem_ty);
-                // Align to next element
-                offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
                 offset += elem_layout.size;
             }
 

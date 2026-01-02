@@ -79,7 +79,7 @@ fn test_function_pointer_in_struct() {
 module Test
 
 struct Handler {
-    func: (Int) -> Int,
+    var func: (Int) -> Int;
 }
 
 func triple(x: Int) -> Int {
@@ -87,7 +87,7 @@ func triple(x: Int) -> Int {
 }
 
 func main() -> Int {
-    let h = Handler { func: triple };
+    let h = Handler (func: triple);
     (h.func)(14)
 }
 "#,

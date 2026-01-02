@@ -18,6 +18,7 @@ mod pointers;
 mod raii;
 mod strings;
 mod structs;
+mod tuples;
 
 /// Result of running a compiled program.
 #[derive(Debug)]
