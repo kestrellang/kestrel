@@ -169,9 +169,7 @@ mod enum_construction {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Main.makeNone").returns(MirTy::named("Main.Option")),
-        );
+        .expect(Mir::mir_function("Main.makeNone").returns(MirTy::named("Main.Option")));
     }
 
     #[test]

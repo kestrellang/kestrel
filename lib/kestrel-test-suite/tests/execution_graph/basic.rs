@@ -17,7 +17,11 @@ mod basic_functions {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Main.answer").returns(MirTy::I64).has_param_count(0));
+        .expect(
+            Mir::mir_function("Main.answer")
+                .returns(MirTy::I64)
+                .has_param_count(0),
+        );
     }
 
     #[test]
@@ -251,7 +255,8 @@ mod enums {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.toInt").any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
+            Mir::mir_function("Main.toInt")
+                .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
     }
 

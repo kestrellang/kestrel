@@ -403,6 +403,15 @@ fn has_else_branch(if_node: &SyntaxNode) -> bool {
                         // It's a final "else { ... }" - check if it ends with a value
                         return block_ends_with_value_expression(&child);
                     }
+                    SyntaxKind::Expression => {
+                        // The else if might be wrapped in an Expression node
+                        // Look inside for ExprIf
+                        for inner in child.children() {
+                            if inner.kind() == SyntaxKind::ExprIf {
+                                return has_else_branch(&inner);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }

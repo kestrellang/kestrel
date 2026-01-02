@@ -154,7 +154,9 @@ mod wrong_symbol_kind {
             struct Foo {}
         "#,
         )
-        .expect(HasError("@builtin(.Copyable) can only be applied to a protocol"));
+        .expect(HasError(
+            "@builtin(.Copyable) can only be applied to a protocol",
+        ));
     }
 
     #[test]
@@ -165,7 +167,9 @@ mod wrong_symbol_kind {
             enum Color { case Red }
         "#,
         )
-        .expect(HasError("@builtin(.Copyable) can only be applied to a protocol"));
+        .expect(HasError(
+            "@builtin(.Copyable) can only be applied to a protocol",
+        ));
     }
 
     #[test]
@@ -176,7 +180,9 @@ mod wrong_symbol_kind {
             func foo() {}
         "#,
         )
-        .expect(HasError("@builtin(.Copyable) can only be applied to a protocol"));
+        .expect(HasError(
+            "@builtin(.Copyable) can only be applied to a protocol",
+        ));
     }
 }
 

@@ -408,9 +408,7 @@ mod witness_from_struct {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_witness("Test.Circle", "Test.Drawable").has_method("draw"),
-        );
+        .expect(Mir::mir_witness("Test.Circle", "Test.Drawable").has_method("draw"));
     }
 
     #[test]
@@ -568,9 +566,7 @@ mod generic_witness {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_witness("Test.Box", "Test.Getter").has_method("get"),
-        );
+        .expect(Mir::mir_witness("Test.Box", "Test.Getter").has_method("get"));
     }
 }
 

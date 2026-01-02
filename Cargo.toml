@@ -52,5 +52,6 @@ members = [
     "lib/kestrel-compiler",
     "lib/kestrel-execution-graph",
     "lib/kestrel-execution-graph-lowering",
+    "lib/kestrel-codegen",
     "lib/kestrel-test-suite"
 ]

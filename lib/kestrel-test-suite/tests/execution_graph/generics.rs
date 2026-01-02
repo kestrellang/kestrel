@@ -287,11 +287,10 @@ mod nested_generics {
                 .has_type_params(1)
                 .has_field("value", MirTy::type_param("T")),
         )
-        .expect(
-            Mir::mir_struct("Main.Outer")
-                .has_type_params(1)
-                .has_field("inner", MirTy::generic("Main.Inner", vec![MirTy::type_param("T")])),
-        );
+        .expect(Mir::mir_struct("Main.Outer").has_type_params(1).has_field(
+            "inner",
+            MirTy::generic("Main.Inner", vec![MirTy::type_param("T")]),
+        ));
     }
 }
 

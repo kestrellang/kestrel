@@ -1,0 +1,8 @@
+[package]
+name = "kestrel-codegen"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kestrel-execution-graph = { path = "../kestrel-execution-graph" }
+target-lexicon = "0.12"

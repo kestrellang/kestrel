@@ -452,12 +452,14 @@ mod closure_as_parameter {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Main.main").calls("Main.apply"))
-        .expect(Mir::mir_closure("Main.main", 0).any_block(|b| {
-            b.has_statement(StatementPattern::BinOp(BinOp::MulSigned))
-        }))
-        .expect(Mir::mir_closure("Main.main", 1).any_block(|b| {
-            b.has_statement(StatementPattern::BinOp(BinOp::AddSigned))
-        }));
+        .expect(
+            Mir::mir_closure("Main.main", 0)
+                .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::MulSigned))),
+        )
+        .expect(
+            Mir::mir_closure("Main.main", 1)
+                .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::AddSigned))),
+        );
     }
 }
 
