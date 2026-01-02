@@ -12,7 +12,7 @@ use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::Context as CraneliftContext;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use std::collections::HashMap;
@@ -38,6 +38,8 @@ pub struct CodegenContext<'a> {
     pub func_ids_by_name: HashMap<String, FuncId>,
     /// Function builder context (reused across functions).
     pub func_builder_ctx: FunctionBuilderContext,
+    /// Map from string literal content to data section ID.
+    pub string_data: HashMap<String, DataId>,
 }
 
 impl<'a> CodegenContext<'a> {
@@ -71,6 +73,7 @@ impl<'a> CodegenContext<'a> {
             func_ids: HashMap::new(),
             func_ids_by_name: HashMap::new(),
             func_builder_ctx: FunctionBuilderContext::new(),
+            string_data: HashMap::new(),
         })
     }
 
@@ -203,6 +206,34 @@ impl<'a> CodegenContext<'a> {
     fn is_main(&self, func_def: &FunctionDef) -> bool {
         let name = self.mir.name(func_def.name);
         name.segments.last().map(|s| s.as_str()) == Some("main")
+    }
+
+    /// Add a string literal to the data section.
+    ///
+    /// Returns the DataId for the string, creating a new entry if needed.
+    /// Deduplicates identical strings.
+    pub fn add_string_data(&mut self, s: &str) -> Result<DataId, CodegenError> {
+        // Check if we already have this string
+        if let Some(&id) = self.string_data.get(s) {
+            return Ok(id);
+        }
+
+        // Create new data
+        let mut desc = DataDescription::new();
+        desc.define(s.as_bytes().to_vec().into_boxed_slice());
+
+        let name = format!("str_{}", self.string_data.len());
+        let data_id = self
+            .module
+            .declare_data(&name, Linkage::Local, false, false)
+            .map_err(|e| CodegenError::DataSection(e.to_string()))?;
+
+        self.module
+            .define_data(data_id, &desc)
+            .map_err(|e| CodegenError::DataSection(e.to_string()))?;
+
+        self.string_data.insert(s.to_string(), data_id);
+        Ok(data_id)
     }
 
     /// Finish compilation and return the object file bytes.

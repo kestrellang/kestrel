@@ -13,6 +13,7 @@ mod enums;
 mod functions;
 mod loops;
 mod raii;
+mod strings;
 mod structs;
 
 /// Result of running a compiled program.

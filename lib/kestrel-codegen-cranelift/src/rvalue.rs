@@ -355,7 +355,7 @@ pub fn compile_value(
 
 /// Compile an immediate value.
 fn compile_immediate(
-    ctx: &CodegenContext<'_>,
+    ctx: &mut CodegenContext<'_>,
     imm: &Immediate,
     builder: &mut FunctionBuilder<'_>,
 ) -> Result<CraneliftValue, CodegenError> {
@@ -390,10 +390,7 @@ fn compile_immediate(
             Ok(builder.ins().iconst(cl_types::I8, 0))
         }
 
-        ImmediateKind::StringLiteral(_) => {
-            // TODO: String literals need data section handling
-            Err(CodegenError::Unsupported("string literals".to_string()))
-        }
+        ImmediateKind::StringLiteral(s) => compile_string_literal(ctx, s, builder),
 
         ImmediateKind::FunctionRef { .. } => {
             // TODO: Function references
@@ -409,6 +406,50 @@ fn compile_immediate(
 
         ImmediateKind::Error => Err(CodegenError::Unsupported("error immediate".to_string())),
     }
+}
+
+/// Compile a string literal.
+///
+/// String literals are compiled as fat pointers: { ptr_to_data, length }.
+/// The string content is stored in the binary's data section.
+fn compile_string_literal(
+    ctx: &mut CodegenContext<'_>,
+    s: &str,
+    builder: &mut FunctionBuilder<'_>,
+) -> Result<CraneliftValue, CodegenError> {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    // Add string to data section
+    let data_id = ctx.add_string_data(s)?;
+
+    // Get reference to the string data in this function
+    let data_ref = ctx.module.declare_data_in_func(data_id, builder.func);
+    let str_ptr = builder.ins().global_value(ptr_type, data_ref);
+
+    // Create length constant
+    let str_len = builder.ins().iconst(ptr_type, s.len() as i64);
+
+    // Allocate stack slot for the fat pointer struct (ptr + len = 16 bytes on 64-bit)
+    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        (ptr_size * 2) as u32,
+        ptr_size as u8,
+    ));
+    let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Store ptr at offset 0
+    builder.ins().store(MemFlags::new(), str_ptr, struct_ptr, 0);
+    // Store len at offset ptr_size
+    builder
+        .ins()
+        .store(MemFlags::new(), str_len, struct_ptr, ptr_size as i32);
+
+    Ok(struct_ptr)
 }
 
 /// Compile a binary operation.

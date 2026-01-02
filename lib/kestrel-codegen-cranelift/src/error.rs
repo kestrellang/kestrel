@@ -23,6 +23,8 @@ pub enum CodegenError {
     IoError(String),
     /// Unsupported feature.
     Unsupported(String),
+    /// Failed to create data section entry.
+    DataSection(String),
 }
 
 impl fmt::Display for CodegenError {
@@ -54,6 +56,9 @@ impl fmt::Display for CodegenError {
             }
             CodegenError::Unsupported(msg) => {
                 write!(f, "unsupported: {}", msg)
+            }
+            CodegenError::DataSection(msg) => {
+                write!(f, "data section error: {}", msg)
             }
         }
     }
