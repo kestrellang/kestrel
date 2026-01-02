@@ -160,6 +160,15 @@ impl<'a> CodegenContext<'a> {
             });
         }
 
+        // Debug: print generated IR
+        if std::env::var("KESTREL_DEBUG_IR").is_ok() {
+            eprintln!(
+                "=== Generated IR for {} ===\n{}\n",
+                symbol_name,
+                cl_func.display()
+            );
+        }
+
         // Define the function in the module
         let mut ctx = CraneliftContext::for_function(cl_func);
         self.module

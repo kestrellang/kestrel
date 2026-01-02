@@ -13,7 +13,8 @@ use kestrel_execution_graph::{
 
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{
-    InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CraneliftValue,
+    AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind,
+    Value as CraneliftValue,
 };
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_module::Module;
@@ -769,9 +770,29 @@ fn compile_immediate(
 
         ImmediateKind::StringLiteral(s) => compile_string_literal(ctx, s, builder),
 
-        ImmediateKind::FunctionRef { .. } => {
-            // TODO: Function references
-            Err(CodegenError::Unsupported("function references".to_string()))
+        ImmediateKind::FunctionRef { name, type_args } => {
+            // Get the function address as a pointer value
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // Look up the function by its mangled name
+            let mangled_name = mangle_name(ctx.mir, *name, type_args);
+            let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
+                CodegenError::Unsupported(format!(
+                    "function not found for reference: {} (mangled: {})",
+                    ctx.mir.name(*name),
+                    mangled_name
+                ))
+            })?;
+
+            // Get the function reference for use in this function
+            let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            // Get the address of the function
+            let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
+            Ok(func_ptr)
         }
 
         ImmediateKind::WitnessMethod { .. } => {
@@ -1028,13 +1049,9 @@ pub fn compile_call(
             }
         }
 
-        Callee::Thin(_place) => Err(CodegenError::Unsupported(
-            "thin function pointer calls".to_string(),
-        )),
+        Callee::Thin(place) => compile_thin_call(ctx, func_def, place, args, builder, local_map),
 
-        Callee::Thick(_place) => Err(CodegenError::Unsupported(
-            "thick function pointer calls".to_string(),
-        )),
+        Callee::Thick(place) => compile_thick_call(ctx, func_def, place, args, builder, local_map),
 
         Callee::Witness {
             protocol,
@@ -1201,4 +1218,385 @@ fn compile_str_from_parts(
         .store(MemFlags::new(), len_val, struct_ptr, ptr_size);
 
     Ok(struct_ptr)
+}
+
+/// Get the type of a place expression (for determining function signature in indirect calls).
+fn get_place_type_for_call(
+    ctx: &CodegenContext<'_>,
+    place: &Place,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<Id<Ty>, CodegenError> {
+    match &place.kind {
+        PlaceKind::Local(local_id) => {
+            let local_def = ctx.mir.local(*local_id);
+            Ok(local_def.ty)
+        }
+
+        PlaceKind::Field { parent, name } => {
+            let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
+            get_field_type_for_call(ctx, parent_ty, name)
+        }
+
+        PlaceKind::Index { parent, index } => {
+            let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
+            get_field_type_by_index_for_call(ctx, parent_ty, *index)
+        }
+
+        PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map),
+
+        PlaceKind::Deref(inner) => {
+            let inner_ty = get_place_type_for_call(ctx, inner, local_map)?;
+            match ctx.mir.ty(inner_ty) {
+                MirTy::Pointer(pointee) | MirTy::Ref(pointee) | MirTy::RefMut(pointee) => {
+                    Ok(*pointee)
+                }
+                _ => Err(CodegenError::Unsupported(format!(
+                    "deref of non-pointer type: {:?}",
+                    ctx.mir.ty(inner_ty)
+                ))),
+            }
+        }
+    }
+}
+
+/// Get the type of a field by name.
+fn get_field_type_for_call(
+    ctx: &CodegenContext<'_>,
+    parent_ty: Id<Ty>,
+    field_name: &str,
+) -> Result<Id<Ty>, CodegenError> {
+    let mir_ty = ctx.mir.ty(parent_ty);
+
+    if let MirTy::Named { name, .. } = mir_ty {
+        let name_data = ctx.mir.name(*name);
+        for (_struct_id, def) in ctx.mir.structs.iter() {
+            if ctx.mir.name(def.name) == name_data {
+                for field_id in &def.fields {
+                    let field_def = &ctx.mir.fields[*field_id];
+                    if field_def.name == field_name {
+                        return Ok(field_def.ty);
+                    }
+                }
+            }
+        }
+    }
+
+    Err(CodegenError::Unsupported(format!(
+        "field {} not found in type {:?}",
+        field_name, mir_ty
+    )))
+}
+
+/// Get the type of a field by index.
+fn get_field_type_by_index_for_call(
+    ctx: &CodegenContext<'_>,
+    parent_ty: Id<Ty>,
+    index: usize,
+) -> Result<Id<Ty>, CodegenError> {
+    let mir_ty = ctx.mir.ty(parent_ty);
+
+    match mir_ty {
+        MirTy::Tuple(elements) => {
+            if index < elements.len() {
+                Ok(elements[index])
+            } else {
+                Err(CodegenError::Unsupported(format!(
+                    "tuple index {} out of bounds",
+                    index
+                )))
+            }
+        }
+        MirTy::Named { name, .. } => {
+            let name_data = ctx.mir.name(*name);
+            for (_struct_id, def) in ctx.mir.structs.iter() {
+                if ctx.mir.name(def.name) == name_data {
+                    if index < def.fields.len() {
+                        let field_id = def.fields[index];
+                        let field_def = &ctx.mir.fields[field_id];
+                        return Ok(field_def.ty);
+                    }
+                }
+            }
+            Err(CodegenError::Unsupported(format!(
+                "field index {} out of bounds in {:?}",
+                index, name_data
+            )))
+        }
+        _ => Err(CodegenError::Unsupported(format!(
+            "index access on unsupported type: {:?}",
+            mir_ty
+        ))),
+    }
+}
+
+/// Resolve through references to find the underlying function type.
+fn resolve_func_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> Id<Ty> {
+    let mir_ty = ctx.mir.ty(ty);
+    match mir_ty {
+        MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
+            resolve_func_type(ctx, *inner)
+        }
+        _ => ty,
+    }
+}
+
+/// Build a Cranelift signature from a function type.
+fn build_signature_from_func_type(
+    ctx: &CodegenContext<'_>,
+    func_ty: Id<Ty>,
+    builder: &FunctionBuilder<'_>,
+) -> Result<Signature, CodegenError> {
+    let mir_ty = ctx.mir.ty(func_ty);
+
+    let (params, ret) = match mir_ty {
+        MirTy::FuncThin { params, ret } => (params.clone(), *ret),
+        MirTy::FuncThick { params, ret } => (params.clone(), *ret),
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "not a function type: {:?}",
+                mir_ty
+            )))
+        }
+    };
+
+    let call_conv = builder.func.signature.call_conv;
+    let mut sig = Signature::new(call_conv);
+
+    // Add parameters
+    for param_ty in &params {
+        let cl_type = translate_type(ctx.mir, *param_ty, ctx.target);
+        sig.params.push(AbiParam::new(cl_type));
+    }
+
+    // Add return type if not unit
+    let ret_mir_ty = ctx.mir.ty(ret);
+    if !matches!(ret_mir_ty, MirTy::Unit) {
+        let cl_type = translate_type(ctx.mir, ret, ctx.target);
+        sig.returns.push(AbiParam::new(cl_type));
+    }
+
+    Ok(sig)
+}
+
+/// Check if a local is a function parameter (passed by pointer).
+fn is_parameter_local(
+    func_def: &FunctionDef,
+    local_id: Id<Local>,
+    ctx: &CodegenContext<'_>,
+) -> bool {
+    for &param_id in &func_def.params {
+        let param = &ctx.mir.params[param_id];
+        if param.local == local_id {
+            return true;
+        }
+    }
+    false
+}
+
+/// Compile a thin function pointer call.
+///
+/// A thin function pointer is just an address - we load it and call indirectly.
+fn compile_thin_call(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    place: &Place,
+    args: &[CallArg],
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    // Get the function pointer value
+    let place_value = compile_place_read(ctx, place, builder, local_map)?;
+
+    // Check if this is a parameter local - if so, we need to dereference
+    // because parameters are passed by pointer.
+    let func_ptr = if let PlaceKind::Local(local_id) = place.kind {
+        if is_parameter_local(func_def, local_id, ctx) {
+            // Load the actual function pointer from the parameter pointer
+            builder
+                .ins()
+                .load(ptr_type, MemFlags::new(), place_value, 0)
+        } else {
+            // Regular local - value is the function pointer directly
+            place_value
+        }
+    } else {
+        place_value
+    };
+
+    // Get the type of the place to determine the function signature
+    let func_ty = get_place_type_for_call(ctx, place, local_map)?;
+
+    // Build the signature
+    let sig = build_signature_from_func_type(ctx, func_ty, builder)?;
+    let sig_ref = builder.import_signature(sig);
+
+    // Compile arguments
+    let mut arg_values = Vec::with_capacity(args.len());
+    for arg in args {
+        let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+        arg_values.push(val);
+    }
+
+    // Make the indirect call
+    let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+
+    // Get the return value (if any)
+    let results = builder.inst_results(call_inst);
+    if results.is_empty() {
+        // Unit return - return a dummy value
+        Ok(builder.ins().iconst(cl_types::I8, 0))
+    } else {
+        Ok(results[0])
+    }
+}
+
+/// Compile a thick function pointer (closure) call.
+///
+/// A thick callable has the layout: { func_ptr: *const (), env_ptr: *const () }
+/// The function pointer expects the environment pointer as the first argument.
+///
+/// Note: The MIR lowering may use Callee::Thick for all function calls for
+/// simplicity. We check the actual type and handle FuncThin types appropriately.
+fn compile_thick_call(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    place: &Place,
+    args: &[CallArg],
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+
+    // Get the type of the place to determine how to handle the call
+    let func_ty = get_place_type_for_call(ctx, place, local_map)?;
+    let resolved_ty = resolve_func_type(ctx, func_ty);
+    let mir_ty = ctx.mir.ty(resolved_ty);
+
+    // Check if this is actually a thin function type
+    // The MIR lowering may use Callee::Thick for all function calls
+    match mir_ty {
+        MirTy::FuncThin { params, ret } => {
+            // For thin function types, the value is the function pointer directly
+            // (not a struct with func_ptr + env_ptr)
+            //
+            // Note: If this is a parameter local, the value is a POINTER to the
+            // function pointer (because Kestrel passes all parameters by pointer).
+            // In that case, we need to load from it.
+            let place_value = compile_place_read(ctx, place, builder, local_map)?;
+
+            // Check if this is a parameter local - if so, we need to dereference
+            // because parameters are passed by pointer.
+            let func_ptr = if let PlaceKind::Local(local_id) = place.kind {
+                if is_parameter_local(func_def, local_id, ctx) {
+                    // Load the actual function pointer from the parameter pointer
+                    builder
+                        .ins()
+                        .load(ptr_type, MemFlags::new(), place_value, 0)
+                } else {
+                    // Regular local - value is the function pointer directly
+                    place_value
+                }
+            } else {
+                place_value
+            };
+
+            let call_conv = builder.func.signature.call_conv;
+            let mut sig = Signature::new(call_conv);
+
+            for param_ty in params {
+                let cl_type = translate_type(ctx.mir, *param_ty, ctx.target);
+                sig.params.push(AbiParam::new(cl_type));
+            }
+
+            let ret_mir_ty = ctx.mir.ty(*ret);
+            if !matches!(ret_mir_ty, MirTy::Unit) {
+                let cl_type = translate_type(ctx.mir, *ret, ctx.target);
+                sig.returns.push(AbiParam::new(cl_type));
+            }
+
+            let sig_ref = builder.import_signature(sig);
+
+            let mut arg_values = Vec::with_capacity(args.len());
+            for arg in args {
+                let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+                arg_values.push(val);
+            }
+
+            let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+            let results = builder.inst_results(call_inst);
+            if results.is_empty() {
+                return Ok(builder.ins().iconst(cl_types::I8, 0));
+            } else {
+                return Ok(results[0]);
+            }
+        }
+        MirTy::FuncThick { params, ret } => {
+            // For thick function types, the value is a struct with func_ptr and env_ptr
+            let thick_ptr = compile_place_read(ctx, place, builder, local_map)?;
+
+            // Load the function pointer from offset 0
+            let func_ptr = builder.ins().load(ptr_type, MemFlags::new(), thick_ptr, 0);
+
+            // Load the environment pointer from offset ptr_size
+            let env_ptr = builder
+                .ins()
+                .load(ptr_type, MemFlags::new(), thick_ptr, ptr_size as i32);
+
+            let call_conv = builder.func.signature.call_conv;
+            let mut sig = Signature::new(call_conv);
+
+            // First parameter is the environment pointer
+            sig.params.push(AbiParam::new(ptr_type));
+
+            // Then add the regular parameters
+            for param_ty in params {
+                let cl_type = translate_type(ctx.mir, *param_ty, ctx.target);
+                sig.params.push(AbiParam::new(cl_type));
+            }
+
+            // Add return type if not unit
+            let ret_mir_ty = ctx.mir.ty(*ret);
+            if !matches!(ret_mir_ty, MirTy::Unit) {
+                let cl_type = translate_type(ctx.mir, *ret, ctx.target);
+                sig.returns.push(AbiParam::new(cl_type));
+            }
+
+            let sig_ref = builder.import_signature(sig);
+
+            // Compile arguments - env_ptr is the first argument
+            let mut arg_values = Vec::with_capacity(args.len() + 1);
+            arg_values.push(env_ptr);
+            for arg in args {
+                let val = compile_value(ctx, func_def, &arg.value, builder, local_map)?;
+                arg_values.push(val);
+            }
+
+            // Make the indirect call
+            let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+
+            let results = builder.inst_results(call_inst);
+            if results.is_empty() {
+                return Ok(builder.ins().iconst(cl_types::I8, 0));
+            } else {
+                return Ok(results[0]);
+            }
+        }
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "not a function type: {:?}",
+                mir_ty
+            )))
+        }
+    }
 }

@@ -14,7 +14,7 @@ use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyKind};
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
@@ -266,6 +266,49 @@ fn mark_moved_args(ctx: &mut LoweringContext, call_args: &[CallArg]) {
             }
         }
     }
+}
+
+/// Build call arguments for indirect calls (function pointers/closures).
+///
+/// For indirect calls, we don't have CallableBehavior, so we determine passing
+/// semantics from the function type itself. In Kestrel, function type parameters
+/// are passed by reference (borrow) by default.
+fn build_indirect_call_args(
+    ctx: &mut LoweringContext,
+    arg_values: Vec<Value>,
+    arg_types: &[&Ty],
+    callee_ty: &Ty,
+) -> Vec<CallArg> {
+    // Get the parameter types from the callee's function type
+    let param_types: Vec<&Ty> = match callee_ty.kind() {
+        TyKind::Function { params, .. } => params.iter().collect(),
+        TyKind::UnresolvedFunction { param_info, .. } => {
+            match param_info {
+                ParamInfo::Explicit { param_types } => param_types.iter().collect(),
+                ParamInfo::ImplicitIt { it_type } => vec![it_type.as_ref()],
+                ParamInfo::Unconstrained => vec![], // No param info available
+            }
+        }
+        _ => vec![], // Not a function type, shouldn't happen
+    };
+
+    arg_values
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| {
+            // Get the argument type if available
+            if let Some(&arg_ty) = arg_types.get(i) {
+                // For function pointer/closure calls, parameters are passed by reference
+                // (this matches Kestrel's default borrow semantics)
+                let ref_value = create_ref(ctx, &value, arg_ty, false);
+                CallArg::new(ref_value, PassingMode::Copy)
+            } else {
+                // Fallback: no type info, just borrow as-is
+                // This path shouldn't be hit in practice after type checking
+                CallArg::borrow(value)
+            }
+        })
+        .collect()
 }
 
 /// Lower an expression to a MIR Value.
@@ -1408,12 +1451,13 @@ fn lower_call(
             // Indirect call through a local variable (closure)
             let mir_local = ctx.get_local_unwrap(*local_id);
             let callee_place = Place::local(mir_local);
+
+            // Build call args with proper reference creation for indirect calls
+            let call_args = build_indirect_call_args(ctx, arg_values, &arg_types, &callee.ty);
+            mark_moved_args(ctx, &call_args);
+
             // Closures are "thick" callables
-            ctx.emit_call(
-                result_place.clone(),
-                Callee::Thick(callee_place),
-                arg_values,
-            );
+            ctx.emit_call_with_modes(result_place.clone(), Callee::Thick(callee_place), call_args);
         }
 
         _ => {
@@ -1421,6 +1465,11 @@ fn lower_call(
             let callee_value = lower_expression(ctx, callee);
             match callee_value {
                 Value::Place(callee_place) => {
+                    // Build call args with proper reference creation for indirect calls
+                    let call_args =
+                        build_indirect_call_args(ctx, arg_values, &arg_types, &callee.ty);
+                    mark_moved_args(ctx, &call_args);
+
                     // Determine if this is a thick (closure) or thin function call
                     // by checking the callee's type
                     let is_thick = matches!(
@@ -1432,7 +1481,7 @@ fn lower_call(
                     } else {
                         Callee::Thin(callee_place)
                     };
-                    ctx.emit_call(result_place.clone(), mir_callee, arg_values);
+                    ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                 }
                 Value::Immediate(_) => {
                     ctx.emit_error(LoweringError::unsupported_expr(
