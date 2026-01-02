@@ -126,4 +126,29 @@ public struct Int8:
     public func shiftRight(by count: Int) -> Int8 {
         Int8(value: lang.i8_shr(self.value, count as lang.i8))
     }
+
+    // Type conversions
+    public func toInt() -> Int {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toInt16() -> Int16 {
+        Int16(value: self.value as lang.i16)
+    }
+
+    public func toInt32() -> Int32 {
+        Int32(value: self.value as lang.i32)
+    }
+
+    public func toInt64() -> Int64 {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toFloat32() -> Float32 {
+        Float32(value: self.value as lang.f32)
+    }
+
+    public func toFloat64() -> Float64 {
+        Float64(value: self.value as lang.f64)
+    }
 }

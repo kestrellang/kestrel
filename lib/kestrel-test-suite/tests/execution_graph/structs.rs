@@ -203,6 +203,7 @@ mod field_access {
 
     #[test]
     fn simple_field_access() {
+        // Note: Parameters default to borrow mode, so they have reference types
         Test::new(
             r#"
             module Main
@@ -222,13 +223,14 @@ mod field_access {
         .expect(
             Mir::mir_function("Main.getX")
                 .returns(MirTy::I64)
-                .has_param("p", MirTy::named("Main.Point")),
+                .has_param("p", MirTy::ref_(MirTy::named("Main.Point"))),
         );
     }
 
     #[test]
     fn deeply_nested_field_access() {
         // Based on tmp/51_deeply_nested_struct.ks
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -255,13 +257,14 @@ mod field_access {
         .expect(
             Mir::mir_function("Main.getValue")
                 .returns(MirTy::I64)
-                .has_param("o", MirTy::named("Main.Outer")),
+                .has_param("o", MirTy::ref_(MirTy::named("Main.Outer"))),
         );
     }
 
     #[test]
     fn four_level_nesting() {
         // Based on tmp/51_deeply_nested_struct.ks
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -282,7 +285,7 @@ mod field_access {
         .expect(
             Mir::mir_function("Main.getValue")
                 .returns(MirTy::I64)
-                .has_param("t", MirTy::named("Main.Top")),
+                .has_param("t", MirTy::ref_(MirTy::named("Main.Top"))),
         );
     }
 }
@@ -323,6 +326,7 @@ mod instance_methods {
 
     #[test]
     fn method_with_parameters() {
+        // Note: Regular parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -343,8 +347,8 @@ mod instance_methods {
             Mir::mir_function("Main.Point.add")
                 .returns(MirTy::named("Main.Point"))
                 .has_param("self", MirTy::ref_(MirTy::named("Main.Point")))
-                .has_param("dx", MirTy::I64)
-                .has_param("dy", MirTy::I64),
+                .has_param("dx", MirTy::ref_(MirTy::I64))
+                .has_param("dy", MirTy::ref_(MirTy::I64)),
         );
     }
 
@@ -437,6 +441,7 @@ mod mutating_methods {
     #[test]
     fn mutating_method_with_param() {
         // Based on tmp/08_mutating.ks
+        // Note: Regular parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -456,7 +461,7 @@ mod mutating_methods {
             Mir::mir_function("Main.Counter.add")
                 .returns(MirTy::Unit)
                 .has_param("self", MirTy::ref_mut(MirTy::named("Main.Counter")))
-                .has_param("n", MirTy::I64),
+                .has_param("n", MirTy::ref_(MirTy::I64)),
         );
     }
 
@@ -533,6 +538,7 @@ mod initializers {
     fn init_with_parameter() {
         // Based on tmp/08_mutating.ks
         // Note: init methods take &var self and return ()
+        // Note: Regular parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -552,7 +558,7 @@ mod initializers {
             Mir::mir_function("Main.Counter.init")
                 .returns(MirTy::Unit)
                 .has_param("self", MirTy::ref_mut(MirTy::named("Main.Counter")))
-                .has_param("start", MirTy::I64),
+                .has_param("start", MirTy::ref_(MirTy::I64)),
         );
     }
 
@@ -599,6 +605,7 @@ mod static_methods {
 
     #[test]
     fn static_method_definition() {
+        // Note: Regular parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -615,8 +622,8 @@ mod static_methods {
         .expect(
             Mir::mir_function("Main.Math.add")
                 .returns(MirTy::I64)
-                .has_param("a", MirTy::I64)
-                .has_param("b", MirTy::I64)
+                .has_param("a", MirTy::ref_(MirTy::I64))
+                .has_param("b", MirTy::ref_(MirTy::I64))
                 .has_param_count(2), // No self parameter
         );
     }
@@ -759,6 +766,7 @@ mod struct_with_struct_fields {
 
     #[test]
     fn accessing_nested_struct_field() {
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -784,7 +792,7 @@ mod struct_with_struct_fields {
         .expect(
             Mir::mir_function("Main.getOriginX")
                 .returns(MirTy::I64)
-                .has_param("r", MirTy::named("Main.Rectangle")),
+                .has_param("r", MirTy::ref_(MirTy::named("Main.Rectangle"))),
         );
     }
 }

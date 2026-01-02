@@ -26,6 +26,7 @@ mod basic_functions {
 
     #[test]
     fn function_with_parameters() {
+        // Note: Parameters default to borrow mode in Kestrel, so they have reference types
         Test::new(
             r#"
             module Main
@@ -37,8 +38,8 @@ mod basic_functions {
         .expect(
             Mir::mir_function("Main.add")
                 .returns(MirTy::I64)
-                .has_param("a", MirTy::I64)
-                .has_param("b", MirTy::I64)
+                .has_param("a", MirTy::ref_(MirTy::I64))
+                .has_param("b", MirTy::ref_(MirTy::I64))
                 .has_param_count(2),
         );
     }

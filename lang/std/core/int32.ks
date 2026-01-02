@@ -60,4 +60,29 @@ public struct Int32:
     public func bitwiseNot() -> Int32 { Int32(value: lang.i32_not(self.value)) }
     public func shiftLeft(by count: Int) -> Int32 { Int32(value: lang.i32_shl(self.value, count as lang.i32)) }
     public func shiftRight(by count: Int) -> Int32 { Int32(value: lang.i32_shr(self.value, count as lang.i32)) }
+
+    // Type conversions
+    public func toInt() -> Int {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toInt8() -> Int8 {
+        Int8(value: self.value as lang.i8)
+    }
+
+    public func toInt16() -> Int16 {
+        Int16(value: self.value as lang.i16)
+    }
+
+    public func toInt64() -> Int64 {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toFloat32() -> Float32 {
+        Float32(value: self.value as lang.f32)
+    }
+
+    public func toFloat64() -> Float64 {
+        Float64(value: self.value as lang.f64)
+    }
 }

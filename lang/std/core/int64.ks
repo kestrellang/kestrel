@@ -60,6 +60,27 @@ public struct Int64:
     public func bitwiseNot() -> Int64 { Int64(value: lang.i64_not(self.value)) }
     public func shiftLeft(by count: Int) -> Int64 { Int64(value: lang.i64_shl(self.value, count as lang.i64)) }
     public func shiftRight(by count: Int) -> Int64 { Int64(value: lang.i64_shr(self.value, count as lang.i64)) }
+
+    // Type conversions
+    public func toInt8() -> Int8 {
+        Int8(value: self.value as lang.i8)
+    }
+
+    public func toInt16() -> Int16 {
+        Int16(value: self.value as lang.i16)
+    }
+
+    public func toInt32() -> Int32 {
+        Int32(value: self.value as lang.i32)
+    }
+
+    public func toFloat32() -> Float32 {
+        Float32(value: self.value as lang.f32)
+    }
+
+    public func toFloat64() -> Float64 {
+        Float64(value: self.value as lang.f64)
+    }
 }
 
 // Int - platform-sized signed integer (alias to Int64 on 64-bit platforms)

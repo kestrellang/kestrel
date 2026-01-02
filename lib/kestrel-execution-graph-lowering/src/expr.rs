@@ -5,8 +5,8 @@
 //! statements and new basic blocks along the way.
 
 use kestrel_execution_graph::{
-    BinOp, CallArg, Callee, Id, Immediate, Local, PassingMode, Place, QualifiedNameData, Rvalue,
-    UnOp, Value,
+    BinOp, CallArg, Callee, Id, Immediate, Local, MirTy, PassingMode, Place, QualifiedNameData,
+    Rvalue, UnOp, Value,
 };
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
@@ -145,9 +145,28 @@ fn build_call_args(
                                     return CallArg::new(cloned_value, PassingMode::Move);
                                 }
 
-                                // Standard handling: use access_mode_to_passing_mode
-                                let mode = access_mode_to_passing_mode(param.access_mode(), arg_ty);
-                                CallArg::new(value, mode)
+                                // Handle based on access mode
+                                match param.access_mode() {
+                                    ParameterAccessMode::Borrow => {
+                                        // Create a reference to the argument
+                                        let ref_value = create_ref(ctx, &value, arg_ty, false);
+                                        CallArg::new(ref_value, PassingMode::Copy)
+                                    }
+                                    ParameterAccessMode::Mutating => {
+                                        // Create a mutable reference to the argument
+                                        let ref_value = create_ref(ctx, &value, arg_ty, true);
+                                        CallArg::new(ref_value, PassingMode::Copy)
+                                    }
+                                    ParameterAccessMode::Consuming => {
+                                        // Pass by value (copy or move)
+                                        let mode = if arg_ty.is_copyable() {
+                                            PassingMode::Copy
+                                        } else {
+                                            PassingMode::Move
+                                        };
+                                        CallArg::new(value, mode)
+                                    }
+                                }
                             } else {
                                 // Fallback if type not found (shouldn't happen after type checking)
                                 // Default to Copy for Consuming since most types are copyable
@@ -169,6 +188,62 @@ fn build_call_args(
         None => {
             // No behavior available - default to Ref for all arguments
             arg_values.into_iter().map(CallArg::borrow).collect()
+        }
+    }
+}
+
+/// Create a reference (or mutable reference) to a value.
+///
+/// For values that are already places, emits `Rvalue::Ref` or `Rvalue::RefMut`.
+/// For immediates, creates a temporary and takes a reference to that.
+fn create_ref(ctx: &mut LoweringContext, value: &Value, ty: &Ty, is_mutable: bool) -> Value {
+    match value {
+        Value::Place(place) => {
+            // Take a reference to the place
+            let base_mir_ty = lower_type(ctx, ty);
+            let ref_ty = if is_mutable {
+                ctx.mir.ty_ref_mut(base_mir_ty)
+            } else {
+                ctx.mir.ty_ref(base_mir_ty)
+            };
+            let ref_local = ctx.create_temp("arg_ref", ref_ty);
+            let ref_place = Place::local(ref_local);
+
+            let rvalue = if is_mutable {
+                Rvalue::RefMut(place.clone())
+            } else {
+                Rvalue::Ref(place.clone())
+            };
+            ctx.emit_assign(ref_place.clone(), rvalue);
+
+            Value::Place(ref_place)
+        }
+        Value::Immediate(imm) => {
+            // For immediates, we need to spill to a temp first, then take a reference
+            let base_mir_ty = lower_type(ctx, ty);
+            let temp_local = ctx.create_temp("arg_temp", base_mir_ty);
+            let temp_place = Place::local(temp_local);
+
+            // Store the immediate in the temp
+            ctx.emit_assign(temp_place.clone(), Rvalue::Use(imm.clone()));
+
+            // Take a reference to the temp
+            let ref_ty = if is_mutable {
+                ctx.mir.ty_ref_mut(base_mir_ty)
+            } else {
+                ctx.mir.ty_ref(base_mir_ty)
+            };
+            let ref_local = ctx.create_temp("arg_ref", ref_ty);
+            let ref_place = Place::local(ref_local);
+
+            let rvalue = if is_mutable {
+                Rvalue::RefMut(temp_place)
+            } else {
+                Rvalue::Ref(temp_place)
+            };
+            ctx.emit_assign(ref_place.clone(), rvalue);
+
+            Value::Place(ref_place)
         }
     }
 }
@@ -212,7 +287,20 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
         // === Variable References ===
         ExprKind::LocalRef(local_id) => {
             let mir_local = ctx.get_local_unwrap(*local_id);
-            Value::Place(Place::local(mir_local))
+            let local_place = Place::local(mir_local);
+
+            // Check if this local is a reference type (e.g., parameter with borrow/mutating mode).
+            // If so, we need to dereference it to get the underlying value.
+            let local_def = ctx.mir.local(mir_local);
+            let local_mir_ty = ctx.mir.ty(local_def.ty);
+
+            if matches!(local_mir_ty, MirTy::Ref(_) | MirTy::RefMut(_)) {
+                // This is a reference-typed local (e.g., borrow or mutating parameter).
+                // Dereference it to access the underlying value.
+                Value::Place(local_place.deref())
+            } else {
+                Value::Place(local_place)
+            }
         }
 
         ExprKind::SymbolRef(symbol_id) => {

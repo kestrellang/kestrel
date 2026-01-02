@@ -209,6 +209,17 @@ fn get_place_type(
             // Downcast preserves the enum type
             get_place_type(ctx, parent)
         }
+        PlaceKind::Deref(parent) => {
+            // Get the pointer/ref type and extract the pointee type
+            let parent_ty_id = get_place_type(ctx, parent)?;
+            let parent_ty = ctx.mir.ty(parent_ty_id);
+            match parent_ty {
+                MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => Ok(*inner),
+                _ => Err(CodegenError::Unsupported(
+                    "deref of non-pointer type".to_string(),
+                )),
+            }
+        }
         _ => Err(CodegenError::Unsupported(
             "unsupported place kind for type lookup".to_string(),
         )),

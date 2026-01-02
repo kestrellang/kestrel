@@ -19,6 +19,7 @@ mod generic_functions {
     #[test]
     fn identity_function() {
         // Based on tmp/07_generics.ks
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -33,13 +34,14 @@ mod generic_functions {
         .expect(
             Mir::mir_function("Main.identity")
                 .has_type_params(1)
-                .has_param("x", MirTy::type_param("T"))
+                .has_param("x", MirTy::ref_(MirTy::type_param("T")))
                 .returns(MirTy::type_param("T")),
         );
     }
 
     #[test]
     fn generic_function_with_multiple_type_params() {
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -54,8 +56,8 @@ mod generic_functions {
         .expect(
             Mir::mir_function("Main.swap")
                 .has_type_params(2)
-                .has_param("a", MirTy::type_param("A"))
-                .has_param("b", MirTy::type_param("B")),
+                .has_param("a", MirTy::ref_(MirTy::type_param("A")))
+                .has_param("b", MirTy::ref_(MirTy::type_param("B"))),
         );
     }
 

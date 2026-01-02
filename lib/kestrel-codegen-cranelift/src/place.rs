@@ -135,9 +135,39 @@ pub fn compile_place_read(
         }
 
         PlaceKind::Deref(inner) => {
-            // TODO: Implement dereference
-            Err(CodegenError::Unsupported("dereference".to_string()))
+            // Get the pointer value from the inner place
+            let ptr = compile_place_read(ctx, inner, builder, local_map)?;
+
+            // Get the type of the inner (which should be a pointer/ref type)
+            let inner_ty = get_place_type(ctx, inner, local_map)?;
+            let pointee_ty = get_pointee_type(ctx, inner_ty)?;
+
+            // Check if the pointee is a struct (compound type)
+            let pointee_mir_ty = ctx.mir.ty(pointee_ty);
+            let is_struct =
+                matches!(pointee_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, pointee_ty);
+
+            if is_struct {
+                // For struct types, the "value" is the pointer itself
+                // (structs are always passed by pointer)
+                Ok(ptr)
+            } else {
+                // For primitive types, load the value from memory
+                let cl_type = translate_type(ctx.mir, pointee_ty, ctx.target);
+                Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
+            }
         }
+    }
+}
+
+/// Get the pointee type of a pointer/reference type.
+fn get_pointee_type(ctx: &CodegenContext<'_>, ptr_ty: Id<Ty>) -> Result<Id<Ty>, CodegenError> {
+    match ctx.mir.ty(ptr_ty) {
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => Ok(*inner),
+        _ => Err(CodegenError::Unsupported(format!(
+            "not a pointer/reference type: {:?}",
+            ctx.mir.ty(ptr_ty)
+        ))),
     }
 }
 
@@ -185,9 +215,11 @@ fn get_place_type(
             get_place_type(ctx, parent, local_map)
         }
 
-        PlaceKind::Deref(_inner) => {
-            // TODO: Handle pointer dereference
-            Err(CodegenError::Unsupported("deref type".to_string()))
+        PlaceKind::Deref(inner) => {
+            // Get the type of the inner (which should be a pointer/ref type)
+            let inner_ty = get_place_type(ctx, inner, local_map)?;
+            // Return the pointee type
+            get_pointee_type(ctx, inner_ty)
         }
     }
 }
@@ -417,6 +449,87 @@ pub fn compile_place_write(
 
         PlaceKind::Downcast { .. } => Err(CodegenError::Unsupported("downcast write".to_string())),
 
-        PlaceKind::Deref(_) => Err(CodegenError::Unsupported("deref write".to_string())),
+        PlaceKind::Deref(inner) => {
+            // Get the pointer value from the inner place
+            let ptr = compile_place_read(ctx, inner, builder, local_map)?;
+
+            // Store the value at the pointer address
+            builder.ins().store(MemFlags::new(), value, ptr, 0);
+            Ok(())
+        }
+    }
+}
+
+/// Get the address of a place (for taking references).
+///
+/// This is used by Rvalue::Ref and Rvalue::RefMut to get a pointer to a place.
+pub fn compile_place_addr(
+    ctx: &mut CodegenContext<'_>,
+    place: &Place,
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+    local_slots: &HashMap<Id<Local>, cranelift_codegen::ir::StackSlot>,
+) -> Result<CraneliftValue, CodegenError> {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    match &place.kind {
+        PlaceKind::Local(local_id) => {
+            // Get the stack slot for this local
+            let slot = local_slots.get(local_id).ok_or_else(|| {
+                CodegenError::Unsupported(format!(
+                    "no stack slot for local (cannot take reference of register-only local)"
+                ))
+            })?;
+            Ok(builder.ins().stack_addr(ptr_type, *slot, 0))
+        }
+
+        PlaceKind::Field { parent, name } => {
+            // Get the parent's address (which is a struct pointer)
+            // For a field, the parent is already a pointer to the struct
+            let struct_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+
+            // Get the field offset
+            let parent_ty = get_place_type(ctx, parent, local_map)?;
+            let (field_offset, _field_ty) = get_field_info(ctx, parent_ty, name)?;
+
+            // Compute field address
+            if field_offset == 0 {
+                Ok(struct_ptr)
+            } else {
+                Ok(builder.ins().iadd_imm(struct_ptr, field_offset as i64))
+            }
+        }
+
+        PlaceKind::Index { parent, index } => {
+            // Get the parent pointer
+            let parent_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+
+            // Get the parent type and field info
+            let parent_ty = get_place_type(ctx, parent, local_map)?;
+            let (field_offset, _field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+
+            // Compute field address
+            if field_offset == 0 {
+                Ok(parent_ptr)
+            } else {
+                Ok(builder.ins().iadd_imm(parent_ptr, field_offset as i64))
+            }
+        }
+
+        PlaceKind::Downcast { parent, variant: _ } => {
+            // Downcast doesn't change the address - it just changes how we interpret it
+            // The payload is at offset 4 (after the discriminant)
+            let enum_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            Ok(builder.ins().iadd_imm(enum_ptr, 4))
+        }
+
+        PlaceKind::Deref(inner) => {
+            // The address of *ptr is just ptr itself
+            compile_place_read(ctx, inner, builder, local_map)
+        }
     }
 }

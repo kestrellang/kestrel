@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use kestrel_execution_graph::TypeParamOwner;
-use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::callable::{
+    CallableBehavior, ParameterAccessMode, ReceiverKind,
+};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableBehavior};
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
@@ -100,10 +102,21 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     }
 
     // Add other parameters
+    // Parameters are wrapped in reference types based on their access mode:
+    // - Borrow: parameter has type &T (caller passes Rvalue::Ref)
+    // - Mutating: parameter has type &var T (caller passes Rvalue::RefMut)
+    // - Consuming: parameter has type T (caller passes value)
+    // When accessing a reference-typed parameter, the LocalRef handler in expr.rs
+    // automatically dereferences it.
     if let Some(ref callable) = callable {
         for param in callable.parameters() {
             let param_name = param.internal_name().to_string();
-            let mir_ty = lower_type(ctx, &param.ty);
+            let base_mir_ty = lower_type(ctx, &param.ty);
+            let mir_ty = match param.access_mode() {
+                ParameterAccessMode::Borrow => ctx.mir.ty_ref(base_mir_ty),
+                ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
+                ParameterAccessMode::Consuming => base_mir_ty,
+            };
             ctx.mir.function_builder(func_id).param(param_name, mir_ty);
         }
     }
@@ -256,10 +269,16 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
     }
 
     // Add other parameters
+    // Parameters are wrapped in reference types based on their access mode
     if let Some(ref callable) = callable {
         for param in callable.parameters() {
             let param_name = param.internal_name().to_string();
-            let mir_ty = lower_type(ctx, &param.ty);
+            let base_mir_ty = lower_type(ctx, &param.ty);
+            let mir_ty = match param.access_mode() {
+                ParameterAccessMode::Borrow => ctx.mir.ty_ref(base_mir_ty),
+                ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
+                ParameterAccessMode::Consuming => base_mir_ty,
+            };
             ctx.mir.function_builder(func_id).param(param_name, mir_ty);
         }
     }

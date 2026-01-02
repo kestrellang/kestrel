@@ -259,7 +259,8 @@ mod mir_tests {
 
     #[test]
     fn borrow_mode_unaffected_by_copyability() {
-        // Borrow mode should be used regardless of copyability when explicitly marked
+        // Borrow mode creates a reference and passes it with Copy
+        // The copyability doesn't affect borrow mode - we always create a Ref
         Test::new(
             r#"module Test
             @builtin(.Copyable)
@@ -279,12 +280,17 @@ mod mir_tests {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
+        // The call passes the reference with Copy mode (the reference value is copied)
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.borrow_it".to_string(),
-                arg_modes: vec![PassingMode::Ref],
+                arg_modes: vec![PassingMode::Copy],
             })
-        }));
+        }))
+        // Verify a Ref rvalue is created
+        .expect(
+            Mir::mir_function("Test.test").any_block(|b| b.has_statement(StatementPattern::Ref)),
+        );
     }
 
     #[test]

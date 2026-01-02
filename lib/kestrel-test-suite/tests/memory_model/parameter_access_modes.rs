@@ -774,8 +774,17 @@ mod edge_cases {
 }
 
 // =============================================================================
-// MIR TESTS - Verify passing modes are emitted in MIR
+// MIR TESTS - Verify references are created for borrow/mutating parameters
 // =============================================================================
+//
+// Note: The calling convention is now:
+// - Borrow: create Rvalue::Ref, pass with PassingMode::Copy
+// - Mutating: create Rvalue::RefMut, pass with PassingMode::Copy
+// - Consuming: pass value directly with PassingMode::Copy or PassingMode::Move
+//
+// The PassingMode in CallArg is now always Copy for references (the reference
+// value itself is copied, not the pointee). The actual reference semantics
+// come from the Rvalue::Ref/RefMut being emitted before the call.
 
 mod mir_passing_modes {
     use super::*;
@@ -783,8 +792,7 @@ mod mir_passing_modes {
 
     #[test]
     fn mir_call_has_passing_modes() {
-        // Verify that calls in MIR include passing mode information
-        // For now, all arguments default to Ref (borrow)
+        // Borrow parameters: reference is created before call, passed with Copy
         Test::new(
             r#"module Test
             struct Point { var x: Int; var y: Int }
@@ -799,17 +807,22 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
+        // The call now passes the reference with Copy mode
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.process".to_string(),
-                arg_modes: vec![PassingMode::Ref],
+                arg_modes: vec![PassingMode::Copy], // Reference is copied, not Ref
             })
-        }));
+        }))
+        // Also verify a Ref rvalue is emitted before the call
+        .expect(
+            Mir::mir_function("Test.caller").any_block(|b| b.has_statement(StatementPattern::Ref)),
+        );
     }
 
     #[test]
     fn mir_method_call_has_passing_modes() {
-        // Method calls also have passing modes (self arg is Ref by default)
+        // Method calls also create references for the receiver
         Test::new(
             r#"module Test
             struct Point { 
@@ -828,17 +841,19 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
+        // Note: Method receiver handling is different - it uses CallArg::borrow
+        // which still uses PassingMode::Ref for the receiver
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.Point.magnitude".to_string(),
-                arg_modes: vec![PassingMode::Ref], // self is Ref
+                arg_modes: vec![PassingMode::Ref], // self is still Ref (handled specially)
             })
         }));
     }
 
     #[test]
     fn mir_mutating_parameter_emits_mutref() {
-        // mutating parameters should emit MutRef passing mode
+        // mutating parameters: RefMut created before call, passed with Copy
         Test::new(
             r#"module Test
             struct Point { var x: Int; var y: Int }
@@ -853,17 +868,23 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
+        // The call passes the mutable reference with Copy mode
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.reset".to_string(),
-                arg_modes: vec![PassingMode::MutRef],
+                arg_modes: vec![PassingMode::Copy], // MutRef is copied
             })
-        }));
+        }))
+        // Also verify a RefMut rvalue is emitted before the call
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| b.has_statement(StatementPattern::RefMut)),
+        );
     }
 
     #[test]
     fn mir_consuming_parameter_emits_copy() {
-        // consuming parameters should emit Copy passing mode (for now, until not Copyable)
+        // consuming parameters pass value directly with Copy mode
         Test::new(
             r#"module Test
             struct Point { var x: Int; var y: Int }
@@ -889,6 +910,9 @@ mod mir_passing_modes {
     #[test]
     fn mir_mixed_modes_in_call() {
         // Multiple parameters with different access modes
+        // borrow -> Ref created, passed with Copy
+        // mutating -> RefMut created, passed with Copy
+        // consuming -> passed directly with Copy
         Test::new(
             r#"module Test
             struct Point { var x: Int; var y: Int }
@@ -906,12 +930,21 @@ mod mir_passing_modes {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
+        // All args are passed with Copy (the first two are references that are copied)
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.process".to_string(),
-                arg_modes: vec![PassingMode::Ref, PassingMode::MutRef, PassingMode::Copy],
+                arg_modes: vec![PassingMode::Copy, PassingMode::Copy, PassingMode::Copy],
             })
-        }));
+        }))
+        // Verify Ref and RefMut are created
+        .expect(
+            Mir::mir_function("Test.caller").any_block(|b| b.has_statement(StatementPattern::Ref)),
+        )
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| b.has_statement(StatementPattern::RefMut)),
+        );
     }
 
     #[test]
@@ -939,9 +972,14 @@ mod mir_passing_modes {
         .expect(Mir::mir_function("Test.caller").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.Point.copyXTo".to_string(),
-                // self (Ref) + other (MutRef)
-                arg_modes: vec![PassingMode::Ref, PassingMode::MutRef],
+                // self (Ref, handled specially) + other (RefMut created, passed with Copy)
+                arg_modes: vec![PassingMode::Ref, PassingMode::Copy],
             })
-        }));
+        }))
+        // Also verify a RefMut rvalue is emitted for the mutating parameter
+        .expect(
+            Mir::mir_function("Test.caller")
+                .any_block(|b| b.has_statement(StatementPattern::RefMut)),
+        );
     }
 }

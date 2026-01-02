@@ -4,13 +4,57 @@ use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::types::translate_type;
 
-use kestrel_execution_graph::{Block, FunctionDef, Id, Local, LocalDef, Place, PlaceKind};
+use kestrel_execution_graph::{
+    Block, FunctionDef, Id, Local, LocalDef, Place, PlaceKind, Rvalue, StatementKind,
+};
 
 use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::{Function as CraneliftFunction, InstBuilder, Value};
+use cranelift_codegen::ir::{
+    Function as CraneliftFunction, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value,
+};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Collect locals that have their address taken (used in Ref/RefMut).
+/// These locals must be stack-allocated, not register-allocated.
+fn collect_address_taken_locals(
+    ctx: &CodegenContext<'_>,
+    func_def: &FunctionDef,
+) -> HashSet<Id<Local>> {
+    let mut result = HashSet::new();
+
+    for &block_id in &func_def.blocks {
+        let block = ctx.mir.block(block_id);
+        for &stmt_id in &block.statements {
+            let stmt = ctx.mir.statement(stmt_id);
+            if let StatementKind::Assign { rvalue, .. } = &stmt.kind {
+                match rvalue {
+                    Rvalue::Ref(place) | Rvalue::RefMut(place) => {
+                        // Find the root local of this place
+                        if let Some(local_id) = get_root_local(place) {
+                            result.insert(local_id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Get the root local of a place expression.
+fn get_root_local(place: &Place) -> Option<Id<Local>> {
+    match &place.kind {
+        PlaceKind::Local(local_id) => Some(*local_id),
+        PlaceKind::Field { parent, .. } => get_root_local(parent),
+        PlaceKind::Index { parent, .. } => get_root_local(parent),
+        PlaceKind::Downcast { parent, .. } => get_root_local(parent),
+        PlaceKind::Deref(inner) => get_root_local(inner),
+    }
+}
 
 /// Compile a function body.
 pub fn compile_function_body(

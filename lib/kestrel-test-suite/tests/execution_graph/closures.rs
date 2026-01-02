@@ -473,6 +473,7 @@ mod make_adder {
     #[test]
     fn make_adder_returns_closure() {
         // Based on tmp/13_closure_capture.ks
+        // Note: Function parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -487,7 +488,7 @@ mod make_adder {
         .expect(
             Mir::mir_function("Main.makeAdder")
                 .returns(MirTy::func(vec![MirTy::I64], MirTy::I64))
-                .has_param("n", MirTy::I64),
+                .has_param("n", MirTy::ref_(MirTy::I64)),
         )
         .expect(
             Mir::mir_closure("Main.makeAdder", 0)
