@@ -3,15 +3,18 @@
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::place::compile_place_read;
+use crate::types::translate_type;
 
 use kestrel_codegen::mangle_name;
 use kestrel_execution_graph::{
     BinOp, CallArg, Callee, FloatBits, FunctionDef, Id, Immediate, ImmediateKind, IntBits, Local,
-    Rvalue, UnOp, Value,
+    MirTy, Rvalue, Ty, UnOp, Value,
 };
 
 use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::{InstBuilder, Value as CraneliftValue};
+use cranelift_codegen::ir::{
+    InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CraneliftValue,
+};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_module::Module;
 
@@ -47,9 +50,149 @@ pub fn compile_rvalue(
             compile_call(ctx, func_def, callee, args, builder, local_map)
         }
 
+        Rvalue::Construct { ty, fields } => {
+            compile_construct(ctx, func_def, *ty, fields, builder, local_map)
+        }
+
         // TODO: Implement remaining rvalues
         _ => Err(CodegenError::Unsupported(format!("rvalue: {:?}", rvalue))),
     }
+}
+
+/// Compile a struct construction.
+///
+/// Allocates stack space for the struct, stores each field value at its offset,
+/// and returns a pointer to the stack slot.
+fn compile_construct(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    ty: Id<Ty>,
+    fields: &[(String, Value)],
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    // Get the struct layout to determine size and field offsets
+    let mir_ty = ctx.mir.ty(ty);
+
+    // Find the struct ID from the type
+    let struct_id = match mir_ty {
+        MirTy::Named { name, .. } => {
+            // Look up struct by name
+            let name_data = ctx.mir.name(*name);
+            let mut found_struct = None;
+            for (id, def) in ctx.mir.structs.iter() {
+                let def_name = ctx.mir.name(def.name);
+                if def_name == name_data {
+                    found_struct = Some(id);
+                    break;
+                }
+            }
+            found_struct.ok_or_else(|| {
+                CodegenError::Unsupported(format!("struct not found: {}", name_data))
+            })?
+        }
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "construct non-struct type: {:?}",
+                mir_ty
+            )));
+        }
+    };
+
+    // Get struct layout with field offsets
+    let struct_layout = ctx.layouts.struct_layout(struct_id);
+    let layout = struct_layout.layout;
+    let field_offsets = struct_layout.field_offsets.clone();
+
+    // Allocate stack slot for the struct
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        layout.size as u32,
+        layout.align as u8,
+    ));
+
+    // Get pointer type for the target
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    // Get pointer to the stack slot
+    let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Store each field at its offset
+    let struct_def = ctx.mir.struct_def(struct_id);
+    for (field_name, field_value) in fields {
+        let offset = field_offsets
+            .get(field_name)
+            .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
+
+        // Find the field type
+        let mut field_ty = None;
+        for field_id in &struct_def.fields {
+            let field_def = &ctx.mir.fields[*field_id];
+            if &field_def.name == field_name {
+                field_ty = Some(field_def.ty);
+                break;
+            }
+        }
+        let field_ty = field_ty.ok_or_else(|| {
+            CodegenError::Unsupported(format!("field type not found: {}", field_name))
+        })?;
+
+        // Compile the field value
+        let value = compile_value(ctx, func_def, field_value, builder, local_map)?;
+
+        // Check if this is a nested struct - if so, copy the struct data
+        let field_mir_ty = ctx.mir.ty(field_ty);
+        let is_nested_struct =
+            matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+
+        if is_nested_struct {
+            // Value is a pointer to the nested struct - copy its contents
+            let nested_layout = ctx.layouts.layout_of(field_ty);
+            let dest_ptr = if *offset == 0 {
+                ptr
+            } else {
+                builder.ins().iadd_imm(ptr, *offset as i64)
+            };
+            // Copy the struct data byte by byte (simple approach)
+            // For larger structs, we could use memcpy, but for now just copy word by word
+            let words = (nested_layout.size + 7) / 8;
+            for i in 0..words {
+                let word_offset = (i * 8) as i32;
+                let word = builder
+                    .ins()
+                    .load(cl_types::I64, MemFlags::new(), value, word_offset);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), word, dest_ptr, word_offset);
+            }
+        } else {
+            // Store primitive value directly
+            builder
+                .ins()
+                .store(MemFlags::new(), value, ptr, *offset as i32);
+        }
+    }
+
+    // Return the pointer to the struct
+    Ok(ptr)
+}
+
+/// Check if a type is a struct type.
+fn is_struct_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
+    let mir_ty = ctx.mir.ty(ty);
+    if let MirTy::Named { name, .. } = mir_ty {
+        let name_data = ctx.mir.name(*name);
+        for (_, def) in ctx.mir.structs.iter() {
+            if ctx.mir.name(def.name) == name_data {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Compile a value (place or immediate).

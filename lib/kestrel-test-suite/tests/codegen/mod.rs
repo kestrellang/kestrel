@@ -11,6 +11,7 @@ mod arithmetic;
 mod control_flow;
 mod functions;
 mod loops;
+mod structs;
 
 /// Result of running a compiled program.
 #[derive(Debug)]
