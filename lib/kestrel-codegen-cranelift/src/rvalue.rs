@@ -54,6 +54,14 @@ pub fn compile_rvalue(
             compile_construct(ctx, func_def, *ty, fields, builder, local_map)
         }
 
+        Rvalue::EnumVariant {
+            enum_ty,
+            variant,
+            payload,
+        } => compile_enum_variant(
+            ctx, func_def, *enum_ty, variant, payload, builder, local_map,
+        ),
+
         // TODO: Implement remaining rvalues
         _ => Err(CodegenError::Unsupported(format!("rvalue: {:?}", rvalue))),
     }
@@ -178,6 +186,142 @@ fn compile_construct(
     }
 
     // Return the pointer to the struct
+    Ok(ptr)
+}
+
+/// Compile an enum variant construction.
+///
+/// Allocates stack space for the enum (discriminant + max payload size),
+/// stores the discriminant, then stores the payload fields.
+fn compile_enum_variant(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    enum_ty: Id<Ty>,
+    variant: &str,
+    payload: &[Value],
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    let mir_ty = ctx.mir.ty(enum_ty);
+
+    // Find the enum ID from the type
+    let enum_id = match mir_ty {
+        MirTy::Named { name, .. } => {
+            let name_data = ctx.mir.name(*name);
+            let mut found_enum = None;
+            for (id, def) in ctx.mir.enums.iter() {
+                let def_name = ctx.mir.name(def.name);
+                if def_name == name_data {
+                    found_enum = Some(id);
+                    break;
+                }
+            }
+            found_enum.ok_or_else(|| {
+                CodegenError::Unsupported(format!("enum not found: {}", name_data))
+            })?
+        }
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "enum variant on non-named type: {:?}",
+                mir_ty
+            )));
+        }
+    };
+
+    // Get the enum layout
+    let enum_layout = ctx.layouts.layout_of(enum_ty);
+
+    // Allocate stack slot for the enum
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        enum_layout.size as u32,
+        enum_layout.align as u8,
+    ));
+
+    // Get pointer type for the target
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    // Get pointer to the stack slot
+    let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Find the case and its discriminant
+    let enum_def = ctx.mir.enum_def(enum_id);
+    let case_id = enum_def
+        .case_by_name(variant)
+        .ok_or_else(|| CodegenError::Unsupported(format!("enum case not found: {}", variant)))?;
+    let case_def = &ctx.mir.enum_cases[case_id];
+    let discriminant = case_def.discriminant;
+
+    // Store the discriminant at offset 0 (i32)
+    let discr_val = builder.ins().iconst(cl_types::I32, discriminant as i64);
+    builder.ins().store(MemFlags::new(), discr_val, ptr, 0);
+
+    // If there's a payload, store the fields after the discriminant
+    if !payload.is_empty() {
+        // Get the payload struct layout
+        let payload_struct_id = case_def.struct_def.ok_or_else(|| {
+            CodegenError::Unsupported(format!("enum case {} has no struct_def", variant))
+        })?;
+        let payload_layout = ctx.layouts.struct_layout(payload_struct_id);
+        let field_offsets = payload_layout.field_offsets.clone();
+
+        // Discriminant is 4 bytes, payload starts at offset 4 (or aligned)
+        // The payload offset is after discriminant, aligned to payload's alignment
+        let payload_base_offset = 4i32; // discriminant is i32 = 4 bytes
+
+        // Get the struct definition to find field names in order
+        let payload_struct = ctx.mir.struct_def(payload_struct_id);
+        let field_ids: Vec<_> = payload_struct.fields.clone();
+
+        for (i, value) in payload.iter().enumerate() {
+            if i >= field_ids.len() {
+                break;
+            }
+            let field_id = field_ids[i];
+            let field_def = &ctx.mir.fields[field_id];
+            let field_name = &field_def.name;
+
+            let field_offset = field_offsets.get(field_name).copied().unwrap_or(0);
+            let total_offset = payload_base_offset + field_offset as i32;
+
+            // Compile the payload value
+            let val = compile_value(ctx, func_def, value, builder, local_map)?;
+
+            // Check if this is a nested struct
+            let field_ty = field_def.ty;
+            let field_mir_ty = ctx.mir.ty(field_ty);
+            let is_nested_struct =
+                matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+
+            if is_nested_struct {
+                // Copy nested struct data
+                let nested_layout = ctx.layouts.layout_of(field_ty);
+                let dest_ptr = if total_offset == 0 {
+                    ptr
+                } else {
+                    builder.ins().iadd_imm(ptr, total_offset as i64)
+                };
+                let words = (nested_layout.size + 7) / 8;
+                for w in 0..words {
+                    let word_offset = (w * 8) as i32;
+                    let word = builder
+                        .ins()
+                        .load(cl_types::I64, MemFlags::new(), val, word_offset);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), word, dest_ptr, word_offset);
+                }
+            } else {
+                // Store primitive value directly
+                builder.ins().store(MemFlags::new(), val, ptr, total_offset);
+            }
+        }
+    }
+
     Ok(ptr)
 }
 

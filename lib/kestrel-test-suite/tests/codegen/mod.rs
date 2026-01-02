@@ -9,6 +9,7 @@ use std::process::Command;
 // Re-export test modules
 mod arithmetic;
 mod control_flow;
+mod enums;
 mod functions;
 mod loops;
 mod structs;

@@ -5,10 +5,13 @@ use crate::error::CodegenError;
 use crate::place::compile_place_read;
 use crate::rvalue::compile_value;
 
-use kestrel_execution_graph::{Block, FunctionDef, Id, Local, Terminator, TerminatorKind, Value};
+use kestrel_execution_graph::{
+    Block, FunctionDef, Id, Local, MirTy, PlaceKind, Terminator, TerminatorKind, Value,
+};
 
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::ir::{InstBuilder, MemFlags};
 use cranelift_frontend::{FunctionBuilder, Variable};
 
 use std::collections::HashMap;
@@ -82,8 +85,62 @@ pub fn compile_terminator(
             discriminant,
             cases,
         } => {
-            // TODO: Implement switch
-            Err(CodegenError::Unsupported("switch terminator".to_string()))?
+            // Load the discriminant value from the enum
+            // The discriminant is stored at offset 0 as an i32
+            let enum_ptr = compile_place_read(ctx, discriminant, builder, local_map)?;
+            let discr_val = builder
+                .ins()
+                .load(cl_types::I32, MemFlags::new(), enum_ptr, 0);
+
+            // Get the enum type to look up case discriminants
+            let enum_id = get_enum_id_from_place(ctx, discriminant)?;
+            let enum_def = ctx.mir.enum_def(enum_id);
+
+            // Build a chain of brif instructions for each case
+            // This is simpler than br_table and works for any number of cases
+            if cases.is_empty() {
+                // No cases - emit unreachable
+                builder
+                    .ins()
+                    .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+            } else {
+                // For each case except the last, compare and branch
+                for (i, (case_name, target_block)) in cases.iter().enumerate() {
+                    let target_cl = block_map.get(target_block).ok_or_else(|| {
+                        CodegenError::Unsupported(format!("unknown switch target: {}", case_name))
+                    })?;
+
+                    // Handle wildcard case "_" - this is the default/fallback
+                    if case_name == "_" {
+                        // Wildcard matches everything - just jump
+                        builder.ins().jump(*target_cl, &[]);
+                        break;
+                    }
+
+                    // Look up the discriminant value for this case
+                    let case_id = enum_def.case_by_name(case_name).ok_or_else(|| {
+                        CodegenError::Unsupported(format!("enum case not found: {}", case_name))
+                    })?;
+                    let case_def = &ctx.mir.enum_cases[case_id];
+                    let expected_discr = case_def.discriminant as i64;
+
+                    if i == cases.len() - 1 {
+                        // Last case - just jump unconditionally (exhaustive match)
+                        builder.ins().jump(*target_cl, &[]);
+                    } else {
+                        // Compare discriminant and branch
+                        let cmp = builder
+                            .ins()
+                            .icmp_imm(IntCC::Equal, discr_val, expected_discr);
+
+                        // Create a fallthrough block for the next comparison
+                        let next_block = builder.create_block();
+                        builder.ins().brif(cmp, *target_cl, &[], next_block, &[]);
+                        builder.switch_to_block(next_block);
+                        builder.seal_block(next_block);
+                    }
+                }
+            }
         }
 
         TerminatorKind::Panic(_msg) => {
@@ -101,4 +158,59 @@ pub fn compile_terminator(
     }
 
     Ok(())
+}
+
+/// Get the enum ID from a place expression.
+fn get_enum_id_from_place(
+    ctx: &CodegenContext<'_>,
+    place: &kestrel_execution_graph::Place,
+) -> Result<kestrel_execution_graph::Id<kestrel_execution_graph::Enum>, CodegenError> {
+    // Get the type of the place
+    let ty = get_place_type(ctx, place)?;
+    let mir_ty = ctx.mir.ty(ty);
+
+    match mir_ty {
+        MirTy::Named { name, .. } => {
+            let name_data = ctx.mir.name(*name);
+            for (id, def) in ctx.mir.enums.iter() {
+                let def_name = ctx.mir.name(def.name);
+                if def_name == name_data {
+                    return Ok(id);
+                }
+            }
+            Err(CodegenError::Unsupported(format!(
+                "enum not found for type: {}",
+                name_data
+            )))
+        }
+        _ => Err(CodegenError::Unsupported(format!(
+            "switch on non-enum type: {:?}",
+            mir_ty
+        ))),
+    }
+}
+
+/// Get the type of a place expression.
+fn get_place_type(
+    ctx: &CodegenContext<'_>,
+    place: &kestrel_execution_graph::Place,
+) -> Result<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>, CodegenError> {
+    match &place.kind {
+        PlaceKind::Local(local_id) => {
+            let local_def = ctx.mir.local(*local_id);
+            Ok(local_def.ty)
+        }
+        PlaceKind::Field { parent, .. } => {
+            // For field access, we'd need to look up the field type
+            // For now, recurse to parent
+            get_place_type(ctx, parent)
+        }
+        PlaceKind::Downcast { parent, .. } => {
+            // Downcast preserves the enum type
+            get_place_type(ctx, parent)
+        }
+        _ => Err(CodegenError::Unsupported(
+            "unsupported place kind for type lookup".to_string(),
+        )),
+    }
 }

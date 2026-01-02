@@ -69,13 +69,69 @@ pub fn compile_place_read(
         }
 
         PlaceKind::Index { parent, index } => {
-            // TODO: Implement tuple/array indexing
-            Err(CodegenError::Unsupported("index access".to_string()))
+            // Index access is used for:
+            // 1. Tuple field access (tuple.0, tuple.1, etc.)
+            // 2. Enum payload field access after downcast (enum.SomeCase.0, etc.)
+            //
+            // The parent could be a struct/tuple or a downcast result.
+            // We need to get the pointer and add the offset for the indexed field.
+            let parent_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+
+            // Get the parent type to find the field at this index
+            let parent_ty = get_place_type(ctx, parent, local_map)?;
+
+            // Find the field offset for this index
+            let (field_offset, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+
+            // Compute pointer type
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // Load the field value from parent_ptr + offset
+            let field_cl_ty = translate_type(ctx.mir, field_ty, ctx.target);
+
+            // Check if the field is itself a struct (compound type)
+            let field_mir_ty = ctx.mir.ty(field_ty);
+            let is_struct_field =
+                matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+
+            if is_struct_field {
+                // For struct fields, return a pointer to the nested struct
+                if field_offset == 0 {
+                    Ok(parent_ptr)
+                } else {
+                    Ok(builder.ins().iadd_imm(parent_ptr, field_offset as i64))
+                }
+            } else {
+                // For primitive fields, load the value
+                Ok(builder.ins().load(
+                    field_cl_ty,
+                    MemFlags::new(),
+                    parent_ptr,
+                    field_offset as i32,
+                ))
+            }
         }
 
         PlaceKind::Downcast { parent, variant } => {
-            // TODO: Implement enum downcast
-            Err(CodegenError::Unsupported("enum downcast".to_string()))
+            // Downcast is used after a switch to access the variant's payload.
+            // The enum layout is: [discriminant: i32][payload...]
+            // After downcast, we return a pointer to the payload area (offset 4).
+            let enum_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+
+            // Compute pointer type
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+
+            // The payload is at offset 4 (after the i32 discriminant)
+            // Return a pointer to the payload area
+            Ok(builder.ins().iadd_imm(enum_ptr, 4))
         }
 
         PlaceKind::Deref(inner) => {
@@ -117,9 +173,11 @@ fn get_place_type(
             Ok(field_ty)
         }
 
-        PlaceKind::Index { parent, index: _ } => {
-            // TODO: Handle tuple indexing
-            Err(CodegenError::Unsupported("index type".to_string()))
+        PlaceKind::Index { parent, index } => {
+            // Get the type of the indexed field
+            let parent_ty = get_place_type(ctx, parent, local_map)?;
+            let (_, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+            Ok(field_ty)
         }
 
         PlaceKind::Downcast { parent, .. } => {
@@ -184,6 +242,140 @@ fn get_field_info(
 
     let field_ty = field_ty.ok_or_else(|| {
         CodegenError::Unsupported(format!("field type not found: {}", field_name))
+    })?;
+
+    Ok((offset, field_ty))
+}
+
+/// Get field offset and type by index for a struct or enum payload.
+///
+/// This handles the case where we have a downcast to an enum variant and need
+/// to access the payload fields by index.
+fn get_field_by_index(
+    ctx: &mut CodegenContext<'_>,
+    parent_place: &Place,
+    parent_ty: Id<Ty>,
+    index: usize,
+) -> Result<(usize, Id<Ty>), CodegenError> {
+    // Check if the parent is a downcast - in that case, we need to find the variant struct
+    if let PlaceKind::Downcast {
+        parent: grandparent,
+        variant,
+    } = &parent_place.kind
+    {
+        // Get the enum type from the grandparent
+        let enum_ty = get_place_type(ctx, grandparent, &HashMap::new())?;
+        let mir_ty = ctx.mir.ty(enum_ty);
+
+        if let MirTy::Named { name, .. } = mir_ty {
+            let name_data = ctx.mir.name(*name);
+
+            // Find the enum
+            for (enum_id, enum_def) in ctx.mir.enums.iter() {
+                let def_name = ctx.mir.name(enum_def.name);
+                if def_name == name_data {
+                    // Find the case
+                    let case_id = enum_def.case_by_name(variant).ok_or_else(|| {
+                        CodegenError::Unsupported(format!("enum case not found: {}", variant))
+                    })?;
+                    let case_def = &ctx.mir.enum_cases[case_id];
+
+                    // Get the payload struct
+                    let struct_id = case_def.struct_def.ok_or_else(|| {
+                        CodegenError::Unsupported(format!(
+                            "enum case {} has no struct_def",
+                            variant
+                        ))
+                    })?;
+
+                    return get_struct_field_by_index(ctx, struct_id, index);
+                }
+            }
+
+            return Err(CodegenError::Unsupported(format!(
+                "enum not found for downcast: {}",
+                name_data
+            )));
+        }
+    }
+
+    // Otherwise, it's a regular struct or tuple - look up by index
+    let mir_ty = ctx.mir.ty(parent_ty);
+
+    match mir_ty {
+        MirTy::Named { name, .. } => {
+            let name_data = ctx.mir.name(*name);
+
+            // Try to find as struct
+            for (struct_id, def) in ctx.mir.structs.iter() {
+                if ctx.mir.name(def.name) == name_data {
+                    return get_struct_field_by_index(ctx, struct_id, index);
+                }
+            }
+
+            Err(CodegenError::Unsupported(format!(
+                "struct not found for index access: {}",
+                name_data
+            )))
+        }
+        MirTy::Tuple(elements) => {
+            // For tuples, calculate offset sequentially
+            let elements = elements.clone();
+            if index >= elements.len() {
+                return Err(CodegenError::Unsupported(format!(
+                    "tuple index {} out of bounds (len {})",
+                    index,
+                    elements.len()
+                )));
+            }
+
+            // Calculate offset by summing sizes of previous elements
+            let mut offset = 0usize;
+            for (i, elem_ty) in elements.iter().enumerate() {
+                if i == index {
+                    return Ok((offset, *elem_ty));
+                }
+                let elem_layout = ctx.layouts.layout_of(*elem_ty);
+                // Align to next element
+                offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
+                offset += elem_layout.size;
+            }
+
+            unreachable!()
+        }
+        _ => Err(CodegenError::Unsupported(format!(
+            "index access on unsupported type: {:?}",
+            mir_ty
+        ))),
+    }
+}
+
+/// Get a struct field by index.
+fn get_struct_field_by_index(
+    ctx: &mut CodegenContext<'_>,
+    struct_id: kestrel_execution_graph::Id<kestrel_execution_graph::Struct>,
+    index: usize,
+) -> Result<(usize, Id<Ty>), CodegenError> {
+    let struct_def = ctx.mir.struct_def(struct_id);
+    let fields: Vec<_> = struct_def.fields.clone();
+
+    if index >= fields.len() {
+        return Err(CodegenError::Unsupported(format!(
+            "field index {} out of bounds (struct has {} fields)",
+            index,
+            fields.len()
+        )));
+    }
+
+    let field_id = fields[index];
+    let field_def = &ctx.mir.fields[field_id];
+    let field_name = &field_def.name;
+    let field_ty = field_def.ty;
+
+    // Get field offset from layout
+    let struct_layout = ctx.layouts.struct_layout(struct_id);
+    let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
+        CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;
 
     Ok((offset, field_ty))
