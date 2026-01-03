@@ -52,9 +52,17 @@ impl Substitutions {
         self.map.iter()
     }
 
-    /// Iterate over just the types (values)
+    /// Iterate over just the types (values).
+    /// WARNING: This iterates in HashMap order which is non-deterministic!
+    /// For generic function calls, use `types_in_order` instead.
     pub fn types(&self) -> impl Iterator<Item = &Ty> {
         self.map.values()
+    }
+
+    /// Get the substituted types in the order specified by the given type parameter IDs.
+    /// Returns types for each parameter ID in order, or None if any parameter is not found.
+    pub fn types_in_order(&self, param_ids: &[SymbolId]) -> Option<Vec<&Ty>> {
+        param_ids.iter().map(|id| self.get(*id)).collect()
     }
 
     /// Apply substitutions to a type, replacing any type parameters with their

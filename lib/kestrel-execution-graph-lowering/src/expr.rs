@@ -1045,6 +1045,9 @@ fn lower_call(
     substitutions: &kestrel_semantic_tree::ty::Substitutions,
     expr: &Expression,
 ) -> Value {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+    use semantic_tree::symbol::Symbol;
+
     // Lower arguments first
     let arg_values: Vec<Value> = arguments
         .iter()
@@ -1054,11 +1057,61 @@ fn lower_call(
     // Extract argument types for determining Copy vs Move passing modes
     let arg_types: Vec<&Ty> = arguments.iter().map(|arg| &arg.value.ty).collect();
 
-    // Lower type arguments for generic calls
-    let type_args: Vec<_> = substitutions
-        .types()
-        .map(|ty| lower_type(ctx, ty))
-        .collect();
+    // Helper to get ordered type args from a symbol's type parameters
+    let get_ordered_type_args =
+        |ctx: &mut LoweringContext,
+         sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>|
+         -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+            use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+            use kestrel_semantic_tree::symbol::EnumSymbol;
+            use semantic_tree::symbol::SymbolId;
+
+            // Try to get type parameters from different symbol types
+            let param_ids: Option<Vec<SymbolId>> =
+                if let Some(func_sym) = sym.as_ref().downcast_ref::<FunctionSymbol>() {
+                    let type_params = func_sym.type_parameters();
+                    Some(
+                        type_params
+                            .iter()
+                            .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                            .collect(),
+                    )
+                } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
+                    let type_params = struct_sym.type_parameters();
+                    Some(
+                        type_params
+                            .iter()
+                            .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                            .collect(),
+                    )
+                } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
+                    let type_params = enum_sym.type_parameters();
+                    Some(
+                        type_params
+                            .iter()
+                            .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                            .collect(),
+                    )
+                } else {
+                    // For initializers and other symbols without type_parameters,
+                    // they inherit from parent - just use the fallback
+                    None
+                };
+
+            if let Some(ids) = param_ids {
+                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
+                    return ordered_types
+                        .into_iter()
+                        .map(|ty| lower_type(ctx, ty))
+                        .collect();
+                }
+            }
+            // Fallback: use arbitrary order (should only happen for non-generic symbols or errors)
+            substitutions
+                .types()
+                .map(|ty| lower_type(ctx, ty))
+                .collect()
+        };
 
     // Get the result type and create a temp for the result
     let result_ty = lower_type(ctx, &expr.ty);
@@ -1182,10 +1235,11 @@ fn lower_call(
                         } else {
                             // Regular initializer call
                             let func_name = qualified_name_for_symbol(ctx, &sym);
+                            let type_args = get_ordered_type_args(ctx, &sym);
                             let mir_callee = if type_args.is_empty() {
                                 Callee::direct(func_name)
                             } else {
-                                Callee::direct_generic(func_name, type_args.clone())
+                                Callee::direct_generic(func_name, type_args)
                             };
                             ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
                         }
@@ -1194,6 +1248,7 @@ fn lower_call(
                     } else {
                         // Regular function call
                         let func_name = qualified_name_for_symbol(ctx, &sym);
+                        let type_args = get_ordered_type_args(ctx, &sym);
                         let mir_callee = if type_args.is_empty() {
                             Callee::direct(func_name)
                         } else {
@@ -1317,10 +1372,11 @@ fn lower_call(
                         } else {
                             // Regular direct method call
                             let func_name = qualified_name_for_symbol(ctx, &sym);
+                            let type_args = get_ordered_type_args(ctx, &sym);
                             let mir_callee = if type_args.is_empty() {
                                 Callee::direct(func_name)
                             } else {
-                                Callee::direct_generic(func_name, type_args.clone())
+                                Callee::direct_generic(func_name, type_args)
                             };
                             ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
                         }
@@ -1423,6 +1479,7 @@ fn lower_call(
                     let unit_place = Place::local(unit_local);
 
                     // Call the init function
+                    let type_args = get_ordered_type_args(ctx, &sym);
                     let mir_callee = if type_args.is_empty() {
                         Callee::direct(init_name)
                     } else {

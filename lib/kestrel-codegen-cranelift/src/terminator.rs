@@ -89,7 +89,7 @@ pub fn compile_terminator(
         } => {
             // Load the discriminant value from the enum
             // The discriminant is stored at offset 0 as an i32
-            let enum_ptr = compile_place_read(ctx, discriminant, builder, local_map)?;
+            let enum_ptr = compile_place_read(ctx, discriminant, builder, local_map, subst)?;
             let discr_val = builder
                 .ins()
                 .load(cl_types::I32, MemFlags::new(), enum_ptr, 0);

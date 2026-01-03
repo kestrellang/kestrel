@@ -35,7 +35,7 @@ pub fn compile_rvalue(
         Rvalue::Use(imm) => compile_immediate(ctx, subst, imm, builder),
 
         Rvalue::Copy(place) | Rvalue::Move(place) => {
-            compile_place_read(ctx, place, builder, local_map)
+            compile_place_read(ctx, place, builder, local_map, subst)
         }
 
         Rvalue::BinaryOp { op, lhs, rhs } => {
@@ -65,7 +65,9 @@ pub fn compile_rvalue(
             ctx, func_def, subst, *enum_ty, variant, payload, builder, local_map,
         ),
 
-        Rvalue::Ref(place) | Rvalue::RefMut(place) => compile_ref(ctx, place, builder, local_map),
+        Rvalue::Ref(place) | Rvalue::RefMut(place) => {
+            compile_ref(ctx, place, builder, local_map, subst)
+        }
 
         // Pointer/reference conversions - these are no-ops at runtime
         Rvalue::PtrToRef(value) | Rvalue::PtrToRefMut(value) | Rvalue::RefToPtr(value) => {
@@ -189,14 +191,20 @@ fn compile_construct(
         // Compile the field value
         let value = compile_value(ctx, func_def, subst, field_value, builder, local_map)?;
 
+        // Apply substitution to get the concrete field type
+        // This is important for generic structs where field types might be type parameters
+        let concrete_field_ty = subst
+            .apply_ty_readonly(ctx.mir, field_ty)
+            .unwrap_or(field_ty);
+
         // Check if this is a nested struct - if so, copy the struct data
-        let field_mir_ty = ctx.mir.ty(field_ty);
+        let field_mir_ty = ctx.mir.ty(concrete_field_ty);
         let is_nested_struct =
-            matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+            matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, concrete_field_ty);
 
         if is_nested_struct {
             // Value is a pointer to the nested struct - copy its contents
-            let nested_layout = ctx.layouts.layout_of(field_ty);
+            let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
             let dest_ptr = if *offset == 0 {
                 ptr
             } else {
@@ -293,9 +301,11 @@ fn compile_tuple(
 
         // Check if this is a nested compound type - if so, copy the data
         let is_compound = if let Some(ty) = elem_ty {
-            let elem_mir_ty = ctx.mir.ty(ty);
+            // Apply substitution to get concrete type for generic tuples
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+            let elem_mir_ty = ctx.mir.ty(concrete_ty);
             matches!(elem_mir_ty, MirTy::Named { .. } | MirTy::Tuple(_))
-                && (is_struct_type(ctx, ty) || matches!(elem_mir_ty, MirTy::Tuple(_)))
+                && (is_struct_type(ctx, concrete_ty) || matches!(elem_mir_ty, MirTy::Tuple(_)))
         } else {
             false
         };
@@ -503,13 +513,17 @@ fn compile_enum_variant(
 
             // Check if this is a nested struct
             let field_ty = field_def.ty;
-            let field_mir_ty = ctx.mir.ty(field_ty);
-            let is_nested_struct =
-                matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+            // Apply substitution to get concrete type for generic enums
+            let concrete_field_ty = subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty);
+            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
+            let is_nested_struct = matches!(field_mir_ty, MirTy::Named { .. })
+                && is_struct_type(ctx, concrete_field_ty);
 
             if is_nested_struct {
                 // Copy nested struct data
-                let nested_layout = ctx.layouts.layout_of(field_ty);
+                let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
                 let dest_ptr = if total_offset == 0 {
                     ptr
                 } else {
@@ -558,6 +572,7 @@ fn compile_ref(
     place: &Place,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -572,10 +587,16 @@ fn compile_ref(
             // We need to spill it to a stack slot to get an address.
             let local_def = ctx.mir.local(*local_id);
             let local_ty = local_def.ty;
-            let mir_ty = ctx.mir.ty(local_ty);
+
+            // Apply substitution to get concrete type for generic locals
+            let concrete_local_ty = subst
+                .apply_ty_readonly(ctx.mir, local_ty)
+                .unwrap_or(local_ty);
+            let mir_ty = ctx.mir.ty(concrete_local_ty);
 
             // Check if this is a struct type (already a pointer)
-            let is_struct = matches!(mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, local_ty);
+            let is_struct =
+                matches!(mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, concrete_local_ty);
 
             if is_struct {
                 // Structs are already represented as pointers, just return the value
@@ -613,7 +634,7 @@ fn compile_ref(
         PlaceKind::Field { parent, name } => {
             // Taking a reference to a field means getting the field's address
             // The parent is a struct pointer, so we compute: parent_ptr + field_offset
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -628,7 +649,7 @@ fn compile_ref(
 
         PlaceKind::Index { parent, index } => {
             // Taking a reference to an indexed element
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -643,13 +664,13 @@ fn compile_ref(
 
         PlaceKind::Downcast { parent, variant: _ } => {
             // Taking a reference to a downcast - return pointer to payload
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
             Ok(builder.ins().iadd_imm(enum_ptr, 4))
         }
 
         PlaceKind::Deref(inner) => {
             // Taking a reference to a dereference: &*ptr is just ptr
-            compile_place_read(ctx, inner, builder, local_map)
+            compile_place_read(ctx, inner, builder, local_map, subst)
         }
     }
 }
@@ -912,7 +933,7 @@ pub fn compile_value(
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
     match value {
-        Value::Place(place) => compile_place_read(ctx, place, builder, local_map),
+        Value::Place(place) => compile_place_read(ctx, place, builder, local_map, subst),
         Value::Immediate(imm) => compile_immediate(ctx, subst, imm, builder),
     }
 }
@@ -1683,7 +1704,7 @@ fn compile_thin_call(
     };
 
     // Get the function pointer value
-    let place_value = compile_place_read(ctx, place, builder, local_map)?;
+    let place_value = compile_place_read(ctx, place, builder, local_map, subst)?;
 
     // Check if this is a parameter local - if so, we need to dereference
     // because parameters are passed by pointer.
@@ -1766,7 +1787,7 @@ fn compile_thick_call(
             // Note: If this is a parameter local, the value is a POINTER to the
             // function pointer (because Kestrel passes all parameters by pointer).
             // In that case, we need to load from it.
-            let place_value = compile_place_read(ctx, place, builder, local_map)?;
+            let place_value = compile_place_read(ctx, place, builder, local_map, subst)?;
 
             // Check if this is a parameter local - if so, we need to dereference
             // because parameters are passed by pointer.
@@ -1816,7 +1837,7 @@ fn compile_thick_call(
         }
         MirTy::FuncThick { params, ret } => {
             // For thick function types, the value is a struct with func_ptr and env_ptr
-            let thick_ptr = compile_place_read(ctx, place, builder, local_map)?;
+            let thick_ptr = compile_place_read(ctx, place, builder, local_map, subst)?;
 
             // Load the function pointer from offset 0
             let func_ptr = builder.ins().load(ptr_type, MemFlags::new(), thick_ptr, 0);

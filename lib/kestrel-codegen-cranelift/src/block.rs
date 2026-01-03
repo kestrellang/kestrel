@@ -61,7 +61,7 @@ fn compile_statement(
     match stmt {
         StatementKind::Assign { dest, rvalue } => {
             let value = compile_rvalue(ctx, func_def, subst, rvalue, builder, local_map)?;
-            crate::place::compile_place_write(ctx, dest, value, builder, local_map)?;
+            crate::place::compile_place_write(ctx, dest, value, builder, local_map, subst)?;
         }
 
         StatementKind::Call { callee, args } => {
@@ -97,7 +97,8 @@ fn compile_statement(
             // We still need to "use" the flag to avoid unused variable warnings in the
             // generated code, but since we don't actually emit anything for deinit,
             // we can just read the flag value without acting on it.
-            let _flag_value = compile_place_read(ctx, &Place::local(*flag), builder, local_map)?;
+            let _flag_value =
+                compile_place_read(ctx, &Place::local(*flag), builder, local_map, subst)?;
         }
 
         StatementKind::SetDeinitFlag { flag, value } => {

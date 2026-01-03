@@ -13,6 +13,7 @@ mod closures;
 mod control_flow;
 mod enums;
 mod functions;
+mod generics;
 mod loops;
 mod pointers;
 mod raii;

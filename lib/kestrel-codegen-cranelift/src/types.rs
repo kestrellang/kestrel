@@ -1,5 +1,6 @@
 //! MIR to Cranelift type translation.
 
+use crate::monomorphize::Substitution;
 use kestrel_codegen::TargetConfig;
 use kestrel_execution_graph::{Id, MirContext, MirTy, Ty};
 
@@ -76,4 +77,22 @@ pub fn is_pass_by_value(ctx: &MirContext, ty: Id<Ty>) -> bool {
             | MirTy::RefMut(_)
             | MirTy::FuncThin { .. }
     )
+}
+
+/// Translate a MIR type to a Cranelift type, applying substitution for type params.
+pub fn translate_type_with_subst(
+    ctx: &MirContext,
+    ty: Id<Ty>,
+    target: &TargetConfig,
+    subst: &Substitution,
+) -> CraneliftType {
+    // Apply substitution first
+    let concrete_ty = subst.apply_ty_readonly(ctx, ty).unwrap_or(ty);
+    translate_type(ctx, concrete_ty, target)
+}
+
+/// Check if a type should be passed by value, applying substitution first.
+pub fn is_pass_by_value_with_subst(ctx: &MirContext, ty: Id<Ty>, subst: &Substitution) -> bool {
+    let concrete_ty = subst.apply_ty_readonly(ctx, ty).unwrap_or(ty);
+    is_pass_by_value(ctx, concrete_ty)
 }

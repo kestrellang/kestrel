@@ -3,7 +3,7 @@
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::Substitution;
-use crate::types::translate_type;
+use crate::types::translate_type_with_subst;
 
 use kestrel_execution_graph::{
     Block, FunctionDef, Id, Local, LocalDef, Place, PlaceKind, Rvalue, StatementKind,
@@ -128,7 +128,7 @@ fn compile_blocks(
     for (i, &local_id) in func_def.locals.iter().enumerate() {
         let var = Variable::from_u32(i as u32);
         let local_def = ctx.mir.local(local_id);
-        let cl_type = translate_type(ctx.mir, local_def.ty, ctx.target);
+        let cl_type = translate_type_with_subst(ctx.mir, local_def.ty, ctx.target, subst);
         builder.declare_var(var, cl_type);
         local_map.insert(local_id, var);
     }
@@ -139,14 +139,11 @@ fn compile_blocks(
 
     let params = builder.block_params(entry_block).to_vec();
     for (i, &param_id) in func_def.params.iter().enumerate() {
-        // Find the local that corresponds to this param
-        for &local_id in &func_def.locals {
-            let local_def = ctx.mir.local(local_id);
-            if local_def.name == ctx.mir.params[param_id].name {
-                let var = local_map[&local_id];
-                builder.def_var(var, params[i]);
-                break;
-            }
+        // Use the param's direct local field instead of searching by name
+        let param = &ctx.mir.params[param_id];
+        let local_id = param.local;
+        if let Some(&var) = local_map.get(&local_id) {
+            builder.def_var(var, params[i]);
         }
     }
 

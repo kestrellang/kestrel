@@ -2,7 +2,8 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::types::translate_type;
+use crate::monomorphize::Substitution;
+use crate::types::{translate_type, translate_type_with_subst};
 
 use kestrel_execution_graph::{Id, Local, MirTy, Place, PlaceKind, Ty};
 
@@ -18,6 +19,7 @@ pub fn compile_place_read(
     place: &Place,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<CraneliftValue, CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
@@ -29,7 +31,7 @@ pub fn compile_place_read(
 
         PlaceKind::Field { parent, name } => {
             // Get the struct pointer from the parent place
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the type of the parent to find field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -43,12 +45,18 @@ pub fn compile_place_read(
             };
 
             // Load the field value from struct_ptr + offset
-            let field_cl_ty = translate_type(ctx.mir, field_ty, ctx.target);
+            let field_cl_ty = translate_type_with_subst(ctx.mir, field_ty, ctx.target, subst);
+
+            // Apply substitution to get the concrete field type
+            // This is important for generic structs where field types might be type parameters
+            let concrete_field_ty = subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty);
 
             // Check if the field is itself a struct (compound type)
-            let field_mir_ty = ctx.mir.ty(field_ty);
-            let is_struct_field =
-                matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty);
+            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
+            let is_struct_field = matches!(field_mir_ty, MirTy::Named { .. })
+                && is_struct_type(ctx, concrete_field_ty);
 
             if is_struct_field {
                 // For struct fields, return a pointer to the nested struct
@@ -75,7 +83,7 @@ pub fn compile_place_read(
             //
             // The parent could be a struct/tuple or a downcast result.
             // We need to get the pointer and add the offset for the indexed field.
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the parent type to find the field at this index
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -91,12 +99,19 @@ pub fn compile_place_read(
             };
 
             // Load the field value from parent_ptr + offset
-            let field_cl_ty = translate_type(ctx.mir, field_ty, ctx.target);
+            let field_cl_ty = translate_type_with_subst(ctx.mir, field_ty, ctx.target, subst);
+
+            // Apply substitution to get the concrete field type
+            // This is important for generic tuples/structs where field types might be type parameters
+            let concrete_field_ty = subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty);
 
             // Check if the field is itself a compound type (struct or tuple)
-            let field_mir_ty = ctx.mir.ty(field_ty);
+            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
             let is_compound_field = matches!(field_mir_ty, MirTy::Tuple(_))
-                || (matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, field_ty));
+                || (matches!(field_mir_ty, MirTy::Named { .. })
+                    && is_struct_type(ctx, concrete_field_ty));
 
             if is_compound_field {
                 // For compound fields, return a pointer to the nested struct/tuple
@@ -120,7 +135,7 @@ pub fn compile_place_read(
             // Downcast is used after a switch to access the variant's payload.
             // The enum layout is: [discriminant: i32][payload...]
             // After downcast, we return a pointer to the payload area (offset 4).
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Compute pointer type
             let ptr_type = if ctx.target.is_64bit() {
@@ -136,16 +151,22 @@ pub fn compile_place_read(
 
         PlaceKind::Deref(inner) => {
             // Get the pointer value from the inner place
-            let ptr = compile_place_read(ctx, inner, builder, local_map)?;
+            let ptr = compile_place_read(ctx, inner, builder, local_map, subst)?;
 
             // Get the type of the inner (which should be a pointer/ref type)
             let inner_ty = get_place_type(ctx, inner, local_map)?;
             let pointee_ty = get_pointee_type(ctx, inner_ty)?;
 
+            // Apply substitution to get the concrete pointee type
+            // This is critical for generic functions where the pointee might be a type parameter
+            let concrete_pointee_ty = subst
+                .apply_ty_readonly(ctx.mir, pointee_ty)
+                .unwrap_or(pointee_ty);
+
             // Check if the pointee is a struct (compound type)
-            let pointee_mir_ty = ctx.mir.ty(pointee_ty);
-            let is_struct =
-                matches!(pointee_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, pointee_ty);
+            let pointee_mir_ty = ctx.mir.ty(concrete_pointee_ty);
+            let is_struct = matches!(pointee_mir_ty, MirTy::Named { .. })
+                && is_struct_type(ctx, concrete_pointee_ty);
 
             if is_struct {
                 // For struct types, the "value" is the pointer itself
@@ -153,7 +174,7 @@ pub fn compile_place_read(
                 Ok(ptr)
             } else {
                 // For primitive types, load the value from memory
-                let cl_type = translate_type(ctx.mir, pointee_ty, ctx.target);
+                let cl_type = translate_type_with_subst(ctx.mir, pointee_ty, ctx.target, subst);
                 Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
             }
         }
@@ -420,6 +441,7 @@ pub fn compile_place_write(
     value: CraneliftValue,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<(), CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
@@ -432,7 +454,7 @@ pub fn compile_place_write(
 
         PlaceKind::Field { parent, name } => {
             // Get the struct pointer from the parent place
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the type of the parent to find field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -451,7 +473,7 @@ pub fn compile_place_write(
 
         PlaceKind::Deref(inner) => {
             // Get the pointer value from the inner place
-            let ptr = compile_place_read(ctx, inner, builder, local_map)?;
+            let ptr = compile_place_read(ctx, inner, builder, local_map, subst)?;
 
             // Store the value at the pointer address
             builder.ins().store(MemFlags::new(), value, ptr, 0);
@@ -469,6 +491,7 @@ pub fn compile_place_addr(
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
     local_slots: &HashMap<Id<Local>, cranelift_codegen::ir::StackSlot>,
+    subst: &Substitution,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -490,7 +513,7 @@ pub fn compile_place_addr(
         PlaceKind::Field { parent, name } => {
             // Get the parent's address (which is a struct pointer)
             // For a field, the parent is already a pointer to the struct
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -506,7 +529,7 @@ pub fn compile_place_addr(
 
         PlaceKind::Index { parent, index } => {
             // Get the parent pointer
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
             // Get the parent type and field info
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -523,13 +546,13 @@ pub fn compile_place_addr(
         PlaceKind::Downcast { parent, variant: _ } => {
             // Downcast doesn't change the address - it just changes how we interpret it
             // The payload is at offset 4 (after the discriminant)
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map)?;
+            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
             Ok(builder.ins().iadd_imm(enum_ptr, 4))
         }
 
         PlaceKind::Deref(inner) => {
             // The address of *ptr is just ptr itself
-            compile_place_read(ctx, inner, builder, local_map)
+            compile_place_read(ctx, inner, builder, local_map, subst)
         }
     }
 }
