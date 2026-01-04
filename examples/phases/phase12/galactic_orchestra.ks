@@ -9,17 +9,17 @@ struct Note {
 }
 
 protocol Instrument {
-    func play(note: Note) -> String
+    func play(note note: Note) -> String
 }
 
 struct StarFlute : Instrument {
-    func play(note: Note) -> String {
+    func play(note note: Note) -> String {
         "A shimmering whistle at {note.frequency}Hz"
     }
 }
 
 struct NebulaCello : Instrument {
-    func play(note: Note) -> String {
+    func play(note note: Note) -> String {
         "A deep cosmic resonance at {note.frequency}Hz"
     }
 }
@@ -29,7 +29,7 @@ func conductor(perform: (String) -> String) -> String {
     perform(base)
 }
 
-func compose(notes: [Note], transform: (Note) -> String) -> [String] {
+func compose(notes notes: [Note], transform: (Note) -> String) -> [String] {
     // In a real implementation, we'd iterate and map
     // For this example, we'll simulate the behavior
     let n1 = Note(frequency: 440.0, duration: 1.0);
@@ -50,10 +50,10 @@ func main() {
     let symphony = conductor {
         it + "The stars are singing!"
     };
-    print(msg: symphony);
+    print(symphony);
 
     // Explicit parameters in closure
-    let arrangement = compose(notes: []) { note in
+    let arrangement = compose(notes: []) { (note) in
         if note.frequency > 500.0 {
             flute.play(note: note)
         } else {
@@ -62,11 +62,11 @@ func main() {
     };
 
     // Nested closures and "pipelining" via function calls
-    let finale = conductor { intro in
+    let finale = conductor { (intro) in
         let layers = ["Stardust", "Solar Wind", "Void"];
         // In reality, we'd use a real map here
         intro + " and the void echoes back."
     };
-    print(msg: finale);
+    print(finale);
 }
 

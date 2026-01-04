@@ -3,6 +3,9 @@
 
 module VoidVault
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 // A unique artifact that cannot be duplicated
 struct Artifact : not Copyable {
     let name: String
@@ -10,7 +13,7 @@ struct Artifact : not Copyable {
 }
 
 enum VaultSlot {
-    case Occupied(Artifact)
+    case Occupied(artifact: Artifact)
     case Empty
     case Collapsed(reason: String)
 }
@@ -22,7 +25,7 @@ struct Vault {
         match self.slot {
             .Empty => {
                 // item is implicitly moved here
-                self.slot = .Occupied(item);
+                self.slot = .Occupied(artifact: item);
             },
             .Occupied(existing) => {
                 self.slot = .Collapsed(reason: "Tried to double-stuff the vault with {item.name}");
@@ -56,12 +59,12 @@ func main() {
     let crown = Artifact(name: "Crown of the Void", powerLevel: 9001);
 
     // crown is moved into the vault
-    myVault.deposit(item: crown);
+    myVault.deposit(crown);
 
     // let illegalCopy = crown; // Error: use of moved value
 
     let retrieved = myVault.withdraw();
-    let report = inspect(slot: retrieved);
-    print(msg: report);
+    let report = inspect(retrieved);
+    print(report);
 }
 

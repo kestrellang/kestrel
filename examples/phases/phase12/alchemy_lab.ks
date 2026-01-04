@@ -20,7 +20,7 @@ enum Potion {
     case Success(name: String, potency: Int)
 }
 
-struct Alchemist[A : Reagent, B : Reagent] {
+struct Alchemist[A, B] where A: Reagent, B: Reagent {
     let base: A
     let additive: B
 
@@ -36,7 +36,7 @@ func main() {
     let lab = Alchemist(base: mercury, additive: sulfur);
 
     // Using trailing closure for the transmutation formula
-    let result = lab.transmute { (a, b) in
+    let result = lab.transmute { (a, b) in 
         match (a.essence(), b.essence()) {
             ("Fluid Silver", "Burning Stone") => .Success(name: "Philosopher's Dew", potency: 100),
             _ => .Failed(residue: "A puddle of sad grey slime")
@@ -51,7 +51,7 @@ func main() {
         .Failed(msg) => "The lab smells like {msg}."
     };
 
-    print(msg: description);
+    print(description);
 }
 
 func print(msg: String) {
