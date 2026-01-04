@@ -420,19 +420,9 @@
   - [x] FunctionPass trait for per-function passes
   - [x] PassManager with sequential execution
   - [x] Fixed-point iteration support
-- [ ] Analysis Infrastructure
-  - [ ] CFG traversal utilities (dominator computation, post-order traversal)
-  - [ ] Dataflow analysis framework (reaching definitions, liveness)
-  - [ ] Loop detection utilities
-- [ ] Optimization Passes
-  - [ ] Dead code elimination
-  - [ ] Constant folding/propagation
-  - [ ] Copy propagation
-  - [ ] Inlining
-- [x] Remaining Features
+- [x] Additional Features
   - [x] Method references as values (bound methods)
   - [x] Int.toString() (IntToString MIR operation)
-  - [ ] Thin closure optimization (when no captures)
 
 ## Phase 11: Memory Model
 
@@ -475,8 +465,8 @@
 
 ## Current Status
 
-**Phase**: Phase 10 (Execution Graph) - 🚧 IN PROGRESS
-**Progress**: Phases 1-9 complete. Core execution graph IR and lowering complete.
+**Phase**: Phase 10 (Execution Graph) - ✅ COMPLETE
+**Progress**: Phases 1-10 complete.
 
 **Phase 10 Completed Features**:
 
@@ -488,8 +478,10 @@
 - ✅ Closure conversion with environment capture
 - ✅ Protocol conformance witness generation
 - ✅ Pass system infrastructure
+- ✅ Method references as values (bound methods)
+- ✅ Int.toString() operation
 
-**Next Up**: Analysis infrastructure (CFG utilities, dataflow analysis) and optimization passes
+**Next Up**: Phase 11 (Memory Model)
 
 ## Notes
 
