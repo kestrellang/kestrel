@@ -125,7 +125,10 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
         } => analyze_expression(expr, errors),
         StatementKind::Binding { value: None, .. } => Divergence::None,
         StatementKind::Expr(expr) => analyze_expression(expr, errors),
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Analyze each condition
             for condition in conditions {
                 match condition {
@@ -145,7 +148,11 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
             }
             // The else block must diverge, but the guard-let itself doesn't diverge
             // (control continues after guard-let if the pattern matches)
-            let _ = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), errors);
+            let _ = analyze_block(
+                &else_block.statements,
+                else_block.yield_expr.as_deref(),
+                errors,
+            );
             Divergence::None
         }
         StatementKind::Deinit { .. } => {
@@ -344,6 +351,23 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         }
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let d = analyze_expression(receiver, errors);
+            if d.diverges() {
+                return d;
+            }
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        }
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let d = analyze_expression(&arg.value, errors);
@@ -353,7 +377,9 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         }
-        ExprKind::Closure { body, tail_expr, .. } => {
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             // Analyze closure body for dead code
             for stmt in body {
                 let d = analyze_statement(stmt, errors);
@@ -396,7 +422,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         ExprKind::Match { scrutinee, arms } => {
             // Analyze scrutinee for any errors
             let _ = analyze_expression(scrutinee, errors);
-            
+
             if arms.is_empty() {
                 Divergence::None
             } else {
@@ -453,9 +479,9 @@ fn expression_contains_break(expr: &Expression) -> bool {
                     })
                     .unwrap_or(false)
         }
-        ExprKind::While { body, .. } | ExprKind::WhileLet { body, .. } | ExprKind::Loop { body, .. } => {
-            body.iter().any(|s| statement_contains_break(&s.kind))
-        }
+        ExprKind::While { body, .. }
+        | ExprKind::WhileLet { body, .. }
+        | ExprKind::Loop { body, .. } => body.iter().any(|s| statement_contains_break(&s.kind)),
         ExprKind::Grouping(inner) => expression_contains_break(inner),
         ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
             elements.iter().any(expression_contains_break)

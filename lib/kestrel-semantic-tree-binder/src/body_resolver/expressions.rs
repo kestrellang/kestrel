@@ -1240,6 +1240,17 @@ fn expression_references_local(
                     .any(|arg| expression_references_local(&arg.value, local_id))
         }
 
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expression_references_local(receiver, local_id)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
@@ -1834,6 +1845,16 @@ where
             }
         }
         ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_captures_from_expression(receiver, process);
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+        ExprKind::DeferredMethodCall {
             receiver,
             arguments,
             ..

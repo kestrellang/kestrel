@@ -68,7 +68,10 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
         StatementKind::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
         }
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Generate constraints for each condition in the chain
             for condition in conditions {
                 generate_if_condition_constraints(ctx, condition);
@@ -113,7 +116,11 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             // Wildcard patterns match anything - type is already registered
         }
 
-        PatternKind::Tuple { prefix, has_rest, suffix } => {
+        PatternKind::Tuple {
+            prefix,
+            has_rest,
+            suffix,
+        } => {
             // For tuple patterns, generate constraints for each element
             // and ensure the tuple type matches
             if let TyKind::Tuple(elem_tys) = pattern.ty.kind() {
@@ -148,12 +155,16 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             // The type is set during pattern creation
         }
 
-        PatternKind::EnumVariant { case_name, bindings, .. } => {
+        PatternKind::EnumVariant {
+            case_name,
+            bindings,
+            ..
+        } => {
             // For enum patterns, generate constraints for each binding
             for binding in bindings {
                 generate_pattern_constraints(ctx, &binding.pattern);
             }
-            
+
             // Generate a constraint to validate the enum case exists and connect
             // binding types to the enum case's parameter types.
             let binding_tys: Vec<(Option<String>, _)> = bindings
@@ -163,7 +174,7 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                     (b.label.clone(), b.pattern.ty.id())
                 })
                 .collect();
-            
+
             ctx.enum_pattern_binding(
                 pattern.ty.id(),
                 case_name.clone(),
@@ -176,12 +187,17 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             // Range patterns have concrete types (Int or Char) - type is already set
         }
 
-        PatternKind::Struct { struct_name, fields, has_rest, .. } => {
+        PatternKind::Struct {
+            struct_name,
+            fields,
+            has_rest,
+            ..
+        } => {
             // For struct patterns, generate constraints for each field pattern
             for field in fields {
                 generate_pattern_constraints(ctx, &field.pattern);
             }
-            
+
             // Generate struct pattern binding constraint to connect field types
             // to the struct's field types
             let field_bindings: Vec<(String, _)> = fields
@@ -191,7 +207,7 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                     (f.field_name.clone(), f.pattern.ty.id())
                 })
                 .collect();
-            
+
             ctx.struct_pattern_binding(
                 pattern.ty.id(),
                 struct_name.clone(),
@@ -302,11 +318,27 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
         // References: type is already set during binding
         ExprKind::LocalRef(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) => {}
-        ExprKind::OverloadedRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef => {}
+        ExprKind::OverloadedRef(_)
+        | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef => {}
 
         // Field access: type is the field type
-        ExprKind::FieldAccess { object, .. } => {
+        ExprKind::FieldAccess { object, field } => {
             generate_expression_constraints(ctx, object);
+            // If the expression type is Infer, generate a member access constraint
+            // so the solver can resolve the field type once the receiver type is known
+            if matches!(expr.ty.kind(), TyKind::Infer) {
+                ctx.register_type(&object.ty);
+                ctx.register_type(&expr.ty);
+                ctx.member_access(
+                    object.ty.id(),
+                    field.clone(),
+                    false, // instance access
+                    expr.ty.id(),
+                    expr.id,
+                    expr.span.clone(),
+                );
+            }
         }
 
         // Tuple index: type is the element type
@@ -357,6 +389,28 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
+        }
+
+        ExprKind::DeferredMethodCall {
+            receiver,
+            method_name,
+            arguments,
+        } => {
+            generate_expression_constraints(ctx, receiver);
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+            // Generate a member access constraint to resolve the method once receiver type is known
+            ctx.register_type(&receiver.ty);
+            ctx.register_type(&expr.ty);
+            ctx.member_access(
+                receiver.ty.id(),
+                method_name.clone(),
+                false, // instance method call
+                expr.ty.id(),
+                expr.id,
+                expr.span.clone(),
+            );
         }
 
         ExprKind::ImplicitStructInit { arguments, .. } => {
@@ -503,14 +557,24 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         }
 
-        ExprKind::Closure { body, tail_expr, params, uses_it, implicit_param, .. } => {
+        ExprKind::Closure {
+            body,
+            tail_expr,
+            params,
+            uses_it,
+            implicit_param,
+            ..
+        } => {
             // Register the closure type
             ctx.register_type(&expr.ty);
 
             // Handle based on the closure's type
             match expr.ty.kind() {
                 // Explicit params - closure has a concrete function type
-                TyKind::Function { params: closure_param_tys, return_type: closure_return_ty } => {
+                TyKind::Function {
+                    params: closure_param_tys,
+                    return_type: closure_return_ty,
+                } => {
                     ctx.register_type(closure_return_ty);
 
                     // Record closure metadata for better error messages
@@ -564,7 +628,10 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 }
 
                 // UnresolvedFunction - closure without explicit params
-                TyKind::UnresolvedFunction { param_info, return_type } => {
+                TyKind::UnresolvedFunction {
+                    param_info,
+                    return_type,
+                } => {
                     use kestrel_semantic_tree::ty::ParamInfo;
 
                     // Register nested types
@@ -644,10 +711,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         ExprKind::EnumCase { .. } => {}
 
         // Implicit member access: will be resolved during type inference
-        ExprKind::ImplicitMemberAccess { member_name, arguments } => {
+        ExprKind::ImplicitMemberAccess {
+            member_name,
+            arguments,
+        } => {
             // Register the expression type
             ctx.register_type(&expr.ty);
-            
+
             // Process argument expressions and collect their type IDs
             let argument_tys: Vec<(Option<String>, _)> = arguments
                 .as_ref()
@@ -661,7 +731,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         .collect()
                 })
                 .unwrap_or_default();
-            
+
             // Generate the ImplicitMember constraint
             ctx.implicit_member(
                 expr.ty.id(),
@@ -706,11 +776,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
 
                 // Body type contributes to match expression type
                 // All arms should have compatible types
-                ctx.equate(
-                    expr.ty.id(),
-                    arm.body.ty.id(),
-                    arm.body.span.clone(),
-                );
+                ctx.equate(expr.ty.id(), arm.body.ty.id(), arm.body.span.clone());
             }
         }
 

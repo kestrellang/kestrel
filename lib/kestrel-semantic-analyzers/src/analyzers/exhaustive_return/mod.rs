@@ -126,7 +126,10 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
         } => analyze_expression(expr),
         StatementKind::Binding { value: None, .. } => ReturnState::MayFallThrough,
         StatementKind::Expr(expr) => analyze_expression(expr),
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Check if any condition expression diverges
             for condition in conditions {
                 match condition {
@@ -145,7 +148,8 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
                 }
             }
             // The else block must diverge - if it does, control continues after guard-let
-            let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref());
+            let else_state =
+                analyze_block(&else_block.statements, else_block.yield_expr.as_deref());
             if else_state.definitely_returns() {
                 // The else block diverges, so control continues after guard-let
                 ReturnState::MayFallThrough
@@ -307,6 +311,23 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         }
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let s = analyze_expression(receiver);
+            if s.definitely_returns() {
+                return s;
+            }
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        }
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let s = analyze_expression(&arg.value);
@@ -361,7 +382,10 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
             value: Some(expr), ..
         } => expr_contains_break(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             for condition in conditions {
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {

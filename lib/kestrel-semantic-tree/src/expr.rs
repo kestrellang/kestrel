@@ -409,6 +409,16 @@ pub enum ExprKind {
         arguments: Vec<CallArgument>,
     },
 
+    /// Deferred method call: method call on a receiver with inferred type.
+    /// Created when the receiver's type is `Infer` and method resolution must be
+    /// deferred until type inference resolves the receiver's actual type.
+    /// Type inference will resolve this to a concrete method call.
+    DeferredMethodCall {
+        receiver: Box<Expression>,
+        method_name: String,
+        arguments: Vec<CallArgument>,
+    },
+
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
     /// The compiler generates a memberwise initializer that assigns each argument to
     /// the corresponding field in declaration order.
@@ -808,7 +818,9 @@ impl Expression {
                 method_name,
                 ..
             } => format!("{}.{}", receiver.debug_compact(), method_name),
-            ExprKind::Call { callee, arguments, .. } => {
+            ExprKind::Call {
+                callee, arguments, ..
+            } => {
                 let args: Vec<String> = arguments
                     .iter()
                     .map(|a| {
@@ -827,7 +839,25 @@ impl Expression {
                 arguments,
             } => {
                 let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                format!("{}.{}({})", receiver.debug_compact(), method.name(), args.join(", "))
+                format!(
+                    "{}.{}({})",
+                    receiver.debug_compact(),
+                    method.name(),
+                    args.join(", ")
+                )
+            }
+            ExprKind::DeferredMethodCall {
+                receiver,
+                method_name,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
+                format!(
+                    "{}.{}({})",
+                    receiver.debug_compact(),
+                    method_name,
+                    args.join(", ")
+                )
             }
             ExprKind::ImplicitStructInit {
                 struct_type,
@@ -854,12 +884,15 @@ impl Expression {
                 else_branch,
                 ..
             } => {
-                let cond_strs: Vec<String> = conditions.iter().map(|c| match c {
-                    IfCondition::Expr(e) => e.debug_compact(),
-                    IfCondition::Let { pattern, value, .. } => {
-                        format!("let {:?} = {}", pattern, value.debug_compact())
-                    }
-                }).collect();
+                let cond_strs: Vec<String> = conditions
+                    .iter()
+                    .map(|c| match c {
+                        IfCondition::Expr(e) => e.debug_compact(),
+                        IfCondition::Let { pattern, value, .. } => {
+                            format!("let {:?} = {}", pattern, value.debug_compact())
+                        }
+                    })
+                    .collect();
                 let cond_str = cond_strs.join(", ");
                 let then_str = if let Some(v) = then_value {
                     v.debug_compact()
@@ -880,21 +913,21 @@ impl Expression {
                 } else {
                     String::new()
                 };
-                format!(
-                    "if {} {{ {} }}{}",
-                    cond_str,
-                    then_str,
-                    else_str
-                )
+                format!("if {} {{ {} }}{}", cond_str, then_str, else_str)
             }
             ExprKind::While { condition, .. } => {
                 format!("while {} {{ ... }}", condition.debug_compact())
             }
             ExprKind::WhileLet { conditions, .. } => {
-                let conds: Vec<_> = conditions.iter().map(|c| match c {
-                    IfCondition::Let { pattern, value, .. } => format!("let {:?} = {}", pattern, value.debug_compact()),
-                    IfCondition::Expr(e) => e.debug_compact(),
-                }).collect();
+                let conds: Vec<_> = conditions
+                    .iter()
+                    .map(|c| match c {
+                        IfCondition::Let { pattern, value, .. } => {
+                            format!("let {:?} = {}", pattern, value.debug_compact())
+                        }
+                        IfCondition::Expr(e) => e.debug_compact(),
+                    })
+                    .collect();
                 format!("while {} {{ ... }}", conds.join(", "))
             }
             ExprKind::Loop { .. } => "loop { ... }".to_string(),
@@ -919,7 +952,12 @@ impl Expression {
                     "return".to_string()
                 }
             }
-            ExprKind::Closure { params, tail_expr, uses_it, .. } => {
+            ExprKind::Closure {
+                params,
+                tail_expr,
+                uses_it,
+                ..
+            } => {
                 let params_str = match params {
                     Some(ps) => {
                         let p: Vec<_> = ps.iter().map(|p| p.name.clone()).collect();
@@ -961,7 +999,11 @@ impl Expression {
                 }
             }
             ExprKind::Match { scrutinee, arms } => {
-                format!("match {} {{ {} arms }}", scrutinee.debug_compact(), arms.len())
+                format!(
+                    "match {} {{ {} arms }}",
+                    scrutinee.debug_compact(),
+                    arms.len()
+                )
             }
             ExprKind::Error => "<error>".to_string(),
         }
@@ -1280,6 +1322,29 @@ impl Expression {
             kind: ExprKind::PrimitiveMethodCall {
                 receiver: Box::new(receiver),
                 method,
+                arguments,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a deferred method call expression.
+    /// Used when the receiver type is Infer and method resolution must be deferred
+    /// until type inference resolves the receiver's actual type.
+    pub fn deferred_method_call(
+        receiver: Expression,
+        method_name: String,
+        arguments: Vec<CallArgument>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredMethodCall {
+                receiver: Box::new(receiver),
+                method_name,
                 arguments,
             },
             ty: result_ty,

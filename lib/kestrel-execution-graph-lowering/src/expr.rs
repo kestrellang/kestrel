@@ -753,6 +753,15 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::error())
         }
 
+        ExprKind::DeferredMethodCall { method_name, .. } => {
+            // Should be resolved by type inference
+            ctx.emit_error(LoweringError::internal(
+                format!("unresolved deferred method call '.{}'", method_name),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        }
+
         ExprKind::Error => {
             // Error expression - return error value (error already reported)
             Value::Immediate(Immediate::error())
@@ -1084,36 +1093,54 @@ fn lower_call(
             use semantic_tree::symbol::SymbolId;
 
             // Try to get type parameters from different symbol types
-            let param_ids: Option<Vec<SymbolId>> =
-                if let Some(func_sym) = sym.as_ref().downcast_ref::<FunctionSymbol>() {
-                    let type_params = func_sym.type_parameters();
-                    Some(
-                        type_params
-                            .iter()
-                            .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                            .collect(),
-                    )
-                } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
-                    let type_params = struct_sym.type_parameters();
-                    Some(
-                        type_params
-                            .iter()
-                            .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                            .collect(),
-                    )
-                } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
-                    let type_params = enum_sym.type_parameters();
-                    Some(
-                        type_params
-                            .iter()
-                            .map(|tp| Symbol::metadata(tp.as_ref()).id())
-                            .collect(),
-                    )
-                } else {
-                    // For initializers and other symbols without type_parameters,
-                    // they inherit from parent - just use the fallback
-                    None
-                };
+            let param_ids: Option<Vec<SymbolId>> = if let Some(func_sym) =
+                sym.as_ref().downcast_ref::<FunctionSymbol>()
+            {
+                // For methods on generic structs/enums, we need BOTH parent type params
+                // AND the function's own type params (in that order, matching how MIR
+                // functions are lowered in lowerer/function.rs)
+                let mut all_params: Vec<SymbolId> = Vec::new();
+
+                // First, collect parent type parameters (from struct/enum)
+                if let Some(parent) = func_sym.metadata().parent() {
+                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                        for tp in struct_sym.type_parameters() {
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
+                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                        for tp in enum_sym.type_parameters() {
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
+                    }
+                }
+
+                // Then, collect function's own type parameters
+                for tp in func_sym.type_parameters() {
+                    all_params.push(Symbol::metadata(tp.as_ref()).id());
+                }
+
+                Some(all_params)
+            } else if let Some(struct_sym) = sym.as_ref().downcast_ref::<StructSymbol>() {
+                let type_params = struct_sym.type_parameters();
+                Some(
+                    type_params
+                        .iter()
+                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                        .collect(),
+                )
+            } else if let Some(enum_sym) = sym.as_ref().downcast_ref::<EnumSymbol>() {
+                let type_params = enum_sym.type_parameters();
+                Some(
+                    type_params
+                        .iter()
+                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                        .collect(),
+                )
+            } else {
+                // For initializers and other symbols without type_parameters,
+                // they inherit from parent - just use the fallback
+                None
+            };
 
             if let Some(ids) = param_ids {
                 if let Some(ordered_types) = substitutions.types_in_order(&ids) {
@@ -1288,6 +1315,32 @@ fn lower_call(
                 None => {
                     ctx.emit_error(LoweringError::internal(
                         format!("symbol not found for call: {:?}", symbol_id),
+                        Some(expr.span.clone()),
+                    ));
+                    return Value::Immediate(Immediate::error());
+                }
+            }
+        }
+
+        ExprKind::EnumCase { case_id } => {
+            // Enum case with associated values (e.g., .Success(name: "...", potency: 100))
+            let symbol = ctx.model.query(SymbolFor { id: *case_id });
+            match symbol {
+                Some(sym) => {
+                    let variant_name = sym.metadata().name().value.clone();
+
+                    ctx.emit_assign(
+                        result_place.clone(),
+                        Rvalue::EnumVariant {
+                            enum_ty: result_ty,
+                            variant: variant_name,
+                            payload: arg_values,
+                        },
+                    );
+                }
+                None => {
+                    ctx.emit_error(LoweringError::internal(
+                        format!("enum case symbol not found: {:?}", case_id),
                         Some(expr.span.clone()),
                     ));
                     return Value::Immediate(Immediate::error());

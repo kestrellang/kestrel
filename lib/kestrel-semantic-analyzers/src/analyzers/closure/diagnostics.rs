@@ -17,8 +17,7 @@ impl IntoDiagnostic for ItUsedWithWrongArityError {
                 self.expected_arity
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("used here")
+                Label::primary(self.span.file_id, self.span.range()).with_message("used here")
             ])
     }
 }
@@ -32,12 +31,8 @@ impl IntoDiagnostic for ItNotInScopeError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("`it` is not in scope; closure has explicit parameters")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
-            .with_notes(vec![
-                "use the explicit parameter name instead".to_string()
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
+            .with_notes(vec!["use the explicit parameter name instead".to_string()])
     }
 }
 
@@ -50,13 +45,12 @@ pub struct CannotAssignToCapturedVariableError {
 impl IntoDiagnostic for CannotAssignToCapturedVariableError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("cannot assign to captured variable `{}`", self.name))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
-            .with_notes(vec![
-                "captures are by value and immutable".to_string()
-            ])
+            .with_message(format!(
+                "cannot assign to captured variable `{}`",
+                self.name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
+            .with_notes(vec!["captures are by value and immutable".to_string()])
     }
 }
 
@@ -69,10 +63,11 @@ pub struct CannotAssignToClosureParameterError {
 impl IntoDiagnostic for CannotAssignToClosureParameterError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("cannot assign to immutable parameter `{}`", self.name))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
+            .with_message(format!(
+                "cannot assign to immutable parameter `{}`",
+                self.name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
     }
 }
 
@@ -89,9 +84,7 @@ impl IntoDiagnostic for CannotInferClosureParameterTypeError {
                 "cannot infer type for closure parameter `{}`; add a type annotation",
                 self.name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
     }
 }
 
@@ -109,9 +102,7 @@ impl IntoDiagnostic for ClosureArityMismatchError {
                 "closure has {} parameters but {} expected",
                 self.actual, self.expected
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
     }
 }
 
@@ -129,9 +120,7 @@ impl IntoDiagnostic for ClosureReturnTypeMismatchError {
                 "closure returns `{}` but `{}` expected",
                 self.actual, self.expected
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
     }
 }
 
@@ -148,10 +137,10 @@ impl IntoDiagnostic for ClosureParamTypeMismatchError {
         Diagnostic::error()
             .with_message(format!(
                 "closure parameter {} has type `{}` but `{}` expected",
-                self.index + 1, self.actual, self.expected
+                self.index + 1,
+                self.actual,
+                self.expected
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
     }
 }

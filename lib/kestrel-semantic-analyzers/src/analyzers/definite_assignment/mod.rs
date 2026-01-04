@@ -3,17 +3,17 @@ use std::sync::Arc;
 
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
+use diagnostics::UninitializedVariableAccessError;
 use kestrel_semantic_model::ExecutableBodyFor;
+use kestrel_semantic_model::LocalName;
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
-use kestrel_semantic_tree::expr::{ExprKind, Expression, ElseBranch, IfCondition};
+use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::{Pattern, PatternKind};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
 use semantic_tree::symbol::Symbol;
-use diagnostics::UninitializedVariableAccessError;
-use kestrel_semantic_model::LocalName;
 
 pub struct DefiniteAssignmentAnalyzer;
 
@@ -125,7 +125,10 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
         }
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Analyze each condition
             for condition in conditions {
                 match condition {
@@ -139,7 +142,7 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
                     }
                 }
             }
-            
+
             // The else block is analyzed with current state (bindings from earlier statements are visible)
             // but the pattern bindings from THIS guard-let are NOT visible in the else block
             let mut else_ctx = VerificationContext {
@@ -170,10 +173,13 @@ fn analyze_expression(
     match &expr.kind {
         ExprKind::LocalRef(local_id) => {
             if !is_assignment_target && !state.assigned.contains(local_id) {
-                let name = ctx.model.query(LocalName {
-                    container_id: ctx.container_id,
-                    local_id: *local_id,
-                }).unwrap_or_else(|| "<unknown>".to_string());
+                let name = ctx
+                    .model
+                    .query(LocalName {
+                        container_id: ctx.container_id,
+                        local_id: *local_id,
+                    })
+                    .unwrap_or_else(|| "<unknown>".to_string());
 
                 ctx.errors.push(UninitializedVariableAccessError {
                     span: expr.span.clone(),
@@ -216,7 +222,9 @@ fn analyze_expression(
                 diverged: false,
             };
             for stmt in then_branch {
-                if then_state.diverged { break; }
+                if then_state.diverged {
+                    break;
+                }
                 then_state = analyze_statement(stmt, then_state, ctx);
             }
             if !then_state.diverged {
@@ -234,7 +242,9 @@ fn analyze_expression(
                 match else_b {
                     ElseBranch::Block { statements, value } => {
                         for stmt in statements {
-                            if es.diverged { break; }
+                            if es.diverged {
+                                break;
+                            }
                             es = analyze_statement(stmt, es, ctx);
                         }
                         if !es.diverged {
@@ -258,27 +268,41 @@ fn analyze_expression(
             // Merge states
             if then_state.diverged && else_state.diverged {
                 state.diverged = true;
-                state.assigned = then_state.assigned.intersection(&else_state.assigned).cloned().collect();
+                state.assigned = then_state
+                    .assigned
+                    .intersection(&else_state.assigned)
+                    .cloned()
+                    .collect();
             } else if then_state.diverged {
                 state = else_state;
             } else if else_state.diverged {
                 state = then_state;
             } else {
-                state.assigned = then_state.assigned.intersection(&else_state.assigned).cloned().collect();
+                state.assigned = then_state
+                    .assigned
+                    .intersection(&else_state.assigned)
+                    .cloned()
+                    .collect();
             }
         }
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             state = analyze_expression(condition, state, false, ctx);
             let mut body_state = State {
                 assigned: state.assigned.clone(),
                 diverged: false,
             };
             for stmt in body {
-                if body_state.diverged { break; }
+                if body_state.diverged {
+                    break;
+                }
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
         }
-        ExprKind::WhileLet { conditions, body, .. } => {
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
             // Analyze each condition
             let mut body_state = State {
                 assigned: state.assigned.clone(),
@@ -297,7 +321,9 @@ fn analyze_expression(
                 }
             }
             for stmt in body {
-                if body_state.diverged { break; }
+                if body_state.diverged {
+                    break;
+                }
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // Pattern bindings don't persist after the loop
@@ -308,7 +334,9 @@ fn analyze_expression(
                 diverged: false,
             };
             for stmt in body {
-                if body_state.diverged { break; }
+                if body_state.diverged {
+                    break;
+                }
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // For simplicity, we don't assume anything about loop exit state yet
@@ -322,7 +350,15 @@ fn analyze_expression(
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
         }
-        ExprKind::Literal(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) | ExprKind::TypeParameterRef(_) | ExprKind::AssociatedTypeRef | ExprKind::EnumCase { .. } | ExprKind::Error | ExprKind::OverloadedRef(_) | ExprKind::Closure { .. } => {}
+        ExprKind::Literal(_)
+        | ExprKind::SymbolRef(_)
+        | ExprKind::TypeRef(_)
+        | ExprKind::TypeParameterRef(_)
+        | ExprKind::AssociatedTypeRef
+        | ExprKind::EnumCase { .. }
+        | ExprKind::Error
+        | ExprKind::OverloadedRef(_)
+        | ExprKind::Closure { .. } => {}
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {
@@ -347,13 +383,29 @@ fn analyze_expression(
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
         }
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             state = analyze_expression(callee, state, false, ctx);
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        }
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             state = analyze_expression(receiver, state, false, ctx);
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
@@ -420,7 +472,11 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
                 mark_pattern_locals_assigned(&field.pattern, state);
             }
         }
-        PatternKind::Array { prefix, suffix, rest } => {
+        PatternKind::Array {
+            prefix,
+            suffix,
+            rest,
+        } => {
             for elem in prefix {
                 mark_pattern_locals_assigned(elem, state);
             }
@@ -439,7 +495,11 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
                 mark_pattern_locals_assigned(first, state);
             }
         }
-        PatternKind::At { local_id, subpattern, .. } => {
+        PatternKind::At {
+            local_id,
+            subpattern,
+            ..
+        } => {
             // Mark the binding from the @ pattern
             state.assigned.insert(*local_id);
             // Also mark any bindings from the subpattern

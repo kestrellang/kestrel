@@ -30,7 +30,15 @@ impl Analyzer for ClosureAnalyzer {
     }
 
     fn visit_expression(&mut self, expr: &Expression, ctx: &mut AnalysisContext) {
-        let ExprKind::Closure { params, body, tail_expr, captures, uses_it, .. } = &expr.kind else {
+        let ExprKind::Closure {
+            params,
+            body,
+            tail_expr,
+            captures,
+            uses_it,
+            ..
+        } = &expr.kind
+        else {
             return;
         };
 
@@ -79,7 +87,11 @@ fn validate_closure_type(
     ctx: &mut AnalysisContext,
 ) {
     // Extract the closure's function type
-    if let TyKind::Function { params: param_tys, return_type: return_ty } = expr.ty.kind() {
+    if let TyKind::Function {
+        params: param_tys,
+        return_type: return_ty,
+    } = expr.ty.kind()
+    {
         // Check parameter count matches
         if let Some(param_list) = params {
             let actual_count = param_list.len();
@@ -128,9 +140,7 @@ fn validate_capture_assignments(
     }
 
     // Build a set of captured local IDs for quick lookup
-    let captured_ids: std::collections::HashSet<_> = captures.iter()
-        .map(|c| c.local_id)
-        .collect();
+    let captured_ids: std::collections::HashSet<_> = captures.iter().map(|c| c.local_id).collect();
 
     // Walk the closure body to find assignments to captured variables
     for stmt in body {
@@ -155,9 +165,7 @@ fn validate_parameter_assignments(
 
     // Build a set of parameter names for detection
     if let Some(param_list) = params {
-        let _param_names: Vec<_> = param_list.iter()
-            .map(|p| p.name.clone())
-            .collect();
+        let _param_names: Vec<_> = param_list.iter().map(|p| p.name.clone()).collect();
 
         // Similar to capture validation, we'd need to walk the closure body
         // and check for assignments to these parameters
@@ -182,10 +190,13 @@ fn find_assignments_to_locals(
                 if target_locals.contains(local_id) {
                     // Get the variable name
                     if let Some(cid) = container_id {
-                        let name = ctx.model.query(LocalName {
-                            container_id: cid,
-                            local_id: *local_id,
-                        }).unwrap_or_else(|| "<unknown>".to_string());
+                        let name = ctx
+                            .model
+                            .query(LocalName {
+                                container_id: cid,
+                                local_id: *local_id,
+                            })
+                            .unwrap_or_else(|| "<unknown>".to_string());
 
                         ctx.report(CannotAssignToCapturedVariableError {
                             span: target.span.clone(),
@@ -200,7 +211,12 @@ fn find_assignments_to_locals(
         }
 
         // Recursively check other expression kinds
-        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             // Process conditions
             for condition in conditions {
                 match condition {
@@ -238,14 +254,18 @@ fn find_assignments_to_locals(
             }
         }
 
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             find_assignments_to_locals(condition, target_locals, container_id, ctx);
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
             }
         }
 
-        ExprKind::WhileLet { conditions, body, .. } => {
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
             for condition in conditions {
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
@@ -267,7 +287,9 @@ fn find_assignments_to_locals(
             }
         }
 
-        ExprKind::Closure { body, tail_expr, .. } => {
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             // Walk nested closure body
             for stmt in body {
                 walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
@@ -300,14 +322,31 @@ fn find_assignments_to_locals(
             find_assignments_to_locals(receiver, target_locals, container_id, ctx);
         }
 
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             find_assignments_to_locals(callee, target_locals, container_id, ctx);
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
             }
         }
 
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            find_assignments_to_locals(receiver, target_locals, container_id, ctx);
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        }
+
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             find_assignments_to_locals(receiver, target_locals, container_id, ctx);
             for arg in arguments {
                 find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
@@ -376,7 +415,10 @@ fn walk_statement_for_assignments(
         kestrel_semantic_tree::stmt::StatementKind::Expr(expr) => {
             find_assignments_to_locals(expr, target_locals, container_id, ctx);
         }
-        kestrel_semantic_tree::stmt::StatementKind::GuardLet { conditions, else_block } => {
+        kestrel_semantic_tree::stmt::StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             for condition in conditions {
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
