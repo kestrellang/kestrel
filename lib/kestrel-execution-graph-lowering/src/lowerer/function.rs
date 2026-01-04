@@ -564,6 +564,14 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(&arm.body, ids);
             }
         }
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+            if let Some(val) = value {
+                collect_closure_local_ids_from_expr(val, ids);
+            }
+        }
         ExprKind::While {
             condition, body, ..
         } => {

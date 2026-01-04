@@ -372,6 +372,9 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 ReturnState::MayFallThrough
             }
         }
+
+        // Block expression - analyze statements and value
+        ExprKind::Block { statements, value } => analyze_block(statements, value.as_deref()),
     }
 }
 

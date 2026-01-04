@@ -396,6 +396,15 @@ fn find_assignments_to_locals(
                 find_assignments_to_locals(&arm.body, target_locals, container_id, ctx);
             }
         }
+
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                walk_statement_for_assignments(stmt, target_locals, container_id, ctx);
+            }
+            if let Some(val) = value {
+                find_assignments_to_locals(val, target_locals, container_id, ctx);
+            }
+        }
     }
 }
 

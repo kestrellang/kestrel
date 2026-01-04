@@ -780,6 +780,21 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         }
 
+        ExprKind::Block { statements, value } => {
+            // Generate constraints for statements
+            for stmt in statements {
+                generate_statement_constraints(ctx, stmt);
+            }
+            // Generate constraints for the value expression if present
+            if let Some(val) = value {
+                generate_expression_constraints(ctx, val);
+                ctx.register_type(&val.ty);
+                // Block type equals value type
+                ctx.equate(expr.ty.id(), val.ty.id(), val.span.clone());
+            }
+            // If no value, block type should be unit (already set in AST)
+        }
+
         ExprKind::Error => {}
     }
 }

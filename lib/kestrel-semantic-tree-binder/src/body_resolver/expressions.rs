@@ -1414,6 +1414,20 @@ fn expression_references_local(
                 })
         }
 
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                if statement_references_local(stmt, local_id) {
+                    return true;
+                }
+            }
+            if let Some(val) = value {
+                if expression_references_local(val, local_id) {
+                    return true;
+                }
+            }
+            false
+        }
+
         // Leaf expressions - no references
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -1999,6 +2013,16 @@ where
             }
         }
 
+        // Block expression - walk statements and value
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                collect_captures_from_statement(stmt, process);
+            }
+            if let Some(val) = value {
+                collect_captures_from_expression(val, process);
+            }
+        }
+
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -2140,11 +2164,11 @@ fn resolve_match_arm(
     })
 }
 
-/// Resolve a match arm body, handling closures specially.
+/// Resolve a match arm body, handling block syntax specially.
 ///
-/// When the body is a closure expression without explicit parameters (i.e., just `{ ... }`),
-/// we resolve it as an inline block rather than a closure. This prevents outer variables
-/// from being treated as captures (which would disallow assignment).
+/// When the body is a block (closure syntax without explicit parameters, i.e., just `{ ... }`),
+/// we resolve it as an inline block expression rather than a closure. This ensures that
+/// pattern bindings from the match arm remain visible in the block without capture analysis.
 fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     // Unwrap Expression wrapper if present
     let inner_node = if body_node.kind() == SyntaxKind::Expression {
@@ -2153,7 +2177,7 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         body_node.clone()
     };
 
-    // Check if it's a closure without explicit parameters
+    // Check if it's a block (closure syntax without explicit parameters)
     if inner_node.kind() == SyntaxKind::ExprClosure {
         // Check if it has ClosureParams - if so, it's a real closure with explicit params
         let has_explicit_params = inner_node
@@ -2161,7 +2185,7 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
             .any(|c| c.kind() == SyntaxKind::ClosureParams);
 
         if !has_explicit_params {
-            // It's a block-like closure (no params). Resolve the body inline.
+            // It's a block (no params). Resolve the body inline.
             // Don't push a new scope - we're already in the match arm's scope.
             let (statements, tail_expr) = resolve_closure_body(&inner_node, ctx);
             let body_span = get_node_span(&inner_node, ctx.file_id);
@@ -2171,30 +2195,21 @@ fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 if let Some(expr) = tail_expr {
                     return expr;
                 }
-                // Empty closure body - return unit
+                // Empty block body - return unit
                 return Expression::unit(body_span);
             }
 
-            // If there are statements, wrap them in a closure without captures.
-            // This maintains the semantic structure while avoiding capture issues.
+            // Create a block expression (NOT a closure).
+            // Pattern bindings from the match arm remain visible.
             let result_ty = tail_expr
                 .as_ref()
                 .map(|e| e.ty.clone())
                 .unwrap_or_else(|| Ty::unit(body_span.clone()));
-            return Expression::closure(
-                None, // no params
-                statements,
-                tail_expr,
-                Vec::new(), // no captures - this is the key fix!
-                false,      // doesn't use `it`
-                None,       // no implicit param
-                result_ty,
-                body_span,
-            );
+            return Expression::block(statements, tail_expr, result_ty, body_span);
         }
     }
 
-    // For all other cases (non-closure, or closure with explicit params),
+    // For all other cases (non-block, or closure with explicit params),
     // resolve normally using the exact same code path as before
     resolve_expression(body_node, ctx)
 }

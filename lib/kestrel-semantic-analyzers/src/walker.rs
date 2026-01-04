@@ -390,6 +390,17 @@ fn walk_expression(
                     walk_expression(&arm.body, analyzers, model, ctx);
                 }
             }
+            ExprKind::Block { statements, value } => {
+                for stmt in statements {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+                if let Some(val) = value {
+                    walk_expression(val, analyzers, model, ctx);
+                }
+            }
         }
     }
 

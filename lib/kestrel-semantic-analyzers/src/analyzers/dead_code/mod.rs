@@ -444,6 +444,12 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
                 }
             }
         }
+
+        // Block expressions - analyze statements and value
+        ExprKind::Block { statements, value } => {
+            let block_div = analyze_block(statements, value.as_deref(), errors);
+            block_div
+        }
     }
 }
 

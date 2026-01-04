@@ -578,6 +578,18 @@ pub enum ExprKind {
         arms: Vec<MatchArm>,
     },
 
+    /// Block expression: `{ statements; value }`
+    ///
+    /// Used for match arm bodies that contain statements.
+    /// NOT a closure - does not capture variables, has no parameters.
+    /// Pattern bindings from the match arm remain visible in the block.
+    Block {
+        /// Statements in the block
+        statements: Vec<crate::stmt::Statement>,
+        /// Optional trailing expression (the block's value)
+        value: Option<Box<Expression>>,
+    },
+
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
@@ -1004,6 +1016,13 @@ impl Expression {
                     scrutinee.debug_compact(),
                     arms.len()
                 )
+            }
+            ExprKind::Block { value, .. } => {
+                let body_str = value
+                    .as_ref()
+                    .map(|e| e.debug_compact())
+                    .unwrap_or_else(|| "...".to_string());
+                format!("{{ {} }}", body_str)
             }
             ExprKind::Error => "<error>".to_string(),
         }
@@ -1669,6 +1688,29 @@ impl Expression {
                 captures,
                 uses_it,
                 implicit_param,
+            },
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a block expression.
+    ///
+    /// Block expressions contain statements and an optional trailing value.
+    /// Used for match arm bodies that have statements.
+    /// Unlike closures, blocks do not capture variables - they execute inline.
+    pub fn block(
+        statements: Vec<crate::stmt::Statement>,
+        value: Option<Expression>,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Block {
+                statements,
+                value: value.map(Box::new),
             },
             ty,
             span,

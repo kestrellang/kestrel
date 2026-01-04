@@ -564,6 +564,30 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             crate::match_lowering::lower_match_expr(ctx, scrutinee, arms, expr)
         }
 
+        // === Block Expressions ===
+        // Used for match arm bodies with statements. NOT a closure - executes inline.
+        ExprKind::Block { statements, value } => {
+            // Lower statements in order
+            for stmt in statements {
+                crate::stmt::lower_statement(ctx, stmt);
+                if ctx.is_block_terminated() {
+                    break;
+                }
+            }
+
+            // Lower the trailing value expression if present and block not terminated
+            if !ctx.is_block_terminated() {
+                if let Some(val) = value {
+                    lower_expression(ctx, val)
+                } else {
+                    Value::Immediate(Immediate::unit())
+                }
+            } else {
+                // Block was terminated (e.g., by return) - value is unreachable
+                Value::Immediate(Immediate::unit())
+            }
+        }
+
         // === Closures ===
         ExprKind::Closure {
             params,

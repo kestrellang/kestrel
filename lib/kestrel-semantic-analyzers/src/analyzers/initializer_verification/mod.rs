@@ -536,6 +536,19 @@ fn analyze_expression(
                 arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
             }
         }
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                if state.diverged {
+                    break;
+                }
+                state = analyze_statement(stmt, state, ctx);
+            }
+            if !state.diverged {
+                if let Some(val) = value {
+                    state = analyze_expression(val, state, false, ctx);
+                }
+            }
+        }
         ExprKind::Error => {}
     }
     state

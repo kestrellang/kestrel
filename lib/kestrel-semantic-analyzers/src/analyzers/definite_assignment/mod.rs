@@ -432,6 +432,19 @@ fn analyze_expression(
                 // Note: proper handling would merge states from all arms
             }
         }
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                if state.diverged {
+                    break;
+                }
+                state = analyze_statement(stmt, state, ctx);
+            }
+            if !state.diverged {
+                if let Some(val) = value {
+                    state = analyze_expression(val, state, false, ctx);
+                }
+            }
+        }
     }
     state
 }

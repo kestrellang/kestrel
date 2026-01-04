@@ -396,6 +396,20 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 arms: resolved_arms,
             }
         }
+
+        ExprKind::Block { statements, value } => {
+            let resolved_statements = statements
+                .iter()
+                .map(|stmt| apply_to_statement(stmt, solution))
+                .collect();
+            let resolved_value = value
+                .as_ref()
+                .map(|v| Box::new(apply_to_expression(v, solution)));
+            ExprKind::Block {
+                statements: resolved_statements,
+                value: resolved_value,
+            }
+        }
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)
