@@ -8,16 +8,16 @@ This guide covers the essential syntax of the Kestrel programming language.
 
 ```kestrel
 // Immutable binding (default)
-let x: Int = 42
-let message = "Hello" // Type inferred
+let x: Int = 42;
+let message = "Hello"; // Type inferred
 
 // Mutable variable
-var count: Int = 0
-count = count + 1
+var count: Int = 0;
+count = count + 1;
 
 // Type Aliases
-type ID = String
-type Handler = (Int) -> Bool
+type ID = String;
+type Handler = (Int) -> Bool;
 ```
 
 ## Functions
@@ -48,14 +48,14 @@ func move(to point: Point, duration seconds: Float64) {
 ```kestrel
 // Basic struct
 struct Point {
-    var x: Int
-    var y: Int
+    var x: Int;
+    var y: Int;
 }
 
 // Generic struct
 struct Pair[T, U] {
-    let first: T
-    let second: U
+    let first: T;
+    let second: U;
 }
 
 // Methods and initializers
@@ -119,7 +119,7 @@ enum Shape {
 // }
 
 // Implicit Member Access
-let d: Direction = .North
+let d: Direction = .North;
 ```
 
 ## Control Flow
@@ -127,37 +127,37 @@ let d: Direction = .North
 ```kestrel
 // If-else
 if x > 10 {
-    print("Large")
+    print("Large");
 } else if x > 5 {
-    print("Medium")
+    print("Medium");
 } else {
-    print("Small")
+    print("Small");
 }
 
 // Guard statement
 guard x > 0 else {
-    return .Err(Error.InvalidInput)
+    return .Err(Error.InvalidInput);
 }
 
 // While loop
 while count > 0 {
-    count = count - 1
+    count = count - 1;
 }
 
 // While-let (Pattern matching loop)
 while let .Some(item) = iterator.next() {
-    process(item)
+    process(item);
 }
 
 // Loop (Infinite)
 loop {
-    if condition { break }
+    if condition { break; }
 }
 
 // Labeled loops
 outer: for i in 0..10 {
     for j in 0..10 {
-        if i * j > 50 { break outer }
+        if i * j > 50 { break outer; }
     }
 }
 
@@ -168,7 +168,7 @@ let desc = match direction {
     // Or patterns (Future)
     // .East or .West => "Sideways",
     _ => "Other" // Wildcard
-}
+};
 ```
 
 ## Pattern Matching
@@ -190,7 +190,7 @@ match value {
 
 // If-let
 if let .Some(val) = optionalVal {
-    print(val)
+    print(val);
 }
 ```
 
@@ -211,7 +211,7 @@ extension Shape: Drawable {
 
 // Generic constraint
 func render[T: Drawable](item: T) {
-    item.draw()
+    item.draw();
 }
 
 // Built-in attributes
@@ -223,30 +223,30 @@ protocol Copyable {}
 
 ```kestrel
 // Basic syntax
-let add = { (a: Int, b: Int) in a + b }
+let add = { (a: Int, b: Int) in a + b };
 
 // Implicit parameters (for single argument) - (Future/Partial)
-// let double = { it * 2 }
+// let double = { it * 2 };
 
 // Trailing closure syntax
-numbers.map { it * 2 }
+numbers.map { it * 2 };
 
 // Multiple trailing closures
 button.setActions(
     onPress: { print("pressed") },
     onRelease: { print("released") }
-)
+);
 ```
 
 ## Modules and Imports
 
 ```kestrel
 // Module declaration
-module my_app.utils
+module my_app.utils;
 
 // Imports
-import std.collections.Map
-import std.io as IO // Renaming
+import std.collections.Map;
+import std.io as IO; // Renaming
 ```
 
 ## Access Control
@@ -293,17 +293,37 @@ func openFile(path: String) -> Result[File, Error] {
 
 ## Semicolon Rules
 
-Kestrel uses semicolons to separate statements, but they are often optional in block-like structures.
+Kestrel requires semicolons to terminate statements. This is different from languages like Swift or Kotlin that make semicolons optional.
 
--   **Required**: After variable declarations (`let x = 1;`) and expression statements (`doSomething();`).
--   **Optional**: After control flow structures (`if`, `while`, `loop`) and for the final expression in a block (implicit return).
+### Required Semicolons
+
+Semicolons are **required** after:
+- Variable declarations: `let x = 1;` and `var y = 2;`
+- Type aliases: `type ID = String;`
+- Struct/enum field declarations: `var x: Int;`
+- Expression statements: `doSomething();`
+- Assignment statements: `count = count + 1;`
+- Module declarations: `module my_app.utils;`
+- Import statements: `import std.io;`
+
+### Optional/Omitted Semicolons
+
+Semicolons are **not needed** after:
+- Control flow blocks (`if`, `while`, `loop`, `match`, `for`)
+- Function/struct/enum/protocol declarations (after the closing `}`)
+- The final expression in a block (implicit return)
+- Match arm expressions (after `=>`)
 
 ```kestrel
 func example() -> Int {
-    let x = 1;      // Semicolon required
-    if x > 0 {      // No semicolon needed
-        print("hi");
+    let x = 1;          // Required - variable declaration
+    var y = 2;          // Required - variable declaration
+    y = y + 1;          // Required - assignment statement
+    
+    if x > 0 {          // No semicolon after if block
+        print("hi");    // Required - expression statement
     }
-    x + 1           // No semicolon (implicit return)
+    
+    x + y               // No semicolon - implicit return
 }
 ```

@@ -17,7 +17,10 @@ Unlike Rust, **most types in Kestrel are copy-by-default**. This includes:
 When you pass a struct to a function or assign it to a new variable, it is copied.
 
 ```kestrel
-struct Point { x: Int, y: Int }
+struct Point {
+    var x: Int;
+    var y: Int;
+}
 
 func main() {
     let p1 = Point(x: 1, y: 2);
@@ -46,6 +49,8 @@ Resources are managed via Resource Acquisition Is Initialization (RAII). Types c
 
 ```kestrel
 struct File {
+    var handle: Int;
+    
     deinit {
         // Close file descriptor
     }
@@ -70,7 +75,7 @@ Kestrel functions explicitly declare how they handle parameters using access mod
 2.  **Mutating**: Read-write access. The caller must pass a mutable variable.
     ```kestrel
     func offset(mutating p: Point, by: Int) {
-        p.x += by
+        p.x += by;
     }
     ```
 
@@ -81,14 +86,34 @@ Kestrel functions explicitly declare how they handle parameters using access mod
     }
     ```
 
+### Method Receivers
+
+Methods defined inside `struct`, `enum`, or `extension` blocks have implicit access to `self`. Unlike Rust, **methods do not declare `self` as an explicit parameter**.
+
+```kestrel
+struct Counter {
+    var count: Int;
+    
+    // `self` is implicit - do NOT write `func increment(self)` or `func increment(&self)`
+    mutating func increment() {
+        self.count = self.count + 1;
+    }
+}
+```
+
+The method modifier determines how `self` can be accessed:
+- **No modifier**: `self` is borrowed (read-only)
+- **`mutating`**: `self` can be modified
+- **`consuming`**: `self` is moved/consumed
+
 ## Generics and Monomorphization
 
 Generics in Kestrel are **monomorphized**. This means a separate version of the function or type is generated for each concrete type argument used. This ensures zero-cost abstractions but increases binary size.
 
 ```kestrel
-// A separate copy of `Identity` is compiled for Int and String
-let n = Identity[Int](42);
-let s = Identity[String]("hello");
+// A separate copy of `identity` is compiled for Int and String
+let n = identity[Int](42);
+let s = identity[String]("hello");
 ```
 
 Generic types assume `Copyable` by default. To support non-copyable types, use `where T: not Copyable`.
