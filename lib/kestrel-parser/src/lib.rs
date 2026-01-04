@@ -78,6 +78,7 @@ pub mod stmt;
 pub mod r#struct;
 pub mod ty;
 pub mod type_alias;
+pub mod type_decl;
 pub mod type_param;
 
 use event::{EventSink, TreeBuilder};
@@ -95,8 +96,8 @@ pub use function::FunctionDeclaration;
 pub use import::ImportDeclaration;
 pub use module::{ModuleDeclaration, ModulePath};
 pub use protocol::ProtocolDeclaration;
-pub use stmt::Statement;
 pub use r#struct::StructDeclaration;
+pub use stmt::Statement;
 pub use ty::TyExpression;
 pub use type_alias::TypeAliasDeclaration;
 
@@ -111,8 +112,8 @@ pub use function::parse_function_declaration;
 pub use import::parse_import_declaration;
 pub use module::{parse_module_declaration, parse_module_path};
 pub use protocol::parse_protocol_declaration;
-pub use stmt::parse_stmt;
 pub use r#struct::parse_struct_declaration;
+pub use stmt::parse_stmt;
 pub use ty::parse_ty;
 pub use type_alias::parse_type_alias_declaration;
 

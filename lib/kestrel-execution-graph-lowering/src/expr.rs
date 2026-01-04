@@ -45,9 +45,6 @@ fn access_mode_to_passing_mode(mode: ParameterAccessMode, arg_ty: &Ty) -> Passin
     }
 }
 
-/// The qualified name for the Cloneable protocol: std.core.protocols.Cloneable
-const CLONEABLE_PROTOCOL_SEGMENTS: &[&str] = &["std", "core", "protocols", "Cloneable"];
-
 /// Emit a clone call for a Cloneable type.
 ///
 /// For Cloneable types being passed to `consuming` parameters:
@@ -64,13 +61,33 @@ fn emit_clone_call(ctx: &mut LoweringContext, value: &Value, ty: &Ty) -> Value {
     let cloned_local = ctx.create_temp("cloned", mir_ty);
     let cloned_place = Place::local(cloned_local);
 
-    // Build the Cloneable protocol qualified name
-    let protocol_name = ctx.mir.intern_name(QualifiedNameData::new(
-        CLONEABLE_PROTOCOL_SEGMENTS
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-    ));
+    // Look up the Cloneable protocol via the builtin registry
+    let protocol_name = match ctx.model.builtin_registry().cloneable_protocol() {
+        Some(cloneable_id) => {
+            // Query the symbol to get its qualified name
+            match ctx.model.query(SymbolFor { id: cloneable_id }) {
+                Some(symbol) => qualified_name_for_symbol(ctx, &symbol),
+                None => {
+                    // Cloneable protocol symbol not found - internal error
+                    ctx.emit_error(LoweringError::internal(
+                        "Cloneable protocol symbol not found in registry",
+                        None,
+                    ));
+                    // Return a dummy value to allow compilation to continue
+                    return Value::Immediate(Immediate::unit());
+                }
+            }
+        }
+        None => {
+            // Cloneable builtin not registered - std library may not be loaded
+            ctx.emit_error(LoweringError::internal(
+                "Cloneable builtin protocol not registered",
+                None,
+            ));
+            // Return a dummy value to allow compilation to continue
+            return Value::Immediate(Immediate::unit());
+        }
+    };
 
     // Create the witness callee: witness_method Cloneable.clone for T
     let callee = Callee::witness(protocol_name, "clone", mir_ty);

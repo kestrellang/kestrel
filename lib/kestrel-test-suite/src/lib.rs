@@ -427,21 +427,25 @@ impl Symbol {
         self.find_by_path(root, &segments)
     }
 
-    /// Find a symbol by simple name anywhere in the tree (depth-first)
+    /// Find a symbol by simple name anywhere in the tree (depth-first, iterative)
     fn find_by_name(
         &self,
-        symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+        root: &Arc<dyn SymbolTrait<KestrelLanguage>>,
         name: &str,
     ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-        // Check if this symbol matches
-        if symbol.metadata().name().value == name {
-            return Some(symbol.clone());
-        }
+        // Use an explicit stack to avoid stack overflow on deep trees
+        let mut stack = vec![root.clone()];
 
-        // Search children
-        for child in symbol.metadata().children() {
-            if let Some(found) = self.find_by_name(&child, name) {
-                return Some(found);
+        while let Some(symbol) = stack.pop() {
+            // Check if this symbol matches
+            if symbol.metadata().name().value == name {
+                return Some(symbol);
+            }
+
+            // Add children to stack (in reverse order for left-to-right traversal)
+            let children = symbol.metadata().children();
+            for child in children.into_iter().rev() {
+                stack.push(child);
             }
         }
 
@@ -474,19 +478,24 @@ impl Symbol {
         Some(current)
     }
 
-    /// Find a child symbol by name (searches only within the given parent)
+    /// Find a child symbol by name (searches only within the given parent, iterative)
     fn find_child_by_name(
         &self,
         parent: &Arc<dyn SymbolTrait<KestrelLanguage>>,
         name: &str,
     ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-        for child in parent.metadata().children() {
+        // Use an explicit stack to avoid stack overflow on deep trees
+        let mut stack: Vec<Arc<dyn SymbolTrait<KestrelLanguage>>> =
+            parent.metadata().children().into_iter().rev().collect();
+
+        while let Some(child) = stack.pop() {
             if child.metadata().name().value == name {
                 return Some(child);
             }
-            // Also search nested children (for cases like methods inside structs)
-            if let Some(found) = self.find_child_by_name(&child, name) {
-                return Some(found);
+            // Add nested children to stack (in reverse order for left-to-right traversal)
+            let nested_children = child.metadata().children();
+            for nested in nested_children.into_iter().rev() {
+                stack.push(nested);
             }
         }
         None
@@ -1063,18 +1072,23 @@ fn get_implements_protocol_info(
     ))
 }
 
-/// Helper to find a symbol by ID in the tree
+/// Helper to find a symbol by ID in the tree (iterative to avoid stack overflow)
 fn find_symbol_by_id(
-    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    root: &Arc<dyn SymbolTrait<KestrelLanguage>>,
     id: semantic_tree::symbol::SymbolId,
 ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-    if symbol.metadata().id() == id {
-        return Some(symbol.clone());
-    }
+    // Use an explicit stack to avoid stack overflow on deep trees
+    let mut stack = vec![root.clone()];
 
-    for child in symbol.metadata().children() {
-        if let Some(found) = find_symbol_by_id(&child, id) {
-            return Some(found);
+    while let Some(symbol) = stack.pop() {
+        if symbol.metadata().id() == id {
+            return Some(symbol);
+        }
+
+        // Add children to stack
+        let children = symbol.metadata().children();
+        for child in children.into_iter().rev() {
+            stack.push(child);
         }
     }
 

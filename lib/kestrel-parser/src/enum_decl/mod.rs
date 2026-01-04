@@ -3,25 +3,20 @@
 //! This module is the single source of truth for enum declaration parsing.
 //! Enum bodies can contain: cases, functions, initializers, nested structs/enums,
 //! type aliases, modules, and imports.
+//!
+//! Note: The actual parsing is delegated to the unified type_decl module to handle
+//! mutual recursion between structs and enums efficiently.
 
-use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::attribute::attribute_list_parser;
-use crate::common::ConformanceListData;
-use crate::common::{
-    emit_enum_declaration, field_declaration_parser_internal, function_declaration_parser_internal,
-    identifier, import_declaration_parser_internal, initializer_declaration_parser_internal,
-    module_declaration_parser_internal, token, visibility_parser_internal, EnumCaseDeclarationData,
-    EnumCaseParameterData, EnumDeclarationData, TypeDeclarationBodyItem,
-};
+use crate::common::{emit_enum_declaration, EnumDeclarationData};
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
-use crate::ty::ty_parser;
-use crate::type_alias::type_alias_declaration_parser_internal;
-use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
+use crate::type_decl::enum_declaration_parser_unified;
+
+use chumsky::prelude::*;
 
 /// Represents an enum declaration: (visibility)? (indirect)? enum Name[T]? (: Conformances)? (where ...)? { ... }
 ///
@@ -116,178 +111,13 @@ impl EnumDeclaration {
     }
 }
 
-/// Parser that skips trivia tokens
-fn skip_trivia<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
-    any()
-        .filter(|token: &Token| {
-            matches!(
-                token,
-                Token::Whitespace | Token::LineComment | Token::BlockComment
-            )
-        })
-        .repeated()
-        .ignored()
-}
-
-/// Parser for enum case parameter: `label: Type`
-fn enum_case_parameter_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone
-{
-    identifier()
-        .then(token(Token::Colon))
-        .then(ty_parser())
-        .map(|((label, colon), ty)| EnumCaseParameterData { label, colon, ty })
-}
-
-/// Parser for enum case declaration: `(@attr)* case Name` or `(@attr)* case Name(label: Type, ...)`
-fn enum_case_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseDeclarationData, ParserExtra<'tokens>> + Clone
-{
-    attribute_list_parser()
-        .then(token(Token::Case))
-        .then(identifier())
-        .then(
-            // Optional parameter list: (label: Type, label: Type, ...)
-            token(Token::LParen)
-                .then(
-                    enum_case_parameter_parser()
-                        .separated_by(just(Token::Comma))
-                        .allow_trailing()
-                        .collect::<Vec<_>>(),
-                )
-                .then(token(Token::RParen))
-                .map(|((lparen, params), rparen)| Some((lparen, params, rparen)))
-                .or(empty().map(|_| None)),
-        )
-        .map(
-            |(((attributes, case_span), name_span), parameters)| EnumCaseDeclarationData {
-                attributes,
-                case_span,
-                name_span,
-                parameters,
-            },
-        )
-}
-
-/// Internal parser for enum body items
-///
-/// Enum bodies can contain: cases, functions, initializers, nested structs/enums,
-/// type aliases, modules, and imports.
-/// Note: Fields are technically parsed but should be rejected at semantic analysis.
-fn enum_body_item_parser_internal<'tokens>(
-    enum_parser: impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>>
-        + Clone,
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
-{
-    let module_parser = module_declaration_parser_internal()
-        .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
-
-    let import_parser =
-        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
-            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
-        });
-
-    // Nested enums are boxed to avoid infinite size
-    let nested_enum_parser = enum_parser.map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
-
-    // Enum cases
-    let case_parser = enum_case_parser().map(TypeDeclarationBodyItem::EnumCase);
-
-    let initializer_parser =
-        initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
-
-    let function_parser =
-        function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
-
-    let type_alias_parser =
-        type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
-
-    // Fields are parsed but should be rejected semantically (enums don't have stored properties)
-    let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
-
-    // Order matters: try case first (unique to enums), then shared items
-    module_parser
-        .or(import_parser)
-        .or(case_parser)
-        .or(nested_enum_parser)
-        .or(initializer_parser)
-        .or(type_alias_parser) // Check type alias before function (both can have visibility)
-        .or(function_parser)
-        .or(field_parser)
-}
-
-/// Parser for the optional `indirect` modifier
-fn indirect_modifier_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
-    skip_trivia()
-        .ignore_then(just(Token::Indirect).map_with(|_, e| Some(to_kestrel_span(e.span()))))
-        .or(empty().to(None))
-}
-
 /// Internal Chumsky parser for enum declaration
 ///
-/// This is the single source of truth for enum declaration parsing.
+/// This delegates to the unified type_decl parser which handles both struct and enum
+/// in a single recursive context to avoid stack overflow on deeply nested types.
 pub fn enum_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
-    recursive(|enum_parser| {
-        attribute_list_parser()
-            .then(visibility_parser_internal())
-            .then(indirect_modifier_parser())
-            .then(token(Token::Enum))
-            .then(identifier())
-            .then(type_parameter_list_parser().or_not())
-            .then(conformance_list_parser().or_not())
-            .then(where_clause_parser().or_not())
-            .then(token(Token::LBrace))
-            .then(
-                enum_body_item_parser_internal(enum_parser)
-                    .repeated()
-                    .collect::<Vec<_>>(),
-            )
-            .then(token(Token::RBrace))
-            .map(
-                |(
-                    (
-                        (
-                            (
-                                (
-                                    (
-                                        (
-                                            (((attributes, visibility), indirect), enum_span),
-                                            name_span,
-                                        ),
-                                        type_params,
-                                    ),
-                                    conformances,
-                                ),
-                                where_clause,
-                            ),
-                            lbrace_span,
-                        ),
-                        body,
-                    ),
-                    rbrace_span,
-                )| {
-                    EnumDeclarationData {
-                        attributes,
-                        visibility,
-                        indirect,
-                        enum_span,
-                        name_span,
-                        type_params,
-                        conformances: conformances.map(|(colon_span, items)| ConformanceListData {
-                            colon_span,
-                            conformances: items,
-                        }),
-                        where_clause,
-                        lbrace_span,
-                        body,
-                        rbrace_span,
-                    }
-                },
-            )
-    })
+    enum_declaration_parser_unified()
 }
 
 /// Parse an enum declaration and emit events

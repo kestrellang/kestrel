@@ -541,6 +541,7 @@ dependencies = [
  "kestrel-lexer",
  "kestrel-span",
  "kestrel-syntax-tree",
+ "stacker",
 ]
 
 [[package]]

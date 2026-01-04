@@ -160,18 +160,18 @@ impl FunctionBinder {
         }
     }
 
-    /// Validate the signature for @builtin(.Clone): `func clone(self) -> Self`
+    /// Validate the signature for @builtin(.Clone): `func clone() -> Self`
     ///
     /// Requirements:
     /// - Must be an instance method (has a receiver)
-    /// - Must take no parameters besides self
+    /// - Must take no parameters (self is implicit)
     /// - Must return Self
     fn validate_clone_signature(
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
         source: &str,
     ) -> Result<(), String> {
-        let expected = "func clone(self) -> Self".to_string();
+        let expected = "func clone() -> Self".to_string();
 
         // Check for receiver (must be an instance method)
         let is_static = syntax

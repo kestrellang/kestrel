@@ -110,7 +110,7 @@ public struct DefaultHasher: Hasher {
 @builtin(.Cloneable)
 public protocol Cloneable: Copyable {
     @builtin(.Clone)
-    func clone(self) -> Self
+    func clone() -> Self
 }
 
 // Copyable - marker protocol for types that can be implicitly copied

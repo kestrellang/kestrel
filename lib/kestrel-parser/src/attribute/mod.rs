@@ -26,8 +26,7 @@ fn string_literal_parser<'tokens>(
 fn integer_literal_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        just(Token::Integer)
-            .map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
+        just(Token::Integer).map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
     )
 }
 
@@ -52,7 +51,10 @@ fn implicit_member_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     token(Token::Dot)
         .then(identifier())
-        .map(|(dot_span, name_span)| AttributeArgValue::ImplicitMember { dot_span, name_span })
+        .map(|(dot_span, name_span)| AttributeArgValue::ImplicitMember {
+            dot_span,
+            name_span,
+        })
 }
 
 /// Parser for path in attribute arguments: `SomeType` or `Module.Type`
@@ -71,7 +73,7 @@ fn path_parser<'tokens>(
 fn attribute_arg_value_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     string_literal_parser()
-        .or(float_literal_parser())    // Float before integer to handle "3.14" correctly
+        .or(float_literal_parser()) // Float before integer to handle "3.14" correctly
         .or(integer_literal_parser())
         .or(bool_literal_parser())
         .or(implicit_member_parser())

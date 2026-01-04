@@ -89,8 +89,8 @@ mod semantic {
             protocol Copyable {}
             
             func process[T](consuming x: T) where T: not Copyable {
-                let a = x
-                let b = x  // Error: use after move
+                let a = x;
+                let b = x;  // Error: use after move
             }
         "#,
         )
@@ -108,7 +108,7 @@ mod semantic {
             func accept[T](consuming x: T) where T: not Copyable { }
             
             func forward[T](consuming x: T) where T: not Copyable {
-                accept(x)  // x is moved here, that's fine
+                accept(x);  // x is moved here, that's fine
             }
         "#,
         )
@@ -126,8 +126,8 @@ mod semantic {
             func accept[T](consuming x: T) where T: not Copyable { }
             
             func forward[T](consuming x: T) where T: not Copyable {
-                accept(x)  // x is moved here
-                accept(x)  // Error: use after move
+                accept(x);  // x is moved here
+                accept(x);  // Error: use after move
             }
         "#,
         )
@@ -157,8 +157,8 @@ mod function_calls {
             func process[T](consuming x: T) where T: not Copyable { }
             
             func test() {
-                var h = Handle(fd: 1)
-                process(h)  // This should work
+                var h = Handle(fd: 1);
+                process(h);  // This should work
             }
         "#,
         )
@@ -182,8 +182,8 @@ mod function_calls {
             func process[T](consuming x: T) where T: not Copyable { }
             
             func test() {
-                var p = Point(x: 1, y: 2)
-                process(p)  // Copyable types work too
+                var p = Point(x: 1, y: 2);
+                process(p);  // Copyable types work too
             }
         "#,
         )
@@ -214,8 +214,8 @@ mod struct_generics {
             }
             
             func test() {
-                var h = Handle(fd: 1)
-                var w = Wrapper(value: h)
+                var h = Handle(fd: 1);
+                var w = Wrapper(value: h);
             }
         "#,
         )

@@ -1,6 +1,6 @@
 mod path;
 
-pub use path::{ModulePath, parse_module_path};
+pub use path::{parse_module_path, ModulePath};
 
 use kestrel_lexer::Token;
 use kestrel_span::Span;
@@ -58,7 +58,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match module_declaration_parser_internal().parse(input).into_result() {
+    match module_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok((module_span, path_segments)) => {
             emit_module_declaration(sink, module_span, &path_segments);
         }

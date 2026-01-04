@@ -55,3 +55,10 @@ members = [
     "lib/kestrel-codegen",
     "lib/kestrel-test-suite"
 ]
+
+# Reduce stack frame size in debug builds for recursive parsers
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.kestrel-parser]
+opt-level = 2

@@ -92,7 +92,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match import_declaration_parser_internal().parse(input).into_result() {
+    match import_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok((import_span, path_segments, alias, items)) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
         }

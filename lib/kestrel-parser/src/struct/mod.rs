@@ -2,25 +2,20 @@
 //!
 //! This module is the single source of truth for struct declaration parsing.
 //! Struct bodies can contain: fields, functions, nested structs, modules, and imports.
+//!
+//! Note: The actual parsing is delegated to the unified type_decl module to handle
+//! mutual recursion between structs and enums efficiently.
 
-use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::attribute::attribute_list_parser;
-use crate::common::ConformanceListData;
-use crate::common::{
-    deinit_declaration_parser_internal, emit_struct_declaration, field_declaration_parser_internal,
-    function_declaration_parser_internal, identifier, import_declaration_parser_internal,
-    initializer_declaration_parser_internal, module_declaration_parser_internal, token,
-    visibility_parser_internal, StructDeclarationData, TypeDeclarationBodyItem,
-};
-use crate::enum_decl::enum_declaration_parser_internal;
+use crate::common::{emit_struct_declaration, StructDeclarationData};
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
-use crate::type_alias::type_alias_declaration_parser_internal;
-use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
+use crate::type_decl::struct_declaration_parser_unified;
+
+use chumsky::prelude::*;
 
 /// Represents a struct declaration: (visibility)? struct Name[T]? (where ...)? { ... }
 ///
@@ -99,113 +94,14 @@ impl StructDeclaration {
     }
 }
 
-/// Internal parser for struct body items
-///
-/// Struct bodies can contain: fields, functions, initializers, deinit, nested structs, type aliases, modules, and imports.
-fn struct_body_item_parser_internal<'tokens>(
-    struct_parser: impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>>
-        + Clone,
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
-{
-    let module_parser = module_declaration_parser_internal()
-        .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
-
-    let import_parser =
-        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
-            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
-        });
-
-    // Nested structs are boxed to avoid infinite size
-    let nested_struct_parser =
-        struct_parser.map(|data| TypeDeclarationBodyItem::Struct(Box::new(data)));
-
-    // Nested enums are boxed to avoid infinite size
-    let nested_enum_parser = enum_declaration_parser_internal()
-        .map(|data| TypeDeclarationBodyItem::Enum(Box::new(data)));
-
-    let initializer_parser =
-        initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
-
-    let deinit_parser = deinit_declaration_parser_internal().map(TypeDeclarationBodyItem::Deinit);
-
-    let function_parser =
-        function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
-
-    let type_alias_parser =
-        type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
-
-    let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
-
-    module_parser
-        .or(import_parser)
-        .or(nested_struct_parser)
-        .or(nested_enum_parser)
-        .or(initializer_parser)
-        .or(deinit_parser) // deinit has no visibility/attributes, parse after init
-        .or(type_alias_parser) // Check type alias before function (both can have visibility)
-        .or(function_parser)
-        .or(field_parser)
-}
-
 /// Internal Chumsky parser for struct declaration
 ///
-/// This is the single source of truth for struct declaration parsing.
+/// This delegates to the unified type_decl parser which handles both struct and enum
+/// in a single recursive context to avoid stack overflow on deeply nested types.
 pub fn struct_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
 {
-    recursive(|struct_parser| {
-        attribute_list_parser()
-            .then(visibility_parser_internal())
-            .then(token(Token::Struct))
-            .then(identifier())
-            .then(type_parameter_list_parser().or_not())
-            .then(conformance_list_parser().or_not())
-            .then(where_clause_parser().or_not())
-            .then(token(Token::LBrace))
-            .then(
-                struct_body_item_parser_internal(struct_parser)
-                    .repeated()
-                    .collect::<Vec<_>>(),
-            )
-            .then(token(Token::RBrace))
-            .map(
-                |(
-                    (
-                        (
-                            (
-                                (
-                                    (
-                                        (((attributes, visibility), struct_span), name_span),
-                                        type_params,
-                                    ),
-                                    conformances,
-                                ),
-                                where_clause,
-                            ),
-                            lbrace_span,
-                        ),
-                        body,
-                    ),
-                    rbrace_span,
-                )| {
-                    StructDeclarationData {
-                        attributes,
-                        visibility,
-                        struct_span,
-                        name_span,
-                        type_params,
-                        conformances: conformances.map(|(colon_span, items)| ConformanceListData {
-                            colon_span,
-                            conformances: items,
-                        }),
-                        where_clause,
-                        lbrace_span,
-                        body,
-                        rbrace_span,
-                    }
-                },
-            )
-    })
+    struct_declaration_parser_unified()
 }
 
 /// Parse a struct declaration and emit events

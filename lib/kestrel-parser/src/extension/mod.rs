@@ -11,11 +11,12 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
-    function_declaration_parser_internal, initializer_declaration_parser_internal, token,
+    emit_extension_declaration, function_declaration_parser_internal,
+    initializer_declaration_parser_internal, token, ConformanceListData, ExtensionBodyItem,
+    ExtensionDeclarationData,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
 use crate::ty::ty_parser;
 use crate::type_param::{conformance_list_parser, where_clause_parser};
 
@@ -139,7 +140,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match extension_declaration_parser_internal().parse(input).into_result() {
+    match extension_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_extension_declaration(sink, data);
         }

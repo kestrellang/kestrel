@@ -12,10 +12,10 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::expr::{emit_expr_variant, emit_if_condition, expr_parser, ExprVariant, IfCondition};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
 use crate::pattern::pattern_parser;
-use crate::stmt::{StmtVariant, emit_stmt_variant};
+use crate::stmt::{emit_stmt_variant, StmtVariant};
 
 /// Parser that skips trivia tokens (whitespace and comments)
 fn skip_trivia<'tokens>(
@@ -135,7 +135,8 @@ pub fn code_block_parser<'tokens>(
         .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_items_parser())
         .then(
-            skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((lbrace, items), rbrace)| CodeBlockData {
             lbrace,
@@ -148,7 +149,10 @@ pub fn code_block_parser<'tokens>(
 fn is_statement_like_expr(expr: &ExprVariant) -> bool {
     matches!(
         expr,
-        ExprVariant::If { .. } | ExprVariant::While { .. } | ExprVariant::WhileLet { .. } | ExprVariant::Loop { .. }
+        ExprVariant::If { .. }
+            | ExprVariant::While { .. }
+            | ExprVariant::WhileLet { .. }
+            | ExprVariant::Loop { .. }
     )
 }
 
@@ -182,7 +186,10 @@ fn guard_let_else_items_parser<'tokens>(
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
-            |(((((mutability_span, is_mutable), pattern), type_annotation), initializer), semicolon)| {
+            |(
+                ((((mutability_span, is_mutable), pattern), type_annotation), initializer),
+                semicolon,
+            )| {
                 ElseBlockItem::Statement(StmtVariant::VariableDeclaration(
                     crate::stmt::VariableDeclarationData {
                         mutability_span,
@@ -206,7 +213,9 @@ fn guard_let_else_items_parser<'tokens>(
         )
         .try_map(|(expr, maybe_semi), span| {
             if let Some(semi) = maybe_semi {
-                Ok(ElseBlockItem::Statement(StmtVariant::Expression(expr, semi)))
+                Ok(ElseBlockItem::Statement(StmtVariant::Expression(
+                    expr, semi,
+                )))
             } else if is_statement_like_expr(&expr) {
                 Ok(ElseBlockItem::StatementExpr(expr))
             } else {
@@ -220,7 +229,9 @@ fn guard_let_else_items_parser<'tokens>(
         .repeated()
         .collect::<Vec<_>>()
         .then(
-            expr_parser().map(ElseBlockItem::TrailingExpression).or_not(),
+            expr_parser()
+                .map(ElseBlockItem::TrailingExpression)
+                .or_not(),
         )
         .map(|(mut items, trailing)| {
             if let Some(expr) = trailing {
@@ -251,21 +262,30 @@ fn code_block_items_parser<'tokens>(
     // Guard-let statement: guard let pattern = expr, ... else { block }
     // Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
     // The else block is parsed inline to avoid recursive parser types
-    
+
     // Single let condition: let pattern = expr
     let guard_let_condition = skip_trivia()
         .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
         .then(pattern_parser())
-        .then(skip_trivia().ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
         .then(expr_parser())
-        .map(|(((let_span, pattern), equals_span), value)| {
-            IfCondition::Let { let_span, pattern, equals_span, value }
-        });
-    
+        .map(
+            |(((let_span, pattern), equals_span), value)| IfCondition::Let {
+                let_span,
+                pattern,
+                equals_span,
+                value,
+            },
+        );
+
     // Single condition: either let-binding or boolean expression
-    let guard_single_condition = guard_let_condition.clone()
+    let guard_single_condition = guard_let_condition
+        .clone()
         .or(expr_parser().map(IfCondition::Expr));
-    
+
     // Condition list: first must be let, followed by comma-separated conditions
     let guard_conditions = guard_let_condition
         .then(
@@ -273,31 +293,41 @@ fn code_block_items_parser<'tokens>(
                 .ignore_then(just(Token::Comma))
                 .ignore_then(guard_single_condition)
                 .repeated()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         )
         .map(|(first, rest)| {
             let mut conditions = vec![first];
             conditions.extend(rest);
             conditions
         });
-    
+
     let guard_let = skip_trivia()
         .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
         .then(guard_conditions)
-        .then(skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))))
-        .then(skip_trivia().ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))))
+        .then(
+            skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
         .then(guard_let_else_items_parser())
-        .then(skip_trivia().ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))))
-        .map(|(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
-            BlockItem::GuardLet(GuardLetData {
-                guard_span,
-                conditions,
-                else_span,
-                else_lbrace,
-                else_items,
-                else_rbrace,
-            })
-        });
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(
+            |(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
+                BlockItem::GuardLet(GuardLetData {
+                    guard_span,
+                    conditions,
+                    else_span,
+                    else_lbrace,
+                    else_items,
+                    else_rbrace,
+                })
+            },
+        );
 
     // Variable declaration: let/var pattern: Type = expr;
     let var_decl = skip_trivia()
@@ -326,7 +356,10 @@ fn code_block_items_parser<'tokens>(
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
-            |(((((mutability_span, is_mutable), pattern), type_annotation), initializer), semicolon)| {
+            |(
+                ((((mutability_span, is_mutable), pattern), type_annotation), initializer),
+                semicolon,
+            )| {
                 BlockItem::Statement(StmtVariant::VariableDeclaration(
                     crate::stmt::VariableDeclarationData {
                         mutability_span,
@@ -352,13 +385,11 @@ fn code_block_items_parser<'tokens>(
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((deinit_span, identifier_span), semicolon)| {
-            BlockItem::Statement(StmtVariant::Deinit(
-                crate::stmt::DeinitStatementData {
-                    deinit_span,
-                    identifier_span,
-                    semicolon,
-                },
-            ))
+            BlockItem::Statement(StmtVariant::Deinit(crate::stmt::DeinitStatementData {
+                deinit_span,
+                identifier_span,
+                semicolon,
+            }))
         });
 
     // Expression-based item: parse expression first, then check for semicolon
@@ -586,12 +617,16 @@ mod tests {
 
         assert!(!block.is_empty());
         assert!(!block.has_trailing_expression());
-        
+
         // Check that we have a DeinitStatement - look inside Statement nodes
-        let has_deinit = block.syntax
+        let has_deinit = block
+            .syntax
             .children()
             .filter(|child| child.kind() == SyntaxKind::Statement)
-            .any(|stmt| stmt.children().any(|c| c.kind() == SyntaxKind::DeinitStatement));
+            .any(|stmt| {
+                stmt.children()
+                    .any(|c| c.kind() == SyntaxKind::DeinitStatement)
+            });
         assert!(has_deinit, "Expected DeinitStatement in block");
     }
 
@@ -604,11 +639,11 @@ mod tests {
         assert!(!block.has_trailing_expression());
 
         // Check that we have both a variable declaration and a deinit statement
-        let statements: Vec<_> = block.syntax
+        let statements: Vec<_> = block
+            .syntax
             .children()
             .filter(|c| c.kind() == SyntaxKind::Statement)
             .collect();
         assert_eq!(statements.len(), 2, "Expected 2 statements");
     }
-
 }

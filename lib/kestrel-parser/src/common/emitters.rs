@@ -133,7 +133,10 @@ fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
         AttributeArgValue::Bool(span) => {
             sink.add_token(SyntaxKind::Boolean, span.clone());
         }
-        AttributeArgValue::ImplicitMember { dot_span, name_span } => {
+        AttributeArgValue::ImplicitMember {
+            dot_span,
+            name_span,
+        } => {
             sink.add_token(SyntaxKind::Dot, dot_span.clone());
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
         }
@@ -153,16 +156,16 @@ fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
 /// Emit events for a single attribute argument
 fn emit_attribute_arg(sink: &mut EventSink, arg: &AttributeArgData) {
     sink.start_node(SyntaxKind::AttributeArg);
-    
+
     if let Some(label_span) = &arg.label {
         sink.add_token(SyntaxKind::Identifier, label_span.clone());
         if let Some(colon_span) = &arg.colon {
             sink.add_token(SyntaxKind::Colon, colon_span.clone());
         }
     }
-    
+
     emit_attribute_arg_value(sink, &arg.value);
-    
+
     sink.finish_node();
 }
 
@@ -170,11 +173,11 @@ fn emit_attribute_arg(sink: &mut EventSink, arg: &AttributeArgData) {
 fn emit_attribute_args(sink: &mut EventSink, args: &AttributeArgsData) {
     sink.start_node(SyntaxKind::AttributeArgs);
     sink.add_token(SyntaxKind::LParen, args.lparen_span.clone());
-    
+
     for arg in &args.args {
         emit_attribute_arg(sink, arg);
     }
-    
+
     sink.add_token(SyntaxKind::RParen, args.rparen_span.clone());
     sink.finish_node();
 }
@@ -184,11 +187,11 @@ fn emit_attribute(sink: &mut EventSink, attr: &AttributeData) {
     sink.start_node(SyntaxKind::Attribute);
     sink.add_token(SyntaxKind::At, attr.at_span.clone());
     sink.add_token(SyntaxKind::Identifier, attr.name_span.clone());
-    
+
     if let Some(args) = &attr.args {
         emit_attribute_args(sink, args);
     }
-    
+
     sink.finish_node();
 }
 

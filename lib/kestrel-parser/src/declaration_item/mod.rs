@@ -36,7 +36,7 @@ use crate::common::{
     StructDeclarationData,
     TypeAliasDeclarationData,
 };
-use crate::enum_decl::{enum_declaration_parser_internal, parse_enum_declaration, EnumDeclaration};
+use crate::enum_decl::{parse_enum_declaration, EnumDeclaration};
 use crate::event::EventSink;
 use crate::extension::{
     extension_declaration_parser_internal, parse_extension_declaration, ExtensionDeclaration,
@@ -49,12 +49,11 @@ use crate::module::{parse_module_declaration, ModuleDeclaration};
 use crate::protocol::{
     parse_protocol_declaration, protocol_declaration_parser_internal, ProtocolDeclaration,
 };
-use crate::r#struct::{
-    parse_struct_declaration, struct_declaration_parser_internal, StructDeclaration,
-};
+use crate::r#struct::{parse_struct_declaration, StructDeclaration};
 use crate::type_alias::{
     parse_type_alias_declaration, type_alias_declaration_parser_internal, TypeAliasDeclaration,
 };
+use crate::type_decl::{type_declaration_parser_internal, TypeDeclarationData};
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,9 +184,12 @@ fn declaration_item_parser_internal<'tokens>(
 
     let protocol_parser = protocol_declaration_parser_internal().map(DeclarationItemData::Protocol);
 
-    let struct_parser = struct_declaration_parser_internal().map(DeclarationItemData::Struct);
-
-    let enum_parser = enum_declaration_parser_internal().map(DeclarationItemData::Enum);
+    // Use the unified type declaration parser for both struct and enum
+    // This uses a single recursive context to avoid stack overflow on deeply nested types
+    let type_declaration_parser = type_declaration_parser_internal().map(|data| match data {
+        TypeDeclarationData::Struct(s) => DeclarationItemData::Struct(s),
+        TypeDeclarationData::Enum(e) => DeclarationItemData::Enum(e),
+    });
 
     let extension_parser =
         extension_declaration_parser_internal().map(DeclarationItemData::Extension);
@@ -203,8 +205,7 @@ fn declaration_item_parser_internal<'tokens>(
     module_parser
         .or(import_parser)
         .or(protocol_parser)
-        .or(struct_parser)
-        .or(enum_parser)
+        .or(type_declaration_parser) // Handles both struct and enum
         .or(extension_parser)
         .or(function_parser)
         .or(field_parser)
@@ -740,15 +741,16 @@ mod tests {
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
-        
+
         // Check for parse errors
-        let errors: Vec<_> = events.iter()
+        let errors: Vec<_> = events
+            .iter()
             .filter_map(|e| match e {
                 crate::event::Event::Error { message, .. } => Some(message.clone()),
-                _ => None
+                _ => None,
             })
             .collect();
-        
+
         assert!(errors.is_empty(), "Got parse errors: {:?}", errors);
 
         // Check that we have a DeinitStatement in the tree
@@ -756,5 +758,44 @@ mod tests {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::DeinitStatement)
         });
         assert!(has_deinit, "Should have DeinitStatement in syntax tree");
+    }
+
+    #[test]
+    fn test_struct_with_nested_enum_with_nested_enum() {
+        // This test verifies that deeply nested type declarations parse correctly
+        // It was added to catch stack overflow issues with mutually recursive parsers
+        let source = r#"module Test
+            struct Level1 {
+                enum Level2 {
+                    case Value
+                    enum Level3 {
+                        case DeepValue
+                    }
+                }
+            }
+        "#;
+
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.events();
+
+        let has_struct = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::StructDeclaration)
+        });
+        let enum_count = events.iter().filter(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::EnumDeclaration)
+        }).count();
+
+        assert!(has_struct, "Should have StructDeclaration in syntax tree");
+        assert_eq!(
+            enum_count, 2,
+            "Should have 2 EnumDeclarations in syntax tree"
+        );
     }
 }

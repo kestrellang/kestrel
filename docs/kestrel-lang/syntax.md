@@ -60,11 +60,11 @@ struct Pair[T, U] {
 
 // Methods and initializers
 struct Circle {
-    let radius: Float64
+    let radius: Float64;
     
     // Initializer
     init(radius: Float64) {
-        self.radius = radius
+        self.radius = radius;
     }
     
     // Deinitializer (RAII)
@@ -72,12 +72,22 @@ struct Circle {
         // Cleanup resources
     }
     
-    // Method
+    // Method - NOTE: Unlike Rust, methods do NOT take `self` as a parameter.
+    // `self` is implicitly available inside the method body.
     func area() -> Float64 {
         3.14159 * self.radius * self.radius
     }
     
-    // Static method
+    // WRONG (Rust-style) - Do NOT write methods like this:
+    // func area(self) -> Float64 { ... }
+    // func area(&self) -> Float64 { ... }
+    
+    // Mutating method - can modify self
+    mutating func scale(by factor: Float64) {
+        self.radius = self.radius * factor;
+    }
+    
+    // Static method - no self available
     static func unit() -> Circle {
         Circle(radius: 1.0)
     }

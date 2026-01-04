@@ -243,11 +243,15 @@ fn validate_no_conflicting_conformances(
 /// it must also explicitly declare conformance to A.
 ///
 /// This only applies to structs, not to protocols (protocol inheritance is different).
+///
+/// Exception: If the parent protocol has implicit conformance (like Copyable),
+/// we don't require explicit conformance since all types implicitly conform.
 fn validate_parent_protocol_conformances(
     conformances: &[Ty],
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,
 ) {
+    use kestrel_semantic_tree::builtins::LanguageFeature;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     // Only validate structs, not protocols
@@ -287,6 +291,20 @@ fn validate_parent_protocol_conformances(
                     } = parent.kind()
                     {
                         let parent_id = parent_protocol.metadata().id();
+
+                        // Skip if parent protocol has implicit conformance (like Copyable)
+                        // All types implicitly conform to these unless opted out
+                        if let Some(feature) =
+                            ctx.model.builtin_registry().protocol_feature(parent_id)
+                        {
+                            if let kestrel_semantic_tree::builtins::BuiltinKind::Protocol {
+                                implicit_conformance: true,
+                                ..
+                            } = feature.definition().kind
+                            {
+                                continue;
+                            }
+                        }
 
                         // Check if the parent protocol is in our declared conformances
                         if !declared_protocol_ids.contains(&parent_id) {

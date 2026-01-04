@@ -96,7 +96,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match field_declaration_parser_internal().parse(input).into_result() {
+    match field_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_field_declaration(sink, data);
         }

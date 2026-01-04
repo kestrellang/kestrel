@@ -11,10 +11,10 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
-use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
-use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
+use crate::expr::{emit_expr_variant, expr_parser, ExprVariant};
+use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::pattern::{emit_pattern_variant, pattern_parser, PatternVariant};
+use crate::ty::{emit_ty_variant, ty_parser, TyVariant};
 
 /// Represents a statement
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,11 +180,13 @@ fn deinit_statement_parser<'tokens>(
             skip_trivia()
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
-        .map(|((deinit_span, identifier_span), semicolon)| DeinitStatementData {
-            deinit_span,
-            identifier_span,
-            semicolon,
-        })
+        .map(
+            |((deinit_span, identifier_span), semicolon)| DeinitStatementData {
+                deinit_span,
+                identifier_span,
+                semicolon,
+            },
+        )
 }
 
 /// Parser for statements

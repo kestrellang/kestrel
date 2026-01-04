@@ -117,7 +117,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match function_declaration_parser_internal().parse(input).into_result() {
+    match function_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_function_declaration(sink, data);
         }
@@ -341,15 +344,16 @@ mod tests {
         parse_function_declaration(source, tokens.into_iter(), &mut sink);
 
         let events = sink.into_events();
-        
+
         // Check for parse errors
-        let errors: Vec<_> = events.iter()
+        let errors: Vec<_> = events
+            .iter()
             .filter_map(|e| match e {
                 crate::event::Event::Error { message, .. } => Some(message.clone()),
-                _ => None
+                _ => None,
             })
             .collect();
-        
+
         assert!(errors.is_empty(), "Got parse errors: {:?}", errors);
 
         let tree = TreeBuilder::new(source, events).build();

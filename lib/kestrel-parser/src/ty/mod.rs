@@ -4,7 +4,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::input::{to_kestrel_span, ParserExtra, ParserInput};
 
 /// Represents a type expression
 ///
@@ -220,7 +220,10 @@ pub(crate) fn ty_parser<'tokens>(
         let array = skip_trivia()
             .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(ty.clone())
-            .then(skip_trivia().ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
+            )
             .map(|((lbracket, element_ty), rbracket)| {
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
             });
