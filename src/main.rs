@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand};
+use kestrel_compiler::{Compilation, TargetConfig};
 use kestrel_lexer::lex;
-use kestrel_parser::{Parser as KestrelParser, parse_source_file};
+use kestrel_parser::{parse_source_file, Parser as KestrelParser};
 use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -24,9 +26,13 @@ struct Cli {
     #[arg(long, global = true)]
     symbols: bool,
 
-    /// Show MIR (Mid-level Intermediate Representation) after lowering
+    /// Show execution graph after lowering
+    #[arg(long = "execution-graph", visible_alias = "xgraph", global = true)]
+    execution_graph: bool,
+
+    /// Target triple for cross-compilation (e.g., x86_64-unknown-linux-gnu)
     #[arg(long, global = true)]
-    mir: bool,
+    target: Option<String>,
 
     /// Verbose output
     #[arg(short, long, global = true)]
@@ -45,10 +51,18 @@ enum Commands {
         /// Source files to parse
         files: Vec<String>,
     },
-    /// Compile and run a program (shows semantic analysis results)
+    /// Compile and run a program
     Run {
         /// Source file to run
         file: String,
+    },
+    /// Build an executable
+    Build {
+        /// Source file to build
+        file: String,
+        /// Output file path (defaults to input filename without extension)
+        #[arg(short, long)]
+        output: Option<String>,
     },
 }
 
@@ -62,9 +76,23 @@ fn read_source(path: &str) -> Option<String> {
     }
 }
 
-fn run_check(files: &[String], show_tree: bool, show_symbols: bool, show_mir: bool, verbose: bool) -> ExitCode {
-    use kestrel_compiler::Compilation;
+fn get_target_config(target: Option<&str>) -> Result<TargetConfig, ExitCode> {
+    match target {
+        Some(triple) => TargetConfig::from_triple(triple).map_err(|e| {
+            eprintln!("error: {}", e);
+            ExitCode::from(1)
+        }),
+        None => Ok(TargetConfig::host()),
+    }
+}
 
+fn run_check(
+    files: &[String],
+    show_tree: bool,
+    show_symbols: bool,
+    show_execution_graph: bool,
+    verbose: bool,
+) -> ExitCode {
     if files.is_empty() {
         eprintln!("error: no input files");
         return ExitCode::from(1);
@@ -91,41 +119,33 @@ fn run_check(files: &[String], show_tree: bool, show_symbols: bool, show_mir: bo
 
     // Show results
     if show_tree {
-        println!("--- Semantic Tree ---");
         if let Some(model) = compilation.semantic_model() {
             model.print_semantic_model();
-            println!();
         }
     }
 
     if show_symbols {
-        println!("--- Symbol Table ---");
         if let Some(model) = compilation.semantic_model() {
             model.print_model_symbols();
-            println!();
         }
     }
 
-    // Lower to MIR and display
-    if show_mir {
-        println!("--- MIR (Execution Graph) ---");
+    // Lower to execution graph and display
+    if show_execution_graph {
         if let Some(model) = compilation.semantic_model() {
             let root = model.root();
             let result = kestrel_execution_graph_lowering::lower_module(model, &root);
-            
+
             // Show lowering diagnostics if any
             if !result.diagnostics.is_empty() {
-                println!("Lowering warnings/errors:");
                 for diag in &result.diagnostics {
-                    println!("  - {:?}", diag);
+                    eprintln!("warning: {:?}", diag);
                 }
-                println!();
             }
-            
-            // Display the MIR
-            println!("{}", result.mir.display());
+
+            // Display the execution graph
+            print!("{}", result.mir.display());
         }
-        println!();
     }
 
     // Emit diagnostics
@@ -191,14 +211,11 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
     }
 }
 
-fn run_program(file: &str, verbose: bool) -> ExitCode {
-    use kestrel_compiler::Compilation;
-    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-    #[allow(unused_imports)]
-    use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
-    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use semantic_tree::symbol::Symbol;
+fn run_program(file: &str, target: Option<&str>, verbose: bool) -> ExitCode {
+    let target_config = match get_target_config(target) {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
 
     if verbose {
         eprintln!("  Reading {}", file);
@@ -216,126 +233,100 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let Some(model) = compilation.semantic_model() else {
-        eprintln!("error: no semantic model produced");
+    if verbose {
+        eprintln!("  Compiling and running...");
+    }
+
+    match compilation.run(&target_config) {
+        Ok(result) => {
+            // Print stdout/stderr
+            if !result.stdout.is_empty() {
+                print!("{}", result.stdout);
+            }
+            if !result.stderr.is_empty() {
+                eprint!("{}", result.stderr);
+            }
+            ExitCode::from(result.exit_code as u8)
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_build(file: &str, output: Option<&str>, target: Option<&str>, verbose: bool) -> ExitCode {
+    let target_config = match get_target_config(target) {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
+
+    if verbose {
+        eprintln!("  Reading {}", file);
+    }
+    let Some(content) = read_source(file) else {
         return ExitCode::from(1);
     };
 
-    println!("=== Compiled {} ===\n", file);
+    // Determine output path
+    let output_path = match output {
+        Some(path) => path.to_string(),
+        None => {
+            // Strip extension from input file
+            let path = Path::new(file);
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            if cfg!(windows) {
+                format!("{}.exe", stem)
+            } else {
+                stem.to_string()
+            }
+        }
+    };
 
-    // Find and display all functions with bodies
-    fn visit_symbol(
-        symbol: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
-        indent: usize,
-    ) {
-        let prefix = "  ".repeat(indent);
-        let name = &symbol.metadata().name().value;
-        let kind = symbol.metadata().kind();
+    let compilation = Compilation::builder()
+        .add_source(file.to_string(), content)
+        .build();
 
-        match kind {
-            KestrelSymbolKind::Function => {
-                // Check for ExecutableBehavior
-                let behaviors = symbol.metadata().behaviors();
-                let exec = behaviors
-                    .iter()
-                    .find(|b| matches!(b.kind(), KestrelBehaviorKind::Executable));
+    if compilation.has_errors() {
+        compilation.diagnostics().emit().ok();
+        return ExitCode::from(1);
+    }
 
-                if let Some(exec_behavior) = exec {
-                    if let Some(eb) = exec_behavior.as_ref().downcast_ref::<ExecutableBehavior>() {
-                        let body = eb.body();
-                        let stmt_count = body.statements.len();
+    if verbose {
+        eprintln!("  Building {}...", output_path);
+    }
 
-                        print!("{}func {}() ", prefix, name);
-
-                        if stmt_count > 0 || body.yield_expr().is_some() {
-                            println!("{{");
-                            for stmt in &body.statements {
-                                let stmt_str = stmt.debug_compact();
-                                println!("{}  {}", prefix, stmt_str);
-                            }
-                            if let Some(yield_expr) = body.yield_expr() {
-                                let value_str = yield_expr.debug_compact();
-                                println!("{}  -> {}", prefix, value_str);
-                            }
-                            println!("{}}}", prefix);
-                        } else {
-                            println!("{{ }}");
-                        }
-                    }
-                } else {
-                    // Protocol method or abstract function
-                    println!("{}func {}() [no body]", prefix, name);
-                }
+    let options = kestrel_compiler::CodegenOptions::default();
+    match compilation.build(&target_config, &options, Path::new(&output_path)) {
+        Ok(()) => {
+            if verbose {
+                eprintln!("  Built successfully: {}", output_path);
             }
-            KestrelSymbolKind::Struct => {
-                println!("{}struct {} {{", prefix, name);
-                for child in symbol.metadata().children() {
-                    visit_symbol(&child, indent + 1);
-                }
-                println!("{}}}", prefix);
-            }
-            KestrelSymbolKind::Protocol => {
-                println!("{}protocol {} {{", prefix, name);
-                for child in symbol.metadata().children() {
-                    visit_symbol(&child, indent + 1);
-                }
-                println!("{}}}", prefix);
-            }
-            KestrelSymbolKind::Module => {
-                println!("{}module {} {{", prefix, name);
-                for child in symbol.metadata().children() {
-                    visit_symbol(&child, indent + 1);
-                }
-                println!("{}}}", prefix);
-            }
-            KestrelSymbolKind::SourceFile => {
-                // SourceFile is a container - visit children directly
-                for child in symbol.metadata().children() {
-                    visit_symbol(&child, indent);
-                }
-            }
-            KestrelSymbolKind::Field => {
-                use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-                use kestrel_semantic_tree::symbol::field::FieldSymbol;
-                if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
-                    let mutability = if field.is_mutable() { "var" } else { "let" };
-                    // Get the resolved type from TypedBehavior
-                    let behaviors = symbol.metadata().behaviors();
-                    let ty = behaviors
-                        .iter()
-                        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
-                        .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>())
-                        .map(|t| t.ty().to_string())
-                        .unwrap_or_else(|| "<unknown>".to_string());
-                    println!("{}{} {}: {}", prefix, mutability, name, ty);
-                }
-            }
-            _ => {}
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            ExitCode::from(1)
         }
     }
-
-    // Visit from root
-    for child in model.root().metadata().children() {
-        visit_symbol(&child, 0);
-    }
-
-    println!("\n=== Success ===");
-    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Check { files }) => {
-            // Use subcommand files only (cli.files is redundant due to global arg)
-            run_check(&files, cli.tree, cli.symbols, cli.mir, cli.verbose)
+        Some(Commands::Check { files }) => run_check(
+            &files,
+            cli.tree,
+            cli.symbols,
+            cli.execution_graph,
+            cli.verbose,
+        ),
+        Some(Commands::Parse { files }) => run_parse(&files, cli.tree),
+        Some(Commands::Run { file }) => run_program(&file, cli.target.as_deref(), cli.verbose),
+        Some(Commands::Build { file, output }) => {
+            run_build(&file, output.as_deref(), cli.target.as_deref(), cli.verbose)
         }
-        Some(Commands::Parse { files }) => {
-            // Use subcommand files only
-            run_parse(&files, cli.tree)
-        }
-        Some(Commands::Run { file }) => run_program(&file, cli.verbose),
         None => {
             // No subcommand: use global files
             if cli.files.is_empty() {
@@ -343,7 +334,13 @@ fn main() -> ExitCode {
                 eprintln!("Run 'kestrel --help' for usage.");
                 ExitCode::from(1)
             } else {
-                run_check(&cli.files, cli.tree, cli.symbols, cli.mir, cli.verbose)
+                run_check(
+                    &cli.files,
+                    cli.tree,
+                    cli.symbols,
+                    cli.execution_graph,
+                    cli.verbose,
+                )
             }
         }
     }

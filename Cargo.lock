@@ -447,17 +447,9 @@ version = "0.11.0"
 dependencies = [
  "clap",
  "kestrel-compiler",
- "kestrel-execution-graph",
  "kestrel-execution-graph-lowering",
  "kestrel-lexer",
  "kestrel-parser",
- "kestrel-reporting",
- "kestrel-semantic-tree",
- "kestrel-semantic-tree-binder",
- "kestrel-semantic-tree-builder",
- "kestrel-span",
- "kestrel-syntax-tree",
- "semantic-tree",
 ]
 
 [[package]]
@@ -486,6 +478,10 @@ dependencies = [
 name = "kestrel-compiler"
 version = "0.11.0"
 dependencies = [
+ "kestrel-codegen",
+ "kestrel-codegen-cranelift",
+ "kestrel-execution-graph",
+ "kestrel-execution-graph-lowering",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",
