@@ -202,10 +202,42 @@ fn get_place_type(
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
         }
-        PlaceKind::Field { parent, .. } => {
-            // For field access, we'd need to look up the field type
-            // For now, recurse to parent
-            get_place_type(ctx, parent)
+        PlaceKind::Field { parent, name } => {
+            // Get the parent's type, then look up the field type
+            let parent_ty_id = get_place_type(ctx, parent)?;
+            let parent_ty = ctx.mir.ty(parent_ty_id);
+
+            // Find the struct and get the field type
+            if let MirTy::Named {
+                name: type_name, ..
+            } = parent_ty
+            {
+                let type_name_data = ctx.mir.name(*type_name);
+                for (_, struct_def) in ctx.mir.structs.iter() {
+                    if ctx.mir.name(struct_def.name) == type_name_data {
+                        // Found the struct, now find the field
+                        for field_id in &struct_def.fields {
+                            let field_def = &ctx.mir.fields[*field_id];
+                            if field_def.name == *name {
+                                return Ok(field_def.ty);
+                            }
+                        }
+                        return Err(CodegenError::Unsupported(format!(
+                            "field '{}' not found in struct '{}'",
+                            name, type_name_data
+                        )));
+                    }
+                }
+                Err(CodegenError::Unsupported(format!(
+                    "struct not found for type: {}",
+                    type_name_data
+                )))
+            } else {
+                Err(CodegenError::Unsupported(format!(
+                    "field access on non-struct type: {:?}",
+                    parent_ty
+                )))
+            }
         }
         PlaceKind::Downcast { parent, .. } => {
             // Downcast preserves the enum type

@@ -8,8 +8,9 @@ use crate::types::translate_type;
 
 use kestrel_codegen::mangle_name;
 use kestrel_execution_graph::{
-    BinOp, CallArg, Callee, CastKind, FloatBits, FunctionDef, Id, Immediate, ImmediateKind,
-    IntBits, Local, MirTy, Place, PlaceKind, Rvalue, Ty, UnOp, Value,
+    BinOp, CallArg, Callee, CastKind, FloatBits, Function, FunctionDef, Id, Immediate,
+    ImmediateKind, IntBits, Local, MirTy, Origin, Place, PlaceKind, QualifiedName, Rvalue, Struct,
+    Ty, UnOp, Value,
 };
 
 use cranelift_codegen::ir::types as cl_types;
@@ -99,6 +100,10 @@ pub fn compile_rvalue(
         Rvalue::Array { .. } => Err(CodegenError::Unsupported(
             "arrays not yet supported - use std arrays".into(),
         )),
+
+        Rvalue::ApplyPartial { func, captures } => {
+            compile_apply_partial(ctx, func_def, subst, *func, captures, builder, local_map)
+        }
 
         // TODO: Implement remaining rvalues
         _ => Err(CodegenError::Unsupported(format!("rvalue: {:?}", rvalue))),
@@ -1668,6 +1673,172 @@ fn build_signature_from_func_type(
     }
 
     Ok(sig)
+}
+
+/// Compile an ApplyPartial rvalue.
+///
+/// ApplyPartial creates a thick callable (closure) from a function reference and
+/// captured values. The result is a struct: { func_ptr: *const (), env_ptr: *const () }
+///
+/// For non-capturing closures (empty captures), we still allocate an environment struct
+/// (possibly zero-sized) to keep the code path uniform.
+///
+/// For capturing closures, we:
+/// 1. Get the function pointer for the closure's call function
+/// 2. Allocate stack space for the environment struct
+/// 3. Store each captured value into the appropriate field
+/// 4. Create the thick callable struct with (func_ptr, env_ptr)
+fn compile_apply_partial(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    subst: &Substitution,
+    func: Id<QualifiedName>,
+    captures: &[Value],
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+
+    // 1. Find the closure function and get its environment struct
+    let (closure_func_id, env_struct_id) = find_closure_function_and_env(ctx, func)?;
+
+    // 2. Get the function pointer for the closure function
+    // The closure function is non-generic, so we use empty type args
+    let mangled_name = mangle_name(ctx.mir, func, &[]);
+    let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
+        CodegenError::Unsupported(format!(
+            "closure function not found: {} (mangled: {})",
+            ctx.mir.name(func),
+            mangled_name
+        ))
+    })?;
+
+    let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+    let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
+
+    // 3. Allocate and populate the environment struct
+    let env_ptr = if let Some(env_struct_id) = env_struct_id {
+        // Get the environment struct layout
+        let env_layout = ctx.layouts.struct_layout(env_struct_id);
+        let layout = env_layout.layout;
+        let field_offsets = env_layout.field_offsets.clone();
+
+        // Allocate stack space for the environment
+        // Use at least 1 byte to avoid zero-sized allocations
+        let alloc_size = if layout.size == 0 { 1 } else { layout.size };
+        let alloc_align = if layout.align == 0 { 1 } else { layout.align };
+
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            alloc_size as u32,
+            alloc_align as u8,
+        ));
+        let env_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+        // Store each capture into the environment struct
+        let env_struct_def = ctx.mir.struct_def(env_struct_id);
+        let field_ids: Vec<_> = env_struct_def.fields.clone();
+
+        for (i, capture_value) in captures.iter().enumerate() {
+            if i >= field_ids.len() {
+                break;
+            }
+            let field_id = field_ids[i];
+            let field_def = &ctx.mir.fields[field_id];
+            let field_name = &field_def.name;
+            let field_ty = field_def.ty;
+
+            let offset = field_offsets.get(field_name).copied().unwrap_or(0);
+
+            // Compile the capture value
+            let val = compile_value(ctx, func_def, subst, capture_value, builder, local_map)?;
+
+            // Check if this is a nested struct that needs copying
+            let concrete_field_ty = subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty);
+            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
+            let is_nested_struct = matches!(field_mir_ty, MirTy::Named { .. })
+                && is_struct_type(ctx, concrete_field_ty);
+
+            if is_nested_struct {
+                // Copy nested struct data
+                let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
+                let dest_ptr = if offset == 0 {
+                    env_ptr
+                } else {
+                    builder.ins().iadd_imm(env_ptr, offset as i64)
+                };
+                let words = (nested_layout.size + 7) / 8;
+                for w in 0..words {
+                    let word_offset = (w * 8) as i32;
+                    let word = builder
+                        .ins()
+                        .load(cl_types::I64, MemFlags::new(), val, word_offset);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), word, dest_ptr, word_offset);
+                }
+            } else {
+                // Store primitive value directly
+                builder
+                    .ins()
+                    .store(MemFlags::new(), val, env_ptr, offset as i32);
+            }
+        }
+
+        env_ptr
+    } else {
+        // No environment struct found - use null pointer
+        // This shouldn't happen for properly lowered closures, but handle gracefully
+        builder.ins().iconst(ptr_type, 0)
+    };
+
+    // 4. Create the thick callable struct: { func_ptr, env_ptr }
+    let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        (ptr_size * 2) as u32,
+        ptr_size as u8,
+    ));
+    let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
+
+    // Store func_ptr at offset 0
+    builder.ins().store(MemFlags::new(), func_ptr, thick_ptr, 0);
+    // Store env_ptr at offset ptr_size
+    builder
+        .ins()
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
+
+    Ok(thick_ptr)
+}
+
+/// Find a closure function by its qualified name and return its ID along with
+/// the environment struct ID (if any).
+fn find_closure_function_and_env(
+    ctx: &CodegenContext<'_>,
+    func_name: Id<QualifiedName>,
+) -> Result<(Id<Function>, Option<Id<Struct>>), CodegenError> {
+    // Find the function by name
+    for (func_id, func_def) in ctx.mir.functions.iter() {
+        if func_def.name == func_name {
+            // Check if it has ClosureCall origin with an env struct
+            let env_struct_id = match &func_def.meta.origin {
+                Some(Origin::ClosureCall { env_struct, .. }) => Some(*env_struct),
+                _ => None,
+            };
+            return Ok((func_id, env_struct_id));
+        }
+    }
+
+    Err(CodegenError::Unsupported(format!(
+        "closure function not found: {}",
+        ctx.mir.name(func_name)
+    )))
 }
 
 /// Check if a local is a function parameter (passed by pointer).

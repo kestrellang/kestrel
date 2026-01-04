@@ -4,7 +4,9 @@
 //! placeholders with their resolved types from the solution.
 
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
-use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{
+    CallArgument, ElseBranch, ExprKind, Expression, PrimitiveMethod,
+};
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::local::LocalContainer;
@@ -191,14 +193,25 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             receiver,
             method,
             arguments,
-        } => ExprKind::PrimitiveMethodCall {
-            receiver: Box::new(apply_to_expression(receiver, solution)),
-            method: *method,
-            arguments: arguments
+        } => {
+            let resolved_receiver = apply_to_expression(receiver, solution);
+            let resolved_arguments: Vec<CallArgument> = arguments
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
-                .collect(),
-        },
+                .collect();
+
+            // If the receiver type was inferred, we may need to correct the method.
+            // For example, if a placeholder IntGt was used but the receiver is Float,
+            // we need to resolve it to FloatGt to generate the correct comparison.
+            let resolved_method =
+                PrimitiveMethod::lookup(&resolved_receiver.ty, method.name()).unwrap_or(*method);
+
+            ExprKind::PrimitiveMethodCall {
+                receiver: Box::new(resolved_receiver),
+                method: resolved_method,
+                arguments: resolved_arguments,
+            }
+        }
 
         ExprKind::DeferredMethodCall {
             receiver,
