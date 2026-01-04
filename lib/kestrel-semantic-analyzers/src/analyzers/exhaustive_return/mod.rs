@@ -155,6 +155,10 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
                 ReturnState::MayFallThrough
             }
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit is a simple statement that doesn't return or diverge
+            ReturnState::MayFallThrough
+        }
     }
 }
 
@@ -382,6 +386,10 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
                     return true;
                 }
             }
+            false
+        }
+        StatementKind::Deinit { .. } => {
+            // Deinit doesn't contain break
             false
         }
     }

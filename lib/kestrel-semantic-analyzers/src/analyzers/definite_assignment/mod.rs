@@ -153,6 +153,10 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
             ctx.errors.extend(else_ctx.errors);
             // Else block diverges, we don't merge its state
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit doesn't introduce new bindings or read variables in a way
+            // that needs definite assignment checking (the variable is already in scope)
+        }
     }
     state
 }

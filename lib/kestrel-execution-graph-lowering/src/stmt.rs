@@ -1,8 +1,9 @@
 //! Statement lowering - converts semantic statements to MIR.
 
-use kestrel_execution_graph::{Immediate, Place, Rvalue, Value};
+use kestrel_execution_graph::{Immediate, Place, Rvalue, StatementKind as MirStatementKind, Value};
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
 use kestrel_semantic_tree::expr::{Expression, IfCondition};
+use kestrel_semantic_tree::pattern::PatternKind;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 
 use crate::context::LoweringContext;
@@ -14,6 +15,7 @@ use crate::ty::lower_type;
 ///
 /// This handles let/var bindings, expression statements, and guard-let.
 /// The generated MIR statements are added to the current block.
+/// Temporary values are tracked and deinited at statement end.
 pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
     // Don't process if block is already terminated
     if ctx.is_block_terminated() {
@@ -30,20 +32,44 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
                 // don't try to do the pattern binding
                 if !ctx.is_block_terminated() {
                     lower_pattern(ctx, pattern, init_value);
+
+                    // Track the local for deinit if needed
+                    if let PatternKind::Local { local_id, .. } = &pattern.kind {
+                        let mir_local = ctx.get_local_unwrap(*local_id);
+                        let needs_deinit = ctx.type_needs_deinit(&pattern.ty);
+                        // Pass the semantic type for field drop order expansion
+                        let ty = if needs_deinit {
+                            Some(pattern.ty.clone())
+                        } else {
+                            None
+                        };
+                        ctx.track_local(mir_local, needs_deinit, ty);
+                    }
                 }
             } else {
                 // No initializer - the local is created but uninitialized
                 // In MIR, we don't need to do anything here - the local was
                 // already created during function setup
                 //
-                // TODO: Consider emitting an undef or zero initialization
+                // Still track it for scope purposes, but it doesn't need deinit
+                // since it's uninitialized
+                if let PatternKind::Local { local_id, .. } = &pattern.kind {
+                    let mir_local = ctx.get_local_unwrap(*local_id);
+                    ctx.track_local(mir_local, false, None);
+                }
             }
+
+            // Emit deinits for temporaries created during this statement
+            ctx.emit_temp_deinits();
         }
 
         StatementKind::Expr(expr) => {
             // Lower the expression for its side effects
             // The result is discarded
             let _value = lower_expression(ctx, expr);
+
+            // Emit deinits for temporaries created during this statement
+            ctx.emit_temp_deinits();
         }
 
         StatementKind::GuardLet {
@@ -51,6 +77,26 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
             else_block,
         } => {
             lower_guard_let(ctx, conditions, else_block);
+            // Note: temp deinits are handled within guard_let due to control flow
+        }
+
+        StatementKind::Deinit { local_id, .. } => {
+            // Deinit statement explicitly runs the destructor for a variable.
+            // This should call the type's deinit function if it has one.
+            let mir_local = ctx.get_local_unwrap(*local_id);
+
+            // Get the type for proper deinit expansion
+            let ty = ctx.get_local_type(mir_local).cloned();
+
+            // Emit the deinit - this will call deinit functions and drop fields properly
+            let place = Place::local(mir_local);
+            ctx.emit_deinit_for_place(&place, ty.as_ref());
+
+            // Mark as moved so scope exit doesn't double-deinit
+            ctx.mark_moved(mir_local);
+
+            // Emit deinits for temporaries (though unlikely for `deinit x;`)
+            ctx.emit_temp_deinits();
         }
     }
 }

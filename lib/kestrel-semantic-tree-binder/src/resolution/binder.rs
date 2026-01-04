@@ -10,6 +10,7 @@ use std::sync::Arc;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ExtensionRegistry, SemanticModel, SymbolRegistry};
 use kestrel_semantic_tree::behavior::callable::CallableSignature;
+use kestrel_semantic_tree::builtins::BuiltinRegistry;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -38,10 +39,15 @@ pub struct SemanticBinder {
     registry: SymbolRegistry,
     /// Shared extension registry
     extension_registry: ExtensionRegistry,
+    /// Shared builtin registry
+    builtin_registry: Arc<BuiltinRegistry>,
     /// Semantic model used during binding for resolvers
     model: SemanticModel,
     binder_registry: DeclarationBinderRegistry,
+    /// Cycle detector for type alias resolution
     cycle_detector: RefCell<CycleDetector<SymbolId>>,
+    /// Cycle detector for copy semantics computation (handles recursive struct types)
+    copy_semantics_cycle_detector: RefCell<CycleDetector<SymbolId>>,
 }
 
 impl SemanticBinder {
@@ -55,7 +61,8 @@ impl SemanticBinder {
     }
 
     fn from_model(model: SemanticModel) -> Self {
-        let (root, syntax_map, sources, registry, extension_registry) = model.into_parts();
+        let (root, syntax_map, sources, registry, extension_registry, builtin_registry) =
+            model.into_parts();
 
         let model = SemanticModel::with_registries(
             root.clone(),
@@ -63,6 +70,7 @@ impl SemanticBinder {
             sources.clone(),
             registry.clone(),
             extension_registry.clone(),
+            builtin_registry.clone(),
         );
 
         Self {
@@ -71,16 +79,28 @@ impl SemanticBinder {
             sources,
             registry,
             extension_registry,
+            builtin_registry,
             model,
             binder_registry: DeclarationBinderRegistry::new(),
             cycle_detector: RefCell::new(CycleDetector::new()),
+            copy_semantics_cycle_detector: RefCell::new(CycleDetector::new()),
         }
     }
 
     /// Run the binding phase and return the semantic model (internal)
+    ///
+    /// Binding is split into two passes to handle forward references:
+    /// - Pass 1: Bind all signatures (attach CallableBehavior, GenericsBehavior, etc.)
+    /// - Pass 2: Resolve all bodies (now all CallableBehaviors exist)
+    ///
+    /// This ensures that when resolving a function body, all functions in the file
+    /// (including those declared later) have their CallableBehavior attached.
     fn run_binding(&mut self, diagnostics: &mut DiagnosticContext) -> SemanticModel {
-        // Walk all symbols and call bind_declaration
-        self.bind_symbol(&self.root.clone(), diagnostics);
+        // Pass 1: Bind all signatures (behaviors only, no bodies)
+        self.bind_signatures(&self.root.clone(), diagnostics);
+
+        // Pass 2: Resolve all bodies (all CallableBehaviors now exist)
+        self.bind_bodies(&self.root.clone(), diagnostics);
 
         // Post-binding pass: detect duplicate function signatures
         self.check_duplicate_signatures(&self.root.clone(), diagnostics);
@@ -94,11 +114,15 @@ impl SemanticBinder {
             self.sources.clone(),
             self.registry.clone(),
             self.extension_registry.clone(),
+            self.builtin_registry.clone(),
         )
     }
 
-    /// Recursively bind a symbol and its children
-    fn bind_symbol(
+    /// Pass 1: Recursively bind signatures (behaviors only, no bodies)
+    ///
+    /// This attaches CallableBehavior, GenericsBehavior, TypedBehavior, etc.
+    /// to all symbols, but does NOT resolve function/initializer bodies.
+    fn bind_signatures(
         &mut self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         diagnostics: &mut DiagnosticContext,
@@ -115,16 +139,52 @@ impl SemanticBinder {
                         model: &self.model,
                         diagnostics,
                         type_alias_cycle_detector: &self.cycle_detector,
+                        copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
                         sources: &self.sources,
                     };
-                    resolver.bind_declaration(symbol, syntax_node, &mut ctx);
+                    resolver.bind_signature(symbol, syntax_node, &mut ctx);
                 }
             }
         }
 
-        // Recursively bind children
+        // Recursively bind children's signatures
         for child in symbol.metadata().children() {
-            self.bind_symbol(&child, diagnostics);
+            self.bind_signatures(&child, diagnostics);
+        }
+    }
+
+    /// Pass 2: Recursively resolve bodies (all signatures now exist)
+    ///
+    /// At this point, all CallableBehaviors have been attached, so forward
+    /// references to functions declared later in the file can be resolved.
+    fn bind_bodies(
+        &mut self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        diagnostics: &mut DiagnosticContext,
+    ) {
+        let kind = symbol.metadata().kind();
+
+        // Map symbol kind to syntax kind for resolver lookup
+        let syntax_kind = Self::symbol_kind_to_syntax_kind(kind);
+
+        if let Some(sk) = syntax_kind {
+            if let Some(resolver) = self.binder_registry.get(sk) {
+                if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
+                    let mut ctx = BindingContext {
+                        model: &self.model,
+                        diagnostics,
+                        type_alias_cycle_detector: &self.cycle_detector,
+                        copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
+                        sources: &self.sources,
+                    };
+                    resolver.bind_body(symbol, syntax_node, &mut ctx);
+                }
+            }
+        }
+
+        // Recursively resolve children's bodies
+        for child in symbol.metadata().children() {
+            self.bind_bodies(&child, diagnostics);
         }
     }
 
@@ -132,6 +192,7 @@ impl SemanticBinder {
     fn symbol_kind_to_syntax_kind(kind: KestrelSymbolKind) -> Option<SyntaxKind> {
         match kind {
             KestrelSymbolKind::AssociatedType => Some(SyntaxKind::TypeAliasDeclaration),
+            KestrelSymbolKind::Deinit => Some(SyntaxKind::DeinitDeclaration),
             KestrelSymbolKind::Enum => Some(SyntaxKind::EnumDeclaration),
             KestrelSymbolKind::EnumCase => Some(SyntaxKind::EnumCaseDeclaration),
             KestrelSymbolKind::Extension => Some(SyntaxKind::ExtensionDeclaration),

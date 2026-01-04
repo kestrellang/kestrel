@@ -133,12 +133,13 @@ fn builder_for(
     kind: kestrel_syntax_tree::SyntaxKind,
 ) -> Option<&'static dyn crate::builder::Builder> {
     use crate::builders::{
-        EnumBuilder, EnumCaseBuilder, ExtensionBuilder, FieldBuilder, FunctionBuilder,
-        ImportBuilder, InitializerBuilder, ModuleBuilder, ProtocolBuilder, StructBuilder,
-        TerminalBuilder, TypeAliasBuilder,
+        DeinitBuilder, EnumBuilder, EnumCaseBuilder, ExtensionBuilder, FieldBuilder,
+        FunctionBuilder, ImportBuilder, InitializerBuilder, ModuleBuilder, ProtocolBuilder,
+        StructBuilder, TerminalBuilder, TypeAliasBuilder,
     };
     use kestrel_syntax_tree::SyntaxKind;
 
+    static DEINIT: DeinitBuilder = DeinitBuilder;
     static ENUM: EnumBuilder = EnumBuilder;
     static ENUM_CASE: EnumCaseBuilder = EnumCaseBuilder;
     static EXTENSION: ExtensionBuilder = ExtensionBuilder;
@@ -164,6 +165,7 @@ fn builder_for(
         SyntaxKind::FieldDeclaration => Some(&FIELD),
         SyntaxKind::FunctionDeclaration => Some(&FUNCTION),
         SyntaxKind::InitializerDeclaration => Some(&INITIALIZER),
+        SyntaxKind::DeinitDeclaration => Some(&DEINIT),
         SyntaxKind::Visibility | SyntaxKind::Name => Some(&TERMINAL),
         _ => None,
     }

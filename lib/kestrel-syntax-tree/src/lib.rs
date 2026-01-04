@@ -39,6 +39,13 @@ pub enum SyntaxKind {
     Root,
     SourceFile,
     DeclarationItem,
+
+    // Attribute nodes
+    Attribute,     // @name or @name(args)
+    AttributeList, // Zero or more attributes before a declaration
+    AttributeArgs, // (arg, arg, ...) argument list
+    AttributeArg,  // Single argument: value or label: value
+
     ProtocolDeclaration,
     ProtocolBody,
     StructDeclaration,
@@ -61,6 +68,7 @@ pub enum SyntaxKind {
     FieldDeclaration,
     FunctionDeclaration,
     InitializerDeclaration,
+    DeinitDeclaration,
     FunctionBody,
     ParameterList,
     Parameter,
@@ -84,8 +92,9 @@ pub enum SyntaxKind {
     AssociatedTypeTarget, // Iterator.Item or Add[Int].Output (qualified target in type binding)
 
     // Conformance nodes
-    ConformanceList, // : Proto1, Proto2 (after struct/protocol name)
-    ConformanceItem, // Each individual conformance (a type reference)
+    ConformanceList,     // : Proto1, Proto2 (after struct/protocol name)
+    ConformanceItem,     // Each individual conformance (a type reference)
+    NegativeConformance, // not Proto (opt-out of implicit conformance)
 
     // Type nodes
     Ty,
@@ -109,6 +118,7 @@ pub enum SyntaxKind {
     ExpressionStatement, // expression;
     VariableDeclaration, // let/var name: Type = expr;
     GuardLetStatement,   // guard let pattern = expr else { block }
+    DeinitStatement,     // deinit identifier; - explicit destructor call
     GuardLetCondition,   // let pattern = expr (in guard-let condition chain)
 
     // Expression nodes
@@ -185,6 +195,7 @@ pub enum SyntaxKind {
     Case,
     Consuming,
     Continue,
+    Deinit,
     Else,
     Enum,
     Extend,
@@ -298,6 +309,7 @@ impl From<Token> for SyntaxKind {
             Token::Case => SyntaxKind::Case,
             Token::Consuming => SyntaxKind::Consuming,
             Token::Continue => SyntaxKind::Continue,
+            Token::Deinit => SyntaxKind::Deinit,
             Token::Else => SyntaxKind::Else,
             Token::Enum => SyntaxKind::Enum,
             Token::Extend => SyntaxKind::Extend,
@@ -384,6 +396,11 @@ impl Language for KestrelLanguage {
         const ROOT: u16 = SyntaxKind::Root as u16;
         const SOURCE_FILE: u16 = SyntaxKind::SourceFile as u16;
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
+        // Attribute nodes
+        const ATTRIBUTE: u16 = SyntaxKind::Attribute as u16;
+        const ATTRIBUTE_LIST: u16 = SyntaxKind::AttributeList as u16;
+        const ATTRIBUTE_ARGS: u16 = SyntaxKind::AttributeArgs as u16;
+        const ATTRIBUTE_ARG: u16 = SyntaxKind::AttributeArg as u16;
         const PROTOCOL_DECLARATION: u16 = SyntaxKind::ProtocolDeclaration as u16;
         const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
         const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
@@ -406,6 +423,7 @@ impl Language for KestrelLanguage {
         const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
         const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
+        const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
         const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
         const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
         const PARAMETER: u16 = SyntaxKind::Parameter as u16;
@@ -423,6 +441,7 @@ impl Language for KestrelLanguage {
         const ASSOCIATED_TYPE_TARGET: u16 = SyntaxKind::AssociatedTypeTarget as u16;
         const CONFORMANCE_LIST: u16 = SyntaxKind::ConformanceList as u16;
         const CONFORMANCE_ITEM: u16 = SyntaxKind::ConformanceItem as u16;
+        const NEGATIVE_CONFORMANCE: u16 = SyntaxKind::NegativeConformance as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
         const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
         const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
@@ -440,6 +459,7 @@ impl Language for KestrelLanguage {
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
         const GUARD_LET_STATEMENT: u16 = SyntaxKind::GuardLetStatement as u16;
         const GUARD_LET_CONDITION: u16 = SyntaxKind::GuardLetCondition as u16;
+        const DEINIT_STATEMENT: u16 = SyntaxKind::DeinitStatement as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
@@ -507,6 +527,7 @@ impl Language for KestrelLanguage {
         const CASE: u16 = SyntaxKind::Case as u16;
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const CONTINUE: u16 = SyntaxKind::Continue as u16;
+        const DEINIT: u16 = SyntaxKind::Deinit as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const ENUM: u16 = SyntaxKind::Enum as u16;
         const EXTEND: u16 = SyntaxKind::Extend as u16;
@@ -574,14 +595,23 @@ impl Language for KestrelLanguage {
         const CARET: u16 = SyntaxKind::Caret as u16;
         const LESS: u16 = SyntaxKind::Less as u16;
         const GREATER: u16 = SyntaxKind::Greater as u16;
+        const AT: u16 = SyntaxKind::At as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
         const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
         const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
+        const DOT_DOT: u16 = SyntaxKind::DotDot as u16;
+        const TY_OPTIONAL: u16 = SyntaxKind::TyOptional as u16;
+        const ERROR: u16 = SyntaxKind::Error as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
             SOURCE_FILE => SyntaxKind::SourceFile,
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
+            // Attribute nodes
+            ATTRIBUTE => SyntaxKind::Attribute,
+            ATTRIBUTE_LIST => SyntaxKind::AttributeList,
+            ATTRIBUTE_ARGS => SyntaxKind::AttributeArgs,
+            ATTRIBUTE_ARG => SyntaxKind::AttributeArg,
             PROTOCOL_DECLARATION => SyntaxKind::ProtocolDeclaration,
             PROTOCOL_BODY => SyntaxKind::ProtocolBody,
             STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
@@ -604,6 +634,7 @@ impl Language for KestrelLanguage {
             FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
             INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
+            DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
             FUNCTION_BODY => SyntaxKind::FunctionBody,
             PARAMETER_LIST => SyntaxKind::ParameterList,
             PARAMETER => SyntaxKind::Parameter,
@@ -621,6 +652,7 @@ impl Language for KestrelLanguage {
             ASSOCIATED_TYPE_TARGET => SyntaxKind::AssociatedTypeTarget,
             CONFORMANCE_LIST => SyntaxKind::ConformanceList,
             CONFORMANCE_ITEM => SyntaxKind::ConformanceItem,
+            NEGATIVE_CONFORMANCE => SyntaxKind::NegativeConformance,
             TY => SyntaxKind::Ty,
             TY_UNIT => SyntaxKind::TyUnit,
             TY_NEVER => SyntaxKind::TyNever,
@@ -630,6 +662,7 @@ impl Language for KestrelLanguage {
             TY_ARRAY => SyntaxKind::TyArray,
             TY_LIST => SyntaxKind::TyList,
             TY_INFERRED => SyntaxKind::TyInferred,
+            TY_OPTIONAL => SyntaxKind::TyOptional,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,
             CODE_BLOCK => SyntaxKind::CodeBlock,
@@ -638,6 +671,7 @@ impl Language for KestrelLanguage {
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
             GUARD_LET_STATEMENT => SyntaxKind::GuardLetStatement,
             GUARD_LET_CONDITION => SyntaxKind::GuardLetCondition,
+            DEINIT_STATEMENT => SyntaxKind::DeinitStatement,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,
             EXPR_INTEGER => SyntaxKind::ExprInteger,
@@ -705,6 +739,7 @@ impl Language for KestrelLanguage {
             CASE => SyntaxKind::Case,
             CONSUMING => SyntaxKind::Consuming,
             CONTINUE => SyntaxKind::Continue,
+            DEINIT => SyntaxKind::Deinit,
             ELSE => SyntaxKind::Else,
             ENUM => SyntaxKind::Enum,
             EXTEND => SyntaxKind::Extend,
@@ -752,6 +787,7 @@ impl Language for KestrelLanguage {
             // Operators
             DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
             DOT_DOT_LESS => SyntaxKind::DotDotLess,
+            DOT_DOT => SyntaxKind::DotDot,
             LESS_LESS => SyntaxKind::LessLess,
             GREATER_GREATER => SyntaxKind::GreaterGreater,
             LESS_EQUALS => SyntaxKind::LessEquals,
@@ -772,9 +808,11 @@ impl Language for KestrelLanguage {
             CARET => SyntaxKind::Caret,
             LESS => SyntaxKind::Less,
             GREATER => SyntaxKind::Greater,
+            AT => SyntaxKind::At,
             WHITESPACE => SyntaxKind::Whitespace,
             LINE_COMMENT => SyntaxKind::LineComment,
             BLOCK_COMMENT => SyntaxKind::BlockComment,
+            ERROR => SyntaxKind::Error,
             _ => SyntaxKind::Error,
         }
     }

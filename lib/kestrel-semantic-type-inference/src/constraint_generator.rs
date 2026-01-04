@@ -83,6 +83,10 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
                 generate_expression_constraints(ctx, yield_expr);
             }
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit statement doesn't generate any type constraints
+            // The move tracking is already handled during body resolution
+        }
     }
 }
 

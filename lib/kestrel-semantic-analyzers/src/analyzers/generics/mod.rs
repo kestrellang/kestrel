@@ -148,6 +148,27 @@ fn validate_constraint(
                 validate_bound_type(bound, ctx);
             }
         }
+        Constraint::NegativeBound {
+            param,
+            param_name,
+            param_span,
+            bound,
+        } => {
+            // Validate that the type parameter exists
+            if param.is_none() {
+                let available: Vec<String> = type_params
+                    .iter()
+                    .map(|p| p.metadata().name().value.clone())
+                    .collect();
+                ctx.report(UndeclaredTypeParameterError {
+                    name: param_name.clone(),
+                    span: param_span.clone(),
+                    available,
+                });
+            }
+            // Validate the negative bound is a valid protocol
+            validate_bound_type(bound, ctx);
+        }
         Constraint::TypeEquality { .. } => { /* validated elsewhere */ }
     }
 }

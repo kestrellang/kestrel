@@ -14,7 +14,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
-use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
+use crate::pattern::pattern_parser;
 use crate::stmt::{StmtVariant, emit_stmt_variant};
 
 /// Parser that skips trivia tokens (whitespace and comments)
@@ -340,6 +340,27 @@ fn code_block_items_parser<'tokens>(
             },
         );
 
+    // Deinit statement: deinit identifier;
+    let deinit_stmt = skip_trivia()
+        .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(|((deinit_span, identifier_span), semicolon)| {
+            BlockItem::Statement(StmtVariant::Deinit(
+                crate::stmt::DeinitStatementData {
+                    deinit_span,
+                    identifier_span,
+                    semicolon,
+                },
+            ))
+        });
+
     // Expression-based item: parse expression first, then check for semicolon
     let expr_item = expr_parser()
         .then(
@@ -362,10 +383,9 @@ fn code_block_items_parser<'tokens>(
             }
         });
 
-    // A block item is a guard-let, variable declaration, or expression-based item
-    // Guard-let must come first since it starts with a keyword (guard) that's not
-    // valid as the start of a variable declaration or expression
-    let block_item = guard_let.or(var_decl).or(expr_item);
+    // A block item is a guard-let, deinit statement, variable declaration, or expression-based item
+    // Guard-let and deinit must come first since they start with keywords
+    let block_item = guard_let.or(deinit_stmt).or(var_decl).or(expr_item);
 
     block_item
         .repeated()
@@ -557,6 +577,38 @@ mod tests {
 
         assert!(!block.is_empty());
         assert!(!block.has_trailing_expression());
+    }
+
+    #[test]
+    fn test_block_with_deinit_statement() {
+        let source = "{ deinit x; }";
+        let block = parse_block_from_source(source);
+
+        assert!(!block.is_empty());
+        assert!(!block.has_trailing_expression());
+        
+        // Check that we have a DeinitStatement - look inside Statement nodes
+        let has_deinit = block.syntax
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::Statement)
+            .any(|stmt| stmt.children().any(|c| c.kind() == SyntaxKind::DeinitStatement));
+        assert!(has_deinit, "Expected DeinitStatement in block");
+    }
+
+    #[test]
+    fn test_block_with_deinit_and_other_statements() {
+        let source = "{ let x: Int = 0; deinit x; }";
+        let block = parse_block_from_source(source);
+
+        assert!(!block.is_empty());
+        assert!(!block.has_trailing_expression());
+
+        // Check that we have both a variable declaration and a deinit statement
+        let statements: Vec<_> = block.syntax
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::Statement)
+            .collect();
+        assert_eq!(statements.len(), 2, "Expected 2 statements");
     }
 
 }

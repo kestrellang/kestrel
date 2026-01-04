@@ -14,7 +14,7 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use crate::common::skip_trivia;
 use crate::event::EventSink;
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::input::{to_kestrel_span, ParserExtra, ParserInput};
 
 /// Raw parsed data for a single type parameter
 /// Syntax: T or T = Default
@@ -46,6 +46,18 @@ pub struct TypeBoundData {
     pub bounds: Vec<TypeArgumentData>,
 }
 
+/// Raw parsed data for a negative type bound
+/// Syntax: T: not Copyable
+#[derive(Debug, Clone)]
+pub struct NegativeTypeBoundData {
+    /// The constrained path - typically just the type parameter name (T)
+    pub path: Vec<Span>,
+    /// The `not` keyword span
+    pub not_span: Span,
+    /// The negated bound (the protocol this type does NOT need to satisfy)
+    pub bound: TypeArgumentData,
+}
+
 /// Raw parsed data for a type equality constraint
 /// Syntax: T.Item = Type or T.Item = U.Item
 #[derive(Debug, Clone)]
@@ -58,11 +70,13 @@ pub struct TypeEqualityData {
     pub right: crate::ty::TyVariant,
 }
 
-/// A constraint in a where clause - either a bound or equality
+/// A constraint in a where clause - either a bound, negative bound, or equality
 #[derive(Debug, Clone)]
 pub enum WhereConstraintData {
     /// Type bound: T: Proto or T.Item: Proto
     Bound(TypeBoundData),
+    /// Negative type bound: T: not Copyable
+    NegativeBound(NegativeTypeBoundData),
     /// Type equality: T.Item = Type
     Equality(TypeEqualityData),
 }
@@ -133,9 +147,12 @@ pub fn type_argument_list_parser<'tokens>(
 
 /// Parser for type arguments with bracket spans: [Type, Type, ...]
 /// Returns (lbracket, args, rbracket)
-pub fn type_argument_list_with_spans_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<TypeArgumentData>, Span), ParserExtra<'tokens>>
-       + Clone {
+pub fn type_argument_list_with_spans_parser<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    (Span, Vec<TypeArgumentData>, Span),
+    ParserExtra<'tokens>,
+> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -176,9 +193,12 @@ fn type_parameter_parser<'tokens>(
 }
 
 /// Parser for type parameter list: [T, U, V] or [T, U = String]
-pub fn type_parameter_list_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<TypeParameterData>, Span), ParserExtra<'tokens>>
-       + Clone {
+pub fn type_parameter_list_parser<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    (Span, Vec<TypeParameterData>, Span),
+    ParserExtra<'tokens>,
+> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -194,13 +214,15 @@ pub fn type_parameter_list_parser<'tokens>(
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
 }
 
-/// Parser for a single type bound: T: Proto and Proto2 or T.Item: Proto
-fn type_bound_parser<'tokens>(
+/// Parser for a single positive type bound: T: Proto and Proto2 or T.Item: Proto
+fn positive_type_bound_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, TypeBoundData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::Colon))
+        .then_ignore(skip_trivia())
+        // Ensure we don't start with `not` - that's a negative bound
         .then(
             // Bounds separated by `and`, with optional type arguments
             path_with_optional_args_parser()
@@ -213,6 +235,25 @@ fn type_bound_parser<'tokens>(
                 .collect(),
         )
         .map(|(path, bounds)| TypeBoundData { path, bounds })
+}
+
+/// Parser for a negative type bound: T: not Copyable
+fn negative_type_bound_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, NegativeTypeBoundData, ParserExtra<'tokens>> + Clone
+{
+    skip_trivia()
+        .ignore_then(path_parser())
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::Colon))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Not).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(path_with_optional_args_parser())
+        .map(|((path, not_span), bound)| NegativeTypeBoundData {
+            path,
+            not_span,
+            bound,
+        })
 }
 
 /// Parser for a type equality constraint: T.Item = Type
@@ -231,14 +272,17 @@ fn type_equality_parser<'tokens>(
         })
 }
 
-/// Parser for a single where clause constraint (either bound or equality)
+/// Parser for a single where clause constraint (bound, negative bound, or equality)
 fn where_constraint_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, WhereConstraintData, ParserExtra<'tokens>> + Clone {
-    // Try equality first (T.Item = Type), then bound (T: Proto)
-    // This order matters because path_parser is greedy
+    // Try equality first (T.Item = Type), then negative bound (T: not Proto),
+    // then positive bound (T: Proto)
+    // This order matters because path_parser is greedy and negative bounds
+    // must be tried before positive bounds
     type_equality_parser()
         .map(WhereConstraintData::Equality)
-        .or(type_bound_parser().map(WhereConstraintData::Bound))
+        .or(negative_type_bound_parser().map(WhereConstraintData::NegativeBound))
+        .or(positive_type_bound_parser().map(WhereConstraintData::Bound))
 }
 
 /// Parser for where clause: where T: Proto, U: Other, T.Item = Int
@@ -258,20 +302,40 @@ pub fn where_clause_parser<'tokens>(
         })
 }
 
-/// Parser for conformance list: : Proto1, Proto2[T]
+/// Parser for a single conformance item: Proto or not Proto
+fn conformance_item_parser<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    crate::common::ConformanceItemData,
+    ParserExtra<'tokens>,
+> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Not)
+                .map_with(|_, e| to_kestrel_span(e.span()))
+                .or_not(),
+        )
+        .then(crate::ty::ty_parser())
+        .map(|(not_span, ty)| crate::common::ConformanceItemData { not_span, ty })
+}
+
+/// Parser for conformance list: : Proto1, Proto2[T], not Copyable
 /// Used after struct/protocol names to declare conformance/inheritance
-pub fn conformance_list_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<crate::ty::TyVariant>), ParserExtra<'tokens>>
-       + Clone {
+pub fn conformance_list_parser<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    (Span, Vec<crate::common::ConformanceItemData>),
+    ParserExtra<'tokens>,
+> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
-            crate::ty::ty_parser()
+            conformance_item_parser()
                 .separated_by(just(Token::Comma))
                 .at_least(1)
                 .collect(),
         )
-        .map(|(colon_span, types)| (colon_span, types))
+        .map(|(colon_span, conformances)| (colon_span, conformances))
 }
 
 /// Emit events for a type parameter list
@@ -324,6 +388,9 @@ pub fn emit_where_clause(sink: &mut EventSink, data: WhereClauseData) {
     for constraint in data.constraints {
         match constraint {
             WhereConstraintData::Bound(bound) => emit_type_bound(sink, bound),
+            WhereConstraintData::NegativeBound(neg_bound) => {
+                emit_negative_type_bound(sink, neg_bound)
+            }
             WhereConstraintData::Equality(equality) => emit_type_equality(sink, equality),
         }
     }
@@ -349,18 +416,28 @@ fn emit_type_equality(sink: &mut EventSink, equality: TypeEqualityData) {
     sink.finish_node();
 }
 
-/// Emit events for a conformance list: : Proto1, Proto2
+/// Emit events for a conformance list: : Proto1, Proto2, not Copyable
 pub fn emit_conformance_list(
     sink: &mut EventSink,
     colon_span: Span,
-    conformances: &[crate::ty::TyVariant],
+    conformances: &[crate::common::ConformanceItemData],
 ) {
     sink.start_node(SyntaxKind::ConformanceList);
     sink.add_token(SyntaxKind::Colon, colon_span);
 
     for conformance in conformances {
         sink.start_node(SyntaxKind::ConformanceItem);
-        crate::ty::emit_ty_variant(sink, conformance);
+
+        // If this is a negative conformance, wrap in NegativeConformance node
+        if let Some(not_span) = &conformance.not_span {
+            sink.start_node(SyntaxKind::NegativeConformance);
+            sink.add_token(SyntaxKind::Not, not_span.clone());
+            crate::ty::emit_ty_variant(sink, &conformance.ty);
+            sink.finish_node();
+        } else {
+            crate::ty::emit_ty_variant(sink, &conformance.ty);
+        }
+
         sink.finish_node();
     }
 
@@ -395,6 +472,40 @@ fn emit_type_bound(sink: &mut EventSink, bound: TypeBoundData) {
     }
 
     sink.finish_node();
+}
+
+/// Emit events for a negative type bound: T: not Copyable
+fn emit_negative_type_bound(sink: &mut EventSink, bound: NegativeTypeBoundData) {
+    sink.start_node(SyntaxKind::TypeBound);
+
+    // Emit the constrained path (T)
+    if bound.path.len() == 1 {
+        // Simple type parameter: T
+        sink.start_node(SyntaxKind::Name);
+        sink.add_token(SyntaxKind::Identifier, bound.path[0].clone());
+        sink.finish_node();
+    } else {
+        // Associated type path: T.Item or similar
+        sink.start_node(SyntaxKind::AssociatedTypeTarget);
+        emit_path(sink, &bound.path);
+        sink.finish_node();
+    }
+
+    // Wrap the negated bound in NegativeConformance
+    sink.start_node(SyntaxKind::NegativeConformance);
+    sink.add_token(SyntaxKind::Not, bound.not_span);
+
+    // Emit the bound (e.g., Copyable) as a path
+    emit_path(sink, &bound.bound.path);
+
+    // Emit type arguments if present
+    if let Some(ref type_args) = bound.bound.args {
+        emit_type_argument_list(sink, type_args);
+    }
+
+    sink.finish_node(); // NegativeConformance
+
+    sink.finish_node(); // TypeBound
 }
 
 /// Emit events for type argument list
@@ -550,6 +661,36 @@ mod tests {
     }
 
     #[test]
+    fn test_where_clause_negative_bound() {
+        let result = parse_where("where T: not Copyable");
+        assert!(result.is_some(), "Failed to parse 'where T: not Copyable'");
+        let data = result.unwrap();
+        assert_eq!(data.constraints.len(), 1);
+        match &data.constraints[0] {
+            WhereConstraintData::NegativeBound(neg_bound) => {
+                assert_eq!(neg_bound.path.len(), 1); // T
+            }
+            _ => panic!("Expected NegativeBound constraint"),
+        }
+    }
+
+    #[test]
+    fn test_where_clause_mixed_positive_negative() {
+        let result = parse_where("where T: Equatable, U: not Copyable");
+        assert!(result.is_some(), "Failed to parse mixed bounds");
+        let data = result.unwrap();
+        assert_eq!(data.constraints.len(), 2);
+        match &data.constraints[0] {
+            WhereConstraintData::Bound(_) => {}
+            _ => panic!("Expected Bound for first constraint"),
+        }
+        match &data.constraints[1] {
+            WhereConstraintData::NegativeBound(_) => {}
+            _ => panic!("Expected NegativeBound for second constraint"),
+        }
+    }
+
+    #[test]
     fn test_type_arguments_simple() {
         let result = parse_type_args("[Int]");
         assert!(result.is_some());
@@ -587,7 +728,7 @@ mod tests {
         assert_eq!(nested.len(), 2); // String and List[Int]
     }
 
-    fn parse_conformances(source: &str) -> Option<(Span, Vec<crate::ty::TyVariant>)> {
+    fn parse_conformances(source: &str) -> Option<(Span, Vec<crate::common::ConformanceItemData>)> {
         let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -627,5 +768,36 @@ mod tests {
         assert!(result.is_some());
         let (_, conformances) = result.unwrap();
         assert_eq!(conformances.len(), 1);
+    }
+
+    #[test]
+    fn test_conformance_negative() {
+        let result = parse_conformances(": not Copyable");
+        assert!(result.is_some(), "Failed to parse ': not Copyable'");
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 1);
+        assert!(
+            conformances[0].not_span.is_some(),
+            "Expected not_span to be Some"
+        );
+    }
+
+    #[test]
+    fn test_conformance_mixed_positive_negative() {
+        let result = parse_conformances(": Resource, not Copyable");
+        assert!(
+            result.is_some(),
+            "Failed to parse ': Resource, not Copyable'"
+        );
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 2);
+        assert!(
+            conformances[0].not_span.is_none(),
+            "Resource should have not_span None"
+        );
+        assert!(
+            conformances[1].not_span.is_some(),
+            "not Copyable should have not_span Some"
+        );
     }
 }

@@ -67,9 +67,9 @@ pub use item::{
     ProtocolMethodDef, StaticDef, StructDef, WhereClause, WhereConstraint, WitnessDef,
 };
 pub use function::{
-    BasicBlock, BinOp, Callee, CastKind, FloatBits, Immediate, ImmediateKind, IntBits, LocalDef,
-    Place, PlaceKind, Rvalue, Statement as StatementData, StatementKind, Terminator,
-    TerminatorKind, TypeParamDef, TypeParamOwner, UnOp, Value,
+    BasicBlock, BinOp, Callee, CallArg, CastKind, FloatBits, Immediate, ImmediateKind, IntBits,
+    LocalDef, PassingMode, Place, PlaceKind, Rvalue, Statement as StatementData, StatementKind,
+    Terminator, TerminatorKind, TypeParamDef, TypeParamOwner, UnOp, Value,
 };
 pub use builder::{BlockBuilder, FunctionBuilder};
 pub use pass::{FunctionPass, FunctionPassAdapter, MirPass, PassManager, PassResult};

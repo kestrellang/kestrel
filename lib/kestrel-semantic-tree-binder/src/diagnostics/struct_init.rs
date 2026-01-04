@@ -30,10 +30,8 @@ impl IntoDiagnostic for ImplicitInitArityError {
                 "struct '{}' has {} field(s), but {} argument(s) were provided",
                 self.struct_name, self.expected, self.provided
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected {} argument(s)", self.expected)),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("expected {} argument(s)", self.expected))])
             .with_notes(vec![
                 format!("fields: {}", fields_list),
                 "implicit memberwise init requires an argument for each field in declaration order"
@@ -70,10 +68,8 @@ impl IntoDiagnostic for ImplicitInitLabelError {
                 provided_desc,
                 self.expected_label
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected label '{}'", self.expected_label)),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("expected label '{}'", self.expected_label))])
             .with_notes(vec![format!(
                 "struct '{}' requires labeled arguments matching field names in declaration order",
                 self.struct_name
@@ -160,10 +156,8 @@ impl IntoDiagnostic for FieldNotVisibleForInitError {
                 "cannot use implicit initializer for '{}': field '{}' is {}",
                 self.struct_name, self.field_name, self.field_visibility
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("implicit init not available"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("implicit init not available")])
             .with_notes(vec![
                 format!("field '{}' is not visible from this scope", self.field_name),
                 "consider adding a public initializer to the struct".to_string(),
@@ -206,10 +200,8 @@ impl IntoDiagnostic for ExplicitInitSuppressesImplicitError {
                 "no matching initializer for struct '{}' with {} argument(s)",
                 self.struct_name, self.provided_arity
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("no initializer matches labels {}", provided)),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("no initializer matches labels {}", provided))])
             .with_notes(notes)
     }
 }

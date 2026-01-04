@@ -9,6 +9,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::find_child;
@@ -17,7 +18,7 @@ use kestrel_syntax_tree::utils::find_child;
 pub struct InitializerBinder;
 
 impl DeclarationBinder for InitializerBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
@@ -34,14 +35,17 @@ impl DeclarationBinder for InitializerBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
-        // Extract and resolve parameters from syntax
-        let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
+        // Resolve attributes
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
             syntax,
             &source,
-            file_id,
-            symbol_id,
-            context,
-            true,
+            context.diagnostics,
+        );
+        symbol.metadata().add_behavior(attributes_behavior);
+
+        // Extract and resolve parameters from syntax
+        let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
+            syntax, &source, file_id, symbol_id, context, true,
         );
 
         // Initializers return unit type - they don't return a value
@@ -59,7 +63,30 @@ impl DeclarationBinder for InitializerBinder {
         );
         symbol.metadata().add_behavior(resolved_callable);
 
-        // Resolve initializer body
+        // NOTE: Body resolution is deferred to bind_body() to handle forward references
+    }
+
+    fn bind_body(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        // Only process initializer symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Initializer {
+            return;
+        }
+
+        // Get the CallableBehavior to extract resolved parameters
+        let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
+            return;
+        };
+        let resolved_params = callable.parameters().to_vec();
+
+        let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
+
+        // Resolve initializer body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
             resolve_initializer_body(
                 symbol,
@@ -82,7 +109,9 @@ fn resolve_initializer_body(
     source: &str,
     file_id: usize,
 ) {
-    use crate::body_resolver::context::{create_local_scope_for_body, resolve_body_and_attach_executable};
+    use crate::body_resolver::context::{
+        create_local_scope_for_body, resolve_body_and_attach_executable,
+    };
     use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 
@@ -113,30 +142,39 @@ fn resolve_initializer_body(
     }
 
     // Add parameters to local scope
+    // Mutability depends on access mode:
+    // - Borrow: immutable (read-only)
+    // - Mutating: mutable (read-write, but caller keeps ownership)
+    // - Consuming: mutable (takes ownership, can modify)
     for param in params {
+        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
+        let is_mutable = match param.access_mode {
+            ParameterAccessMode::Borrow => false,
+            ParameterAccessMode::Mutating => true,
+            ParameterAccessMode::Consuming => true,
+        };
         // Add to local scope
         local_scope.bind(
             param_name.clone(),
             param_ty.clone(),
-            false,
+            is_mutable,
             param_span.clone(),
         );
     }
 
     // Create body resolution context
-    let mut body_ctx = BodyResolutionContext {
-        model: context.model,
-        diagnostics: context.diagnostics,
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
         source,
         file_id,
-        function_id: symbol.metadata().id(),
+        symbol.metadata().id(),
         local_scope,
-        loop_stack: Vec::new(),
-        next_loop_id: 0,
-    };
+        None, // Initializer doesn't have its own where clause
+    );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }

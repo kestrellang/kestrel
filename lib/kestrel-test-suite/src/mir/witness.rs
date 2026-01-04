@@ -54,18 +54,20 @@ impl MirWitness {
 
     /// Expect an associated type binding (just by name).
     pub fn has_associated_type(mut self, name: &str) -> Self {
-        self.expectations.push(WitnessExpectation::HasAssociatedTypeByName {
-            name: name.to_string(),
-        });
+        self.expectations
+            .push(WitnessExpectation::HasAssociatedTypeByName {
+                name: name.to_string(),
+            });
         self
     }
 
     /// Expect an associated type binding with a specific type.
     pub fn has_associated_type_with_ty(mut self, name: &str, ty: MirTy) -> Self {
-        self.expectations.push(WitnessExpectation::HasAssociatedType {
-            name: name.to_string(),
-            ty,
-        });
+        self.expectations
+            .push(WitnessExpectation::HasAssociatedType {
+                name: name.to_string(),
+                ty,
+            });
         self
     }
 

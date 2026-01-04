@@ -1,8 +1,8 @@
 //! Internal MIR test context.
 
 use kestrel_execution_graph::{
-    EnumDef, FunctionDef, Id, MirContext, ProtocolDef, StructDef, WitnessDef,
-    Enum, Function, Protocol, Struct, Witness,
+    Enum, EnumDef, Function, FunctionDef, Id, MirContext, Protocol, ProtocolDef, Struct, StructDef,
+    Witness, WitnessDef,
 };
 use kestrel_execution_graph_lowering::LoweringResult;
 use kestrel_reporting::DiagnosticContext;
@@ -55,7 +55,11 @@ impl<'a> MirTestContext<'a> {
     }
 
     /// Find a witness by implementing type and protocol names.
-    pub fn find_witness(&self, impl_type: &str, protocol: &str) -> Option<(Id<Witness>, &WitnessDef)> {
+    pub fn find_witness(
+        &self,
+        impl_type: &str,
+        protocol: &str,
+    ) -> Option<(Id<Witness>, &WitnessDef)> {
         for (id, def) in self.mir.witnesses.iter() {
             let impl_ty = self.mir.ty(def.implementing_type);
             let impl_ty_str = impl_ty.display(self.mir).to_string();

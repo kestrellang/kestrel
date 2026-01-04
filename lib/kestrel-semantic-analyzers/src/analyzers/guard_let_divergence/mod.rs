@@ -97,6 +97,9 @@ fn check_statement(stmt: &Statement, ctx: &mut AnalysisContext) {
         StatementKind::Expr(expr) => {
             check_expression(expr, ctx);
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit statements don't contain nested expressions to check
+        }
     }
 }
 
@@ -192,6 +195,10 @@ fn statement_diverges(stmt: &Statement) -> bool {
             }
             // The else block must diverge (but the guard-let as a whole doesn't diverge
             // because control continues after it if the pattern matches)
+            false
+        }
+        StatementKind::Deinit { .. } => {
+            // Deinit doesn't diverge
             false
         }
     }

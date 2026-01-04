@@ -58,6 +58,7 @@
 //! let decl = ModuleDeclaration { syntax: tree, span: Span::from(0..source.len()) };
 //! ```
 
+pub mod attribute;
 pub mod block;
 pub mod common;
 pub mod declaration_item;

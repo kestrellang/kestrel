@@ -1,3 +1,4 @@
+pub mod deinit;
 pub mod enum_builder;
 pub mod enum_case;
 pub mod extension;
@@ -12,6 +13,7 @@ pub mod terminal;
 pub mod type_alias;
 pub mod type_parameter;
 
+pub use deinit::DeinitBuilder;
 pub use enum_builder::EnumBuilder;
 pub use enum_case::EnumCaseBuilder;
 pub use extension::ExtensionBuilder;

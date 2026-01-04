@@ -54,15 +54,16 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
-use kestrel_parser::{Parser, parse_source_file};
+use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_binder::{SemanticBinder, SemanticModel};
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -174,7 +175,7 @@ impl Test {
         // Run analyzers (during migration we mirror builder validations here)
         {
             use kestrel_semantic_analyzers::{
-                AnalysisContext, Analyzer, default_analyzers, run_all,
+                default_analyzers, run_all, AnalysisContext, Analyzer,
             };
             let mut owned = default_analyzers();
             let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
@@ -553,6 +554,22 @@ pub enum Behavior {
     ImplementsProtocol(&'static str, &'static str),
     /// Check if method does NOT implement any protocol method
     ImplementsProtocolNone,
+    /// Check if symbol has a specific attribute by name
+    HasAttribute(&'static str),
+    /// Expected number of attributes on the symbol
+    AttributeCount(usize),
+    /// Expected number of arguments for a specific attribute
+    AttributeArgCount(&'static str, usize),
+    /// Check if symbol has a negative conformance to a specific protocol by name
+    HasNegativeConformance(&'static str),
+    /// Check if symbol conforms to a specific protocol by name
+    ConformsTo(&'static str),
+    /// Check if symbol is copyable (has CopySemanticsBehavior::Copyable or Cloneable)
+    IsCopyable(bool),
+    /// Check if symbol is cloneable (has CopySemanticsBehavior::Cloneable)
+    IsCloneable(bool),
+    /// Check if struct has a deinit (has DeinitBehavior)
+    HasDeinit(bool),
 }
 
 impl Behavior {
@@ -755,6 +772,115 @@ impl Behavior {
                 }
                 Ok(())
             }
+            Behavior::HasAttribute(attr_name) => {
+                let has_attr = get_has_attribute(symbol, attr_name);
+                if !has_attr {
+                    return Err(format!(
+                        "Symbol '{}' does not have attribute '@{}'",
+                        path, attr_name
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::AttributeCount(expected) => {
+                let count = get_attribute_count(symbol);
+                if count != *expected {
+                    return Err(format!(
+                        "Symbol '{}' has {} attribute(s), expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::AttributeArgCount(attr_name, expected) => {
+                let count = get_attribute_arg_count(symbol, attr_name);
+                match count {
+                    Some(actual) if actual == *expected => Ok(()),
+                    Some(actual) => Err(format!(
+                        "Symbol '{}' attribute '@{}' has {} argument(s), expected {}",
+                        path, attr_name, actual, expected
+                    )),
+                    None => Err(format!(
+                        "Symbol '{}' does not have attribute '@{}'",
+                        path, attr_name
+                    )),
+                }
+            }
+            Behavior::HasNegativeConformance(protocol_name) => {
+                let has_neg = has_negative_conformance_to(symbol, protocol_name);
+                if has_neg {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Symbol '{}' does not have negative conformance to '{}'",
+                        path, protocol_name
+                    ))
+                }
+            }
+            Behavior::ConformsTo(protocol_name) => {
+                let conforms = conforms_to_protocol(symbol, protocol_name);
+                if conforms {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Symbol '{}' does not conform to protocol '{}'",
+                        path, protocol_name
+                    ))
+                }
+            }
+            Behavior::IsCopyable(expected) => {
+                let is_copyable = get_is_copyable(symbol);
+                match is_copyable {
+                    Some(actual) if actual == *expected => Ok(()),
+                    Some(actual) => Err(format!(
+                        "Symbol '{}' is_copyable={}, expected {}",
+                        path, actual, expected
+                    )),
+                    None => {
+                        // No CopySemanticsBehavior means the type defaults to copyable
+                        if *expected {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Symbol '{}' has no CopySemanticsBehavior (defaults to copyable), expected not copyable",
+                                path
+                            ))
+                        }
+                    }
+                }
+            }
+            Behavior::IsCloneable(expected) => {
+                let is_cloneable = get_is_cloneable(symbol);
+                match is_cloneable {
+                    Some(actual) if actual == *expected => Ok(()),
+                    Some(actual) => Err(format!(
+                        "Symbol '{}' is_cloneable={}, expected {}",
+                        path, actual, expected
+                    )),
+                    None => {
+                        // No CopySemanticsBehavior means the type is not cloneable (just copyable)
+                        if !*expected {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Symbol '{}' has no CopySemanticsBehavior (not cloneable), expected cloneable",
+                                path
+                            ))
+                        }
+                    }
+                }
+            }
+            Behavior::HasDeinit(expected) => {
+                let has_deinit = get_has_deinit(symbol);
+                if has_deinit == *expected {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Symbol '{}' has_deinit={}, expected {}",
+                        path, has_deinit, expected
+                    ))
+                }
+            }
         }
     }
 }
@@ -775,6 +901,16 @@ impl std::fmt::Debug for Behavior {
             Behavior::ChildCount(n) => write!(f, "ChildCount({})", n),
             Behavior::ImplementsProtocol(p, m) => write!(f, "ImplementsProtocol({}, {})", p, m),
             Behavior::ImplementsProtocolNone => write!(f, "ImplementsProtocolNone"),
+            Behavior::HasAttribute(name) => write!(f, "HasAttribute({})", name),
+            Behavior::AttributeCount(n) => write!(f, "AttributeCount({})", n),
+            Behavior::AttributeArgCount(name, n) => write!(f, "AttributeArgCount({}, {})", name, n),
+            Behavior::HasNegativeConformance(name) => {
+                write!(f, "HasNegativeConformance({})", name)
+            }
+            Behavior::ConformsTo(name) => write!(f, "ConformsTo({})", name),
+            Behavior::IsCopyable(b) => write!(f, "IsCopyable({})", b),
+            Behavior::IsCloneable(b) => write!(f, "IsCloneable({})", b),
+            Behavior::HasDeinit(b) => write!(f, "HasDeinit({})", b),
         }
     }
 }
@@ -896,8 +1032,8 @@ fn get_function_data_behavior(
 fn get_implements_protocol_info(
     symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
 ) -> Option<(String, String)> {
-    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 
     // Look for ImplementsBehavior in the symbol's behaviors
     let impl_behavior = symbol
@@ -943,4 +1079,111 @@ fn find_symbol_by_id(
     }
 
     None
+}
+
+/// Helper to check if a symbol has a specific attribute by name
+fn get_has_attribute(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>, attr_name: &str) -> bool {
+    use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+
+    symbol
+        .metadata()
+        .get_behavior::<AttributesBehavior>()
+        .map(|ab| ab.attributes().iter().any(|a| a.name == attr_name))
+        .unwrap_or(false)
+}
+
+/// Helper to get the number of attributes on a symbol
+fn get_attribute_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
+    use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+
+    symbol
+        .metadata()
+        .get_behavior::<AttributesBehavior>()
+        .map(|ab| ab.attributes().len())
+        .unwrap_or(0)
+}
+
+/// Helper to get the number of arguments for a specific attribute
+fn get_attribute_arg_count(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    attr_name: &str,
+) -> Option<usize> {
+    use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+
+    symbol
+        .metadata()
+        .get_behavior::<AttributesBehavior>()
+        .and_then(|ab| {
+            ab.attributes()
+                .iter()
+                .find(|a| a.name == attr_name)
+                .map(|a| a.args.len())
+        })
+}
+
+/// Helper to check if a symbol has a negative conformance to a specific protocol by name
+fn has_negative_conformance_to(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    protocol_name: &str,
+) -> bool {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    symbol
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+        .map(|cb| {
+            cb.negative_conformances().iter().any(|ty| {
+                if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                    symbol.metadata().name().value == protocol_name
+                } else {
+                    false
+                }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Helper to check if a symbol conforms to a specific protocol by name
+fn conforms_to_protocol(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    protocol_name: &str,
+) -> bool {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    symbol
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+        .map(|cb| {
+            cb.conformances().iter().any(|ty| {
+                if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                    symbol.metadata().name().value == protocol_name
+                } else {
+                    false
+                }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Helper to check if a symbol is copyable (has CopySemanticsBehavior)
+fn get_is_copyable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    symbol
+        .metadata()
+        .get_behavior::<CopySemanticsBehavior>()
+        .map(|csb| csb.is_copyable())
+}
+
+/// Helper to check if a symbol is cloneable (has CopySemanticsBehavior::Cloneable)
+fn get_is_cloneable(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    symbol
+        .metadata()
+        .get_behavior::<CopySemanticsBehavior>()
+        .map(|csb| csb.is_cloneable())
+}
+
+/// Helper to check if a struct has a deinit (has DeinitBehavior)
+fn get_has_deinit(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> bool {
+    use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
+
+    symbol.metadata().get_behavior::<DeinitBehavior>().is_some()
 }

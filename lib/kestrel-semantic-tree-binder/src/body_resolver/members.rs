@@ -33,7 +33,7 @@ use crate::diagnostics::{
     UnsupportedGenericProtocolBoundError,
 };
 
-use super::calls::collect_overload_descriptions;
+use super::calls::{collect_overload_descriptions, validate_argument_access_modes};
 use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, get_callable_behavior, get_type_container,
@@ -567,6 +567,9 @@ pub fn resolve_member_call(
                     }
                 }
 
+                // Validate access modes for arguments
+                validate_argument_access_modes(&callable, &arguments, &span, ctx);
+
                 // Create method ref and then call
                 let method_ref = Expression::method_ref(
                     object.clone(),
@@ -765,6 +768,9 @@ fn resolve_constrained_member_call(
     let return_ty = winner.callable.return_type().clone();
     let method_id = winner.method.metadata().id();
 
+    // Validate access modes for arguments
+    validate_argument_access_modes(&winner.callable, &arguments, &span, ctx);
+
     // Create method ref and call
     let method_ref = Expression::method_ref(
         object.clone(),
@@ -849,6 +855,7 @@ pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -
         .map(|p| {
             let new_ty = substitute_self(&p.ty, receiver_ty);
             CallableParameter {
+                access_mode: p.access_mode,
                 ty: new_ty,
                 label: p.label.clone(),
                 bind_name: p.bind_name.clone(),

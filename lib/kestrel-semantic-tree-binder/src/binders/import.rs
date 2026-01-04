@@ -12,7 +12,7 @@ use crate::declaration_binder::{BindingContext, DeclarationBinder};
 pub struct ImportBinder;
 
 impl DeclarationBinder for ImportBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _syntax: &SyntaxNode,

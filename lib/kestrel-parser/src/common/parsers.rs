@@ -16,9 +16,10 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterData,
-    ReceiverModifier,
+    DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
+    InitializerDeclarationData, ParameterAccessMode, ParameterData, ReceiverModifier,
 };
+use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::{TyVariant, ty_parser};
@@ -269,11 +270,41 @@ pub fn let_var_parser<'tokens>(
 // Parameter Parsers
 // =============================================================================
 
-/// Parser for a single parameter: `(label)? bind_name: Type`
+/// Parser for optional parameter access mode (mutating/consuming)
+///
+/// Parses an optional `mutating` or `consuming` keyword before a parameter.
 ///
 /// # Examples
-/// - `x: Int` → label=None, bind_name=x
-/// - `with x: Int` → label="with", bind_name=x
+/// - `mutating x: Int` → `Some((ParameterAccessMode::Mutating, span))`
+/// - `consuming x: Int` → `Some((ParameterAccessMode::Consuming, span))`
+/// - `x: Int` → `None` (defaults to borrow)
+fn parameter_access_mode_parser<'tokens>(
+) -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    Option<(ParameterAccessMode, Span)>,
+    ParserExtra<'tokens>,
+> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Mutating)
+                .map_with(|_, e| {
+                    Some((ParameterAccessMode::Mutating, to_kestrel_span(e.span())))
+                })
+                .or(just(Token::Consuming).map_with(|_, e| {
+                    Some((ParameterAccessMode::Consuming, to_kestrel_span(e.span())))
+                })),
+        )
+        .or(empty().to(None))
+}
+
+/// Parser for a single parameter: `(access_mode)? (label)? bind_name: Type`
+///
+/// # Examples
+/// - `x: Int` → access_mode=None, label=None, bind_name=x
+/// - `with x: Int` → access_mode=None, label="with", bind_name=x
+/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
+/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
 pub(crate) fn parameter_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone
 {
@@ -282,24 +313,27 @@ pub(crate) fn parameter_parser<'tokens>(
         Token::Identifier = e => to_kestrel_span(e.span()),
     });
 
-    // Labeled parameter: label name: Type
-    let labeled = ident
-        .clone()
+    // Labeled parameter: (access_mode)? label name: Type
+    let labeled = parameter_access_mode_parser()
+        .then(ident.clone())
         .then(ident.clone())
         .then(trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(ty_parser())
-        .map(|(((label, bind_name), colon), ty)| ParameterData {
+        .map(|((((access_mode, label), bind_name), colon), ty)| ParameterData {
+            access_mode,
             label: Some(label),
             bind_name,
             colon,
             ty,
         });
 
-    // Unlabeled parameter: name: Type
-    let unlabeled = ident
+    // Unlabeled parameter: (access_mode)? name: Type
+    let unlabeled = parameter_access_mode_parser()
+        .then(ident)
         .then(trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))))
         .then(ty_parser())
-        .map(|((bind_name, colon), ty)| ParameterData {
+        .map(|(((access_mode, bind_name), colon), ty)| ParameterData {
+            access_mode,
             label: None,
             bind_name,
             colon,
@@ -358,13 +392,14 @@ pub fn function_body_parser<'tokens>(
 
 /// Parser for a function declaration
 ///
-/// Syntax: `(visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
+/// Syntax: `(@attr)* (visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
 ///
 /// This is the single source of truth for function declaration parsing.
 pub fn function_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, FunctionDeclarationData, ParserExtra<'tokens>>
        + Clone {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(static_parser())
         .then(receiver_modifier_parser())
         .then(token(Token::Func))
@@ -385,7 +420,13 @@ pub fn function_declaration_parser_internal<'tokens>(
                                 (
                                     (
                                         (
-                                            (((visibility, is_static), receiver_modifier), fn_span),
+                                            (
+                                                (
+                                                    ((attributes, visibility), is_static),
+                                                    receiver_modifier,
+                                                ),
+                                                fn_span,
+                                            ),
                                             name_span,
                                         ),
                                         type_params,
@@ -403,6 +444,7 @@ pub fn function_declaration_parser_internal<'tokens>(
                 body,
             )| {
                 FunctionDeclarationData {
+                    attributes,
                     visibility,
                     is_static,
                     receiver_modifier,
@@ -422,14 +464,15 @@ pub fn function_declaration_parser_internal<'tokens>(
 
 /// Parser for a field declaration
 ///
-/// Syntax: `(visibility)? (static)? let/var name: Type (;)?`
+/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (;)?`
 ///
 /// This is the single source of truth for field declaration parsing.
 /// An optional trailing semicolon is allowed for inline field declarations.
 pub fn field_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, FieldDeclarationData, ParserExtra<'tokens>>
        + Clone {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(static_parser())
         .then(let_var_parser())
         .then(identifier())
@@ -440,7 +483,10 @@ pub fn field_declaration_parser_internal<'tokens>(
             |(
                 (
                     (
-                        (((visibility, is_static), (mutability_span, is_mutable)), name_span),
+                        (
+                            (((attributes, visibility), is_static), (mutability_span, is_mutable)),
+                            name_span,
+                        ),
                         colon_span,
                     ),
                     ty,
@@ -448,6 +494,7 @@ pub fn field_declaration_parser_internal<'tokens>(
                 semicolon,
             )| {
                 FieldDeclarationData {
+                    attributes,
                     visibility,
                     is_static,
                     mutability_span,
@@ -463,7 +510,7 @@ pub fn field_declaration_parser_internal<'tokens>(
 
 /// Parser for an initializer declaration
 ///
-/// Syntax: `(visibility)? init(params) { body }?`
+/// Syntax: `(@attr)* (visibility)? init(params) { body }?`
 /// Body is optional for protocol initializer declarations.
 ///
 /// This is the single source of truth for initializer declaration parsing.
@@ -474,15 +521,17 @@ pub fn initializer_declaration_parser_internal<'tokens>(
     InitializerDeclarationData,
     ParserExtra<'tokens>,
 > + Clone {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(token(Token::Init))
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
         .then(function_body_parser())
         .map(
-            |(((((visibility, init_span), lparen), parameters), rparen), body)| {
+            |((((((attributes, visibility), init_span), lparen), parameters), rparen), body)| {
                 InitializerDeclarationData {
+                    attributes,
                     visibility,
                     init_span,
                     lparen,
@@ -492,4 +541,19 @@ pub fn initializer_declaration_parser_internal<'tokens>(
                 }
             },
         )
+}
+
+/// Parser for a deinitializer declaration
+///
+/// Syntax: `deinit { body }`
+/// Deinit blocks are used for RAII-style cleanup when a value goes out of scope.
+/// They have no parameters, attributes, or visibility modifiers.
+///
+/// This is the single source of truth for deinit declaration parsing.
+pub fn deinit_declaration_parser_internal<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, DeinitDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    token(Token::Deinit)
+        .then(code_block_parser())
+        .map(|(deinit_span, body)| DeinitDeclarationData { deinit_span, body })
 }

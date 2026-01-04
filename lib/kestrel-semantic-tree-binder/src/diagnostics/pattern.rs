@@ -41,8 +41,7 @@ impl IntoDiagnostic for UnknownStructPatternFieldError {
                 self.struct_name, self.field_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("unknown field"),
+                Label::primary(self.span.file_id, self.span.range()).with_message("unknown field")
             ])
     }
 }
@@ -62,13 +61,9 @@ impl IntoDiagnostic for MissingStructPatternFieldsError {
                 "pattern does not mention fields {} of `{}`",
                 missing, self.struct_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("missing fields in pattern"),
-            ])
-            .with_notes(vec![
-                "use `..` to ignore the remaining fields".to_string(),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("missing fields in pattern")])
+            .with_notes(vec!["use `..` to ignore the remaining fields".to_string()])
     }
 }
 
@@ -83,8 +78,7 @@ impl IntoDiagnostic for NotAStructPatternError {
         Diagnostic::error()
             .with_message(format!("`{}` is not a struct", self.name))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("not a struct"),
+                Label::primary(self.span.file_id, self.span.range()).with_message("not a struct")
             ])
     }
 }
@@ -100,14 +94,12 @@ impl IntoDiagnostic for InvalidRangeBoundsError {
         let op = if self.inclusive { "..=" } else { "..<" };
         Diagnostic::error()
             .with_message("invalid range bounds: start must be less than or equal to end")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("range `{op}` has invalid bounds")),
-            ])
-            .with_notes(vec![
-                format!("the lower bound must be less than{} the upper bound", 
-                    if self.inclusive { " or equal to" } else { "" }),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("range `{op}` has invalid bounds"))])
+            .with_notes(vec![format!(
+                "the lower bound must be less than{} the upper bound",
+                if self.inclusive { " or equal to" } else { "" }
+            )])
     }
 }
 
@@ -129,7 +121,7 @@ impl IntoDiagnostic for DuplicateBindingInPatternError {
                     .with_message("first binding"),
             ])
             .with_notes(vec![
-                "each binding in a pattern must have a unique name".to_string(),
+                "each binding in a pattern must have a unique name".to_string()
             ])
     }
 }
@@ -143,12 +135,11 @@ impl IntoDiagnostic for FloatLiteralInPatternError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("float literals are not allowed in patterns")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("cannot use float literal in pattern"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("cannot use float literal in pattern")])
             .with_notes(vec![
-                "patterns can only match exact values, but floating point comparison is imprecise".to_string(),
+                "patterns can only match exact values, but floating point comparison is imprecise"
+                    .to_string(),
             ])
     }
 }
@@ -163,10 +154,12 @@ pub struct UnknownEnumCaseError {
 impl IntoDiagnostic for UnknownEnumCaseError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
-            .with_message(format!("enum `{}` has no case `{}`", self.enum_name, self.case_name))
+            .with_message(format!(
+                "enum `{}` has no case `{}`",
+                self.enum_name, self.case_name
+            ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("unknown case"),
+                Label::primary(self.span.file_id, self.span.range()).with_message("unknown case")
             ])
     }
 }
@@ -185,10 +178,8 @@ impl IntoDiagnostic for TuplePatternArityMismatchError {
                 "tuple pattern has wrong arity: expected {} elements, found {}",
                 self.expected, self.found
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected {} elements", self.expected)),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("expected {} elements", self.expected))])
     }
 }
 
@@ -201,10 +192,8 @@ impl IntoDiagnostic for MultipleRestPatternsError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("multiple rest patterns in a single pattern")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("only one `..` rest pattern is allowed"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("only one `..` rest pattern is allowed")])
             .with_notes(vec![
                 "a pattern can have at most one rest pattern (`..`) to match remaining elements"
                     .to_string(),
@@ -221,12 +210,10 @@ impl IntoDiagnostic for NestedAtPatternError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("nested @ patterns are not allowed")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("cannot nest @ patterns"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("cannot nest @ patterns")])
             .with_notes(vec![
-                "use a single @ pattern with the outermost binding".to_string(),
+                "use a single @ pattern with the outermost binding".to_string()
             ])
     }
 }
@@ -240,10 +227,8 @@ impl IntoDiagnostic for ArraySuffixPatternError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("array patterns with suffix elements are not yet supported")
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("suffix elements after `..` are not supported"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("suffix elements after `..` are not supported")])
             .with_notes(vec![
                 "only prefix patterns are currently supported: `[a, b, ..]` or `[a, b, ..rest]`"
                     .to_string(),

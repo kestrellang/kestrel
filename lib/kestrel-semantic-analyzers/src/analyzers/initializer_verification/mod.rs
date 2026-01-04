@@ -230,6 +230,9 @@ fn analyze_statement(
             let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), ctx);
             let _ = else_state;
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit doesn't involve field initialization
+        }
     }
     state
 }
@@ -551,6 +554,10 @@ fn contains_break_at_top_level(kind: &StatementKind) -> bool {
                     return true;
                 }
             }
+            false
+        }
+        StatementKind::Deinit { .. } => {
+            // Deinit doesn't contain break
             false
         }
     }

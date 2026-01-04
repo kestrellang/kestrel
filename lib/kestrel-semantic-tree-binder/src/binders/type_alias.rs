@@ -5,9 +5,7 @@ use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::associated_type::{
-    AssociatedTypeBoundsBehavior
-};
+use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeBoundsBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
@@ -20,7 +18,7 @@ use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError,
 };
-use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
+use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Determines the context in which a type alias declaration appears
@@ -38,7 +36,7 @@ enum TypeAliasContext {
 pub struct TypeAliasBinder;
 
 impl DeclarationBinder for TypeAliasBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
@@ -92,8 +90,9 @@ impl DeclarationBinder for TypeAliasBinder {
                 }
 
                 // Extract type parameters and resolve where clause bounds
-                let generics_behavior =
-                    crate::binders::utils::generics::resolve_generics(syntax, &source, file_id, symbol_id, context);
+                let generics_behavior = crate::binders::utils::generics::resolve_generics(
+                    syntax, &source, file_id, symbol_id, context,
+                );
                 symbol.metadata().add_behavior(generics_behavior);
 
                 // Extract and resolve the aliased type from syntax
@@ -110,7 +109,7 @@ impl DeclarationBinder for TypeAliasBinder {
                                 span.clone(),
                                 context,
                             );
-                            
+
                             // Add ConformsToBehavior to track which protocol's associated type this binds
                             add_conforms_to_behavior(symbol, &name, &parent);
                         }
@@ -744,6 +743,8 @@ fn validate_inherited_where_clause_constraints(
                         }
                         // TypeEquality constraints are handled during type checking, not here
                         kestrel_semantic_tree::ty::Constraint::TypeEquality { .. } => {}
+                        // NegativeBound constraints don't affect associated type validation
+                        kestrel_semantic_tree::ty::Constraint::NegativeBound { .. } => {}
                     }
                 }
             }
@@ -809,7 +810,7 @@ fn add_conforms_to_behavior(
                     Some(child.metadata().id()),
                 );
                 symbol.metadata().add_behavior(conforms_to);
-                
+
                 // Note: We add behavior for each protocol that defines this associated type.
                 // This handles the case where multiple protocols have the same associated type name.
                 break; // Only one per protocol

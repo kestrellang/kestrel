@@ -9,6 +9,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
     emit_enum_declaration, field_declaration_parser_internal, function_declaration_parser_internal,
@@ -139,11 +140,12 @@ fn enum_case_parameter_parser<'tokens>(
         .map(|((label, colon), ty)| EnumCaseParameterData { label, colon, ty })
 }
 
-/// Parser for enum case declaration: `case Name` or `case Name(label: Type, ...)`
+/// Parser for enum case declaration: `(@attr)* case Name` or `(@attr)* case Name(label: Type, ...)`
 fn enum_case_parser<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseDeclarationData, ParserExtra<'tokens>> + Clone
 {
-    token(Token::Case)
+    attribute_list_parser()
+        .then(token(Token::Case))
         .then(identifier())
         .then(
             // Optional parameter list: (label: Type, label: Type, ...)
@@ -159,7 +161,8 @@ fn enum_case_parser<'tokens>(
                 .or(empty().map(|_| None)),
         )
         .map(
-            |((case_span, name_span), parameters)| EnumCaseDeclarationData {
+            |(((attributes, case_span), name_span), parameters)| EnumCaseDeclarationData {
+                attributes,
                 case_span,
                 name_span,
                 parameters,
@@ -228,7 +231,8 @@ fn indirect_modifier_parser<'tokens>(
 pub fn enum_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
     recursive(|enum_parser| {
-        visibility_parser_internal()
+        attribute_list_parser()
+            .then(visibility_parser_internal())
             .then(indirect_modifier_parser())
             .then(token(Token::Enum))
             .then(identifier())
@@ -248,7 +252,13 @@ pub fn enum_declaration_parser_internal<'tokens>(
                         (
                             (
                                 (
-                                    ((((visibility, indirect), enum_span), name_span), type_params),
+                                    (
+                                        (
+                                            (((attributes, visibility), indirect), enum_span),
+                                            name_span,
+                                        ),
+                                        type_params,
+                                    ),
                                     conformances,
                                 ),
                                 where_clause,
@@ -260,14 +270,15 @@ pub fn enum_declaration_parser_internal<'tokens>(
                     rbrace_span,
                 )| {
                     EnumDeclarationData {
+                        attributes,
                         visibility,
                         indirect,
                         enum_span,
                         name_span,
                         type_params,
-                        conformances: conformances.map(|(colon_span, types)| ConformanceListData {
+                        conformances: conformances.map(|(colon_span, items)| ConformanceListData {
                             colon_span,
-                            conformances: types,
+                            conformances: items,
                         }),
                         where_clause,
                         lbrace_span,

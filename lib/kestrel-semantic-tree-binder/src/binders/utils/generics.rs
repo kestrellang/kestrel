@@ -10,10 +10,10 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::binders::utils::type_paths::resolve_protocol_bound_path;
 use crate::declaration_binder::BindingContext;
 use crate::diagnostics::WhereClauseAssociatedTypeNotFoundError;
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
-use crate::binders::utils::type_paths::resolve_protocol_bound_path;
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
 pub(crate) fn resolve_generics(
@@ -41,7 +41,8 @@ pub(crate) fn resolve_generics(
         })
         .collect();
 
-    let where_clause = resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
+    let where_clause =
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
     GenericsBehavior::new(type_parameters, where_clause)
 }
 
@@ -65,9 +66,15 @@ pub(crate) fn resolve_where_clause(
         .children()
         .filter(|c| c.kind() == SyntaxKind::TypeBound)
     {
-        if let Some(constraint) =
-            resolve_type_bound(&child, source, file_id, context_id, ctx, type_params, &constraints)
-        {
+        if let Some(constraint) = resolve_type_bound(
+            &child,
+            source,
+            file_id,
+            context_id,
+            ctx,
+            type_params,
+            &constraints,
+        ) {
             constraints.push(constraint);
         }
     }
@@ -77,9 +84,15 @@ pub(crate) fn resolve_where_clause(
         .children()
         .filter(|c| c.kind() == SyntaxKind::TypeEquality)
     {
-        if let Some(constraint) =
-            resolve_type_equality(&child, source, file_id, context_id, ctx, type_params, &constraints)
-        {
+        if let Some(constraint) = resolve_type_equality(
+            &child,
+            source,
+            file_id,
+            context_id,
+            ctx,
+            type_params,
+            &constraints,
+        ) {
             constraints.push(constraint);
         }
     }
@@ -115,7 +128,8 @@ fn resolve_type_bound(
             );
         }
 
-        let bounds = resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
+        let bounds =
+            resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
         if bounds.is_empty() {
             return None;
         }
@@ -128,7 +142,7 @@ fn resolve_type_bound(
         ));
     }
 
-    // Simple bound: T: Protocol
+    // Simple bound: T: Protocol or T: not Copyable
     let name_node = find_child(syntax, SyntaxKind::Name)?;
     let name_token = name_node
         .children_with_tokens()
@@ -137,13 +151,28 @@ fn resolve_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: Span = Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
+    let param_span: Span = Span::new(
+        file_id,
+        (text_range.start().into())..(text_range.end().into()),
+    );
 
     let param_id = type_params
         .iter()
         .find(|p| p.metadata().name().value == param_name)
         .map(|p| p.metadata().id());
 
+    // Check if this is a negative bound (T: not Copyable)
+    if let Some(neg_conformance) = find_child(syntax, SyntaxKind::NegativeConformance) {
+        // Resolve the negated protocol
+        let bound = resolve_negative_bound(&neg_conformance, source, file_id, context_id, ctx);
+
+        return Some(match param_id {
+            Some(id) => Constraint::negative_bound(id, param_name, param_span, bound),
+            None => Constraint::unresolved_negative_bound(param_name, param_span, bound),
+        });
+    }
+
+    // Positive bound: T: Protocol
     let bounds = resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
     if bounds.is_empty() {
         return None;
@@ -153,6 +182,30 @@ fn resolve_type_bound(
         Some(id) => Constraint::type_bound(id, param_name, param_span, bounds),
         None => Constraint::unresolved_type_bound(param_name, param_span, bounds),
     })
+}
+
+/// Resolve a negative bound (the protocol after `not`)
+fn resolve_negative_bound(
+    syntax: &SyntaxNode,
+    _source: &str,
+    file_id: usize,
+    context_id: SymbolId,
+    ctx: &mut BindingContext,
+) -> Ty {
+    // Find the Path inside NegativeConformance
+    if let Some(path_node) = find_child(syntax, SyntaxKind::Path) {
+        let span = get_node_span(&path_node, file_id);
+        let segments = extract_path_segments(&path_node);
+
+        if segments.is_empty() {
+            return Ty::error(span);
+        }
+
+        return resolve_protocol_bound_path(&segments, span, context_id, ctx);
+    }
+
+    let span = get_node_span(syntax, file_id);
+    Ty::error(span)
 }
 
 fn resolve_type_equality(
@@ -166,20 +219,26 @@ fn resolve_type_equality(
 ) -> Option<Constraint> {
     let span = get_node_span(syntax, file_id);
 
-    let (left_path, left_span) = if let Some(left_target) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
-        (extract_path_from_node(&left_target), get_node_span(&left_target, file_id))
-    } else if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
-        let name_token = name_node
-            .children_with_tokens()
-            .filter_map(|e| e.into_token())
-            .find(|t| t.kind() == SyntaxKind::Identifier)?;
-        let text_range = name_token.text_range();
-        let name_span: Span =
-            Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
-        (vec![name_token.text().to_string()], name_span)
-    } else {
-        return None;
-    };
+    let (left_path, left_span) =
+        if let Some(left_target) = find_child(syntax, SyntaxKind::AssociatedTypeTarget) {
+            (
+                extract_path_from_node(&left_target),
+                get_node_span(&left_target, file_id),
+            )
+        } else if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
+            let name_token = name_node
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind() == SyntaxKind::Identifier)?;
+            let text_range = name_token.text_range();
+            let name_span: Span = Span::new(
+                file_id,
+                (text_range.start().into())..(text_range.end().into()),
+            );
+            (vec![name_token.text().to_string()], name_span)
+        } else {
+            return None;
+        };
 
     let left_ty = resolve_path_in_where_clause(
         &left_path,
@@ -192,8 +251,13 @@ fn resolve_type_equality(
 
     let ty_node = find_child(syntax, SyntaxKind::Ty)?;
 
-    let right_ty = if let Some(ty_path_node) = ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
-        if let Some(path_node) = ty_path_node.children().find(|c| c.kind() == SyntaxKind::Path) {
+    let right_ty = if let Some(ty_path_node) =
+        ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath)
+    {
+        if let Some(path_node) = ty_path_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Path)
+        {
             let right_path = extract_path_segments(&path_node);
             let right_span = get_node_span(&ty_node, file_id);
             let resolved = resolve_path_in_where_clause(
@@ -238,7 +302,10 @@ fn resolve_path_in_where_clause(
     }
 
     // Prefer type parameter paths (T, T.Item) so we can resolve using already-collected bounds.
-    if let Some(type_param) = type_params.iter().find(|p| p.metadata().name().value == path[0]) {
+    if let Some(type_param) = type_params
+        .iter()
+        .find(|p| p.metadata().name().value == path[0])
+    {
         if path.len() == 1 {
             return Ty::type_parameter(type_param.clone(), span.clone());
         }
@@ -280,8 +347,12 @@ fn resolve_path_in_where_clause(
                     }
                 }
 
-                if let Some(flattened) = symbol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
-                    if let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name) {
+                if let Some(flattened) = symbol
+                    .metadata()
+                    .get_behavior::<FlattenedProtocolBehavior>()
+                {
+                    if let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name)
+                    {
                         let container = Ty::type_parameter(type_param.clone(), span.clone());
                         return Ty::qualified_associated_type(
                             flattened_assoc.symbol.clone(),
@@ -402,7 +473,10 @@ fn resolve_protocol_bounds_from_type_bound(
             if let TyKind::Protocol { symbol, .. } = base_ty.kind() {
                 // Resolve type arguments
                 let mut type_args: Vec<Ty> = Vec::new();
-                for ty_node in type_arg_list.children().filter(|c| c.kind() == SyntaxKind::Ty) {
+                for ty_node in type_arg_list
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::Ty)
+                {
                     let mut type_ctx = TypeSyntaxContext::new(
                         ctx.model,
                         ctx.diagnostics,
@@ -433,7 +507,9 @@ fn resolve_protocol_bounds_from_type_bound(
             continue;
         }
 
-        bounds.push(resolve_protocol_bound_path(&segments, span, context_id, ctx));
+        bounds.push(resolve_protocol_bound_path(
+            &segments, span, context_id, ctx,
+        ));
         i += 1;
     }
 

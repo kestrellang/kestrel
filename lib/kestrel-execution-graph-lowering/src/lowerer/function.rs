@@ -142,6 +142,9 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     ctx.set_current_block(entry_block);
     ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
 
+    // Enter the function body scope for deinit tracking
+    ctx.enter_scope();
+
     // Lower statements
     for stmt in &body.statements {
         lower_statement(ctx, stmt);
@@ -157,9 +160,13 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         if let Some(yield_expr) = body.yield_expr.as_ref() {
             let value = lower_expression(ctx, yield_expr);
             if !ctx.is_block_terminated() {
+                // Emit deinits for all scopes before returning
+                ctx.emit_all_scope_deinits();
                 ctx.emit_return(value);
             }
         } else {
+            // Emit deinits for all scopes before returning
+            ctx.emit_all_scope_deinits();
             // No yield expression - return unit
             ctx.emit_return_unit();
         }
@@ -398,6 +405,9 @@ fn collect_closure_local_ids_from_stmt(stmt: &Statement, ids: &mut HashSet<Local
             if let Some(expr) = &else_block.yield_expr {
                 collect_closure_local_ids_from_expr(expr, ids);
             }
+        }
+        StatementKind::Deinit { .. } => {
+            // Deinit statement doesn't contain closures
         }
     }
 }

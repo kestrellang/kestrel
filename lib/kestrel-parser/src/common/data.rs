@@ -10,18 +10,94 @@ use crate::block::CodeBlockData;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
+// =============================================================================
+// Attribute Data Structures
+// =============================================================================
+
+/// Value types that can appear in attribute arguments
+#[derive(Debug, Clone)]
+pub enum AttributeArgValue {
+    /// String literal: `"value"`
+    String(Span),
+    /// Integer literal: `42`
+    Integer(Span),
+    /// Float literal: `3.14`
+    Float(Span),
+    /// Boolean literal: `true` or `false`
+    Bool(Span),
+    /// Implicit member access: `.option`
+    ImplicitMember {
+        dot_span: Span,
+        name_span: Span,
+    },
+    /// Path: `SomeType` or `Module.Type`
+    Path(Vec<Span>), // segments (identifiers only, dots are implicit between them)
+}
+
+/// Raw parsed data for a single attribute argument
+#[derive(Debug, Clone)]
+pub struct AttributeArgData {
+    /// Optional label (e.g., `iOS` in `iOS: 15.0`)
+    pub label: Option<Span>,
+    /// Optional colon after label
+    pub colon: Option<Span>,
+    /// The value expression
+    pub value: AttributeArgValue,
+}
+
+/// Raw parsed data for attribute arguments (the contents of the parentheses)
+#[derive(Debug, Clone)]
+pub struct AttributeArgsData {
+    pub lparen_span: Span,
+    pub args: Vec<AttributeArgData>,
+    pub rparen_span: Span,
+}
+
+/// Raw parsed data for a single attribute
+#[derive(Debug, Clone)]
+pub struct AttributeData {
+    /// The @ token span
+    pub at_span: Span,
+    /// The attribute name span
+    pub name_span: Span,
+    /// Optional arguments in parentheses
+    pub args: Option<AttributeArgsData>,
+}
+
+/// Access mode for function parameters.
+///
+/// Determines how the caller's value is passed and what the callee can do with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterAccessMode {
+    /// Read-only access (default). Caller retains ownership.
+    /// Syntax: `x: T`
+    Borrow,
+    /// Read-write access. Caller retains ownership but must use `var` binding.
+    /// Syntax: `mutating x: T`
+    Mutating,
+    /// Takes ownership (move or copy depending on Copyable).
+    /// Syntax: `consuming x: T`
+    Consuming,
+}
+
 /// Raw parsed data for a single parameter
 ///
-/// Parameter syntax: `(label)? bind_name: Type`
+/// Parameter syntax: `(access_mode)? (label)? bind_name: Type`
+/// - `access_mode` is an optional access mode (mutating/consuming)
 /// - `label` is an optional external parameter name (used by callers)
 /// - `bind_name` is the internal parameter name (used in function body)
 /// - If only one name is provided, it's used as both label and bind_name
 ///
 /// # Examples
-/// - `x: Int` → label=None, bind_name=x
-/// - `with x: Int` → label="with", bind_name=x
+/// - `x: Int` → access_mode=None, label=None, bind_name=x
+/// - `with x: Int` → access_mode=None, label="with", bind_name=x
+/// - `mutating x: Int` → access_mode=Mutating, label=None, bind_name=x
+/// - `consuming point p: Point` → access_mode=Consuming, label="point", bind_name=p
 #[derive(Debug, Clone)]
 pub struct ParameterData {
+    /// Optional access mode (mutating/consuming)
+    /// If None, the default is borrow (read-only)
+    pub access_mode: Option<(ParameterAccessMode, Span)>,
     /// Optional label (external name for callers)
     /// If None, bind_name is used as the label
     pub label: Option<Span>,
@@ -47,6 +123,7 @@ pub enum ReceiverModifier {
 /// Used by both function declarations and protocol method declarations.
 #[derive(Debug, Clone)]
 pub struct FunctionDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub is_static: Option<Span>,
     /// Receiver modifier (mutating/consuming) with its span
@@ -65,6 +142,7 @@ pub struct FunctionDeclarationData {
 /// Raw parsed data for field declaration internals
 #[derive(Debug, Clone)]
 pub struct FieldDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub is_static: Option<Span>,
     pub mutability_span: Span,
@@ -82,6 +160,7 @@ pub struct FieldDeclarationData {
 /// Body is optional for protocol initializer declarations.
 #[derive(Debug, Clone)]
 pub struct InitializerDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub init_span: Span,
     pub lparen: Span,
@@ -90,16 +169,37 @@ pub struct InitializerDeclarationData {
     pub body: Option<CodeBlockData>,
 }
 
-/// Raw parsed data for a conformance list (: Proto1, Proto2)
+/// Raw parsed data for deinitializer declaration internals
+///
+/// Deinit syntax: `deinit { body }`
+/// The body is required. Deinit blocks have no parameters or visibility.
+/// Deinit runs when a value goes out of scope to clean up resources.
+#[derive(Debug, Clone)]
+pub struct DeinitDeclarationData {
+    pub deinit_span: Span,
+    pub body: CodeBlockData,
+}
+
+/// A single conformance item, which can be positive or negative
+#[derive(Debug, Clone)]
+pub struct ConformanceItemData {
+    /// If Some, this is a negative conformance (e.g., `not Copyable`)
+    pub not_span: Option<Span>,
+    /// The protocol type
+    pub ty: TyVariant,
+}
+
+/// Raw parsed data for a conformance list (: Proto1, Proto2, not Copyable)
 #[derive(Debug, Clone)]
 pub struct ConformanceListData {
     pub colon_span: Span,
-    pub conformances: Vec<TyVariant>,
+    pub conformances: Vec<ConformanceItemData>,
 }
 
 /// Raw parsed data for struct declaration internals
 #[derive(Debug, Clone)]
 pub struct StructDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub struct_span: Span,
     pub name_span: Span,
@@ -118,11 +218,12 @@ pub enum TypeDeclarationBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
-    Struct(Box<StructDeclarationData>),  // Boxed to avoid infinite size
-    Enum(Box<EnumDeclarationData>),      // Boxed to avoid infinite size
-    EnumCase(EnumCaseDeclarationData),   // Only valid in enum bodies
-    TypeAlias(TypeAliasDeclarationData), // Associated type bindings
-    Module(Span, Vec<Span>),             // module_span, path_segments
+    Deinit(DeinitDeclarationData),        // deinit { } - only valid in struct bodies
+    Struct(Box<StructDeclarationData>),   // Boxed to avoid infinite size
+    Enum(Box<EnumDeclarationData>),       // Boxed to avoid infinite size
+    EnumCase(EnumCaseDeclarationData),    // Only valid in enum bodies
+    TypeAlias(TypeAliasDeclarationData),  // Associated type bindings
+    Module(Span, Vec<Span>),              // module_span, path_segments
     Import(
         Span,
         Vec<Span>,
@@ -147,6 +248,7 @@ pub struct EnumCaseParameterData {
 /// Raw parsed data for enum case declaration
 #[derive(Debug, Clone)]
 pub struct EnumCaseDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub case_span: Span,
     pub name_span: Span,
     pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>, // (lparen, params, rparen)
@@ -155,6 +257,7 @@ pub struct EnumCaseDeclarationData {
 /// Raw parsed data for enum declaration
 #[derive(Debug, Clone)]
 pub struct EnumDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub indirect: Option<Span>,
     pub enum_span: Span,
@@ -170,6 +273,7 @@ pub struct EnumDeclarationData {
 /// Raw parsed data for protocol declaration internals
 #[derive(Debug, Clone)]
 pub struct ProtocolDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub protocol_span: Span,
     pub name_span: Span,

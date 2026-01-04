@@ -14,8 +14,9 @@ use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::binders::{
-    EnumBinder, EnumCaseBinder, ExtensionBinder, FieldBinder, FunctionBinder, ImportBinder,
-    InitializerBinder, ModuleBinder, ProtocolBinder, StructBinder, TerminalBinder, TypeAliasBinder,
+    DeinitBinder, EnumBinder, EnumCaseBinder, ExtensionBinder, FieldBinder, FunctionBinder,
+    ImportBinder, InitializerBinder, ModuleBinder, ProtocolBinder, StructBinder, TerminalBinder,
+    TypeAliasBinder,
 };
 use crate::maps::SourceMap;
 
@@ -24,18 +25,39 @@ use crate::maps::SourceMap;
 /// During the bind phase, we re-walk the symbol hierarchy and (when available)
 /// use the stored syntax node for each symbol to resolve types, conformances,
 /// bodies, and other relationships.
+///
+/// Binding is split into two passes to handle forward references:
+/// - Pass 1 (`bind_signature`): Attach behaviors like CallableBehavior, GenericsBehavior, etc.
+/// - Pass 2 (`bind_body`): Resolve function/initializer bodies (requires all signatures to be bound)
+///
+/// This two-pass approach ensures that when resolving a function body, all functions
+/// (including those declared later in the file) have their CallableBehavior attached.
 pub trait DeclarationBinder {
-    /// Binding phase: resolve references and establish relationships
+    /// Pass 1: Bind the declaration's signature (attach behaviors).
     ///
-    /// The syntax node is the node stored in the `SemanticModel` for this symbol,
-    /// allowing binders to extract type information directly from syntax during binding.
-    fn bind_declaration(
+    /// This is called for all symbols before any bodies are resolved.
+    /// Implementations should attach CallableBehavior, GenericsBehavior, TypedBehavior, etc.
+    /// but should NOT resolve function/initializer bodies.
+    fn bind_signature(
         &self,
         _symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _syntax: &SyntaxNode,
         _context: &mut BindingContext,
     ) {
         // Default: do nothing
+    }
+
+    /// Pass 2: Resolve the declaration's body (if any).
+    ///
+    /// This is called after all signatures have been bound, ensuring that forward
+    /// references to functions declared later in the file can be resolved correctly.
+    fn bind_body(
+        &self,
+        _symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        _syntax: &SyntaxNode,
+        _context: &mut BindingContext,
+    ) {
+        // Default: do nothing (most declarations don't have bodies)
     }
 
     /// Whether this node is terminal (stops tree traversal)
@@ -52,6 +74,8 @@ pub struct BindingContext<'a> {
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Cycle detector for type alias resolution (uses RefCell for interior mutability)
     pub type_alias_cycle_detector: &'a RefCell<CycleDetector<SymbolId>>,
+    /// Cycle detector for copy semantics computation (to handle recursive types)
+    pub copy_semantics_cycle_detector: &'a RefCell<CycleDetector<SymbolId>>,
     /// Source code by file name
     pub sources: &'a SourceMap,
 }
@@ -115,6 +139,7 @@ impl DeclarationBinderRegistry {
             SyntaxKind::InitializerDeclaration,
             Box::new(InitializerBinder),
         );
+        binders.insert(SyntaxKind::DeinitDeclaration, Box::new(DeinitBinder));
 
         // Register terminal resolvers
         binders.insert(SyntaxKind::Visibility, Box::new(TerminalBinder));

@@ -19,7 +19,7 @@ use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxCont
 pub struct EnumCaseBinder;
 
 impl DeclarationBinder for EnumCaseBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
@@ -35,7 +35,12 @@ impl DeclarationBinder for EnumCaseBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
-        // 2. Check if case has parameters (associated values)
+        // 2. Resolve attributes
+        let attributes_behavior =
+            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        symbol.metadata().add_behavior(attributes_behavior);
+
+        // 3. Check if case has parameters (associated values)
         // Look for EnumCaseParameterList in the syntax
         let has_parameters = syntax
             .children()
@@ -114,6 +119,8 @@ fn resolve_enum_case_parameter(
     let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
     Some(Parameter {
+        // Enum case parameters use default borrow mode
+        access_mode: kestrel_semantic_tree::behavior::callable::ParameterAccessMode::Borrow,
         // Enum case parameters always have labels (like init parameters)
         label: Some(Spanned::new(label_text.clone(), label_span.clone())),
         bind_name: Spanned::new(label_text, label_span),

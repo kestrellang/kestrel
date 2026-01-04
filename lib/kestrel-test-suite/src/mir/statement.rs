@@ -1,7 +1,7 @@
 //! Statement patterns for MIR testing.
 
 use kestrel_execution_graph::{
-    BinOp, Callee, CastKind, MirContext, Rvalue, StatementData, StatementKind, UnOp,
+    BinOp, Callee, CastKind, MirContext, PassingMode, Rvalue, StatementData, StatementKind, UnOp,
 };
 
 /// Pattern for matching statements in MIR.
@@ -26,13 +26,20 @@ pub enum StatementPattern {
     RefMut,
 
     /// Construct a struct (type name pattern)
-    Construct { ty: String },
+    Construct {
+        ty: String,
+    },
 
     /// Create an enum variant
-    EnumVariant { enum_ty: String, variant: String },
+    EnumVariant {
+        enum_ty: String,
+        variant: String,
+    },
 
     /// Create a tuple with specific arity
-    Tuple { arity: usize },
+    Tuple {
+        arity: usize,
+    },
 
     /// Create an array
     Array,
@@ -50,7 +57,9 @@ pub enum StatementPattern {
     AnyUnOp,
 
     /// Direct call to a specific function
-    Call { callee: String },
+    Call {
+        callee: String,
+    },
 
     /// Direct call with type arguments
     CallGeneric {
@@ -59,7 +68,10 @@ pub enum StatementPattern {
     },
 
     /// Witness method call
-    CallWitness { protocol: String, method: String },
+    CallWitness {
+        protocol: String,
+        method: String,
+    },
 
     /// Escaping (thick) call
     CallEscaping,
@@ -68,13 +80,27 @@ pub enum StatementPattern {
     AnyCall,
 
     /// func.to.escaping
-    FuncToEscaping { func: String },
+    FuncToEscaping {
+        func: String,
+    },
 
     /// apply partial
-    ApplyPartial { func: String, capture_count: usize },
+    ApplyPartial {
+        func: String,
+        capture_count: usize,
+    },
 
     /// Type cast
-    Cast { kind: CastKind },
+    Cast {
+        kind: CastKind,
+    },
+
+    /// Call with specific passing modes for arguments
+    /// Each element specifies the expected passing mode for that argument position
+    CallWithModes {
+        callee: String,
+        arg_modes: Vec<PassingMode>,
+    },
 
     /// String operations
     StrPtr,
@@ -86,6 +112,36 @@ pub enum StatementPattern {
     PtrToRef,
     PtrToRefMut,
     RefToPtr,
+
+    /// Deinit operations
+    /// Unconditional deinit of a local
+    Deinit {
+        local: String,
+    },
+    /// Any unconditional deinit
+    AnyDeinit,
+    /// Conditional deinit
+    DeinitIf {
+        local: String,
+        flag: String,
+    },
+    /// Any conditional deinit
+    AnyDeinitIf,
+    /// Set deinit flag to a specific value
+    SetDeinitFlag {
+        flag: String,
+        value: bool,
+    },
+    /// Any set deinit flag
+    AnySetDeinitFlag,
+
+    /// Deinit call - matches `call Module.Type.deinit(...)` patterns
+    /// This is used when a struct/enum has a custom deinit block
+    DeinitCall {
+        ty: String,
+    },
+    /// Any deinit call (matches any call to a `.deinit` function)
+    AnyDeinitCall,
 }
 
 impl StatementPattern {
@@ -94,6 +150,11 @@ impl StatementPattern {
         match &stmt.kind {
             StatementKind::Assign { dest, rvalue } => self.matches_assign(dest, rvalue, ctx),
             StatementKind::Call { callee, args: _ } => self.matches_call(callee, ctx),
+            StatementKind::Deinit { place } => self.matches_deinit(place, ctx),
+            StatementKind::DeinitIf { place, flag } => self.matches_deinit_if(place, flag, ctx),
+            StatementKind::SetDeinitFlag { flag, value } => {
+                self.matches_set_deinit_flag(flag, *value, ctx)
+            }
         }
     }
 
@@ -250,7 +311,10 @@ impl StatementPattern {
                 }
             }
 
-            StatementPattern::ApplyPartial { func, capture_count } => {
+            StatementPattern::ApplyPartial {
+                func,
+                capture_count,
+            } => {
                 if let Rvalue::ApplyPartial {
                     func: actual_func,
                     captures,
@@ -273,6 +337,32 @@ impl StatementPattern {
                 }
             }
 
+            StatementPattern::CallWithModes { callee, arg_modes } => {
+                if let Rvalue::Call {
+                    callee: actual_callee,
+                    args,
+                } = rvalue
+                {
+                    // Check callee name matches
+                    if !self.callee_matches_name(actual_callee, callee, ctx) {
+                        return false;
+                    }
+                    // Check argument count matches
+                    if args.len() != arg_modes.len() {
+                        return false;
+                    }
+                    // Check each argument's passing mode
+                    for (arg, expected_mode) in args.iter().zip(arg_modes.iter()) {
+                        if arg.mode != *expected_mode {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+
             StatementPattern::StrPtr => matches!(rvalue, Rvalue::StrPtr(_)),
             StatementPattern::StrLen => matches!(rvalue, Rvalue::StrLen(_)),
             StatementPattern::StrFromParts => matches!(rvalue, Rvalue::StrFromParts { .. }),
@@ -280,6 +370,16 @@ impl StatementPattern {
             StatementPattern::PtrToRef => matches!(rvalue, Rvalue::PtrToRef(_)),
             StatementPattern::PtrToRefMut => matches!(rvalue, Rvalue::PtrToRefMut(_)),
             StatementPattern::RefToPtr => matches!(rvalue, Rvalue::RefToPtr(_)),
+
+            // Deinit patterns don't match assignments
+            StatementPattern::Deinit { .. }
+            | StatementPattern::AnyDeinit
+            | StatementPattern::DeinitIf { .. }
+            | StatementPattern::AnyDeinitIf
+            | StatementPattern::SetDeinitFlag { .. }
+            | StatementPattern::AnySetDeinitFlag
+            | StatementPattern::DeinitCall { .. }
+            | StatementPattern::AnyDeinitCall => false,
         }
     }
 
@@ -319,6 +419,25 @@ impl StatementPattern {
 
             StatementPattern::CallEscaping => matches!(callee, Callee::Thick(_)),
 
+            StatementPattern::AnyDeinitCall => {
+                if let Callee::Direct { name, .. } = callee {
+                    let callee_name = ctx.name(*name).to_string();
+                    callee_name.ends_with(".deinit")
+                } else {
+                    false
+                }
+            }
+
+            StatementPattern::DeinitCall { ty } => {
+                if let Callee::Direct { name, .. } = callee {
+                    let callee_name = ctx.name(*name).to_string();
+                    let expected = format!("{}.deinit", ty);
+                    callee_name == expected
+                } else {
+                    false
+                }
+            }
+
             _ => false,
         }
     }
@@ -326,6 +445,72 @@ impl StatementPattern {
     fn callee_matches_name(&self, callee: &Callee, expected: &str, ctx: &MirContext) -> bool {
         match callee {
             Callee::Direct { name, .. } => ctx.name(*name).to_string() == expected,
+            _ => false,
+        }
+    }
+
+    fn matches_deinit(&self, place: &kestrel_execution_graph::Place, ctx: &MirContext) -> bool {
+        match self {
+            StatementPattern::AnyDeinit => true,
+            StatementPattern::Deinit { local } => {
+                if let kestrel_execution_graph::PlaceKind::Local(local_id) = &place.kind {
+                    let actual_local = ctx.local(*local_id);
+                    actual_local.name == *local
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn matches_deinit_if(
+        &self,
+        place: &kestrel_execution_graph::Place,
+        flag: &kestrel_execution_graph::Id<kestrel_execution_graph::Local>,
+        ctx: &MirContext,
+    ) -> bool {
+        match self {
+            StatementPattern::AnyDeinitIf => true,
+            StatementPattern::DeinitIf {
+                local: expected_local,
+                flag: expected_flag,
+            } => {
+                let local_matches =
+                    if let kestrel_execution_graph::PlaceKind::Local(local_id) = &place.kind {
+                        let actual_local = ctx.local(*local_id);
+                        actual_local.name == *expected_local
+                    } else {
+                        false
+                    };
+                let flag_matches = {
+                    let actual_flag = ctx.local(*flag);
+                    actual_flag.name == *expected_flag
+                };
+                local_matches && flag_matches
+            }
+            _ => false,
+        }
+    }
+
+    fn matches_set_deinit_flag(
+        &self,
+        flag: &kestrel_execution_graph::Id<kestrel_execution_graph::Local>,
+        value: bool,
+        ctx: &MirContext,
+    ) -> bool {
+        match self {
+            StatementPattern::AnySetDeinitFlag => true,
+            StatementPattern::SetDeinitFlag {
+                flag: expected_flag,
+                value: expected_value,
+            } => {
+                let flag_matches = {
+                    let actual_flag = ctx.local(*flag);
+                    actual_flag.name == *expected_flag
+                };
+                flag_matches && value == *expected_value
+            }
             _ => false,
         }
     }
@@ -360,10 +545,17 @@ impl StatementPattern {
             StatementPattern::CallEscaping => "escaping call".to_string(),
             StatementPattern::AnyCall => "any call".to_string(),
             StatementPattern::FuncToEscaping { func } => format!("func.to.escaping {}", func),
-            StatementPattern::ApplyPartial { func, capture_count } => {
+            StatementPattern::ApplyPartial {
+                func,
+                capture_count,
+            } => {
                 format!("apply partial {}({} captures)", func, capture_count)
             }
             StatementPattern::Cast { kind } => format!("cast {:?}", kind),
+            StatementPattern::CallWithModes { callee, arg_modes } => {
+                let modes_str: Vec<_> = arg_modes.iter().map(|m| m.as_str()).collect();
+                format!("call {}({})", callee, modes_str.join(", "))
+            }
             StatementPattern::StrPtr => "str.ptr".to_string(),
             StatementPattern::StrLen => "str.len".to_string(),
             StatementPattern::StrFromParts => "str.from_parts".to_string(),
@@ -371,6 +563,18 @@ impl StatementPattern {
             StatementPattern::PtrToRef => "ptr.to.ref".to_string(),
             StatementPattern::PtrToRefMut => "ptr.to.ref_var".to_string(),
             StatementPattern::RefToPtr => "ref.to.ptr".to_string(),
+            StatementPattern::Deinit { local } => format!("deinit %{}", local),
+            StatementPattern::AnyDeinit => "any deinit".to_string(),
+            StatementPattern::DeinitIf { local, flag } => {
+                format!("deinit %{} if %{}", local, flag)
+            }
+            StatementPattern::AnyDeinitIf => "any conditional deinit".to_string(),
+            StatementPattern::SetDeinitFlag { flag, value } => {
+                format!("%{} = {}", flag, value)
+            }
+            StatementPattern::AnySetDeinitFlag => "any set deinit flag".to_string(),
+            StatementPattern::DeinitCall { ty } => format!("call {}.deinit", ty),
+            StatementPattern::AnyDeinitCall => "any deinit call".to_string(),
         }
     }
 }

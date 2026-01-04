@@ -11,6 +11,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
     emit_protocol_declaration, function_declaration_parser_internal, identifier,
@@ -117,7 +118,8 @@ fn protocol_body_item_parser<'tokens>(
 pub fn protocol_declaration_parser_internal<'tokens>(
 ) -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolDeclarationData, ParserExtra<'tokens>> + Clone
 {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(token(Token::Protocol))
         .then(identifier())
         .then(type_parameter_list_parser().or_not())
@@ -131,7 +133,13 @@ pub fn protocol_declaration_parser_internal<'tokens>(
                 (
                     (
                         (
-                            ((((visibility, protocol_span), name_span), type_params), inherited),
+                            (
+                                (
+                                    (((attributes, visibility), protocol_span), name_span),
+                                    type_params,
+                                ),
+                                inherited,
+                            ),
                             where_clause,
                         ),
                         lbrace_span,
@@ -141,13 +149,14 @@ pub fn protocol_declaration_parser_internal<'tokens>(
                 rbrace_span,
             )| {
                 ProtocolDeclarationData {
+                    attributes,
                     visibility,
                     protocol_span,
                     name_span,
                     type_params,
-                    inherited: inherited.map(|(colon_span, types)| ConformanceListData {
+                    inherited: inherited.map(|(colon_span, items)| ConformanceListData {
                         colon_span,
-                        conformances: types,
+                        conformances: items,
                     }),
                     where_clause,
                     lbrace_span,

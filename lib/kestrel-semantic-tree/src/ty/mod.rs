@@ -34,6 +34,7 @@ impl Default for TyId {
     }
 }
 
+use crate::behavior::copy_semantics::CopySemanticsBehavior;
 use crate::language::KestrelLanguage;
 use crate::symbol::associated_type::AssociatedTypeSymbol;
 use crate::symbol::enum_symbol::EnumSymbol;
@@ -57,7 +58,11 @@ pub struct Ty {
 
 impl fmt::Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn fmt_list(f: &mut fmt::Formatter<'_>, mut first: bool, items: impl Iterator<Item = Ty>) -> fmt::Result {
+        fn fmt_list(
+            f: &mut fmt::Formatter<'_>,
+            mut first: bool,
+            items: impl Iterator<Item = Ty>,
+        ) -> fmt::Result {
             for item in items {
                 if !first {
                     f.write_str(", ")?;
@@ -116,9 +121,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -136,9 +141,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -156,9 +161,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -176,9 +181,9 @@ impl fmt::Display for Ty {
                 fmt_list(
                     f,
                     true,
-                    type_params.iter().filter_map(|tp| {
-                        substitutions.get(tp.metadata().id()).cloned()
-                    }),
+                    type_params
+                        .iter()
+                        .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
             }
@@ -194,26 +199,24 @@ impl fmt::Display for Ty {
             TyKind::UnresolvedFunction {
                 param_info,
                 return_type,
-            } => {
-                match param_info {
-                    ParamInfo::Unconstrained => {
-                        write!(f, "(...) -> {}", return_type)
-                    }
-                    ParamInfo::ImplicitIt { it_type } => {
-                        write!(f, "({}) -> {}", it_type, return_type)
-                    }
-                    ParamInfo::Explicit { param_types } => {
-                        f.write_char('(')?;
-                        for (i, p) in param_types.iter().enumerate() {
-                            if i > 0 {
-                                f.write_str(", ")?;
-                            }
-                            write!(f, "{}", p)?;
-                        }
-                        write!(f, ") -> {}", return_type)
-                    }
+            } => match param_info {
+                ParamInfo::Unconstrained => {
+                    write!(f, "(...) -> {}", return_type)
                 }
-            }
+                ParamInfo::ImplicitIt { it_type } => {
+                    write!(f, "({}) -> {}", it_type, return_type)
+                }
+                ParamInfo::Explicit { param_types } => {
+                    f.write_char('(')?;
+                    for (i, p) in param_types.iter().enumerate() {
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
+                        write!(f, "{}", p)?;
+                    }
+                    write!(f, ") -> {}", return_type)
+                }
+            },
         }
     }
 }
@@ -1244,6 +1247,155 @@ impl Ty {
                 return_type,
             } => Some((param_info, return_type)),
             _ => None,
+        }
+    }
+
+    // === Copy semantics ===
+
+    /// Check if this type is copyable.
+    ///
+    /// Copyable types can be copied (bitwise copy, original remains valid).
+    /// Non-copyable types can only be moved (original becomes invalid after move).
+    ///
+    /// # Rules
+    ///
+    /// - **Primitives**: Always copyable (`Unit`, `Never`, `Bool`, `String`, `Int`, `Float`)
+    /// - **Composites**: Copyable if all parts are copyable (`Tuple`, `Array`)
+    /// - **Functions**: Always copyable (function pointers/closures are copyable)
+    /// - **User-defined types**: Check `CopySemanticsBehavior`, default to copyable
+    /// - **Special cases**: `Error`, `TypeParameter`, `Protocol`, `TypeAlias`, `Infer` return true
+    pub fn is_copyable(&self) -> bool {
+        match self.kind() {
+            // Primitives are always copyable
+            TyKind::Unit | TyKind::Never | TyKind::Bool | TyKind::String => true,
+            TyKind::Int(_) | TyKind::Float(_) => true,
+
+            // Composites: copyable if all parts are copyable
+            TyKind::Tuple(elements) => elements.iter().all(|e| e.is_copyable()),
+            TyKind::Array(element) => element.is_copyable(),
+
+            // Functions are always copyable
+            TyKind::Function { .. } => true,
+            TyKind::UnresolvedFunction { .. } => true,
+
+            // User-defined types: check CopySemanticsBehavior
+            TyKind::Struct { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_copyable())
+                .unwrap_or(true), // Default to copyable
+
+            TyKind::Enum { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_copyable())
+                .unwrap_or(true), // Default to copyable
+
+            // Error type: return true to avoid cascading errors
+            TyKind::Error => true,
+
+            // Type parameters: by default assume copyable (implicit Copyable bound)
+            // Use is_copyable_with_where_clause for context-aware check
+            TyKind::TypeParameter(_) => true,
+
+            // Protocols: protocols themselves aren't values
+            TyKind::Protocol { .. } => true,
+
+            // Type aliases: should be resolved at runtime, return true
+            TyKind::TypeAlias { .. } => true,
+
+            // Associated types: not yet resolved, return true
+            TyKind::AssociatedType { .. } => true,
+
+            // Self type: depends on context, return true for now
+            TyKind::SelfType => true,
+
+            // Infer: type not yet known, will be resolved
+            TyKind::Infer => true,
+        }
+    }
+
+    /// Check if this type is cloneable (requires clone() to copy).
+    ///
+    /// Cloneable types must be explicitly cloned to copy - they cannot be bitwise copied.
+    /// This is distinct from copyable types which can be implicitly copied.
+    ///
+    /// # Rules
+    ///
+    /// - **Primitives**: Never cloneable (they are copyable, not cloneable)
+    /// - **Composites**: Cloneable if any part is cloneable (`Tuple`, `Array`)
+    /// - **Functions**: Never cloneable (they are copyable)
+    /// - **User-defined types**: Check `CopySemanticsBehavior` for `Cloneable` semantics
+    /// - **Type parameters**: Not cloneable by default (assumed Copyable)
+    pub fn is_cloneable(&self) -> bool {
+        match self.kind() {
+            // Primitives are copyable, not cloneable
+            TyKind::Unit | TyKind::Never | TyKind::Bool | TyKind::String => false,
+            TyKind::Int(_) | TyKind::Float(_) => false,
+
+            // Composites: cloneable if any part is cloneable
+            TyKind::Tuple(elements) => elements.iter().any(|e| e.is_cloneable()),
+            TyKind::Array(element) => element.is_cloneable(),
+
+            // Functions are copyable, not cloneable
+            TyKind::Function { .. } => false,
+            TyKind::UnresolvedFunction { .. } => false,
+
+            // User-defined types: check CopySemanticsBehavior for Cloneable
+            TyKind::Struct { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_cloneable())
+                .unwrap_or(false), // Default to not cloneable (copyable)
+
+            TyKind::Enum { symbol, .. } => symbol
+                .metadata()
+                .get_behavior::<CopySemanticsBehavior>()
+                .map(|b| b.is_cloneable())
+                .unwrap_or(false), // Default to not cloneable (copyable)
+
+            // Error type: return false to avoid unexpected behavior
+            TyKind::Error => false,
+
+            // Type parameters: by default assume copyable (not cloneable)
+            TyKind::TypeParameter(_) => false,
+
+            // Protocols: protocols themselves aren't values
+            TyKind::Protocol { .. } => false,
+
+            // Type aliases: should be resolved, return false
+            TyKind::TypeAlias { .. } => false,
+
+            // Associated types: not yet resolved, return false
+            TyKind::AssociatedType { .. } => false,
+
+            // Self type: depends on context, return false for now
+            TyKind::SelfType => false,
+
+            // Infer: type not yet known, will be resolved
+            TyKind::Infer => false,
+        }
+    }
+
+    /// Check if this type is copyable within a where clause context.
+    ///
+    /// This is like `is_copyable()` but takes a where clause into account for type parameters.
+    /// A type parameter `T` is:
+    /// - Copyable by default (implicit `Copyable` bound)
+    /// - Not copyable if it has a `T: not Copyable` constraint in the where clause
+    ///
+    /// For concrete types, this behaves the same as `is_copyable()`.
+    pub fn is_copyable_in_context(&self, where_clause: &WhereClause) -> bool {
+        match self.kind() {
+            // Type parameters: check for `not Copyable` bound
+            TyKind::TypeParameter(param) => {
+                let param_id = param.metadata().id();
+                // If there's a `not Copyable` bound, the type parameter is not copyable
+                !where_clause.has_not_copyable(param_id)
+            }
+
+            // For all other types, delegate to the regular is_copyable check
+            _ => self.is_copyable(),
         }
     }
 }

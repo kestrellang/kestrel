@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -9,16 +12,227 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::resolution::LocalScope;
+use crate::diagnostics::{
+    BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
+    DuplicateBuiltinError,
+};
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
 pub struct FunctionBinder;
 
+impl FunctionBinder {
+    /// Process @builtin attribute on a function.
+    fn process_builtin_attribute(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        attributes: &AttributesBehavior,
+        source: &str,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        let feature = match parse_builtin_attribute(attributes, source, context.diagnostics) {
+            BuiltinParseResult::Success(f) => f,
+            BuiltinParseResult::NotBuiltin | BuiltinParseResult::Error => return,
+        };
+
+        let definition = feature.definition();
+        let attr_span = attributes
+            .get_kind(kestrel_semantic_tree::attributes::AttributeKind::Builtin)
+            .map(|a| a.span.clone())
+            .unwrap_or_else(|| symbol.metadata().span().clone());
+
+        let symbol_id = symbol.metadata().id();
+
+        // Check if this is a protocol method builtin
+        if let BuiltinKind::ProtocolMethod { protocol_feature } = &definition.kind {
+            Self::process_protocol_method_builtin(
+                symbol,
+                feature,
+                *protocol_feature,
+                attr_span,
+                syntax,
+                source,
+                context,
+            );
+            return;
+        }
+
+        // Validate: feature must expect a function
+        if !definition.kind.is_function() {
+            context.diagnostics.throw(BuiltinWrongKindError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+                expected_kind: definition.kind.kind_name().to_string(),
+                actual_kind: "function".to_string(),
+            });
+            return;
+        }
+
+        // Register the builtin
+        if !context
+            .model
+            .builtin_registry()
+            .register_function(feature, symbol_id)
+        {
+            context.diagnostics.throw(DuplicateBuiltinError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+            });
+        }
+    }
+
+    /// Process @builtin attribute for a protocol method (e.g., @builtin(.Clone)).
+    fn process_protocol_method_builtin(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        feature: LanguageFeature,
+        protocol_feature: LanguageFeature,
+        attr_span: Span,
+        syntax: &SyntaxNode,
+        source: &str,
+        context: &mut BindingContext,
+    ) {
+        let symbol_id = symbol.metadata().id();
+
+        // Validate: parent must be a protocol with @builtin matching the required protocol feature
+        let parent = symbol.metadata().parent();
+        let parent_is_correct_builtin_protocol = parent
+            .as_ref()
+            .filter(|p| p.metadata().kind() == KestrelSymbolKind::Protocol)
+            .and_then(|p| {
+                context
+                    .model
+                    .builtin_registry()
+                    .protocol_feature(p.metadata().id())
+            })
+            .map(|pf| pf == protocol_feature)
+            .unwrap_or(false);
+
+        if !parent_is_correct_builtin_protocol {
+            context.diagnostics.throw(BuiltinMethodNotInProtocolError {
+                span: attr_span,
+                method_feature: feature.name().to_string(),
+                required_protocol_feature: protocol_feature.name().to_string(),
+            });
+            return;
+        }
+
+        // Validate signature based on the specific feature
+        if let Err(expected_signature) =
+            Self::validate_protocol_method_signature(feature, symbol, syntax, source)
+        {
+            context.diagnostics.throw(BuiltinMethodWrongSignatureError {
+                span: attr_span,
+                method_feature: feature.name().to_string(),
+                expected_signature,
+            });
+            return;
+        }
+
+        // Register the builtin method
+        if !context
+            .model
+            .builtin_registry()
+            .register_method(feature, symbol_id)
+        {
+            context.diagnostics.throw(DuplicateBuiltinError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+            });
+        }
+    }
+
+    /// Validate the signature for a builtin protocol method.
+    /// Returns Ok(()) if valid, Err(expected_signature) if invalid.
+    fn validate_protocol_method_signature(
+        feature: LanguageFeature,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        source: &str,
+    ) -> Result<(), String> {
+        match feature {
+            LanguageFeature::Clone => Self::validate_clone_signature(symbol, syntax, source),
+            // Add more protocol method validations here as needed
+            _ => Ok(()), // Unknown method features pass validation by default
+        }
+    }
+
+    /// Validate the signature for @builtin(.Clone): `func clone(self) -> Self`
+    ///
+    /// Requirements:
+    /// - Must be an instance method (has a receiver)
+    /// - Must take no parameters besides self
+    /// - Must return Self
+    fn validate_clone_signature(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        source: &str,
+    ) -> Result<(), String> {
+        let expected = "func clone(self) -> Self".to_string();
+
+        // Check for receiver (must be an instance method)
+        let is_static = syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::StaticModifier);
+
+        if is_static {
+            return Err(expected);
+        }
+
+        // Check parent is a protocol (instance method context)
+        let parent_kind = symbol.metadata().parent().map(|p| p.metadata().kind());
+        if !matches!(parent_kind, Some(KestrelSymbolKind::Protocol)) {
+            return Err(expected);
+        }
+
+        // Check parameters: should have no explicit parameters (only implicit self)
+        // In protocol methods, `self` is implicit for instance methods
+        if let Some(params_node) = find_child(syntax, SyntaxKind::ParameterList) {
+            let param_count = params_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::Parameter)
+                .count();
+
+            if param_count > 0 {
+                return Err(expected);
+            }
+        }
+
+        // Check return type: must be Self
+        if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
+            if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
+                // Check if it's a TyPath containing just "Self"
+                if let Some(ty_path) = ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
+                    // Get the text of the type path
+                    let start: usize = ty_path.text_range().start().into();
+                    let end: usize = ty_path.text_range().end().into();
+                    let type_text = source[start..end].trim();
+
+                    if type_text != "Self" {
+                        return Err(expected);
+                    }
+                } else {
+                    // Not a TyPath (could be tuple, function, etc.)
+                    return Err(expected);
+                }
+            } else {
+                // No Ty node in return type
+                return Err(expected);
+            }
+        } else {
+            // No return type specified (returns Unit, not Self)
+            return Err(expected);
+        }
+
+        Ok(())
+    }
+}
+
 impl DeclarationBinder for FunctionBinder {
-    fn bind_declaration(
+    fn bind_signature(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
@@ -35,21 +249,28 @@ impl DeclarationBinder for FunctionBinder {
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
+        // Resolve attributes
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+            syntax,
+            &source,
+            context.diagnostics,
+        );
+        symbol.metadata().add_behavior(attributes_behavior.clone());
+
+        // Process @builtin attribute if present
+        Self::process_builtin_attribute(symbol, &attributes_behavior, &source, syntax, context);
+
         // Extract type parameters and resolve where clause bounds FIRST
         // This must happen before resolving parameter/return types so that
         // T.Item paths can find the protocol bounds for T
-        let generics_behavior =
-            crate::binders::utils::generics::resolve_generics(syntax, &source, file_id, symbol_id, context);
+        let generics_behavior = crate::binders::utils::generics::resolve_generics(
+            syntax, &source, file_id, symbol_id, context,
+        );
         symbol.metadata().add_behavior(generics_behavior);
 
         // Now extract and resolve parameters from syntax (T.Item will work)
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
-            syntax,
-            &source,
-            file_id,
-            symbol_id,
-            context,
-            false,
+            syntax, &source, file_id, symbol_id, context, false,
         );
 
         // Extract and resolve return type from syntax (T.Item will work)
@@ -70,6 +291,29 @@ impl DeclarationBinder for FunctionBinder {
             None => CallableBehavior::new(resolved_params.clone(), resolved_return, span),
         };
         symbol.metadata().add_behavior(resolved_callable);
+
+        // NOTE: Body resolution is deferred to bind_body() to handle forward references
+    }
+
+    fn bind_body(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        // Only process function symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Function {
+            return;
+        }
+
+        // Get the CallableBehavior to extract resolved parameters
+        let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() else {
+            return;
+        };
+        let resolved_params = callable.parameters().to_vec();
+
+        let source = context.source_for_symbol(symbol);
+        let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve function body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
@@ -94,7 +338,9 @@ fn resolve_function_body(
     source: &str,
     file_id: usize,
 ) {
-    use crate::body_resolver::context::{create_local_scope_for_body, resolve_body_and_attach_executable};
+    use crate::body_resolver::context::{
+        create_local_scope_for_body, resolve_body_and_attach_executable,
+    };
     use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -137,30 +383,40 @@ fn resolve_function_body(
     }
 
     // Add parameters to local scope
+    // Mutability depends on access mode:
+    // - Borrow: immutable (read-only)
+    // - Mutating: mutable (read-write, but caller keeps ownership)
+    // - Consuming: mutable (takes ownership, can modify)
     for param in params {
+        use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
         let param_span = param.bind_name.span.clone();
+        let is_mutable = match param.access_mode {
+            ParameterAccessMode::Borrow => false,
+            ParameterAccessMode::Mutating => true,
+            ParameterAccessMode::Consuming => true,
+        };
         // Add to local scope (this also adds it to the FunctionSymbol's locals)
-        local_scope.bind(
-            param_name,
-            param_ty,
-            false,
-            param_span,
-        );
+        local_scope.bind(param_name, param_ty, is_mutable, param_span);
     }
 
+    // Get the where clause from the function's generics behavior
+    let where_clause = symbol
+        .metadata()
+        .get_behavior::<GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
     // Create body resolution context
-    let mut body_ctx = BodyResolutionContext {
-        model: context.model,
-        diagnostics: context.diagnostics,
+    let mut body_ctx = BodyResolutionContext::new_with_scope(
+        context.model,
+        context.diagnostics,
         source,
         file_id,
-        function_id: symbol.metadata().id(),
+        symbol.metadata().id(),
         local_scope,
-        loop_stack: Vec::new(),
-        next_loop_id: 0,
-    };
+        where_clause,
+    );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);
 }

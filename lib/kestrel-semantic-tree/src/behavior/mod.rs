@@ -1,6 +1,9 @@
+pub mod attributes;
 pub mod callable;
 pub mod conformances;
 pub mod conforms_to;
+pub mod copy_semantics;
+pub mod deinit;
 pub mod executable;
 pub mod extension_target;
 pub mod function_data;
@@ -14,9 +17,12 @@ pub mod visibility;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KestrelBehaviorKind {
     AssociatedTypeBounds,
+    Attributes,
     Callable,
     Conformances,
     ConformsTo,
+    CopySemantics,
+    Deinit,
     Executable,
     ExtensionTarget,
     FlattenedProtocol,

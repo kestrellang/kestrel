@@ -16,9 +16,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{
-    AmbiguousNameError, NotGenericError, SelfOutsideInstanceMethodError,
+    AmbiguousNameError, MaybeMovedError, NotGenericError, SelfOutsideInstanceMethodError,
     TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
-    UndefinedNameError,
+    UndefinedNameError, UseAfterMoveError,
 };
 use crate::resolution::type_resolver::TypeResolver;
 use kestrel_syntax_tree::utils::get_node_span;
@@ -60,6 +60,32 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
     // First, check if it's a local variable
     if let Some(local_id) = ctx.local_scope.lookup(first_name) {
+        // Check for use-after-move: if this variable has been moved, emit an error
+        if let Some(moved_span) = ctx.move_tracker().get_move_span(local_id) {
+            ctx.diagnostics.add_diagnostic(
+                UseAfterMoveError {
+                    use_span: first_span.clone(),
+                    name: first_name.clone(),
+                    moved_at: moved_span,
+                }
+                .into_diagnostic(),
+            );
+            return Expression::error(span);
+        }
+
+        // Check for use-after-maybe-move: if this variable may have been moved, emit an error
+        if let Some(moved_span) = ctx.move_tracker().get_maybe_move_span(local_id) {
+            ctx.diagnostics.add_diagnostic(
+                MaybeMovedError {
+                    use_span: first_span.clone(),
+                    name: first_name.clone(),
+                    moved_at: moved_span,
+                }
+                .into_diagnostic(),
+            );
+            return Expression::error(span);
+        }
+
         // Check for type arguments on the variable itself (first segment only) - not allowed
         // Only check if this is a single-segment path (just `x[T]`), not `x.member[T]`
         if path_with_spans.len() == 1 && has_type_arguments_on_first_segment(node) {

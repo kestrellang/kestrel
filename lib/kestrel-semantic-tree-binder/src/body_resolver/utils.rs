@@ -550,6 +550,7 @@ pub fn substitute_type(ty: &Ty, substitutions: &Substitutions) -> Ty {
 pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
     match kind {
         KestrelSymbolKind::AssociatedType => "associated type".to_string(),
+        KestrelSymbolKind::Deinit => "deinit".to_string(),
         KestrelSymbolKind::Enum => "enum".to_string(),
         KestrelSymbolKind::EnumCase => "enum case".to_string(),
         KestrelSymbolKind::Extension => "extension".to_string(),

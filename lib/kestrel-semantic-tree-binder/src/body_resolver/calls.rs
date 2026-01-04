@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
+use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -25,7 +26,9 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::resolution::type_resolver::TypeResolver;
 
 use crate::diagnostics::{
-    AmbiguousTypeParameterInitError, ClosureArityError, FieldNotVisibleForInitError,
+    AmbiguousTypeParameterInitError, CannotMutateThroughImmutableBindingError,
+    CannotPassImmutableFieldToMutatingError, CannotPassLetToMutatingError,
+    CannotPassTemporaryToMutatingError, ClosureArityError, FieldNotVisibleForInitError,
     ImplicitInitArityError, ImplicitInitLabelError, InstanceMethodOnTypeError,
     MemberNotVisibleError, NoInitInTypeParameterBoundsError, NoMatchingInitializerError,
     NoMatchingMethodError, NoMatchingOverloadError, NoMatchingTypeParameterInitError,
@@ -205,8 +208,13 @@ fn extract_type_arguments_from_callee(
 
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
-            let mut resolver =
-                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.file_id, ctx.function_id);
+            let mut resolver = TypeResolver::new(
+                ctx.model,
+                ctx.diagnostics,
+                ctx.source,
+                ctx.file_id,
+                ctx.function_id,
+            );
             let ty = resolver.resolve(&child);
             type_args.push(ty);
         }
@@ -217,7 +225,10 @@ fn extract_type_arguments_from_callee(
 }
 
 /// Resolve an argument list node into CallArguments
-pub(crate) fn resolve_argument_list(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<CallArgument> {
+pub(crate) fn resolve_argument_list(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<CallArgument> {
     let mut arguments = Vec::new();
 
     for child in node.children() {
@@ -527,11 +538,17 @@ fn resolve_single_function_call(
         return Expression::error(span);
     }
 
+    // Validate access modes for arguments (mutating parameters require mutable lvalues)
+    validate_argument_access_modes(&callable, &arguments, &span, ctx);
+
     // For static methods, get the parent type for Self substitution
     use super::utils::substitute_self;
     use kestrel_semantic_tree::behavior::typed::TypedBehavior;
     let self_replacement: Option<Ty> = symbol.metadata().parent().and_then(|parent| {
-        parent.metadata().get_behavior::<TypedBehavior>().map(|typed| typed.ty().clone())
+        parent
+            .metadata()
+            .get_behavior::<TypedBehavior>()
+            .map(|typed| typed.ty().clone())
     });
 
     // Get return type and substitutions, applying explicit type arguments if provided
@@ -647,13 +664,14 @@ fn resolve_single_function_call(
         } else if symbol.as_any().downcast_ref::<EnumCaseSymbol>().is_some() {
             // Enum case - check if callee already has concrete types from qualified path
             // e.g., Result[Int, Bool].Ok already has substitutions applied
-            let from_qualified_path = if let TyKind::Function { return_type, .. } = callee.ty.kind() {
+            let from_qualified_path = if let TyKind::Function { return_type, .. } = callee.ty.kind()
+            {
                 // Check if the return type is a concrete enum (not just type parameters)
                 if let TyKind::Enum { substitutions, .. } = return_type.kind() {
                     // Check if substitutions contain concrete types (not just type parameters)
-                    let has_concrete_subs = substitutions.iter().any(|(_, ty)| {
-                        !matches!(ty.kind(), TyKind::TypeParameter(_))
-                    });
+                    let has_concrete_subs = substitutions
+                        .iter()
+                        .any(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
                     if has_concrete_subs {
                         // Use the already-substituted return type from the callee
                         Some((return_type.as_ref().clone(), substitutions.clone()))
@@ -666,7 +684,7 @@ fn resolve_single_function_call(
             } else {
                 None
             };
-            
+
             if let Some((ret_ty, subs)) = from_qualified_path {
                 (ret_ty, subs)
             } else if let Some(parent) = symbol.metadata().parent() {
@@ -676,10 +694,12 @@ fn resolve_single_function_call(
 
                     if !type_params.is_empty() {
                         // Collect argument types
-                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let arg_types: Vec<Ty> =
+                            arguments.iter().map(|a| a.value.ty.clone()).collect();
 
                         // Infer type arguments from argument types
-                        let substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
+                        let substitutions =
+                            infer_type_arguments(&type_params, &callable, &arg_types);
 
                         // Apply substitution to return type
                         let return_ty = substitute_type(callable.return_type(), &substitutions);
@@ -719,7 +739,13 @@ fn resolve_single_function_call(
         callee
     };
 
-    Expression::generic_call(instantiated_callee, arguments, call_substitutions, return_ty, span)
+    Expression::generic_call(
+        instantiated_callee,
+        arguments,
+        call_substitutions,
+        return_ty,
+        span,
+    )
 }
 
 /// Collect a single overload description from a symbol.
@@ -771,6 +797,9 @@ fn resolve_overloaded_call(
         if let Some(symbol) = ctx.model.query(SymbolFor { id: candidate_id }) {
             if let Some(callable) = get_callable_behavior(&symbol) {
                 if matches_signature(&callable, arguments.len(), arg_labels) {
+                    // Validate access modes for arguments
+                    validate_argument_access_modes(&callable, &arguments, &span, ctx);
+
                     let return_ty = callable.return_type().clone();
                     // Functions are not mutable lvalues
                     let resolved_callee = Expression::symbol_ref(
@@ -821,7 +850,21 @@ pub fn resolve_struct_instantiation(
 
     // Verify it's a struct
     if symbol.metadata().kind() != KestrelSymbolKind::Struct {
-        // Not a struct - cannot instantiate
+        // Not a struct - check if it's a function.
+        // NOTE: With two-pass binding, CallableBehavior should always be available
+        // for functions, so they should resolve as SymbolRef not TypeRef. This
+        // fallback handles any edge cases where that doesn't happen.
+        if symbol.metadata().kind() == KestrelSymbolKind::Function {
+            if let Some(callable) = get_callable_behavior(&symbol) {
+                // Validate access modes for arguments
+                validate_argument_access_modes(&callable, &arguments, &span, ctx);
+
+                let return_ty = callable.return_type().clone();
+                let fn_ty = callable.function_type();
+                let callee = Expression::symbol_ref(symbol_id, fn_ty, false, span.clone());
+                return Expression::call(callee, arguments, return_ty, span);
+            }
+        }
         // TODO: Add proper error diagnostic
         return Expression::error(span);
     }
@@ -893,11 +936,8 @@ fn resolve_explicit_init_call(
                 let init_id = init_sym.metadata().id();
 
                 // Build the function type for the initializer
-                let param_tys: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| p.ty.clone())
-                    .collect();
+                let param_tys: Vec<Ty> =
+                    callable.parameters().iter().map(|p| p.ty.clone()).collect();
                 let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
 
                 let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
@@ -1077,8 +1117,12 @@ pub fn resolve_method_call(
                     let resolved_receiver_ty = match &receiver.kind {
                         ExprKind::TypeRef(type_symbol_id) => {
                             // For static methods, get the actual struct type from the symbol
-                            if let Some(type_sym) = ctx.model.query(SymbolFor { id: *type_symbol_id }) {
-                                if let Some(typed) = type_sym.metadata().get_behavior::<TypedBehavior>() {
+                            if let Some(type_sym) = ctx.model.query(SymbolFor {
+                                id: *type_symbol_id,
+                            }) {
+                                if let Some(typed) =
+                                    type_sym.metadata().get_behavior::<TypedBehavior>()
+                                {
                                     typed.ty().clone()
                                 } else {
                                     receiver.ty.clone()
@@ -1091,7 +1135,8 @@ pub fn resolve_method_call(
                     };
 
                     // Get return type, substituting Self with the resolved receiver type
-                    let mut return_ty = substitute_self(callable.return_type(), &resolved_receiver_ty);
+                    let mut return_ty =
+                        substitute_self(callable.return_type(), &resolved_receiver_ty);
                     let mut call_substitutions = Substitutions::new();
                     if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Add receiver's substitutions to call_substitutions
@@ -1105,7 +1150,8 @@ pub fn resolve_method_call(
                     // This handles the case like Box.wrap(42) where T needs to be inferred from the argument
                     // Also handles Box[Int].wrap(42) where substitutions are already available
                     if explicit_type_args.is_none() {
-                        let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let arg_types: Vec<Ty> =
+                            arguments.iter().map(|a| a.value.ty.clone()).collect();
                         let mut inferred_any = false;
                         for (param, arg_ty) in callable.parameters().iter().zip(arg_types.iter()) {
                             if let TyKind::TypeParameter(type_param) = param.ty.kind() {
@@ -1134,6 +1180,9 @@ pub fn resolve_method_call(
                             return_ty = substitute_type(&return_ty, &call_substitutions);
                         }
                     }
+
+                    // Validate access modes for arguments
+                    validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
                     // Compute the function type with substitutions applied
                     // Must substitute both type parameters AND Self
@@ -1459,4 +1508,269 @@ fn collect_protocol_initializers(
             }
         }
     }
+}
+
+// =============================================================================
+// ACCESS MODE VALIDATION
+// =============================================================================
+
+/// Result of classifying an expression's mutability for access mode validation.
+#[derive(Debug)]
+enum MutabilityClassification {
+    /// Expression is a mutable lvalue (var binding or mutable field chain)
+    Mutable,
+    /// Expression is an immutable local binding (let)
+    ImmutableLocal { name: String, span: Span },
+    /// Expression is an immutable field (let field)
+    ImmutableField {
+        field_name: String,
+        field_span: Option<Span>,
+    },
+    /// Expression has a mutable field but the root binding is immutable (let)
+    ImmutableThroughBinding {
+        binding_name: String,
+        binding_span: Span,
+        field_path: String,
+    },
+    /// Expression is a temporary value (not an lvalue)
+    Temporary,
+}
+
+/// Classify an expression's mutability for access mode validation.
+///
+/// This walks the expression tree to determine:
+/// - Whether it's an lvalue (can be assigned to)
+/// - If so, whether it's mutable throughout the entire access chain
+fn classify_mutability(expr: &Expression, ctx: &BodyResolutionContext) -> MutabilityClassification {
+    match &expr.kind {
+        // Local variable reference
+        ExprKind::LocalRef(local_id) => {
+            if let Some(local) = ctx.local_scope.get_local(*local_id) {
+                if local.is_mutable() {
+                    MutabilityClassification::Mutable
+                } else {
+                    MutabilityClassification::ImmutableLocal {
+                        name: local.name().to_string(),
+                        span: local.span().clone(),
+                    }
+                }
+            } else {
+                // Local not found - shouldn't happen, treat as temporary
+                MutabilityClassification::Temporary
+            }
+        }
+
+        // Field access: obj.field
+        ExprKind::FieldAccess { object, field } => {
+            // First check if the expression is already marked as mutable
+            if expr.mutable {
+                return MutabilityClassification::Mutable;
+            }
+
+            // Walk up the chain to find why it's not mutable
+            classify_field_chain_mutability(object, field, ctx)
+        }
+
+        // Tuple index: tuple.0
+        ExprKind::TupleIndex { tuple, .. } => {
+            // Tuple elements inherit mutability from the tuple expression
+            if expr.mutable {
+                MutabilityClassification::Mutable
+            } else {
+                // Classify based on the tuple expression
+                classify_mutability(tuple, ctx)
+            }
+        }
+
+        // Grouping expression: (expr)
+        ExprKind::Grouping(inner) => classify_mutability(inner, ctx),
+
+        // Everything else is a temporary (call results, literals, etc.)
+        _ => MutabilityClassification::Temporary,
+    }
+}
+
+/// Classify mutability for a field access chain, finding the cause of immutability.
+fn classify_field_chain_mutability(
+    object: &Expression,
+    current_field: &str,
+    ctx: &BodyResolutionContext,
+) -> MutabilityClassification {
+    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+
+    // First, check if the field itself is immutable
+    // Look up the field in the object's type
+    if let Some((struct_symbol, _)) = object.ty.as_struct_with_subs() {
+        for child in struct_symbol.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Field
+                && child.metadata().name().value == current_field
+            {
+                if let Some(field_sym) = child.as_any().downcast_ref::<FieldSymbol>() {
+                    if !field_sym.is_mutable() {
+                        // The field itself is immutable (let field)
+                        return MutabilityClassification::ImmutableField {
+                            field_name: current_field.to_string(),
+                            field_span: Some(child.metadata().name().span.clone()),
+                        };
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // The field is mutable, so check the object expression
+    match &object.kind {
+        ExprKind::LocalRef(local_id) => {
+            if let Some(local) = ctx.local_scope.get_local(*local_id) {
+                if local.is_mutable() {
+                    MutabilityClassification::Mutable
+                } else {
+                    // The root is an immutable binding
+                    MutabilityClassification::ImmutableThroughBinding {
+                        binding_name: local.name().to_string(),
+                        binding_span: local.span().clone(),
+                        field_path: current_field.to_string(),
+                    }
+                }
+            } else {
+                MutabilityClassification::Temporary
+            }
+        }
+
+        ExprKind::FieldAccess {
+            object: inner_object,
+            field: inner_field,
+        } => {
+            // Recurse up the chain, tracking the field path
+            let inner_result = classify_field_chain_mutability(inner_object, inner_field, ctx);
+            match inner_result {
+                MutabilityClassification::ImmutableThroughBinding {
+                    binding_name,
+                    binding_span,
+                    field_path,
+                } => MutabilityClassification::ImmutableThroughBinding {
+                    binding_name,
+                    binding_span,
+                    field_path: format!("{}.{}", field_path, current_field),
+                },
+                other => other,
+            }
+        }
+
+        // For other expression types as object, treat as temporary
+        _ => MutabilityClassification::Temporary,
+    }
+}
+
+/// Validate that arguments satisfy access mode requirements.
+///
+/// For `mutating` parameters, the argument must be a mutable lvalue:
+/// - A `var` binding (not `let`)
+/// - A mutable field chain (all fields in the path must be `var`, and root must be `var`)
+///
+/// Returns true if validation passed, false if errors were emitted.
+pub fn validate_argument_access_modes(
+    callable: &kestrel_semantic_tree::behavior::callable::CallableBehavior,
+    arguments: &[CallArgument],
+    call_span: &Span,
+    ctx: &mut BodyResolutionContext,
+) -> bool {
+    let mut valid = true;
+    let params = callable.parameters();
+
+    for (i, arg) in arguments.iter().enumerate() {
+        let Some(param) = params.get(i) else {
+            continue;
+        };
+
+        match param.access_mode() {
+            ParameterAccessMode::Borrow => {
+                // Borrow accepts any expression - no validation needed
+            }
+            ParameterAccessMode::Consuming => {
+                // For consuming parameters with non-copyable types, mark the local as moved
+                // so subsequent uses will trigger a use-after-move error
+                if let ExprKind::LocalRef(local_id) = &arg.value.kind {
+                    // Only mark as moved if the type is non-copyable
+                    // Use context-aware check that considers `T: not Copyable` bounds
+                    if !arg.value.ty.is_copyable_in_context(ctx.where_clause()) {
+                        ctx.move_tracker_mut()
+                            .mark_moved(*local_id, arg.value.span.clone());
+                    }
+                }
+            }
+            ParameterAccessMode::Mutating => {
+                // Mutating requires a mutable lvalue
+                let classification = classify_mutability(&arg.value, ctx);
+                let param_name = param.internal_name().to_string();
+
+                match classification {
+                    MutabilityClassification::Mutable => {
+                        // Good - mutable lvalue
+                    }
+                    MutabilityClassification::ImmutableLocal { name, span } => {
+                        ctx.diagnostics.add_diagnostic(
+                            CannotPassLetToMutatingError {
+                                call_span: call_span.clone(),
+                                argument_span: arg.value.span.clone(),
+                                binding_name: name,
+                                binding_span: span,
+                                parameter_name: param_name,
+                            }
+                            .into_diagnostic(),
+                        );
+                        valid = false;
+                    }
+                    MutabilityClassification::ImmutableField {
+                        field_name,
+                        field_span,
+                    } => {
+                        ctx.diagnostics.add_diagnostic(
+                            CannotPassImmutableFieldToMutatingError {
+                                call_span: call_span.clone(),
+                                argument_span: arg.value.span.clone(),
+                                field_name,
+                                field_span,
+                                parameter_name: param_name,
+                            }
+                            .into_diagnostic(),
+                        );
+                        valid = false;
+                    }
+                    MutabilityClassification::ImmutableThroughBinding {
+                        binding_name,
+                        binding_span,
+                        field_path,
+                    } => {
+                        ctx.diagnostics.add_diagnostic(
+                            CannotMutateThroughImmutableBindingError {
+                                call_span: call_span.clone(),
+                                argument_span: arg.value.span.clone(),
+                                binding_name,
+                                binding_span,
+                                field_path,
+                                parameter_name: param_name,
+                            }
+                            .into_diagnostic(),
+                        );
+                        valid = false;
+                    }
+                    MutabilityClassification::Temporary => {
+                        ctx.diagnostics.add_diagnostic(
+                            CannotPassTemporaryToMutatingError {
+                                call_span: call_span.clone(),
+                                argument_span: arg.value.span.clone(),
+                                parameter_name: param_name,
+                            }
+                            .into_diagnostic(),
+                        );
+                        valid = false;
+                    }
+                }
+            }
+        }
+    }
+
+    valid
 }

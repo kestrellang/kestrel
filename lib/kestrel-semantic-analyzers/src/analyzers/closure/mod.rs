@@ -394,5 +394,8 @@ fn walk_statement_for_assignments(
                 find_assignments_to_locals(yield_expr, target_locals, container_id, ctx);
             }
         }
+        kestrel_semantic_tree::stmt::StatementKind::Deinit { .. } => {
+            // Deinit statement has no expressions that could contain assignments
+        }
     }
 }

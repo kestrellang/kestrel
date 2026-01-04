@@ -70,6 +70,11 @@ pub fn lower_match_expr(
     let result_local = ctx.create_temp("match_result", result_ty);
     let result_place = Place::local(result_local);
 
+    // Track the temp for deinit if the result type needs deinit
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
     // Lower the scrutinee
     let scrutinee_value = lower_expression(ctx, scrutinee);
 

@@ -9,6 +9,7 @@ use kestrel_span::Span;
 use crate::behavior::executable::CodeBlock;
 use crate::expr::{Expression, IfCondition};
 use crate::pattern::Pattern;
+use crate::symbol::local::LocalId;
 
 /// Represents the kind of statement.
 #[derive(Debug, Clone)]
@@ -32,6 +33,16 @@ pub enum StatementKind {
         conditions: Vec<IfCondition>,
         /// The else block (must diverge)
         else_block: CodeBlock,
+    },
+    /// Deinit statement: `deinit x;`
+    ///
+    /// Explicitly runs the destructor for a variable and marks it as moved.
+    /// The variable cannot be used after this point.
+    Deinit {
+        /// The local variable being deinited
+        local_id: LocalId,
+        /// The name of the variable (for diagnostics)
+        name: String,
     },
 }
 
@@ -80,6 +91,14 @@ impl Statement {
         }
     }
 
+    /// Create a deinit statement.
+    pub fn deinit(local_id: LocalId, name: String, span: Span) -> Self {
+        Statement {
+            kind: StatementKind::Deinit { local_id, name },
+            span,
+        }
+    }
+
     /// Check if this is a binding statement.
     pub fn is_binding(&self) -> bool {
         matches!(self.kind, StatementKind::Binding { .. })
@@ -93,6 +112,11 @@ impl Statement {
     /// Check if this is a guard-let statement.
     pub fn is_guard_let(&self) -> bool {
         matches!(self.kind, StatementKind::GuardLet { .. })
+    }
+
+    /// Check if this is a deinit statement.
+    pub fn is_deinit(&self) -> bool {
+        matches!(self.kind, StatementKind::Deinit { .. })
     }
 
     /// Get the pattern if this is a binding statement.
@@ -168,6 +192,9 @@ impl Statement {
                     IfCondition::Expr(e) => e.debug_compact(),
                 }).collect();
                 format!("guard {} else {{ ... }}", conds.join(", "))
+            }
+            StatementKind::Deinit { name, .. } => {
+                format!("deinit {};", name)
             }
         }
     }

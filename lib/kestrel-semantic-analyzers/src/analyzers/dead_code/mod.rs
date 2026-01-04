@@ -148,6 +148,10 @@ fn analyze_statement(stmt: &Statement, errors: &mut Vec<UnreachableCodeWarning>)
             let _ = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), errors);
             Divergence::None
         }
+        StatementKind::Deinit { .. } => {
+            // Deinit is a simple statement that doesn't diverge
+            Divergence::None
+        }
     }
 }
 

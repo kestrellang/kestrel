@@ -35,9 +35,15 @@ pub enum MirTy {
 
     // Function types
     /// Thin function: `func(T) -> U`
-    Func { params: Vec<MirTy>, ret: Box<MirTy> },
+    Func {
+        params: Vec<MirTy>,
+        ret: Box<MirTy>,
+    },
     /// Thick function (closure): `func(T) -> U` with captures
-    FuncThick { params: Vec<MirTy>, ret: Box<MirTy> },
+    FuncThick {
+        params: Vec<MirTy>,
+        ret: Box<MirTy>,
+    },
 
     // Generics
     /// Type parameter: `T`
@@ -313,7 +319,11 @@ impl MirTy {
             }
             MirTy::FuncThick { params, ret } => {
                 let params_str: Vec<_> = params.iter().map(|p| p.display()).collect();
-                format!("func({}) -> {} [thick]", params_str.join(", "), ret.display())
+                format!(
+                    "func({}) -> {} [thick]",
+                    params_str.join(", "),
+                    ret.display()
+                )
             }
             MirTy::TypeParam(name) => name.clone(),
             MirTy::AssociatedType {
