@@ -1027,13 +1027,15 @@ pub fn expr_parser<'tokens>(
                     .boxed()
             };
 
-        // Condition expression (simplified, no nested if/while/loop to avoid recursion issues)
+        // Condition expression (simplified, no block expressions like if/while/loop/match/closures)
         let condition_primary = float
             .clone()
             .or(integer.clone())
             .or(string.clone())
             .or(boolean.clone())
             .or(null.clone())
+            .or(array.clone())
+            .or(paren_expr.clone())
             .or(path.clone());
 
         let condition_postfix_op = arg_list
