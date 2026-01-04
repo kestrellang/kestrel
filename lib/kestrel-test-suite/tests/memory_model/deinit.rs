@@ -26,8 +26,7 @@ mod basic_deinit {
         // A struct with a deinit block should compile
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -68,8 +67,7 @@ mod basic_deinit {
         // A struct can have both init and deinit
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Resource: not Copyable {
                 var id: Int
@@ -95,8 +93,7 @@ mod basic_deinit {
         // An empty deinit body is valid
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -126,8 +123,7 @@ mod duplicate_deinit {
         // A struct with multiple deinit declarations should error
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -146,8 +142,7 @@ mod duplicate_deinit {
         // Even empty deinit blocks can't be duplicated
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -195,8 +190,7 @@ mod copyable_with_deinit {
         // A not Copyable struct with deinit should NOT emit a warning
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -220,8 +214,7 @@ mod copyable_with_deinit {
         // A struct that is not copyable due to non-copyable field should not warn
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -257,8 +250,7 @@ mod deinit_with_features {
         // Struct can have deinit with multiple fields
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Connection: not Copyable {
                 var host: String
@@ -283,8 +275,7 @@ mod deinit_with_features {
         // Struct with deinit can also conform to protocols
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             protocol Resource {}
             
@@ -332,8 +323,7 @@ mod deinit_statement {
         // Using a variable after `deinit x;` should error (use after move)
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -372,8 +362,7 @@ mod deinit_statement {
         // Trying to deinit an already-moved variable should error
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -438,8 +427,7 @@ mod deinit_statement {
         // Can't deinit the same variable twice
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -469,8 +457,7 @@ mod automatic_deinit {
         // A non-copyable local with deinit should get a Deinit statement at scope exit
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -513,8 +500,7 @@ mod automatic_deinit {
         // Multiple locals should be deinited in reverse declaration order
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -544,8 +530,7 @@ mod automatic_deinit {
         // Explicit `deinit x;` should emit a deinit call when the type has a deinit block
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -575,8 +560,7 @@ mod automatic_deinit {
         // Return should emit deinits for all in-scope locals
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -602,8 +586,7 @@ mod automatic_deinit {
         // Break should emit deinits for loop-scoped locals
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -631,8 +614,7 @@ mod automatic_deinit {
         // Each branch should deinit its own locals
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -665,8 +647,7 @@ mod automatic_deinit {
         // A moved value should not be deinited again at scope exit
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -700,8 +681,7 @@ mod automatic_deinit {
         // if not consumed
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -737,8 +717,7 @@ mod automatic_deinit {
         // Temporary that is consumed (moved) should NOT be deinited
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -772,8 +751,7 @@ mod automatic_deinit {
         // should use DeinitIf with a flag
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -806,8 +784,7 @@ mod automatic_deinit {
         // should set deinit flags appropriately in each branch
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -839,8 +816,7 @@ mod automatic_deinit {
         // When a variable is moved in both branches, should NOT use DeinitIf
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -879,8 +855,7 @@ mod automatic_deinit {
         // When a variable is not moved in either branch, should use regular Deinit
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -930,8 +905,7 @@ mod enum_deinit {
         // a switch on the discriminant to drop only the active variant
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -975,6 +949,7 @@ mod enum_deinit {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             MirFunction::new("Test.example")
@@ -1018,8 +993,7 @@ mod enum_deinit {
         // Dropping an enum variant should recursively drop non-copyable fields
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Inner: not Copyable {
                 var id: Int

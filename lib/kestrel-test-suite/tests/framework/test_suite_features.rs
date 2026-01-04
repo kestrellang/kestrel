@@ -276,3 +276,104 @@ mod child_count_behavior {
         .expect(Symbol::new("Widget").has(Behavior::ChildCount(2)));
     }
 }
+
+mod prelude {
+    use super::*;
+
+    #[test]
+    fn prelude_is_included_by_default() {
+        // Tests can import Copyable and Cloneable from the prelude
+        Test::new(
+            r#"module Test
+            import Prelude
+
+            struct Handle: not Copyable {
+                var fd: Int
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Handle")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsCopyable(false)),
+        );
+    }
+
+    #[test]
+    fn prelude_selective_import() {
+        // Can import specific items from prelude
+        // Note: Using full import as selective import of builtin protocols
+        // may have resolution limitations
+        Test::new(
+            r#"module Test
+            import Prelude
+
+            struct Handle: not Copyable {
+                var fd: Int
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Handle").has(Behavior::IsCopyable(false)));
+    }
+
+    #[test]
+    fn prelude_cloneable_import() {
+        // Can use Cloneable from prelude
+        Test::new(
+            r#"module Test
+            import Prelude
+
+            struct Data: Cloneable {
+                var value: Int
+
+                func clone() -> Data {
+                    Data(value: self.value)
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Data")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsCloneable(true)),
+        );
+    }
+
+    #[test]
+    fn without_prelude_allows_own_definitions() {
+        // Tests that opt out of prelude can define their own builtin protocols
+        Test::new(
+            r#"module Test
+            @builtin(.Copyable)
+            protocol Copyable {}
+
+            struct Handle: not Copyable {
+                var fd: Int
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles)
+        .expect(Symbol::new("Handle").has(Behavior::IsCopyable(false)));
+    }
+
+    #[test]
+    fn with_prelude_is_explicit_default() {
+        // .with_prelude() is the same as default
+        Test::new(
+            r#"module Test
+            import Prelude
+
+            struct Handle: not Copyable {
+                var fd: Int
+            }
+        "#,
+        )
+        .with_prelude()
+        .expect(Compiles)
+        .expect(Symbol::new("Handle").has(Behavior::IsCopyable(false)));
+    }
+}

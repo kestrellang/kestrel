@@ -32,6 +32,7 @@ mod parsing {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Cloneable")
@@ -55,6 +56,7 @@ mod parsing {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Cloneable.clone")
@@ -77,6 +79,7 @@ mod parsing {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Symbol::new("Cloneable").is(SymbolKind::Protocol));
     }
@@ -103,6 +106,7 @@ mod parsing {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("MyData")
@@ -141,6 +145,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("MyData")
@@ -163,6 +168,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Point")
@@ -198,6 +204,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("Cloneable"));
     }
 
@@ -228,6 +235,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("Cloneable"));
     }
 
@@ -261,6 +269,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Outer")
@@ -302,6 +311,7 @@ mod conflicting_conformance {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "cannot conform to `Cloneable` and opt out of `Copyable`",
         ));
@@ -345,6 +355,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").calls_witness("Test.Cloneable", "clone"));
@@ -380,6 +391,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // The witness call should use Ref mode for the self parameter
@@ -421,6 +433,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // The final call to consume should use Move mode
@@ -462,6 +475,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // No witness call should be made for borrowing
@@ -495,6 +509,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // Simple copyable uses Copy mode, not Move after clone
@@ -533,6 +548,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("duplicate")
@@ -559,6 +575,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -581,6 +598,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.makeClone").calls_witness("Test.Cloneable", "clone"));
@@ -617,6 +635,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -648,6 +667,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("")); // Should error about Point not conforming to Cloneable
     }
 }
@@ -681,6 +701,7 @@ mod witness_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
@@ -729,6 +750,7 @@ mod multiple_args_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -775,6 +797,7 @@ mod multiple_args_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // Point is simple Copyable → Copy, Data is Cloneable → Move (after clone)
@@ -824,6 +847,7 @@ mod value_preservation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles); // Should compile - data is cloned each time
     }
 }

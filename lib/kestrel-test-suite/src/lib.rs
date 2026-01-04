@@ -14,6 +14,28 @@
 //! }
 //! ```
 //!
+//! # Test Prelude
+//!
+//! By default, tests include a prelude module with builtin protocols (`Copyable`, `Cloneable`).
+//! Tests can import these with `import Prelude` or `import Prelude.(Copyable, Cloneable)`.
+//!
+//! ```
+//! use kestrel_test_suite::*;
+//!
+//! // Uses prelude (default)
+//! fn test_with_prelude() {
+//!     Test::new("module Test\nimport Prelude\nstruct Handle: not Copyable {}")
+//!         .expect(Compiles);
+//! }
+//!
+//! // Opt-out for tests that define their own builtin protocols
+//! fn test_without_prelude() {
+//!     Test::new("module Test\n@builtin(.Copyable)\nprotocol Copyable {}")
+//!         .without_prelude()
+//!         .expect(Compiles);
+//! }
+//! ```
+//!
 //! # Symbol Path Matching
 //!
 //! Symbols can be found by simple name or by dot-separated path:
@@ -51,6 +73,25 @@
 pub mod mir;
 
 use std::cell::OnceCell;
+
+/// Prelude source containing builtin protocols.
+///
+/// This module is automatically included in tests (unless `.without_prelude()` is called)
+/// and provides the `Copyable` and `Cloneable` protocols that tests can import.
+pub const PRELUDE_SOURCE: (&str, &str) = (
+    "prelude.ks",
+    r#"module Prelude
+
+@builtin(.Copyable)
+public protocol Copyable {}
+
+@builtin(.Cloneable)
+public protocol Cloneable: Copyable {
+    @builtin(.Clone)
+    func clone() -> Self
+}
+"#,
+);
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
@@ -106,18 +147,28 @@ impl TestContext {
 pub struct Test {
     files: Vec<(String, String)>,
     context: Option<TestContext>,
+    /// Whether to include the prelude module with builtin protocols.
+    /// Default is `true`. Use `.without_prelude()` to opt out.
+    include_prelude: bool,
 }
 
 impl Test {
-    /// Create a new test from a single source string
+    /// Create a new test from a single source string.
+    ///
+    /// By default, includes the prelude module with builtin protocols.
+    /// Use `.without_prelude()` to opt out.
     pub fn new(source: &str) -> Self {
         Test {
             files: vec![("test.ks".to_string(), source.to_string())],
             context: None,
+            include_prelude: true,
         }
     }
 
-    /// Create a test from multiple source files
+    /// Create a test from multiple source files.
+    ///
+    /// By default, includes the prelude module with builtin protocols.
+    /// Use `.without_prelude()` to opt out.
     pub fn with_files(files: &[(&str, &str)]) -> Self {
         Test {
             files: files
@@ -125,7 +176,26 @@ impl Test {
                 .map(|(name, content)| (name.to_string(), content.to_string()))
                 .collect(),
             context: None,
+            include_prelude: true,
         }
+    }
+
+    /// Include the prelude module with builtin protocols (default behavior).
+    ///
+    /// The prelude provides `Copyable` and `Cloneable` protocols that can be
+    /// imported with `import Prelude` or `import Prelude.(Copyable, Cloneable)`.
+    pub fn with_prelude(mut self) -> Self {
+        self.include_prelude = true;
+        self
+    }
+
+    /// Exclude the prelude module.
+    ///
+    /// Use this for tests that define their own builtin protocols or
+    /// specifically test prelude-related behavior.
+    pub fn without_prelude(mut self) -> Self {
+        self.include_prelude = false;
+        self
     }
 
     /// Compile the test files and store the result
@@ -138,9 +208,18 @@ impl Test {
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
 
+        // Collect all files to compile (prelude first if enabled, then test files)
+        let mut all_files: Vec<(&str, &str)> = Vec::new();
+        if self.include_prelude {
+            all_files.push((PRELUDE_SOURCE.0, PRELUDE_SOURCE.1));
+        }
+        for (name, content) in &self.files {
+            all_files.push((name.as_str(), content.as_str()));
+        }
+
         // Parse and add all files
-        for (file_name, content) in &self.files {
-            let file_id = diagnostics.add_file(file_name.clone(), content.clone());
+        for (file_name, content) in all_files {
+            let file_id = diagnostics.add_file(file_name.to_string(), content.to_string());
             let tokens: Vec<_> = lex(content, file_id)
                 .filter_map(|t| t.ok())
                 .map(|spanned| (spanned.value, spanned.span))

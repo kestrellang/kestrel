@@ -19,6 +19,7 @@ mod success {
             protocol Copyable {}
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Copyable")
@@ -37,6 +38,7 @@ mod success {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("ExpressibleByIntLiteral")
@@ -58,6 +60,7 @@ mod success {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -69,6 +72,7 @@ mod success {
             public protocol Copyable {}
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Copyable")
@@ -94,6 +98,7 @@ mod missing_argument {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("@builtin requires a language feature argument"));
     }
 
@@ -105,6 +110,7 @@ mod missing_argument {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("@builtin requires a language feature argument"));
     }
 }
@@ -124,6 +130,7 @@ mod unknown_feature {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("unknown language feature"));
     }
 
@@ -135,6 +142,7 @@ mod unknown_feature {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("unknown language feature"));
     }
 }
@@ -154,6 +162,7 @@ mod wrong_symbol_kind {
             struct Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "@builtin(.Copyable) can only be applied to a protocol",
         ));
@@ -167,6 +176,7 @@ mod wrong_symbol_kind {
             enum Color { case Red }
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "@builtin(.Copyable) can only be applied to a protocol",
         ));
@@ -180,6 +190,7 @@ mod wrong_symbol_kind {
             func foo() {}
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "@builtin(.Copyable) can only be applied to a protocol",
         ));
@@ -203,6 +214,7 @@ mod non_marker_protocol {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("must be a marker protocol"));
     }
 
@@ -216,6 +228,7 @@ mod non_marker_protocol {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("must be a marker protocol"));
     }
 }
@@ -238,6 +251,7 @@ mod duplicate_builtin {
             protocol Copyable2 {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("already defined"));
     }
 }
@@ -257,6 +271,7 @@ mod invalid_argument_format {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("expected implicit member syntax"));
     }
 
@@ -268,6 +283,7 @@ mod invalid_argument_format {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("expected implicit member syntax"));
     }
 
@@ -279,6 +295,7 @@ mod invalid_argument_format {
             protocol Foo {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("expected implicit member syntax"));
     }
 }

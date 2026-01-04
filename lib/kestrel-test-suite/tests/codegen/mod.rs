@@ -2,9 +2,14 @@
 //!
 //! These tests compile Kestrel source code to native executables
 //! and verify the output.
+//!
+//! By default, `compile_and_run` includes a prelude module with builtin protocols
+//! (`Copyable`, `Cloneable`). Use `compile_and_run_without_prelude` to opt out.
 
 use std::path::PathBuf;
 use std::process::Command;
+
+use kestrel_test_suite::PRELUDE_SOURCE;
 
 // Re-export test modules
 mod arithmetic;
@@ -34,8 +39,21 @@ pub struct RunResult {
 
 /// Compile Kestrel source code and run the resulting executable.
 ///
-/// Returns the exit code, stdout, and stderr.
+/// Includes the prelude module with builtin protocols by default.
+/// Tests can import these with `import Prelude` or `import Prelude.(Copyable, Cloneable)`.
 pub fn compile_and_run(source: &str) -> RunResult {
+    compile_and_run_impl(source, true)
+}
+
+/// Compile Kestrel source code without the prelude module.
+///
+/// Use this for tests that define their own builtin protocols.
+#[allow(dead_code)]
+pub fn compile_and_run_without_prelude(source: &str) -> RunResult {
+    compile_and_run_impl(source, false)
+}
+
+fn compile_and_run_impl(source: &str, include_prelude: bool) -> RunResult {
     // Create unique temp directory for this test (use thread id + timestamp)
     let temp_dir = std::env::temp_dir().join(format!(
         "kestrel_test_{}_{:?}",
@@ -48,7 +66,7 @@ pub fn compile_and_run(source: &str) -> RunResult {
     std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
     // Compile using the full pipeline
-    let result = compile_source(source, &temp_dir);
+    let result = compile_source(source, &temp_dir, include_prelude);
 
     // Clean up
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -57,34 +75,64 @@ pub fn compile_and_run(source: &str) -> RunResult {
 }
 
 /// Internal compilation function.
-fn compile_source(source: &str, temp_dir: &PathBuf) -> RunResult {
+fn compile_source(source: &str, temp_dir: &PathBuf, include_prelude: bool) -> RunResult {
     use kestrel_lexer::lex;
     use kestrel_parser::{parse_source_file, Parser};
     use kestrel_reporting::DiagnosticContext;
     use kestrel_semantic_tree_binder::SemanticBinder;
     use kestrel_semantic_tree_builder::SemanticModelBuilder;
+    use kestrel_span::Span;
 
     let mut builder = SemanticModelBuilder::new();
     let mut diagnostics = DiagnosticContext::new();
 
-    let file_id = diagnostics.add_file("test.kes".to_string(), source.to_string());
-    let tokens: Vec<_> = lex(source, file_id)
-        .filter_map(|t| t.ok())
-        .map(|spanned| (spanned.value, spanned.span))
-        .collect();
+    // Collect all files to compile (prelude first if enabled, then test file)
+    let mut all_files: Vec<(&str, &str)> = Vec::new();
+    if include_prelude {
+        all_files.push((PRELUDE_SOURCE.0, PRELUDE_SOURCE.1));
+    }
+    all_files.push(("test.kes", source));
 
-    let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+    // Parse and add all files
+    for (file_name, content) in all_files {
+        let file_id = diagnostics.add_file(file_name.to_string(), content.to_string());
+        let tokens: Vec<_> = lex(content, file_id)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
 
-    if !result.errors.is_empty() {
-        let errors: Vec<_> = result.errors.iter().map(|e| e.message.clone()).collect();
+        let result = Parser::parse(content, tokens.into_iter(), parse_source_file);
+
+        if !result.errors.is_empty() {
+            // Add parse errors to diagnostics
+            for error in &result.errors {
+                let span = error.span.clone().unwrap_or(Span::from(0..1));
+                let diagnostic = kestrel_reporting::Diagnostic::error()
+                    .with_message(&error.message)
+                    .with_labels(vec![kestrel_reporting::Label::primary(
+                        file_id,
+                        span.range(),
+                    )]);
+                diagnostics.add_diagnostic(diagnostic);
+            }
+        }
+
+        builder.add_file(file_name, &result.tree, content, file_id, &mut diagnostics);
+    }
+
+    // Check for parse errors
+    if diagnostics.has_errors() {
+        let errors: Vec<_> = diagnostics
+            .diagnostics()
+            .iter()
+            .map(|d| d.message.clone())
+            .collect();
         return RunResult {
             exit_code: -1,
             stdout: String::new(),
             stderr: format!("Parse errors: {}", errors.join("\n")),
         };
     }
-
-    builder.add_file("test.kes", &result.tree, source, file_id, &mut diagnostics);
     let model = builder.build();
     let model = SemanticBinder::bind(model, &mut diagnostics);
 

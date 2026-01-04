@@ -23,6 +23,7 @@ mod parsing {
             struct Handle: not Copyable {}
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -38,6 +39,7 @@ mod parsing {
             struct Handle: Resource, not Copyable {}
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -53,6 +55,7 @@ mod parsing {
             struct Handle: not Copyable, Resource {}
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -69,6 +72,7 @@ mod parsing {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 }
@@ -89,6 +93,7 @@ mod validation_errors {
             struct Foo: not MyProtocol {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("not a language feature protocol"));
     }
 
@@ -103,6 +108,7 @@ mod validation_errors {
             struct Shape: not Drawable {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("not a language feature protocol"));
     }
 
@@ -119,6 +125,7 @@ mod validation_errors {
             struct Foo: not ExpressibleByIntLiteral {}
         "#,
         )
+        .without_prelude()
         .expect(HasError("not a language feature protocol"));
     }
 
@@ -143,6 +150,7 @@ mod validation_errors {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "cannot conform to `Cloneable` and opt out of `Copyable`",
         ));
@@ -169,6 +177,7 @@ mod validation_errors {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "cannot conform to `Cloneable` and opt out of `Copyable`",
         ));
@@ -196,6 +205,7 @@ mod validation_errors {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "cannot conform to `Cloneable` and opt out of `Copyable`",
         ));
@@ -221,6 +231,7 @@ mod semantic {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")
@@ -243,6 +254,7 @@ mod semantic {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")

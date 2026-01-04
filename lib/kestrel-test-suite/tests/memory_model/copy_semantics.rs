@@ -26,6 +26,7 @@ mod struct_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Point")
@@ -47,6 +48,7 @@ mod struct_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")
@@ -71,6 +73,7 @@ mod struct_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")
@@ -88,6 +91,7 @@ mod struct_copy_semantics {
             struct Empty {}
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Empty")
@@ -117,6 +121,7 @@ mod enum_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Direction")
@@ -139,6 +144,7 @@ mod enum_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("State")
@@ -158,6 +164,7 @@ mod enum_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Result")
@@ -181,6 +188,7 @@ mod enum_copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Connection")
@@ -217,6 +225,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -247,6 +256,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -278,6 +288,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // The call passes the reference with Copy mode (the reference value is copied)
@@ -310,6 +321,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -340,6 +352,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -363,6 +376,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -398,6 +412,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -435,6 +450,7 @@ mod rvalue_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
@@ -464,6 +480,7 @@ mod rvalue_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -499,6 +516,7 @@ mod field_propagation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")
@@ -533,6 +551,7 @@ mod field_propagation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")
@@ -566,6 +585,7 @@ mod field_propagation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Inner")
@@ -597,6 +617,7 @@ mod field_propagation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Handle")
@@ -626,6 +647,7 @@ mod field_propagation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Shape")
@@ -663,6 +685,7 @@ mod use_after_move_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("use of moved value"));
     }
 
@@ -685,6 +708,7 @@ mod use_after_move_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -709,6 +733,7 @@ mod use_after_move_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("use of moved value"));
     }
 
@@ -735,6 +760,7 @@ mod use_after_move_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("use of moved value"));
     }
 }
@@ -769,6 +795,7 @@ mod maybe_moved_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("may have been moved"));
     }
 
@@ -797,6 +824,7 @@ mod maybe_moved_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("use of moved value"));
     }
 
@@ -826,6 +854,7 @@ mod maybe_moved_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("may have been moved"));
     }
 
@@ -855,6 +884,7 @@ mod maybe_moved_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -898,6 +928,7 @@ mod loop_move_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("may have been moved"));
     }
 
@@ -925,6 +956,7 @@ mod loop_move_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("use of moved value"));
     }
 }
