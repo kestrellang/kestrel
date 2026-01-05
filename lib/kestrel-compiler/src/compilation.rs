@@ -221,7 +221,11 @@ impl Compilation {
     ///
     /// Requires a `main` function in the source code.
     /// Returns the exit code, stdout, and stderr.
-    pub fn run(&self, target: &TargetConfig) -> Result<RunResult, CompileError> {
+    pub fn run(
+        &self,
+        target: &TargetConfig,
+        options: &CodegenOptions,
+    ) -> Result<RunResult, CompileError> {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
 
         // Create a unique temp directory for this run
@@ -245,8 +249,7 @@ impl Compilation {
         let exe_path = temp_dir.join(exe_name);
 
         // Build the executable
-        let options = CodegenOptions::default();
-        self.build(target, &options, &exe_path)?;
+        self.build(target, options, &exe_path)?;
 
         // Run the executable
         let output = Command::new(&exe_path)

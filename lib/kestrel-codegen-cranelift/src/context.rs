@@ -108,9 +108,12 @@ impl<'a> CodegenContext<'a> {
             let is_main = self.is_main(func_def);
 
             // Main function is exported as "main" for the C runtime
+            // Extern functions use Import linkage with their specified symbol name
             // Other functions use mangled names (with type args for generics)
             let (symbol_name, linkage) = if is_main {
                 ("main".to_string(), Linkage::Export)
+            } else if let Some(extern_info) = &func_def.extern_info {
+                (extern_info.symbol_name.clone(), Linkage::Import)
             } else {
                 (
                     mangle_name(self.mir, func_def.name, &inst.type_args),
@@ -146,6 +149,11 @@ impl<'a> CodegenContext<'a> {
         let instantiations: Vec<_> = self.mono_set.functions.iter().cloned().collect();
 
         for inst in instantiations {
+            let func_def = &self.mir.functions[inst.func_id];
+            // Skip extern functions - they have no body to compile
+            if func_def.is_extern() {
+                continue;
+            }
             self.compile_function_instantiation(&inst)?;
         }
         Ok(())
@@ -222,7 +230,12 @@ impl<'a> CodegenContext<'a> {
         func_def: &FunctionDef,
         type_args: &[Id<Ty>],
     ) -> Signature {
-        let call_conv = self.isa.default_call_conv();
+        // Use C calling convention for extern functions, default otherwise
+        let call_conv = if func_def.is_extern() {
+            self.c_call_conv()
+        } else {
+            self.isa.default_call_conv()
+        };
         let mut sig = Signature::new(call_conv);
 
         // Build substitution
@@ -266,6 +279,18 @@ impl<'a> CodegenContext<'a> {
     fn is_main(&self, func_def: &FunctionDef) -> bool {
         let name = self.mir.name(func_def.name);
         name.segments.last().map(|s| s.as_str()) == Some("main")
+    }
+
+    /// Get the C calling convention for the target platform.
+    ///
+    /// Uses SystemV for Unix-like systems (Linux, macOS, BSD) and
+    /// WindowsFastcall for Windows.
+    fn c_call_conv(&self) -> CallConv {
+        use target_lexicon::OperatingSystem;
+        match self.target.triple.operating_system {
+            OperatingSystem::Windows => CallConv::WindowsFastcall,
+            _ => CallConv::SystemV,
+        }
     }
 
     /// Add a string literal to the data section.

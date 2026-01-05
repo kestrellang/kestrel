@@ -44,6 +44,13 @@ pub struct CodegenOptions {
     pub debug_info: bool,
     /// Optimization level (0 = none, 1 = speed, 2 = speed+size).
     pub opt_level: u8,
+    /// Libraries to link with (-l flags).
+    /// Supports both library names (e.g., "ssl") and literal filenames (e.g., ":libfoo.a").
+    pub libraries: Vec<String>,
+    /// Library search paths (-L flags).
+    pub library_paths: Vec<String>,
+    /// Frameworks to link with (macOS -framework flags).
+    pub frameworks: Vec<String>,
 }
 
 /// Result of compilation.
@@ -108,7 +115,7 @@ pub fn compile_and_link(
         .map_err(|e| CodegenError::IoError(e.to_string()))?;
 
     // Link to executable
-    link_executable(&object_path, output_path.as_ref(), target)?;
+    link_executable(&object_path, output_path.as_ref(), options)?;
 
     // Clean up
     let _ = std::fs::remove_file(&object_path);

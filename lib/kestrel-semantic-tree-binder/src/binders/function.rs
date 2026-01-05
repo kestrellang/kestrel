@@ -307,11 +307,15 @@ impl FunctionBinder {
             }
         }
 
-        // Validation 3: All parameters must use consuming access mode
+        // Validation 3: Parameters cannot use borrow or mutating access mode
+        // (extern functions implicitly treat all parameters as consuming since FFI
+        // can't handle Kestrel's borrowing semantics)
         if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
             use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
             for param in callable.parameters() {
-                if param.access_mode != ParameterAccessMode::Consuming {
+                // Only error if the user explicitly used borrow/mutating
+                // Default (Borrow) without explicit keyword is implicitly treated as consuming
+                if param.access_mode == ParameterAccessMode::Mutating {
                     context.diagnostics.throw(ExternParameterNotConsumingError {
                         span: param.bind_name.span.clone(),
                         param_name: param.bind_name.value.clone(),
@@ -394,9 +398,6 @@ impl DeclarationBinder for FunctionBinder {
         );
         symbol.metadata().add_behavior(generics_behavior);
 
-        // Process @extern attribute if present (must be after generics are resolved)
-        Self::process_extern_attribute(symbol, &attributes_behavior, &source, syntax, context);
-
         // Now extract and resolve parameters from syntax (T.Item will work)
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
             syntax, &source, file_id, symbol_id, context, false,
@@ -420,6 +421,10 @@ impl DeclarationBinder for FunctionBinder {
             None => CallableBehavior::new(resolved_params.clone(), resolved_return, span),
         };
         symbol.metadata().add_behavior(resolved_callable);
+
+        // Process @extern attribute if present (must be after CallableBehavior is added
+        // so we can check parameter types and access modes)
+        Self::process_extern_attribute(symbol, &attributes_behavior, &source, syntax, context);
 
         // NOTE: Body resolution is deferred to bind_body() to handle forward references
     }

@@ -55,6 +55,15 @@ enum Commands {
     Run {
         /// Source file to run
         file: String,
+        /// Link with a library (can be repeated, use :libname.a for static libs)
+        #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
+        libraries: Vec<String>,
+        /// Add library search path (can be repeated)
+        #[arg(short = 'L', long = "library-path", value_name = "PATH")]
+        library_paths: Vec<String>,
+        /// Link with a macOS framework (can be repeated)
+        #[arg(long = "framework", value_name = "NAME")]
+        frameworks: Vec<String>,
     },
     /// Build an executable
     Build {
@@ -63,6 +72,15 @@ enum Commands {
         /// Output file path (defaults to input filename without extension)
         #[arg(short, long)]
         output: Option<String>,
+        /// Link with a library (can be repeated, use :libname.a for static libs)
+        #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
+        libraries: Vec<String>,
+        /// Add library search path (can be repeated)
+        #[arg(short = 'L', long = "library-path", value_name = "PATH")]
+        library_paths: Vec<String>,
+        /// Link with a macOS framework (can be repeated)
+        #[arg(long = "framework", value_name = "NAME")]
+        frameworks: Vec<String>,
     },
 }
 
@@ -211,7 +229,14 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
     }
 }
 
-fn run_program(file: &str, target: Option<&str>, verbose: bool) -> ExitCode {
+fn run_program(
+    file: &str,
+    target: Option<&str>,
+    verbose: bool,
+    libraries: Vec<String>,
+    library_paths: Vec<String>,
+    frameworks: Vec<String>,
+) -> ExitCode {
     let target_config = match get_target_config(target) {
         Ok(t) => t,
         Err(code) => return code,
@@ -237,7 +262,14 @@ fn run_program(file: &str, target: Option<&str>, verbose: bool) -> ExitCode {
         eprintln!("  Compiling and running...");
     }
 
-    match compilation.run(&target_config) {
+    let options = kestrel_compiler::CodegenOptions {
+        libraries,
+        library_paths,
+        frameworks,
+        ..Default::default()
+    };
+
+    match compilation.run(&target_config, &options) {
         Ok(result) => {
             // Print stdout/stderr
             if !result.stdout.is_empty() {
@@ -255,7 +287,15 @@ fn run_program(file: &str, target: Option<&str>, verbose: bool) -> ExitCode {
     }
 }
 
-fn run_build(file: &str, output: Option<&str>, target: Option<&str>, verbose: bool) -> ExitCode {
+fn run_build(
+    file: &str,
+    output: Option<&str>,
+    target: Option<&str>,
+    verbose: bool,
+    libraries: Vec<String>,
+    library_paths: Vec<String>,
+    frameworks: Vec<String>,
+) -> ExitCode {
     let target_config = match get_target_config(target) {
         Ok(t) => t,
         Err(code) => return code,
@@ -296,7 +336,12 @@ fn run_build(file: &str, output: Option<&str>, target: Option<&str>, verbose: bo
         eprintln!("  Building {}...", output_path);
     }
 
-    let options = kestrel_compiler::CodegenOptions::default();
+    let options = kestrel_compiler::CodegenOptions {
+        libraries,
+        library_paths,
+        frameworks,
+        ..Default::default()
+    };
     match compilation.build(&target_config, &options, Path::new(&output_path)) {
         Ok(()) => {
             if verbose {
@@ -323,10 +368,34 @@ fn main() -> ExitCode {
             cli.verbose,
         ),
         Some(Commands::Parse { files }) => run_parse(&files, cli.tree),
-        Some(Commands::Run { file }) => run_program(&file, cli.target.as_deref(), cli.verbose),
-        Some(Commands::Build { file, output }) => {
-            run_build(&file, output.as_deref(), cli.target.as_deref(), cli.verbose)
-        }
+        Some(Commands::Run {
+            file,
+            libraries,
+            library_paths,
+            frameworks,
+        }) => run_program(
+            &file,
+            cli.target.as_deref(),
+            cli.verbose,
+            libraries,
+            library_paths,
+            frameworks,
+        ),
+        Some(Commands::Build {
+            file,
+            output,
+            libraries,
+            library_paths,
+            frameworks,
+        }) => run_build(
+            &file,
+            output.as_deref(),
+            cli.target.as_deref(),
+            cli.verbose,
+            libraries,
+            library_paths,
+            frameworks,
+        ),
         None => {
             // No subcommand: use global files
             if cli.files.is_empty() {
