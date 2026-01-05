@@ -19,11 +19,13 @@ use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
     DuplicateBuiltinError, ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
+    ExternParameterNotConsumingError, TypeNotFFISafeError,
 };
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::resolution::LocalScope;
 use kestrel_semantic_tree::attributes::AttributeKind;
 use kestrel_semantic_tree::behavior::extern_fn::ExternBehavior;
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
@@ -302,6 +304,50 @@ impl FunctionBinder {
                     .diagnostics
                     .throw(ExternFunctionCannotHaveBodyError { span: attr_span });
                 return;
+            }
+        }
+
+        // Validation 3: All parameters must use consuming access mode
+        if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+            use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
+            for param in callable.parameters() {
+                if param.access_mode != ParameterAccessMode::Consuming {
+                    context.diagnostics.throw(ExternParameterNotConsumingError {
+                        span: param.bind_name.span.clone(),
+                        param_name: param.bind_name.value.clone(),
+                    });
+                    // Continue checking other parameters to report all errors
+                }
+            }
+        }
+
+        // Validation 4: All parameter types and return type must conform to FFISafe
+        if let Some(ffi_safe_id) = context
+            .model
+            .builtin_registry()
+            .protocol(LanguageFeature::FFISafe)
+        {
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                // Check each parameter type
+                for param in callable.parameters() {
+                    if !context.model.conforms_to(&param.ty, ffi_safe_id) {
+                        context.diagnostics.throw(TypeNotFFISafeError {
+                            span: param.ty.span().clone(),
+                            ty: param.ty.to_string(),
+                            context: "parameter".to_string(),
+                        });
+                    }
+                }
+
+                // Check return type (skip if Unit - void is always valid for extern)
+                let return_ty = callable.return_type();
+                if !return_ty.is_unit() && !context.model.conforms_to(return_ty, ffi_safe_id) {
+                    context.diagnostics.throw(TypeNotFFISafeError {
+                        span: return_ty.span().clone(),
+                        ty: return_ty.to_string(),
+                        context: "return type".to_string(),
+                    });
+                }
             }
         }
 
