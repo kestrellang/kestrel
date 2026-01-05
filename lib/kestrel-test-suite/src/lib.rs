@@ -90,6 +90,9 @@ public protocol Cloneable: Copyable {
     @builtin(.Clone)
     func clone() -> Self
 }
+
+@builtin(.FFISafe)
+public protocol FFISafe {}
 "#,
 );
 use std::sync::Arc;

@@ -1,10 +1,11 @@
 // Socket types and C extern bindings for networking
 //
-// This module provides low-level socket operations via @extern(.c) bindings.
+// This module provides low-level socket operations via @extern(.C) bindings.
 
 module expressks.internal.socket;
 
 import std.memory.pointer;
+import std.ffi.(FFISafe)
 
 // Socket constants (POSIX)
 public let AF_INET: Int32 = 2;
@@ -21,7 +22,8 @@ public let INADDR_ANY: UInt32 = 0;
 //     struct in_addr sin_addr;    // 4 bytes
 //     char           sin_zero[8]; // 8 bytes padding
 // }
-public struct SockAddrIn {
+// FFISafe because all fields are FFI-safe primitive types and tuples
+public struct SockAddrIn: FFISafe {
     public var sin_len: UInt8;       // macOS has length prefix
     public var sin_family: UInt8;
     public var sin_port: UInt16;     // Network byte order (big endian)
@@ -63,28 +65,28 @@ public struct SockAddrIn {
 
 // C extern declarations for socket operations
 
-@extern(.c)
+@extern(.C)
 public func socket(domain: Int32, type: Int32, protocol: Int32) -> Int32 {}
 
-@extern(.c)
+@extern(.C)
 public func bind(sockfd: Int32, addr: Pointer[SockAddrIn], addrlen: UInt32) -> Int32 {}
 
-@extern(.c)
+@extern(.C)
 public func listen(sockfd: Int32, backlog: Int32) -> Int32 {}
 
-@extern(.c)
+@extern(.C)
 public func accept(sockfd: Int32, addr: Pointer[SockAddrIn], addrlen: Pointer[UInt32]) -> Int32 {}
 
-@extern(.c)
+@extern(.C)
 public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Pointer[Int32], optlen: UInt32) -> Int32 {}
 
-@extern(.c, mangleName: "read")
+@extern(.C, mangleName: "read")
 public func readSocket(fd: Int32, buf: Pointer[UInt8], count: Int) -> Int {}
 
-@extern(.c, mangleName: "write")
+@extern(.C, mangleName: "write")
 public func writeSocket(fd: Int32, buf: Pointer[UInt8], count: Int) -> Int {}
 
-@extern(.c)
+@extern(.C)
 public func close(fd: Int32) -> Int32 {}
 
 // Helper to create and configure a server socket

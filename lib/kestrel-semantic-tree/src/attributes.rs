@@ -15,6 +15,10 @@ pub enum AttributeKind {
     /// The argument specifies which language feature this symbol implements.
     Builtin,
 
+    /// `@extern(.C)` or `@extern(.C, mangleName: "name")` - Marks a function as external.
+    /// The function has no body and will be linked from external C code.
+    Extern,
+
     /// `@dummy` - A placeholder attribute for testing the infrastructure.
     /// This attribute is recognized but has no semantic effect.
     Dummy,
@@ -29,6 +33,7 @@ impl AttributeKind {
     pub fn from_name(name: &str) -> Self {
         match name {
             "builtin" => AttributeKind::Builtin,
+            "extern" => AttributeKind::Extern,
             "dummy" => AttributeKind::Dummy,
             _ => AttributeKind::Unknown,
         }

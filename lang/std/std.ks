@@ -142,6 +142,9 @@ public import std.iter.adapters.(
     repeatN
 )
 
+// FFI
+public import std.ffi.(FFISafe)
+
 // Memory
 public import std.memory.layout.(Layout)
 public import std.memory.allocator.(

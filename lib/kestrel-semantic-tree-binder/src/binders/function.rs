@@ -12,14 +12,18 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
+use crate::binders::utils::attributes::{
+    parse_builtin_attribute, parse_extern_attribute, BuiltinParseResult, ExternParseResult,
+};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
-    DuplicateBuiltinError,
+    DuplicateBuiltinError, ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
 };
 use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::resolution::LocalScope;
+use kestrel_semantic_tree::attributes::AttributeKind;
+use kestrel_semantic_tree::behavior::extern_fn::ExternBehavior;
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
@@ -229,6 +233,82 @@ impl FunctionBinder {
 
         Ok(())
     }
+
+    /// Process @extern attribute on a function.
+    ///
+    /// Validates that:
+    /// - The function is not generic
+    /// - The function has no body (implementation is external)
+    ///
+    /// If valid, attaches an ExternBehavior to the symbol.
+    fn process_extern_attribute(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        attributes: &AttributesBehavior,
+        source: &str,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        let result = parse_extern_attribute(attributes, source, context.diagnostics);
+
+        let (calling_convention, mangle_name) = match result {
+            ExternParseResult::Success {
+                calling_convention,
+                mangle_name,
+            } => (calling_convention, mangle_name),
+            ExternParseResult::NotExtern | ExternParseResult::Error => return,
+        };
+
+        let attr_span = attributes
+            .get_kind(AttributeKind::Extern)
+            .map(|a| a.span.clone())
+            .unwrap_or_else(|| symbol.metadata().span().clone());
+
+        // Validation 1: Cannot be generic
+        if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+            if generics.is_generic() {
+                context
+                    .diagnostics
+                    .throw(ExternFunctionCannotBeGenericError {
+                        span: attr_span.clone(),
+                    });
+                return;
+            }
+        }
+
+        // Validation 2: Cannot have a body
+        // Check for FunctionBody in syntax (non-empty braces or expression body)
+        if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
+            // Check if body has actual content
+            // A FunctionBody contains either a CodeBlock or a single Expression
+            // An empty body `{}` has an empty CodeBlock
+            let has_content = body_node.children().any(|child| {
+                match child.kind() {
+                    SyntaxKind::CodeBlock => {
+                        // Check if the code block has any statements or trailing expression
+                        child.children().any(|grandchild| {
+                            matches!(
+                                grandchild.kind(),
+                                SyntaxKind::Statement | SyntaxKind::Expression
+                            )
+                        })
+                    }
+                    SyntaxKind::Expression => true, // Expression body like `func foo() -> Int = 42`
+                    _ => false,
+                }
+            });
+
+            if has_content {
+                context
+                    .diagnostics
+                    .throw(ExternFunctionCannotHaveBodyError { span: attr_span });
+                return;
+            }
+        }
+
+        // Attach ExternBehavior to the symbol
+        let extern_behavior = ExternBehavior::new(calling_convention, mangle_name);
+        symbol.metadata().add_behavior(extern_behavior);
+    }
 }
 
 impl DeclarationBinder for FunctionBinder {
@@ -267,6 +347,9 @@ impl DeclarationBinder for FunctionBinder {
             syntax, &source, file_id, symbol_id, context,
         );
         symbol.metadata().add_behavior(generics_behavior);
+
+        // Process @extern attribute if present (must be after generics are resolved)
+        Self::process_extern_attribute(symbol, &attributes_behavior, &source, syntax, context);
 
         // Now extract and resolve parameters from syntax (T.Item will work)
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(

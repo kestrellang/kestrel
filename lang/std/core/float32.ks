@@ -1,6 +1,8 @@
 // Float32 - 32-bit floating point
 // Generated from templates/float.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Float32:
     FloatingPoint,
     Numeric,
@@ -10,7 +12,8 @@ public struct Float32:
     Divisible,
     Negatable,
     ExpressibleByFloatLiteral,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.f32
 

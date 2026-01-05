@@ -7,6 +7,7 @@ edition.workspace = true
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
 kestrel-semantic-model = { path = "../kestrel-semantic-model" }
+kestrel-semantic-type-inference = { path = "../kestrel-semantic-type-inference" }
 kestrel-prelude = { path = "../kestrel-prelude" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }

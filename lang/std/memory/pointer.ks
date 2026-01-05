@@ -1,7 +1,10 @@
 // Pointer types
 
+import std.ffi.(FFISafe)
+
 // RawPointer - untyped pointer
-public struct RawPointer: Equatable {
+// RawPointer is always FFI-safe as it's just an opaque pointer
+public struct RawPointer: Equatable, FFISafe {
     private var raw: lang.ptr[lang.u8]
 
     public init(raw: lang.ptr[lang.u8]) {
@@ -86,6 +89,9 @@ public struct Pointer[T]: Equatable {
         self.address == other.address
     }
 }
+
+// Pointer[T] is FFI-safe when T is FFI-safe
+extension Pointer: FFISafe where T: FFISafe {}
 
 // Slice[T] - view into contiguous memory
 public struct Slice[T]: Iterable, Equatable where T: Equatable {

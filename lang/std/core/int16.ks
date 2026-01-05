@@ -1,6 +1,8 @@
 // Int16 - 16-bit signed integer
 // Generated from templates/integer.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Int16:
     SignedInteger,
     Numeric,
@@ -17,7 +19,8 @@ public struct Int16:
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.i16
 

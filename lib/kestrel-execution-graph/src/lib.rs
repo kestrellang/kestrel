@@ -66,8 +66,9 @@ pub use id::{
     ProtocolMethod, QualifiedName, Statement, Static, Struct, Ty, TypeParam, Witness,
 };
 pub use item::{
-    AssociatedTypeDef, EnumCaseDef, EnumDef, FieldDef, FunctionDef, ParamDef, ProtocolDef,
-    ProtocolMethodDef, StaticDef, StructDef, WhereClause, WhereConstraint, WitnessDef,
+    AssociatedTypeDef, CallingConvention, EnumCaseDef, EnumDef, ExternInfo, FieldDef, FunctionDef,
+    ParamDef, ProtocolDef, ProtocolMethodDef, StaticDef, StructDef, WhereClause, WhereConstraint,
+    WitnessDef,
 };
 pub use metadata::{Metadata, Origin, Prior};
 pub use pass::{FunctionPass, FunctionPassAdapter, MirPass, PassManager, PassResult};

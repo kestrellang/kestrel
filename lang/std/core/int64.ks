@@ -1,6 +1,8 @@
 // Int64 - 64-bit signed integer
 // Generated from templates/integer.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Int64:
     SignedInteger,
     Numeric,
@@ -17,7 +19,8 @@ public struct Int64:
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.i64
 

@@ -10,6 +10,7 @@ use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -94,9 +95,7 @@ impl TypeOracle for SemanticModel {
         if is_static {
             // Static access - should be a function with no receiver
             if member_kind == KestrelSymbolKind::Function {
-                if let Some(callable) = member_symbol
-                    .metadata()
-                    .get_behavior::<CallableBehavior>()
+                if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
                 {
                     if callable.is_static() {
                         let return_ty = callable.return_type().apply_substitutions(&substitutions);
@@ -134,10 +133,7 @@ impl TypeOracle for SemanticModel {
 
         // Check for method access
         if member_kind == KestrelSymbolKind::Function {
-            if let Some(callable) = member_symbol
-                .metadata()
-                .get_behavior::<CallableBehavior>()
-            {
+            if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
                 // For methods, return the function type (parameters -> return)
                 let return_ty = callable.return_type().apply_substitutions(&substitutions);
                 return Ok(MemberResolution {
@@ -164,6 +160,26 @@ impl TypeOracle for SemanticModel {
         // Handle error types - treat as conforming to suppress cascading errors
         if matches!(ty.kind(), TyKind::Error) {
             return true;
+        }
+
+        // Handle tuple types - check if protocol has tuple_conformance_propagation flag
+        if let TyKind::Tuple(elements) = ty.kind() {
+            // Look up if this protocol has tuple_conformance_propagation flag
+            if let Some(feature) = self.builtin_registry().protocol_feature(protocol_id) {
+                let definition = feature.definition();
+                if let BuiltinKind::Protocol {
+                    tuple_conformance_propagation: true,
+                    ..
+                } = definition.kind
+                {
+                    // Tuple conforms if all elements conform
+                    return elements
+                        .iter()
+                        .all(|elem| self.conforms_to(elem, protocol_id));
+                }
+            }
+            // Protocol doesn't have the flag or isn't a builtin, tuples don't conform
+            return false;
         }
 
         // Get the type's symbol ID to check conformances
@@ -195,7 +211,8 @@ impl TypeOracle for SemanticModel {
         });
 
         // Filter to only applicable extensions based on type arguments
-        let applicable_extensions = filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
+        let applicable_extensions =
+            filter_applicable_extensions_for_conformance(&extensions, &actual_subs);
 
         for extension in applicable_extensions {
             let ext_conformances = self.query(ConformancesForSymbol {
@@ -272,9 +289,8 @@ impl TypeOracle for SemanticModel {
             // For type parameters, look up in bounds
             TyKind::TypeParameter(type_param) => {
                 // Get bounds from the type parameter
-                if let Some(conformances) = type_param
-                    .metadata()
-                    .get_behavior::<ConformancesBehavior>()
+                if let Some(conformances) =
+                    type_param.metadata().get_behavior::<ConformancesBehavior>()
                 {
                     for bound in conformances.conformances() {
                         if let TyKind::Protocol {
@@ -282,9 +298,11 @@ impl TypeOracle for SemanticModel {
                             substitutions,
                         } = bound.kind()
                         {
-                            if let Some(ty) =
-                                resolve_associated_type_from_protocol(symbol, assoc_name, substitutions)
-                            {
+                            if let Some(ty) = resolve_associated_type_from_protocol(
+                                symbol,
+                                assoc_name,
+                                substitutions,
+                            ) {
                                 return Some(ty);
                             }
                         }
@@ -319,7 +337,9 @@ impl TypeOracle for SemanticModel {
 }
 
 /// Get the container symbol and substitutions from a type.
-fn get_type_container_with_subs(ty: &Ty) -> Option<(Arc<dyn Symbol<KestrelLanguage>>, Substitutions)> {
+fn get_type_container_with_subs(
+    ty: &Ty,
+) -> Option<(Arc<dyn Symbol<KestrelLanguage>>, Substitutions)> {
     match ty.kind() {
         TyKind::Struct {
             symbol,
@@ -388,7 +408,8 @@ fn resolve_associated_type_from_protocol(
             {
                 // Combine substitutions
                 let combined_subs = combine_substitutions(substitutions, parent_subs);
-                if let Some(ty) = resolve_associated_type_from_protocol(parent, assoc_name, &combined_subs)
+                if let Some(ty) =
+                    resolve_associated_type_from_protocol(parent, assoc_name, &combined_subs)
                 {
                     return Some(ty);
                 }

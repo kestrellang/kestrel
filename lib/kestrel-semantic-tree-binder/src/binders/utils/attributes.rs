@@ -3,12 +3,14 @@
 //! This module provides functions to extract and resolve attributes from syntax nodes.
 
 use crate::diagnostics::{
-    BuiltinInvalidArgumentError, BuiltinRequiresArgumentError, UnknownAttributeWarning,
-    UnknownLanguageFeatureError,
+    BuiltinInvalidArgumentError, BuiltinRequiresArgumentError, ExternInvalidCallingConventionError,
+    ExternRequiresCallingConventionError, ExternUnknownCallingConventionError,
+    UnknownAttributeWarning, UnknownLanguageFeatureError,
 };
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::attributes::{Attribute, AttributeArg, AttributeKind};
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
+use kestrel_semantic_tree::behavior::extern_fn::CallingConvention;
 use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
@@ -83,7 +85,9 @@ fn extract_single_attribute(node: &SyntaxNode, source: &str) -> Option<Attribute
     for child in node.children_with_tokens() {
         if let Some(tok) = child.into_token() {
             if tok.kind() == SyntaxKind::At {
-                at_span = Some(Span::from(tok.text_range().start().into()..tok.text_range().end().into()));
+                at_span = Some(Span::from(
+                    tok.text_range().start().into()..tok.text_range().end().into(),
+                ));
             } else if tok.kind() == SyntaxKind::Identifier && name.is_none() {
                 name = Some(tok.text().to_string());
                 name_end = tok.text_range().end().into();
@@ -161,13 +165,17 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str) -> Option<AttributeArg> 
                 }
                 SyntaxKind::Identifier if has_colon => {
                     // This is a value identifier (after colon)
-                    value_span = Some(Span::from(tok.text_range().start().into()..tok.text_range().end().into()));
+                    value_span = Some(Span::from(
+                        tok.text_range().start().into()..tok.text_range().end().into(),
+                    ));
                 }
                 SyntaxKind::String
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
                 | SyntaxKind::Boolean => {
-                    value_span = Some(Span::from(tok.text_range().start().into()..tok.text_range().end().into()));
+                    value_span = Some(Span::from(
+                        tok.text_range().start().into()..tok.text_range().end().into(),
+                    ));
                 }
                 SyntaxKind::Dot => {
                     // Part of implicit member access - skip
@@ -276,6 +284,109 @@ pub fn parse_builtin_attribute(
             });
             BuiltinParseResult::Error
         }
+    }
+}
+
+/// Result of parsing a `@extern(.C)` attribute.
+pub enum ExternParseResult {
+    /// Successfully parsed
+    Success {
+        calling_convention: CallingConvention,
+        mangle_name: Option<String>,
+    },
+    /// Not an extern attribute
+    NotExtern,
+    /// Error occurred during parsing (diagnostic already emitted)
+    Error,
+}
+
+/// Parse a `@extern(.C, mangleName: "...")` attribute from an AttributesBehavior.
+///
+/// This function checks if the attributes contain an `@extern` attribute,
+/// validates its arguments, and returns the parsed calling convention and
+/// optional mangle name.
+///
+/// # Arguments
+/// * `attributes` - The resolved attributes behavior
+/// * `source` - The source text (needed to extract values)
+/// * `diagnostics` - The diagnostic context for emitting errors
+///
+/// # Returns
+/// - `ExternParseResult::Success { ... }` if a valid extern attribute was found
+/// - `ExternParseResult::NotExtern` if no extern attribute is present
+/// - `ExternParseResult::Error` if an extern attribute is present but invalid
+pub fn parse_extern_attribute(
+    attributes: &AttributesBehavior,
+    source: &str,
+    diagnostics: &mut DiagnosticContext,
+) -> ExternParseResult {
+    // Find the @extern attribute
+    let Some(attr) = attributes.get_kind(AttributeKind::Extern) else {
+        return ExternParseResult::NotExtern;
+    };
+
+    // Must have at least one argument (calling convention)
+    if attr.args.is_empty() {
+        diagnostics.throw(ExternRequiresCallingConventionError {
+            span: attr.span.clone(),
+        });
+        return ExternParseResult::Error;
+    }
+
+    let conv_arg = &attr.args[0];
+
+    // First arg must be unlabeled (implicit member like .C)
+    if conv_arg.is_labeled() {
+        diagnostics.throw(ExternInvalidCallingConventionError {
+            span: conv_arg.span.clone(),
+        });
+        return ExternParseResult::Error;
+    }
+
+    // Extract the calling convention from the source
+    let arg_text = &source[conv_arg.value_span.range()];
+
+    // Must start with '.' for implicit member syntax
+    if !arg_text.starts_with('.') {
+        diagnostics.throw(ExternInvalidCallingConventionError {
+            span: conv_arg.span.clone(),
+        });
+        return ExternParseResult::Error;
+    }
+
+    // Parse the calling convention
+    let conv_name = &arg_text[1..];
+    let calling_convention = match conv_name {
+        "C" => CallingConvention::C,
+        _ => {
+            diagnostics.throw(ExternUnknownCallingConventionError {
+                span: conv_arg.value_span.clone(),
+                name: conv_name.to_string(),
+            });
+            return ExternParseResult::Error;
+        }
+    };
+
+    // Check for optional mangleName parameter
+    let mangle_name = attr.args.get(1).and_then(|arg| {
+        if arg.label.as_deref() == Some("mangleName") {
+            let val_text = &source[arg.value_span.range()];
+            // Remove quotes from string literal
+            if val_text.starts_with('"') && val_text.ends_with('"') && val_text.len() >= 2 {
+                Some(val_text[1..val_text.len() - 1].to_string())
+            } else {
+                // Not a valid string literal, but we'll silently ignore for now
+                // Could add a diagnostic here
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    ExternParseResult::Success {
+        calling_convention,
+        mangle_name,
     }
 }
 

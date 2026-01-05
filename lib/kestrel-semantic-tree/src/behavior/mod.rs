@@ -6,6 +6,7 @@ pub mod copy_semantics;
 pub mod deinit;
 pub mod executable;
 pub mod extension_target;
+pub mod extern_fn;
 pub mod function_data;
 pub mod generics;
 pub mod implements;
@@ -24,6 +25,7 @@ pub enum KestrelBehaviorKind {
     CopySemantics,
     Deinit,
     Executable,
+    Extern,
     ExtensionTarget,
     FlattenedProtocol,
     FunctionData,

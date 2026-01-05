@@ -1,6 +1,8 @@
 // Int32 - 32-bit signed integer
 // Generated from templates/integer.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Int32:
     SignedInteger,
     Numeric,
@@ -17,7 +19,8 @@ public struct Int32:
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.i32
 

@@ -610,6 +610,7 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-semantic-model",
  "kestrel-semantic-tree",
+ "kestrel-semantic-type-inference",
  "kestrel-span",
  "kestrel-syntax-tree",
  "parking_lot",

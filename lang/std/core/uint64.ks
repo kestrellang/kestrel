@@ -1,6 +1,8 @@
 // UInt64 - 64-bit unsigned integer
 // Generated from templates/integer.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct UInt64:
     UnsignedInteger,
     Numeric,
@@ -16,7 +18,8 @@ public struct UInt64:
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.u64
 

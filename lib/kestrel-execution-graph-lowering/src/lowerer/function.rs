@@ -3,11 +3,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use kestrel_execution_graph::CallingConvention as MirCallingConvention;
 use kestrel_execution_graph::TypeParamOwner;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableBehavior};
+use kestrel_semantic_tree::behavior::extern_fn::{CallingConvention, ExternBehavior};
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
@@ -27,23 +29,31 @@ use crate::ty::lower_type;
 
 /// Lower a function to MIR.
 pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbol>) {
-    // Skip functions without bodies (e.g., protocol methods)
-    if !func_symbol.has_body() {
+    // Check if this is an extern function
+    let extern_behavior = func_symbol.metadata().get_behavior::<ExternBehavior>();
+
+    // For non-extern functions without bodies (e.g., protocol methods), skip
+    if extern_behavior.is_none() && !func_symbol.has_body() {
         return;
     }
 
-    // Get the resolved body
-    let body = match func_symbol
-        .metadata()
-        .get_behavior::<ResolvedExecutableBehavior>()
-    {
-        Some(behavior) => behavior.body().clone(),
-        None => {
-            ctx.emit_error(LoweringError::missing_body(
-                func_symbol.metadata().name().value.clone(),
-                func_symbol.metadata().span().clone(),
-            ));
-            return;
+    // Get the resolved body (not required for extern functions)
+    let body = if extern_behavior.is_some() {
+        // Extern functions have no body
+        None
+    } else {
+        match func_symbol
+            .metadata()
+            .get_behavior::<ResolvedExecutableBehavior>()
+        {
+            Some(behavior) => Some(behavior.body().clone()),
+            None => {
+                ctx.emit_error(LoweringError::missing_body(
+                    func_symbol.metadata().name().value.clone(),
+                    func_symbol.metadata().span().clone(),
+                ));
+                return;
+            }
         }
     };
 
@@ -120,6 +130,25 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
             ctx.mir.function_builder(func_id).param(param_name, mir_ty);
         }
     }
+
+    // For extern functions, set the extern_info and skip body lowering
+    if let Some(extern_behavior) = extern_behavior {
+        let func_name = func_symbol.metadata().name().value.clone();
+        let symbol_name = extern_behavior.symbol_name(&func_name).to_string();
+        let calling_convention = match extern_behavior.calling_convention() {
+            CallingConvention::C => MirCallingConvention::C,
+        };
+        ctx.mir.function_mut(func_id).extern_info = Some(kestrel_execution_graph::ExternInfo {
+            calling_convention,
+            symbol_name,
+        });
+        // Clear type param mappings and return - no body to lower
+        ctx.clear_type_params();
+        return;
+    }
+
+    // Get the body (we know it's Some because we checked above)
+    let body = body.unwrap();
 
     // Enter the function context
     ctx.enter_function(func_id);

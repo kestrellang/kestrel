@@ -1,6 +1,8 @@
 // Float64 - 64-bit floating point
 // Generated from templates/float.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Float64:
     FloatingPoint,
     Numeric,
@@ -10,7 +12,8 @@ public struct Float64:
     Divisible,
     Negatable,
     ExpressibleByFloatLiteral,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.f64
 
