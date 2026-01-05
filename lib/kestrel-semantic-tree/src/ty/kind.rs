@@ -75,6 +75,9 @@ pub enum TyKind {
     /// Array type: [T]
     Array(Box<Ty>),
 
+    /// Raw pointer type: lang.ptr[T]
+    Pointer(Box<Ty>),
+
     /// Function type: (P1, P2, ...) -> R
     Function {
         params: Vec<Ty>,

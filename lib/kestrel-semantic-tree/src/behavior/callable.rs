@@ -228,6 +228,10 @@ impl SignatureType {
             TyKind::Array(element_type) => {
                 SignatureType::Array(Box::new(SignatureType::from_ty(element_type)))
             }
+            TyKind::Pointer(_) => {
+                // Pointer types are represented as a named type for signature matching
+                SignatureType::Named(vec!["lang".to_string(), "ptr".to_string()])
+            }
             TyKind::Function {
                 params,
                 return_type,

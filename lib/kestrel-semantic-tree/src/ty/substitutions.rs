@@ -115,6 +115,11 @@ impl Substitutions {
                 Ty::array(new_element, ty.span().clone())
             }
 
+            TyKind::Pointer(element_type) => {
+                let new_element = self.apply_with_visited(element_type, visited);
+                Ty::pointer(new_element, ty.span().clone())
+            }
+
             TyKind::Function {
                 params,
                 return_type,

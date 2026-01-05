@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use kestrel_prelude::primitives;
+use kestrel_prelude::{lang, primitives};
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ResolveTypePath, SemanticModel, TypePathResolution};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -15,8 +15,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
-    AmbiguousTypeError, NotATypeError, NotGenericError, TooFewTypeArgumentsError,
-    TooManyTypeArgumentsError, UnresolvedTypeError,
+    AmbiguousTypeError, LangPtrArityError, NotATypeError, NotGenericError,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError,
 };
 use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
 
@@ -233,7 +233,7 @@ impl<'a> TypeResolver<'a> {
 
     /// Resolve a TyPath node, handling type arguments if present
     fn resolve_ty_path(&mut self, ty_path_node: &SyntaxNode) -> Ty {
-            let ty_span = get_node_span(ty_path_node, self.file_id);
+        let ty_span = get_node_span(ty_path_node, self.file_id);
 
         if let Some(path_node) = ty_path_node
             .children()
@@ -242,6 +242,19 @@ impl<'a> TypeResolver<'a> {
             let segments = extract_path_segments(&path_node);
 
             if !segments.is_empty() {
+                // Check for lang.ptr[T] built-in generic pointer type
+                if segments.len() == 2 && segments[0] == lang::LANG && segments[1] == lang::PTR {
+                    let type_args = self.extract_type_arguments(ty_path_node);
+                    if type_args.len() != 1 {
+                        self.diagnostics.throw(LangPtrArityError {
+                            span: ty_span.clone(),
+                            got: type_args.len(),
+                        });
+                        return Ty::error(ty_span);
+                    }
+                    return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
+                }
+
                 let type_args = self.extract_type_arguments(ty_path_node);
                 let resolved = self.resolve_path(&segments, ty_span.clone());
 

@@ -20,10 +20,8 @@ impl IntoDiagnostic for ReturnTypeLessVisibleError {
                 "return type of '{}' is less visible than the function",
                 self.function_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("return type is less visible than function"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("return type is less visible than function")])
             .with_notes(vec![format!(
                 "function is {} but return type is {}",
                 self.function_visibility, self.return_type_visibility
@@ -46,10 +44,8 @@ impl IntoDiagnostic for ParameterTypeLessVisibleError {
                 "parameter type in '{}' is less visible than the function",
                 self.function_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("parameter type is less visible than function"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("parameter type is less visible than function")])
             .with_notes(vec![format!(
                 "function is {} but parameter type is {}",
                 self.function_visibility, self.param_type_visibility
@@ -72,10 +68,8 @@ impl IntoDiagnostic for AliasedTypeLessVisibleError {
                 "aliased type in '{}' is less visible than the type alias",
                 self.alias_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("aliased type is less visible than alias"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("aliased type is less visible than alias")])
             .with_notes(vec![format!(
                 "type alias is {} but aliased type is {}",
                 self.alias_visibility, self.aliased_type_visibility
@@ -98,10 +92,8 @@ impl IntoDiagnostic for FieldTypeLessVisibleError {
                 "field '{}' has type less visible than the field",
                 self.field_name
             ))
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range())
-                    .with_message("field type is less visible than field"),
-            ])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("field type is less visible than field")])
             .with_notes(vec![format!(
                 "field is {} but field type is {}",
                 self.field_visibility, self.field_type_visibility

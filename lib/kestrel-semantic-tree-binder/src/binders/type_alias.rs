@@ -298,6 +298,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::String => "String".to_string(),
         TyKind::Tuple(_) => "tuple".to_string(),
         TyKind::Array(_) => "array".to_string(),
+        TyKind::Pointer(_) => "pointer".to_string(),
         TyKind::Function { .. } => "function".to_string(),
         TyKind::Error => "error".to_string(),
         TyKind::SelfType => "Self".to_string(),

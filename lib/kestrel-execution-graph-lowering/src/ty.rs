@@ -1,7 +1,9 @@
 //! Type conversion from semantic Ty to MIR types.
 
 use kestrel_execution_graph::{Id, MirTy, Ty as MirTyMarker};
-use kestrel_semantic_tree::ty::{FloatBits as SemanticFloatBits, IntBits as SemanticIntBits, Ty, TyKind};
+use kestrel_semantic_tree::ty::{
+    FloatBits as SemanticFloatBits, IntBits as SemanticIntBits, Ty, TyKind,
+};
 use semantic_tree::symbol::Symbol;
 
 use crate::context::LoweringContext;
@@ -44,8 +46,16 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             ctx.mir.ty_array(element)
         }
 
+        TyKind::Pointer(element_ty) => {
+            let element = lower_type(ctx, element_ty);
+            ctx.mir.ty_ptr(element)
+        }
+
         // === Named Types ===
-        TyKind::Struct { symbol, substitutions } => {
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
             // Get the qualified name for the struct
             let name = qualified_name_for_symbol(ctx, &(symbol.clone() as _));
 
@@ -54,14 +64,19 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             let type_args: Vec<_> = type_params
                 .iter()
                 .filter_map(|tp| {
-                    substitutions.get(tp.metadata().id()).map(|sub_ty| lower_type(ctx, sub_ty))
+                    substitutions
+                        .get(tp.metadata().id())
+                        .map(|sub_ty| lower_type(ctx, sub_ty))
                 })
                 .collect();
 
             ctx.mir.ty_named(name, type_args)
         }
 
-        TyKind::Enum { symbol, substitutions } => {
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
             // Get the qualified name for the enum
             let name = qualified_name_for_symbol(ctx, &(symbol.clone() as _));
 
@@ -70,7 +85,9 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             let type_args: Vec<_> = type_params
                 .iter()
                 .filter_map(|tp| {
-                    substitutions.get(tp.metadata().id()).map(|sub_ty| lower_type(ctx, sub_ty))
+                    substitutions
+                        .get(tp.metadata().id())
+                        .map(|sub_ty| lower_type(ctx, sub_ty))
                 })
                 .collect();
 
@@ -86,7 +103,10 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             ctx.mir.ty_error()
         }
 
-        TyKind::TypeAlias { symbol, substitutions: _ } => {
+        TyKind::TypeAlias {
+            symbol,
+            substitutions: _,
+        } => {
             // Expand the type alias and lower the underlying type
             let expanded = ty.expand_aliases();
             if expanded.is_type_alias() {
@@ -102,7 +122,10 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         }
 
         // === Function Types ===
-        TyKind::Function { params, return_type } => {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             let mir_params: Vec<_> = params.iter().map(|p| lower_type(ctx, p)).collect();
             let mir_ret = lower_type(ctx, return_type);
             // Use thin function type for now (no captures)
@@ -136,7 +159,10 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 // Type parameter not in scope - this can happen when lowering
                 // a generic definition without entering its context first
                 ctx.emit_error(LoweringError::unsupported_type(
-                    format!("type parameter '{}' not in scope", param_symbol.metadata().name().value),
+                    format!(
+                        "type parameter '{}' not in scope",
+                        param_symbol.metadata().name().value
+                    ),
                     ty.span().clone(),
                 ));
                 ctx.mir.ty_error()
@@ -173,7 +199,8 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                     //   func get() -> Element
                     // The associated type should be projected from Self
                     let self_ty = ctx.mir.ty_self();
-                    ctx.mir.ty_assoc_projection(self_ty, protocol_name, assoc_name)
+                    ctx.mir
+                        .ty_assoc_projection(self_ty, protocol_name, assoc_name)
                 }
             }
         }

@@ -143,3 +143,26 @@ impl IntoDiagnostic for TypeParameterWrongPositionError {
             ])
     }
 }
+
+/// Error when lang.ptr has wrong number of type arguments.
+pub struct LangPtrArityError {
+    pub span: Span,
+    pub got: usize,
+}
+
+impl IntoDiagnostic for LangPtrArityError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        let message = if self.got == 0 {
+            "lang.ptr requires exactly 1 type argument".to_string()
+        } else {
+            format!(
+                "too many type arguments for 'lang.ptr': expected 1, found {}",
+                self.got
+            )
+        };
+        Diagnostic::error()
+            .with_message(message)
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("type argument required")])
+    }
+}
