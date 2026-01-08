@@ -6,6 +6,7 @@ public struct Array[T, A]:
     Functor,
     ExpressibleByArrayLiteral,
     Cloneable
+    where A: Allocator
 {
     type Item = T
     type Element = T
@@ -275,7 +276,7 @@ public struct Array[T, A]:
         } */
     }
 
-    public func sorted() -> Array[T, A] where T: Comparable + Cloneable {
+    public func sorted() -> Array[T, A] where T: Comparable, T: Cloneable {
         var result = self.clone()
         result.sort()
         result
@@ -337,7 +338,7 @@ extension Array[T, A]: Equatable where T: Equatable {
 
 // Hashable when T is Hashable
 extension Array[T, A]: Hashable where T: Hashable {
-    public func hash[H](into hasher: ref H) where H: Hasher {
+    public func hash[H](into hasher: mutating H) where H: Hasher {
         /* for i in 0..<self.count {
             self(unchecked: i).hash(into: hasher)
         } */

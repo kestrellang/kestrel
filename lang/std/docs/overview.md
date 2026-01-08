@@ -424,7 +424,7 @@ public protocol ExpressibleByDictionaryLiteral {
 ## Operator Protocols
 
 Operators are defined as protocols with the `// TODO: Add back 
-@operator` attribute. The operator protocols are **pure syntax** - they define what `+`, `==`, etc. mean for a type, with no constraints on return types.
+//@operator` attribute. The operator protocols are **pure syntax** - they define what `+`, `==`, etc. mean for a type, with no constraints on return types.
 
 Semantic protocols like `Equatable` and `Comparable` are separate, and provide default implementations of the operator protocols.
 
@@ -433,7 +433,7 @@ Semantic protocols like `Equatable` and `Comparable` are separate, and provide d
 ```kestrel
 // Raw operator protocol - no semantic meaning, flexible return type
 // TODO: Add back 
-@operator(==)
+//@operator(==)
 public protocol Equal[Rhs = Self] {
     type Output
     func eq(other: Rhs) -> Output
@@ -485,42 +485,42 @@ let query = users.where { $0.age >= 21 and $0.age < 65 }  // returns SqlExpr
 
 ```kestrel
 // TODO: Add back 
-@operator(+)
+//@operator(+)
 public protocol Addable[Rhs = Self] {
     type Output
     func add(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(-)
+//@operator(-)
 public protocol Subtractable[Rhs = Self] {
     type Output
     func subtract(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(*)
+//@operator(*)
 public protocol Multipliable[Rhs = Self] {
     type Output
     func multiply(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(/)
+//@operator(/)
 public protocol Divisible[Rhs = Self] {
     type Output
     func divide(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(%)
+//@operator(%)
 public protocol Modulo[Rhs = Self] {
     type Output
     func mod(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(prefix -)
+//@operator(prefix -)
 public protocol Negatable {
     type Output
     func negate() -> Output
@@ -533,42 +533,42 @@ Raw operator protocols (flexible return type):
 
 ```kestrel
 // TODO: Add back 
-@operator(==)
+//@operator(==)
 public protocol Equal[Rhs = Self] {
     type Output
     func eq(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(!=)
+//@operator(!=)
 public protocol NotEqual[Rhs = Self] {
     type Output
     func ne(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(<)
+//@operator(<)
 public protocol Less[Rhs = Self] {
     type Output
     func lt(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(<=)
+//@operator(<=)
 public protocol LessOrEqual[Rhs = Self] {
     type Output
     func le(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(>)
+//@operator(>)
 public protocol Greater[Rhs = Self] {
     type Output
     func gt(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(>=)
+//@operator(>=)
 public protocol GreaterOrEqual[Rhs = Self] {
     type Output
     func ge(other: Rhs) -> Output
@@ -633,21 +633,21 @@ Kestrel uses keyword-style logical operators for clarity:
 
 ```kestrel
 // TODO: Add back 
-@operator(and)
+//@operator(and)
 public protocol And[Rhs = Self] {
     type Output
     func and(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(or)
+//@operator(or)
 public protocol Or[Rhs = Self] {
     type Output
     func or(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(not)
+//@operator(not)
 public protocol Not {
     type Output
     func not() -> Output
@@ -673,42 +673,42 @@ if not isEmpty or forceRefresh {
 
 ```kestrel
 // TODO: Add back 
-@operator(&)
+//@operator(&)
 public protocol BitwiseAnd[Rhs = Self] {
     type Output
     func bitwiseAnd(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(|)
+//@operator(|)
 public protocol BitwiseOr[Rhs = Self] {
     type Output
     func bitwiseOr(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(^)
+//@operator(^)
 public protocol BitwiseXor[Rhs = Self] {
     type Output
     func bitwiseXor(other: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(prefix ~)
+//@operator(prefix ~)
 public protocol BitwiseNot {
     type Output
     func bitwiseNot() -> Output
 }
 
 // TODO: Add back 
-@operator(<<)
+//@operator(<<)
 public protocol LeftShift[Rhs = Int] {
     type Output
     func shiftLeft(by: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(>>)
+//@operator(>>)
 public protocol RightShift[Rhs = Int] {
     type Output
     func shiftRight(by: Rhs) -> Output
@@ -719,13 +719,13 @@ public protocol RightShift[Rhs = Int] {
 
 ```kestrel
 // TODO: Add back 
-@operator(+=)
+//@operator(+=)
 public protocol AddAssign[Rhs = Self] {
     func addAssign(other: Rhs)
 }
 
 // TODO: Add back 
-@operator(-=)
+//@operator(-=)
 public protocol SubtractAssign[Rhs = Self] {
     func subtractAssign(other: Rhs)
 }
@@ -806,14 +806,14 @@ Ranges are constructed via operator protocols, not magic syntax:
 ```kestrel
 // Range operator protocols
 // TODO: Add back 
-@operator(..)
+//@operator(..)
 public protocol RangeConstructible[Rhs = Self] {
     type Output
     func rangeExclusive(to: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(..=)
+//@operator(..=)
 public protocol ClosedRangeConstructible[Rhs = Self] {
     type Output
     func rangeInclusive(to: Rhs) -> Output
@@ -1169,7 +1169,7 @@ The `->` operator applies a function to the inner value of any `Functor`:
 
 ```kestrel
 // TODO: Add back 
-@operator(->)
+//@operator(->)
 public protocol Mappable[Rhs] {
     type Output
     func apply(transform: Rhs) -> Output

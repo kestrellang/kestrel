@@ -46,7 +46,7 @@ extension Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqu
 
 // Hashable - types that can be hashed
 public protocol Hashable: Equatable {
-    func hash[H: Hasher](into hasher: ref H)
+    func hash[H](into hasher: mutating H) where H: Hasher
 }
 
 // Hasher - types that can compute hash values

@@ -7,6 +7,7 @@ public struct String[A]:
     Comparable,
     Hashable,
     Cloneable
+    where A: Allocator
 {
     // Note: String is NOT Iterable - must use a view
 
@@ -57,7 +58,7 @@ public struct String[A]:
 
     // From code points
     public init(codePoints: Array[CodePoint]) {
-        var bytes: [UInt8] = []
+        var bytes: [UInt8] = [];
         /* for cp in codePoints {
             cp.encodeUtf8(into: bytes)
         } */
@@ -319,7 +320,7 @@ public struct String[A]:
     }
 
     // Hashable
-    public func hash[H](into hasher: ref H) where H: Hasher {
+    public func hash[H](into hasher: mutating H) where H: Hasher {
         /* for i in 0..<self.byteCount {
             hasher.write(bytes: [self.storage.value.buffer(unchecked: i)])
         } */

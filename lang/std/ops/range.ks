@@ -1,21 +1,21 @@
 // Range operator protocols and types
 
 // TODO: Add back 
-@operator(..)
+//@operator(..)
 public protocol RangeConstructible[Rhs = Self] {
     type Output
     func rangeExclusive(to end: Rhs) -> Output
 }
 
 // TODO: Add back 
-@operator(..=)
+//@operator(..=)
 public protocol ClosedRangeConstructible[Rhs = Self] {
     type Output
     func rangeInclusive(to end: Rhs) -> Output
 }
 
 // Range type (exclusive end)
-public struct Range[T: Comparable]: Equatable where T: Steppable {
+public struct Range[T]: Equatable where T: Steppable and Comparable {
     public var start: T
     public var end: T
 
@@ -46,7 +46,7 @@ extension Range[T]: Iterable where T: Steppable {
     }
 }
 
-public struct RangeIterator[T: Steppable + Comparable]: Iterator {
+public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
     type Item = T
 
     private var current: T
@@ -100,7 +100,7 @@ extension ClosedRange[T]: Iterable where T: Steppable {
     }
 }
 
-public struct ClosedRangeIterator[T: Steppable + Comparable]: Iterator {
+public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable {
     type Item = T
 
     private var current: T

@@ -316,7 +316,7 @@ public struct ChainIterator[A, B]: Iterator
 }
 
 // CycleIterator
-public struct CycleIterator[I]: Iterator where I: Iterator + Cloneable {
+public struct CycleIterator[I]: Iterator where I: Iterator, I: Cloneable {
     type Item = I.Item
 
     private var original: I

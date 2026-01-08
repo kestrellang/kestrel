@@ -4,6 +4,7 @@ public struct Set[T, A]:
     Iterable,
     Collectable,
     Cloneable
+    where A: Allocator
 {
     type Item = T
     type Iter = SetIterator[T]
@@ -207,7 +208,7 @@ extension Set[T, A]: Equatable {
 
 // Hashable
 extension Set[T, A]: Hashable {
-    public func hash[H](into hasher: ref H) where H: Hasher {
+    public func hash[H](into hasher: mutating H) where H: Hasher {
         // XOR all element hashes (order-independent)
         var combinedHash: UInt64 = 0
         /* for element in self {

@@ -55,7 +55,7 @@ public struct Int8:
     }
 
     // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
+    public func hash[H](into hasher: mutating H) where H: Hasher {
         hasher.write(bytes: [self.value as UInt8])
     }
 

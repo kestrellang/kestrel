@@ -210,7 +210,7 @@ public enum JsonValue: Equatable {
 
 // JsonValue implements Serialize
 extension JsonValue: Serialize {
-    public func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
+    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
         match self {
             .Null => serializer.serializeNil(),
             .Bool(let v) => serializer.serializeBool(value: v),
@@ -257,7 +257,7 @@ public struct Json {
     }
 
     // Serialize any Serialize type to JSON string
-    public static func serialize[T: Serialize](value: T) -> Result[String, JsonError] {
+    public static func serialize[T](value: T) -> Result[String, JsonError] where T: Serialize {
         var serializer = JsonSerializer()
         match value.serialize(to: serializer) {
             .Ok(_) => serializer.finish(),
@@ -266,7 +266,7 @@ public struct Json {
     }
 
     // Serialize with pretty printing
-    public static func serialize[T: Serialize](value: T, pretty: Bool) -> Result[String, JsonError] {
+    public static func serialize[T](value: T, pretty: Bool) -> Result[String, JsonError] where T: Serialize {
         var serializer = JsonSerializer(pretty: pretty)
         match value.serialize(to: serializer) {
             .Ok(_) => serializer.finish(),
@@ -275,7 +275,7 @@ public struct Json {
     }
 
     // Deserialize JSON string to any Deserialize type
-    public static func deserialize[T: Deserialize](input: String) -> Result[T, JsonError] {
+    public static func deserialize[T](input: String) -> Result[T, JsonError] where T: Deserialize {
         var deserializer = JsonDeserializer(input: input)
         T.deserialize(from: deserializer)
     }
@@ -869,7 +869,7 @@ public struct JsonSerializer: Serializer {
     }
 
     // Compound types
-    public func serializeArray[S: Serialize](values: Array[S]) -> Result[(), JsonError] {
+    public func serializeArray[S](values: Array[S]) -> Result[(), JsonError] where S: Serialize {
         var arr = try self.beginArray(length: values.count)
         /* for item in values {
             try arr.serializeElement(value: item)
@@ -877,7 +877,7 @@ public struct JsonSerializer: Serializer {
         arr.end()
     }
 
-    public func serializeMap[K: Serialize, V: Serialize](entries: Array[(K, V)]) -> Result[(), JsonError] {
+    public func serializeMap[K, V](entries: Array[(K, V)]) -> Result[(), JsonError] where K: Serialize, V: Serialize {
         var obj = try self.beginObject(name: "", fieldCount: entries.count)
         /* for (key, value) in entries {
             // For JSON, keys should be strings
@@ -915,7 +915,7 @@ public struct JsonObjectSerializer: ObjectSerializer {
         self.serializer.writer.output.append(codePoint: CodePoint(value: 123)) // '{'
     }
 
-    public func serializeField[V: Serialize](name: String, value: V) -> Result[(), JsonError] {
+    public func serializeField[V](name: String, value: V) -> Result[(), JsonError] where V: Serialize {
         if self.currentField > 0 {
             self.serializer.writer.output.append(codePoint: CodePoint(value: 44)) // ','
         }
@@ -947,7 +947,7 @@ public struct JsonArraySerializer: ArraySerializer {
         self.serializer.writer.output.append(codePoint: CodePoint(value: 91)) // '['
     }
 
-    public func serializeElement[V: Serialize](value: V) -> Result[(), JsonError] {
+    public func serializeElement[V](value: V) -> Result[(), JsonError] where V: Serialize {
         if self.currentIndex > 0 {
             self.serializer.writer.output.append(codePoint: CodePoint(value: 44)) // ','
         }
@@ -1113,7 +1113,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     // Compound types
-    public func deserializeArray[T: Deserialize]() -> Result[Array[T], JsonError] {
+    public func deserializeArray[T]() -> Result[Array[T], JsonError] where T: Deserialize {
         let value = try self.takeValue()
         match value {
             .Array(let arr) => {
@@ -1131,7 +1131,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeMap[K: Deserialize + Hashable, V: Deserialize]() -> Result[Dictionary[K, V], JsonError] {
+    public func deserializeMap[K, V]() -> Result[Dictionary[K, V], JsonError] where K: Deserialize, K: Hashable, V: Deserialize {
         let value = try self.takeValue()
         match value {
             .Object(let obj) => {
@@ -1152,7 +1152,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeObject[V: Deserialize](visitor: V.Visitor) -> Result[V, JsonError] {
+    public func deserializeObject[V](visitor: V.Visitor) -> Result[V, JsonError] where V: Deserialize {
         let value = try self.takeValue()
         match value {
             .Object(let obj) => {
@@ -1190,7 +1190,7 @@ public struct JsonObjectAccess: ObjectAccess {
         .Ok(.Some(key))
     }
 
-    public func value[V: Deserialize]() -> Result[V, JsonError] {
+    public func value[V]() -> Result[V, JsonError] where V: Deserialize {
         match self.currentKey {
             .Some(let key) => {
                 match self.object(key) {
@@ -1215,7 +1215,7 @@ public struct JsonObjectAccess: ObjectAccess {
 extension JsonValue: Deserialize {
     type Visitor = JsonValueVisitor
 
-    public static func deserialize[D: Deserializer](from deserializer: ref D) -> Result[JsonValue, D.Error] {
+    public static func deserialize[D](from deserializer: mutating D) -> Result[JsonValue, D.Error] where D: Deserializer {
         // Special case: JsonDeserializer can directly return JsonValue
         // For other deserializers, we'd need to construct from primitives
         deserializer.deserializeAny()
@@ -1225,7 +1225,7 @@ extension JsonValue: Deserialize {
 public struct JsonValueVisitor: ObjectVisitor {
     type Value = JsonValue
 
-    public func visit[A: ObjectAccess](access: ref A) -> Result[JsonValue, A.Error] {
+    public func visit[A](access: mutating A) -> Result[JsonValue, A.Error] where A: ObjectAccess {
         var entries: Dictionary[String, JsonValue] = [:]
         while let field = try access.nextField() {
             let value = try access.value[JsonValue]()

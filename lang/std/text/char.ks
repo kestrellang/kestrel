@@ -76,7 +76,7 @@ public struct CodePoint: Equatable, Comparable, Hashable {
         else { 4 }
     }
 
-    public func encodeUtf8(into buffer: ref [UInt8]) -> Int {
+    public func encodeUtf8(into buffer: mutating [UInt8]) -> Int {
         let len = self.utf8Length()
         match len {
             1 => {
@@ -112,7 +112,7 @@ public struct CodePoint: Equatable, Comparable, Hashable {
     }
 
     // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
+    public func hash[H](into hasher: mutating H) where H: Hasher {
         self.value.hash(into: hasher)
     }
 }
@@ -155,7 +155,7 @@ public struct Char: Equatable, Hashable {
     }
 
     // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
+    public func hash[H](into hasher: mutating H) where H: Hasher {
         /* for cp in self.codePoints {
             cp.hash(into: hasher)
         } */

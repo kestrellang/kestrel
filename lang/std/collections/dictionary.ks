@@ -4,6 +4,7 @@ public struct Dictionary[K, V, A]:
     Iterable,
     ExpressibleByDictionaryLiteral,
     Cloneable
+    where A: Allocator
 {
     type Item = (K, V)
     type Key = K
