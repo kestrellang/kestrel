@@ -657,6 +657,13 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             }
         }
 
+        // Lang intrinsics - recurse into arguments
+        ExprKind::LangIntrinsic { arguments, .. } => {
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        }
+
         // Leaf expressions that don't contain sub-expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -668,6 +675,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {}
     }
 }

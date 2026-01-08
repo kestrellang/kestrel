@@ -1432,6 +1432,11 @@ fn expression_references_local(
             false
         }
 
+        // Lang intrinsic calls - check arguments
+        ExprKind::LangIntrinsic { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
+
         // Leaf expressions - no references
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -1442,6 +1447,7 @@ fn expression_references_local(
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => false,
     }
 }
@@ -2030,6 +2036,13 @@ where
             }
         }
 
+        // Lang intrinsic calls - walk arguments
+        ExprKind::LangIntrinsic { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -2038,6 +2051,7 @@ where
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {}
     }
 }

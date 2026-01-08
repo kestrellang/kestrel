@@ -552,7 +552,21 @@ fn analyze_expression(
                 }
             }
         }
-        ExprKind::Error => {}
+        ExprKind::LangIntrinsic {
+            arguments,
+            intrinsic,
+        } => {
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+            // Check if this intrinsic diverges
+            match intrinsic {
+                LangIntrinsic::PanicUnwind => state.diverged = true,
+                LangIntrinsic::Cast { .. } => {} // Cast returns normally
+            }
+        }
+        ExprKind::LangIntrinsicRef(_) | ExprKind::Error => {}
     }
     state
 }

@@ -428,6 +428,21 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 value: resolved_value,
             }
         }
+
+        // Language intrinsics - apply solution to arguments
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => ExprKind::LangIntrinsic {
+            intrinsic: *intrinsic,
+            arguments: arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect(),
+        },
+
+        // Language intrinsic reference - no changes needed
+        ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(*intrinsic),
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)

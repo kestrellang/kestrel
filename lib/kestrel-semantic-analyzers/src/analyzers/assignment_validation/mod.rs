@@ -127,6 +127,8 @@ fn validate_assignment_target(
         | ExprKind::Closure { .. }
         | ExprKind::Match { .. }
         | ExprKind::Block { .. }
+        | ExprKind::LangIntrinsic { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {

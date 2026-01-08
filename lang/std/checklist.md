@@ -5,9 +5,24 @@ This checklist tracks language features required for `lang/std/` to compile succ
 ## Summary
 
 - **Total Features Needed**: 23
-- **Implemented**: 0
-- **In Progress**: 0
-- **Blocked**: 23
+- **Implemented**: 5 (Associated Type Visibility, Static Methods, Protocol Inheritance, `lang.panic_unwind`, Type Cast Intrinsics)
+- **Low-Hanging Fruit**: 0
+- **Blocked**: 18
+
+## ✅ Recently Implemented
+
+| Feature | Date | Notes |
+|---------|------|-------|
+| Associated type visibility | 2025-01-08 | Protocol associated types inherit visibility |
+| `lang.panic_unwind()` | 2025-01-08 | Intrinsic that emits `Terminator::Panic` |
+| Type cast intrinsics | 2025-01-08 | `lang.cast_<from>_<to>()` for all primitive conversions |
+
+## 🍎 Nearly Complete (Testing/Edge Cases)
+
+| Feature | Status | Effort | Notes |
+|---------|--------|--------|-------|
+| Static methods | 95% done | Testing only | Recent fix in `3bc9ca9`, edge cases remain |
+| Protocol inheritance | 85% done | 1-3 days | Parser done, semantics mostly done |
 
 ---
 
@@ -16,10 +31,16 @@ This checklist tracks language features required for `lang/std/` to compile succ
 These features block the most fundamental parts of the standard library.
 
 ### 1.1 Computed Properties
-**Status**: Not Implemented
+**Status**: Not Implemented (Medium effort - 1-2 weeks)
 **Blocking**: All numeric types, String, Array, Optional, Result, protocols
 
-Static and instance computed properties with getter bodies:
+**What's needed:**
+- Lexer: Add `get`, `set` keywords
+- Parser: Computed property syntax `var name: Type { get { ... } set { ... } }`
+- Semantic tree: Extend `FieldSymbol` or create new symbol type
+- Resolution: Desugar property access to getter/setter calls
+- MIR: Generate getter calls for property access
+
 ```kestrel
 // Static computed property
 public static var zero: Int64 { Int64(value: 0) }
@@ -27,7 +48,7 @@ public static var zero: Int64 { Int64(value: 0) }
 // Instance computed property
 public var isEmpty: Bool { self.count == 0 }
 
-// Protocol computed property
+// Protocol computed property requirement
 var description: String { get }
 ```
 
@@ -41,21 +62,9 @@ var description: String { get }
 ---
 
 ### 1.2 Associated Type Visibility in Protocols
-**Status**: Not Implemented
-**Blocking**: All operator protocols, Iterator, Iterable, Functor
+**Status**: ✅ Implemented (2025-01-08)
 
-Associated types declared with `type` in protocols are not being treated as public, causing "return type less visible than function" errors:
-```kestrel
-public protocol Addable[Rhs = Self] {
-    type Output  // This should be visible to callers
-    func add(other: Rhs) -> Output  // Error: Output is "internal"
-}
-```
-
-**Files affected**:
-- `ops/arithmetic.ks`, `ops/comparison.ks`, `ops/bitwise.ks`
-- `ops/logical.ks`, `ops/range.ks`
-- `iter/iterator.ks`
+Associated types in protocols now inherit their protocol's visibility. Fixed in `lib/kestrel-semantic-analyzers/src/analyzers/visibility_consistency/mod.rs` by making the `find_less_visible_type()` function check if an associated type's parent is a public protocol and use that visibility level.
 
 ---
 
@@ -135,10 +144,18 @@ public func hash[H: Hasher](into hasher: ref H)
 ---
 
 ### 2.2 Subscript Declarations
-**Status**: Not Implemented
+**Status**: Not Implemented (Large effort - 2-3 weeks)
 **Blocking**: Array, Dictionary, Set, Buffer, Slice, String views
 
-Custom subscript with labels:
+**What's needed:**
+- Lexer: `subscript` keyword
+- Parser: Subscript declaration syntax
+- Semantic tree: New `SubscriptSymbol` type
+- Resolution: Desugar `obj[index]` → subscript method call
+- MIR: Already has `Place::Index` for arrays, needs protocol dispatch
+
+**Note:** MIR already supports array indexing via `Place::Index`, but custom subscripts need method protocol dispatch.
+
 ```kestrel
 public subscript(safe index: Int) -> Optional[T] { get }
 public subscript(unchecked index: Int) -> T { get set }
@@ -251,16 +268,23 @@ public init(arrayLiteral elements: [T]) {
 
 ---
 
-### 3.2 `panic()` Builtin Function
-**Status**: Not Implemented
-**Blocking**: All unwrap/expect methods
+### 3.2 `lang.panic_unwind()` Intrinsic
+**Status**: ✅ Implemented (2025-01-08)
 
-Panic function for unrecoverable errors:
+Implemented as `lang.panic_unwind(message: String) -> Never` intrinsic.
+
+**Implementation:**
+- Added `LangIntrinsic::PanicUnwind` to expression kinds
+- Path resolution detects `lang.panic_unwind` and returns intrinsic reference
+- Call resolution validates arguments and creates intrinsic call
+- MIR lowering emits `Terminator::Panic(message)`
+- All analyzers properly recognize it as diverging (never returns)
+
 ```kestrel
 public func unwrap() -> T {
     match self {
         .Some(let value) => value,
-        .None => panic("called unwrap() on None")
+        .None => lang.panic_unwind("called unwrap() on None")
     }
 }
 ```
@@ -272,19 +296,34 @@ public func unwrap() -> T {
 
 ---
 
-### 3.3 `as` Type Casting
-**Status**: Not Implemented
-**Blocking**: Numeric conversions, pointer casts
+### 3.3 Type Casting Intrinsics ✅
+**Status**: Implemented (2025-01-08)
 
-Type casting expression:
+Explicit cast intrinsics for type conversions:
 ```kestrel
-self.value as lang.i64
-lang.ptr_null() as lang.ptr[T]
+// Format: lang.cast_<from>_<to>(value)
+lang.cast_i64_i32(value)    // Int to Int32
+lang.cast_i32_f64(self.value)  // Int32 to Float64
+lang.cast_f64_f32(value)    // Float64 to Float32
 ```
 
+**Implementation:**
+- `LangPrimitive` enum in `kestrel-semantic-tree/src/expr.rs` (i8, i16, i32, i64, u8, u16, u32, u64, f32, f64)
+- `LangIntrinsic::Cast { from, to }` variant for cast operations
+- Path resolution in `paths.rs` parses `lang.cast_<from>_<to>` patterns
+- MIR lowering emits `Rvalue::Cast` with appropriate `CastKind`
+
+**Cast kinds supported:**
+- Integer widening: `lang.cast_i8_i64`, etc. → `CastKind::IntWiden`
+- Integer narrowing: `lang.cast_i64_i8`, etc. → `CastKind::IntTruncate`
+- Int to float: `lang.cast_i64_f64`, etc. → `CastKind::IntToFloat`
+- Float to int: `lang.cast_f64_i64`, etc. → `CastKind::FloatToInt`
+- Float widening: `lang.cast_f32_f64` → `CastKind::FloatWiden`
+- Float narrowing: `lang.cast_f64_f32` → `CastKind::FloatTruncate`
+
 **Files affected**:
-- All `core/*.ks` files (numeric conversions)
-- `memory/pointer.ks`
+- All `core/*.ks` files (numeric conversions) - ✅ Updated
+- `memory/pointer.ks` - uses `lang.cast_ptr[T]` (needs separate implementation)
 
 ---
 
@@ -386,8 +425,19 @@ extension Result[T, E]: Equatable where T: Equatable, E: Equatable { }
 ---
 
 ### 5.3 Protocol Inheritance
-**Status**: Partially Working
-**Blocking**: Numeric hierarchy, protocol composition
+**Status**: ✅ 85% Implemented - Mostly Working
+
+**What works:**
+- Parser: `protocol A: B, C { }` syntax fully supported
+- Semantic: `ProtocolSymbol` supports inheritance
+- Conformance checking validates inherited methods
+- Method lookup traverses protocol hierarchy
+- Associated type inheritance works
+- Tests pass: `test_protocol_inheritance()`, `test_protocol_multiple_inheritance()`
+
+**Potential edge cases:**
+- Associated type refinement in child protocols
+- Conflicting method names across multiple inherited protocols
 
 Protocol extending another protocol:
 ```kestrel
@@ -407,10 +457,17 @@ public protocol SignedInteger: Integer { }
 ## Priority 6: Additional Features
 
 ### 6.1 Static Methods and Properties
-**Status**: Partially Working
-**Blocking**: Factory methods, type constants
+**Status**: ✅ 95% Implemented
 
-Static members on structs/enums:
+Static members on structs/enums are fully supported:
+- Parser: `static func` and `static let/var` parse correctly
+- Semantic: `FunctionSymbol.is_static()` and `FieldSymbol.is_static()` work
+- Resolution: Static vs instance method dispatch works
+- MIR lowering generates correct dispatch
+- Recent fix: `3bc9ca9 fix: static method protocols`
+
+**Remaining edge cases**: Static methods on generic types, protocol static methods
+
 ```kestrel
 public static var zero: Int64 { Int64(value: 0) }
 public static func some(value: T) -> Optional[T] { .Some(value) }
@@ -556,30 +613,31 @@ cargo run -- check --verbose lang/std/ops/arithmetic.ks
 
 ## Implementation Order Recommendation
 
-1. **Phase 1**: Core type system
-   - Computed properties (1.1)
-   - Associated type visibility (1.2)
-   - Type parameter defaults (1.3)
-   - `lang.*` primitives (1.4)
-   - Import resolution (1.5)
+### Quick Wins (Do First)
+1. **Test static methods** (6.1) - 1 day, 95% done
+2. **Debug protocol inheritance** (5.3) - 1-3 days, 85% done
 
-2. **Phase 2**: Method features
-   - `ref` parameters (2.1)
-   - Generic methods in protocols (2.3)
-   - `self.init()` delegation (3.1)
-   - `as` casting (3.3)
+### Phase 1: Core Type System
+- Computed properties (1.1) - Medium effort
+- Type parameter defaults (1.3)
+- `lang.*` primitives (1.4)
+- Import resolution (1.5)
 
-3. **Phase 3**: Collection features
-   - Subscript declarations (2.2)
-   - ArcBox type (3.4)
-   - `panic()` builtin (3.2)
+### Phase 2: Method Features
+- Generic methods in protocols (2.3)
+- `self.init()` delegation (3.1)
+- `as` casting (3.3)
 
-4. **Phase 4**: Protocol system
-   - Extension conformances (2.4)
-   - Where clause equality (2.5)
-   - Operator attributes (4.1)
+### Phase 3: Collection Features
+- Subscript declarations (2.2) - Large effort
+- ArcBox type (3.4)
 
-5. **Phase 5**: Refinements
-   - Remaining conditional extensions
-   - Tuple patterns
-   - Error handling system
+### Phase 4: Protocol System
+- Extension conformances (2.4)
+- Where clause equality (2.5)
+- Operator attributes (4.1)
+
+### Phase 5: Refinements
+- Remaining conditional extensions
+- Tuple patterns
+- Error handling system

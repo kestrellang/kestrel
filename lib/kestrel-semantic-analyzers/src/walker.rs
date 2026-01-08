@@ -404,6 +404,17 @@ fn walk_expression(
                     walk_expression(val, analyzers, model, ctx);
                 }
             }
+            // Lang intrinsics - walk arguments
+            ExprKind::LangIntrinsic { arguments, .. } => {
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            }
+            // Lang intrinsic ref - leaf node
+            ExprKind::LangIntrinsicRef(_) => {}
         }
     }
 

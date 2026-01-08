@@ -180,7 +180,25 @@ fn find_less_visible_type(
             symbol: assoc_symbol,
             container,
         } => {
-            let level = get_visibility_level_from_symbol(assoc_symbol);
+            // Associated types in protocols inherit the protocol's visibility
+            // (they have no explicit visibility keyword in syntax)
+            let level = {
+                let direct_level = get_visibility_level_from_symbol(assoc_symbol);
+
+                // Check if parent is a protocol with higher visibility
+                if let Some(parent) = assoc_symbol.metadata().parent() {
+                    if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                        let protocol_level = get_symbol_visibility_level(&parent);
+                        // Use the higher of direct or protocol visibility
+                        std::cmp::max(direct_level, protocol_level)
+                    } else {
+                        direct_level
+                    }
+                } else {
+                    direct_level
+                }
+            };
+
             if level < required_level {
                 return Some((assoc_symbol.metadata().name().value.clone(), level));
             }

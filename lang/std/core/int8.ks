@@ -35,7 +35,7 @@ public struct Int8:
 
     // ExpressibleByIntLiteral
     public init(intLiteral value: Int) {
-        self.value = value as lang.i8
+        self.value = lang.cast_i64_i8(value)
     }
 
     // Equatable
@@ -56,7 +56,7 @@ public struct Int8:
 
     // Hashable
     public func hash[H](into hasher: mutating H) where H: Hasher {
-        hasher.write(bytes: [self.value as UInt8])
+        hasher.write(bytes: [UInt8(self.value)])
     }
 
     // Addable
@@ -122,36 +122,36 @@ public struct Int8:
 
     // LeftShift
     public func shiftLeft(by count: Int) -> Int8 {
-        Int8(value: lang.i8_shl(self.value, count as lang.i8))
+        Int8(value: lang.i8_shl(self.value, lang.cast_i64_i8(count)))
     }
 
     // RightShift (arithmetic)
     public func shiftRight(by count: Int) -> Int8 {
-        Int8(value: lang.i8_shr(self.value, count as lang.i8))
+        Int8(value: lang.i8_shr(self.value, lang.cast_i64_i8(count)))
     }
 
     // Type conversions
     public func toInt() -> Int {
-        Int64(value: self.value as lang.i64)
+        Int64(value: lang.cast_i8_i64(self.value))
     }
 
     public func toInt16() -> Int16 {
-        Int16(value: self.value as lang.i16)
+        Int16(value: lang.cast_i8_i16(self.value))
     }
 
     public func toInt32() -> Int32 {
-        Int32(value: self.value as lang.i32)
+        Int32(value: lang.cast_i8_i32(self.value))
     }
 
     public func toInt64() -> Int64 {
-        Int64(value: self.value as lang.i64)
+        Int64(value: lang.cast_i8_i64(self.value))
     }
 
     public func toFloat32() -> Float32 {
-        Float32(value: self.value as lang.f32)
+        Float32(value: lang.cast_i8_f32(self.value))
     }
 
     public func toFloat64() -> Float64 {
-        Float64(value: self.value as lang.f64)
+        Float64(value: lang.cast_i8_f64(self.value))
     }
 }

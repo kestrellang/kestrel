@@ -349,6 +349,17 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         }
+        // Lang intrinsic - check which intrinsic
+        ExprKind::LangIntrinsic { intrinsic, .. } => {
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+            match intrinsic {
+                // panic_unwind never returns
+                LangIntrinsic::PanicUnwind => ReturnState::Returns,
+                // Cast intrinsics return a value normally
+                LangIntrinsic::Cast { .. } => ReturnState::MayFallThrough,
+            }
+        }
+
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
         | ExprKind::SymbolRef(_)
@@ -358,6 +369,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::Closure { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => ReturnState::MayFallThrough,
 
         // Match expression - all arms must return for the match to be exhaustive

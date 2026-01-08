@@ -33,7 +33,7 @@ public struct Float64:
     }
 
     public init(intLiteral value: Int) {
-        self.value = value as lang.f64
+        self.value = lang.cast_i64_f64(value)
     }
 
     public func isNaN() -> Bool {
@@ -100,27 +100,27 @@ public struct Float64:
 
     // Type conversions
     public func toInt() -> Int {
-        Int64(value: self.value as lang.i64)
+        Int64(value: lang.cast_f64_i64(self.value))
     }
 
     public func toInt8() -> Int8 {
-        Int8(value: self.value as lang.i8)
+        Int8(value: lang.cast_f64_i8(self.value))
     }
 
     public func toInt16() -> Int16 {
-        Int16(value: self.value as lang.i16)
+        Int16(value: lang.cast_f64_i16(self.value))
     }
 
     public func toInt32() -> Int32 {
-        Int32(value: self.value as lang.i32)
+        Int32(value: lang.cast_f64_i32(self.value))
     }
 
     public func toInt64() -> Int64 {
-        Int64(value: self.value as lang.i64)
+        Int64(value: lang.cast_f64_i64(self.value))
     }
 
     public func toFloat32() -> Float32 {
-        Float32(value: self.value as lang.f32)
+        Float32(value: lang.cast_f64_f32(self.value))
     }
 }
 

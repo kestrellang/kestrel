@@ -93,7 +93,7 @@ public struct DefaultHasher: Hasher {
 
     public func write(bytes: Slice[UInt8]) {
         // Implementation details - writes bytes into hasher state
-        self.length += bytes.count as UInt64
+        self.length += UInt64(bytes.count)
         // ... SipHash implementation
     }
 

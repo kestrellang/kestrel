@@ -30,7 +30,7 @@ public struct UInt32:
     public static var bitWidth: Int { 32 }
 
     public init(intLiteral value: Int) {
-        self.value = value as lang.u32
+        self.value = lang.cast_i64_u32(value)
     }
 
     public func equals(other: UInt32) -> Bool {
@@ -58,6 +58,6 @@ public struct UInt32:
     public func bitwiseOr(other: UInt32) -> UInt32 { UInt32(value: lang.u32_or(self.value, other.value)) }
     public func bitwiseXor(other: UInt32) -> UInt32 { UInt32(value: lang.u32_xor(self.value, other.value)) }
     public func bitwiseNot() -> UInt32 { UInt32(value: lang.u32_not(self.value)) }
-    public func shiftLeft(by count: Int) -> UInt32 { UInt32(value: lang.u32_shl(self.value, count as lang.u32)) }
-    public func shiftRight(by count: Int) -> UInt32 { UInt32(value: lang.u32_shr(self.value, count as lang.u32)) }
+    public func shiftLeft(by count: Int) -> UInt32 { UInt32(value: lang.u32_shl(self.value, lang.cast_i64_u32(count))) }
+    public func shiftRight(by count: Int) -> UInt32 { UInt32(value: lang.u32_shr(self.value, lang.cast_i64_u32(count))) }
 }

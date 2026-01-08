@@ -350,12 +350,27 @@ fn analyze_expression(
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
         }
+        ExprKind::LangIntrinsic {
+            arguments,
+            intrinsic,
+        } => {
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+            // Check if this intrinsic diverges
+            match intrinsic {
+                LangIntrinsic::PanicUnwind => state.diverged = true,
+                LangIntrinsic::Cast { .. } => {} // Cast returns normally
+            }
+        }
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error
         | ExprKind::OverloadedRef(_)
         | ExprKind::Closure { .. } => {}

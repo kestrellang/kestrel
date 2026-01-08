@@ -5,8 +5,8 @@
 //! statements and new basic blocks along the way.
 
 use kestrel_execution_graph::{
-    BinOp, CallArg, Callee, Id, Immediate, Local, MirTy, PassingMode, Place, QualifiedNameData,
-    Rvalue, UnOp, Value,
+    BinOp, CallArg, Callee, CastKind, Id, Immediate, Local, MirTy, PassingMode, Place,
+    QualifiedNameData, Rvalue, UnOp, Value,
 };
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{
@@ -833,6 +833,96 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             // Should be resolved by type inference
             ctx.emit_error(LoweringError::internal(
                 format!("unresolved deferred method call '.{}'", method_name),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        }
+
+        // === Language Intrinsics ===
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => {
+            use kestrel_execution_graph::function::ImmediateKind;
+            use kestrel_execution_graph::TerminatorKind;
+            use kestrel_semantic_tree::expr::{LangIntrinsic, LangPrimitive};
+
+            match intrinsic {
+                LangIntrinsic::PanicUnwind => {
+                    // Lower the message argument
+                    let message_value = if let Some(arg) = arguments.first() {
+                        lower_expression(ctx, &arg.value)
+                    } else {
+                        // Should not happen after binder validation
+                        Value::Immediate(Immediate::string("panic".to_string()))
+                    };
+
+                    // Extract the message string
+                    let message = match message_value {
+                        Value::Immediate(imm) => {
+                            match &imm.kind {
+                                ImmediateKind::StringLiteral(s) => s.clone(),
+                                _ => {
+                                    // For non-constant strings, use a placeholder
+                                    "<dynamic panic message>".to_string()
+                                }
+                            }
+                        }
+                        _ => {
+                            // For non-immediate values, use a placeholder
+                            "<dynamic panic message>".to_string()
+                        }
+                    };
+
+                    // Emit the panic terminator
+                    ctx.emit_terminator(TerminatorKind::Panic(message));
+
+                    // Start a new unreachable block (panic never returns)
+                    let unreachable_block = ctx.create_block();
+                    ctx.set_current_block(unreachable_block);
+
+                    // Return unit since the type is Never (control doesn't reach here)
+                    Value::Immediate(Immediate::unit())
+                }
+                LangIntrinsic::Cast { from, to } => {
+                    // Lower the operand argument
+                    let operand = if let Some(arg) = arguments.first() {
+                        lower_expression(ctx, &arg.value)
+                    } else {
+                        // Should not happen after binder validation
+                        ctx.emit_error(LoweringError::internal(
+                            "cast intrinsic missing argument",
+                            Some(expr.span.clone()),
+                        ));
+                        return Value::Immediate(Immediate::error());
+                    };
+
+                    // Determine the cast kind based on from/to primitives
+                    let cast_kind = determine_cast_kind(*from, *to);
+
+                    // Lower the target type
+                    let target_ty = lower_type(ctx, &expr.ty);
+
+                    // Emit the cast
+                    let result = ctx.create_temp("cast", target_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::Cast {
+                            kind: cast_kind,
+                            operand,
+                            target: target_ty,
+                        },
+                    );
+                    Value::Place(Place::local(result))
+                }
+            }
+        }
+
+        ExprKind::LangIntrinsicRef(_) => {
+            // Intrinsic reference without a call - this is an error
+            // (intrinsics cannot be used as first-class values)
+            ctx.emit_error(LoweringError::internal(
+                "lang intrinsic cannot be used as a value",
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
@@ -3408,4 +3498,41 @@ fn emit_while_let_string_switch(
     } else {
         ctx.emit_jump(exit_block);
     }
+}
+
+/// Determine the MIR CastKind based on source and target primitive types.
+fn determine_cast_kind(
+    from: kestrel_semantic_tree::expr::LangPrimitive,
+    to: kestrel_semantic_tree::expr::LangPrimitive,
+) -> CastKind {
+    use kestrel_semantic_tree::expr::LangPrimitive;
+
+    // Float <-> Float
+    if from.is_float() && to.is_float() {
+        if from.bit_width() < to.bit_width() {
+            return CastKind::FloatWiden;
+        } else {
+            return CastKind::FloatTruncate;
+        }
+    }
+
+    // Int <-> Float
+    if from.is_int() && to.is_float() {
+        return CastKind::IntToFloat;
+    }
+    if from.is_float() && to.is_int() {
+        return CastKind::FloatToInt;
+    }
+
+    // Int <-> Int (signed or unsigned)
+    if from.is_int() && to.is_int() {
+        if from.bit_width() < to.bit_width() {
+            return CastKind::IntWiden;
+        } else {
+            return CastKind::IntTruncate;
+        }
+    }
+
+    // Default: truncate (should not happen with valid casts)
+    CastKind::IntTruncate
 }

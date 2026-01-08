@@ -138,7 +138,7 @@ public struct Dictionary[K, V, A]:
 
     private func findSlot(hash: UInt64) -> Int {
         let mask = self.storage.value.capacity - 1
-        var index = (hash as Int) & mask
+        var index = Int(hash) & mask
 
         while self.storage.value.entries(unchecked: index).occupied {
             if self.storage.value.entries(unchecked: index).hash == hash {
@@ -155,7 +155,7 @@ public struct Dictionary[K, V, A]:
         }
 
         let mask = self.storage.value.capacity - 1
-        var index = (hash as Int) & mask
+        var index = Int(hash) & mask
         var checked = 0
 
         while checked < self.storage.value.capacity {
@@ -174,7 +174,7 @@ public struct Dictionary[K, V, A]:
 
     private func insertEntry(key: K, value: V, hash: UInt64) {
         let mask = self.storage.value.capacity - 1
-        var index = (hash as Int) & mask
+        var index = Int(hash) & mask
 
         while self.storage.value.entries(unchecked: index).occupied {
             index = (index + 1) & mask

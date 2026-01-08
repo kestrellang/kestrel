@@ -31,7 +31,7 @@ public struct Int64:
     public static var bitWidth: Int { 64 }
 
     public init(intLiteral value: Int) {
-        self.value = value as lang.i64
+        self.value = lang.cast_i64_i64(value)
     }
 
     public func equals(other: Int64) -> Bool {
@@ -61,28 +61,28 @@ public struct Int64:
     public func bitwiseOr(other: Int64) -> Int64 { Int64(value: lang.i64_or(self.value, other.value)) }
     public func bitwiseXor(other: Int64) -> Int64 { Int64(value: lang.i64_xor(self.value, other.value)) }
     public func bitwiseNot() -> Int64 { Int64(value: lang.i64_not(self.value)) }
-    public func shiftLeft(by count: Int) -> Int64 { Int64(value: lang.i64_shl(self.value, count as lang.i64)) }
-    public func shiftRight(by count: Int) -> Int64 { Int64(value: lang.i64_shr(self.value, count as lang.i64)) }
+    public func shiftLeft(by count: Int) -> Int64 { Int64(value: lang.i64_shl(self.value, lang.cast_i64_i64(count))) }
+    public func shiftRight(by count: Int) -> Int64 { Int64(value: lang.i64_shr(self.value, lang.cast_i64_i64(count))) }
 
     // Type conversions
     public func toInt8() -> Int8 {
-        Int8(value: self.value as lang.i8)
+        Int8(value: lang.cast_i64_i8(self.value))
     }
 
     public func toInt16() -> Int16 {
-        Int16(value: self.value as lang.i16)
+        Int16(value: lang.cast_i64_i16(self.value))
     }
 
     public func toInt32() -> Int32 {
-        Int32(value: self.value as lang.i32)
+        Int32(value: lang.cast_i64_i32(self.value))
     }
 
     public func toFloat32() -> Float32 {
-        Float32(value: self.value as lang.f32)
+        Float32(value: lang.cast_i64_f32(self.value))
     }
 
     public func toFloat64() -> Float64 {
-        Float64(value: self.value as lang.f64)
+        Float64(value: lang.cast_i64_f64(self.value))
     }
 }
 

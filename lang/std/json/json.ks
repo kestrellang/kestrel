@@ -135,7 +135,7 @@ public enum JsonValue: Equatable {
 
     public func asInt() -> Optional[Int] {
         match self {
-            .Number(let v) => .Some(v as Int),
+            .Number(let v) => .Some(Int(v)),
             _ => .None
         }
     }
@@ -332,7 +332,7 @@ struct JsonParser {
             return self.parseNumber()
         }
 
-        .Err(JsonError(message: "unexpected character: " + String(codePoints: [CodePoint(value: ch as UInt32)]), at: self.position))
+        .Err(JsonError(message: "unexpected character: " + String(codePoints: [CodePoint(value: UInt32(ch))]), at: self.position))
     }
 
     private func parseNull() -> Result[JsonValue, JsonError] {
@@ -423,11 +423,11 @@ struct JsonParser {
             self.advance()
 
             let digit: UInt32 = if ch >= 48 and ch <= 57 { // 0-9
-                (ch - 48) as UInt32
+                UInt32(ch - 48)
             } else if ch >= 65 and ch <= 70 { // A-F
-                (ch - 55) as UInt32
+                UInt32(ch - 55)
             } else if ch >= 97 and ch <= 102 { // a-f
-                (ch - 87) as UInt32
+                UInt32(ch - 87)
             } else {
                 return .Err(JsonError(message: "invalid hex digit", at: self.position - 1))
             }
@@ -685,7 +685,7 @@ struct JsonWriter {
     private func writeHex4(value: UInt32) {
         let hexChars = "0123456789abcdef"
         /* for i in [12, 8, 4, 0] {
-            let digit = ((value >> i) & 0xF) as Int
+            let digit = Int((value >> i) & 0xF)
             self.output.append(codePoint: hexChars.codePoints.nth(digit).unwrap())
         } */
     }
@@ -804,57 +804,57 @@ public struct JsonSerializer: Serializer {
     }
 
     public func serializeInt(value: Int) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeInt8(value: Int8) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeInt16(value: Int16) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeInt32(value: Int32) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeInt64(value: Int64) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeUInt(value: UInt) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeUInt8(value: UInt8) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeUInt16(value: UInt16) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeUInt32(value: UInt32) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeUInt64(value: UInt64) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
     public func serializeFloat32(value: Float32) -> Result[(), JsonError] {
-        self.writer.write(value: .Number(value as Float64))
+        self.writer.write(value: .Number(Float64(value)))
         .Ok(())
     }
 
@@ -1011,7 +1011,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeInt() -> Result[Int, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as Int),
+            .Number(let v) => .Ok(Int(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
@@ -1019,7 +1019,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeInt8() -> Result[Int8, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as Int8),
+            .Number(let v) => .Ok(Int8(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
@@ -1027,7 +1027,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeInt16() -> Result[Int16, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as Int16),
+            .Number(let v) => .Ok(Int16(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
@@ -1035,7 +1035,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeInt32() -> Result[Int32, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as Int32),
+            .Number(let v) => .Ok(Int32(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
@@ -1043,7 +1043,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeInt64() -> Result[Int64, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as Int64),
+            .Number(let v) => .Ok(Int64(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
@@ -1051,7 +1051,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeUInt() -> Result[UInt, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as UInt),
+            .Number(let v) => .Ok(UInt(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
@@ -1059,7 +1059,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeUInt8() -> Result[UInt8, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as UInt8),
+            .Number(let v) => .Ok(UInt8(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
@@ -1067,7 +1067,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeUInt16() -> Result[UInt16, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as UInt16),
+            .Number(let v) => .Ok(UInt16(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
@@ -1075,7 +1075,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeUInt32() -> Result[UInt32, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as UInt32),
+            .Number(let v) => .Ok(UInt32(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
@@ -1083,7 +1083,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeUInt64() -> Result[UInt64, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as UInt64),
+            .Number(let v) => .Ok(UInt64(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
@@ -1091,7 +1091,7 @@ public struct JsonDeserializer: Deserializer {
     public func deserializeFloat32() -> Result[Float32, JsonError] {
         let value = try self.takeValue()
         match value {
-            .Number(let v) => .Ok(v as Float32),
+            .Number(let v) => .Ok(Float32(v)),
             _ => .Err(JsonError(message: "expected float"))
         }
     }

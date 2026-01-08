@@ -381,6 +381,112 @@ pub enum LiteralValue {
     Bool(bool),
 }
 
+/// Primitive types available in the `lang` namespace.
+/// These are the low-level types that map directly to machine types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LangPrimitive {
+    /// Signed integers
+    I8,
+    I16,
+    I32,
+    I64,
+    /// Unsigned integers
+    U8,
+    U16,
+    U32,
+    U64,
+    /// Floating point
+    F32,
+    F64,
+}
+
+impl LangPrimitive {
+    /// Parse a primitive type from a string (e.g., "i32", "f64").
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "i8" => Some(LangPrimitive::I8),
+            "i16" => Some(LangPrimitive::I16),
+            "i32" => Some(LangPrimitive::I32),
+            "i64" => Some(LangPrimitive::I64),
+            "u8" => Some(LangPrimitive::U8),
+            "u16" => Some(LangPrimitive::U16),
+            "u32" => Some(LangPrimitive::U32),
+            "u64" => Some(LangPrimitive::U64),
+            "f32" => Some(LangPrimitive::F32),
+            "f64" => Some(LangPrimitive::F64),
+            _ => None,
+        }
+    }
+
+    /// Get the string representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LangPrimitive::I8 => "i8",
+            LangPrimitive::I16 => "i16",
+            LangPrimitive::I32 => "i32",
+            LangPrimitive::I64 => "i64",
+            LangPrimitive::U8 => "u8",
+            LangPrimitive::U16 => "u16",
+            LangPrimitive::U32 => "u32",
+            LangPrimitive::U64 => "u64",
+            LangPrimitive::F32 => "f32",
+            LangPrimitive::F64 => "f64",
+        }
+    }
+
+    /// Check if this is a signed integer type.
+    pub fn is_signed_int(&self) -> bool {
+        matches!(
+            self,
+            LangPrimitive::I8 | LangPrimitive::I16 | LangPrimitive::I32 | LangPrimitive::I64
+        )
+    }
+
+    /// Check if this is an unsigned integer type.
+    pub fn is_unsigned_int(&self) -> bool {
+        matches!(
+            self,
+            LangPrimitive::U8 | LangPrimitive::U16 | LangPrimitive::U32 | LangPrimitive::U64
+        )
+    }
+
+    /// Check if this is an integer type (signed or unsigned).
+    pub fn is_int(&self) -> bool {
+        self.is_signed_int() || self.is_unsigned_int()
+    }
+
+    /// Check if this is a floating point type.
+    pub fn is_float(&self) -> bool {
+        matches!(self, LangPrimitive::F32 | LangPrimitive::F64)
+    }
+
+    /// Get the bit width of this primitive type.
+    pub fn bit_width(&self) -> u32 {
+        match self {
+            LangPrimitive::I8 | LangPrimitive::U8 => 8,
+            LangPrimitive::I16 | LangPrimitive::U16 => 16,
+            LangPrimitive::I32 | LangPrimitive::U32 | LangPrimitive::F32 => 32,
+            LangPrimitive::I64 | LangPrimitive::U64 | LangPrimitive::F64 => 64,
+        }
+    }
+}
+
+/// Language intrinsics available in the `lang` namespace.
+/// These are compiler-provided functions that lower to special MIR constructs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LangIntrinsic {
+    /// `lang.panic_unwind(message: String) -> Never`
+    /// Terminates the program with the given panic message.
+    PanicUnwind,
+
+    /// `lang.cast_<from>_<to>(value: From) -> To`
+    /// Type cast between primitive types.
+    Cast {
+        from: LangPrimitive,
+        to: LangPrimitive,
+    },
+}
+
 /// Represents the kind of expression.
 ///
 /// All variants represent resolved expressions - there is no `Path` variant
@@ -658,6 +764,20 @@ pub enum ExprKind {
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
+
+    /// Language intrinsic call.
+    /// These are special `lang.*` functions that are handled directly by the compiler
+    /// rather than being real function calls.
+    LangIntrinsic {
+        /// The intrinsic being called
+        intrinsic: LangIntrinsic,
+        /// Arguments to the intrinsic
+        arguments: Vec<CallArgument>,
+    },
+
+    /// Reference to a language intrinsic function (before being called).
+    /// This is similar to SymbolRef but for intrinsics that don't have real symbols.
+    LangIntrinsicRef(LangIntrinsic),
 }
 
 /// A closure parameter.
@@ -1093,6 +1213,25 @@ impl Expression {
                 format!("{{ {} }}", body_str)
             }
             ExprKind::Error => "<error>".to_string(),
+            ExprKind::LangIntrinsic {
+                intrinsic,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
+                let name = match intrinsic {
+                    LangIntrinsic::PanicUnwind => "lang.panic_unwind".to_string(),
+                    LangIntrinsic::Cast { from, to } => {
+                        format!("lang.cast_{}_{}", from.as_str(), to.as_str())
+                    }
+                };
+                format!("{}({})", name, args.join(", "))
+            }
+            ExprKind::LangIntrinsicRef(intrinsic) => match intrinsic {
+                LangIntrinsic::PanicUnwind => "lang.panic_unwind".to_string(),
+                LangIntrinsic::Cast { from, to } => {
+                    format!("lang.cast_{}_{}", from.as_str(), to.as_str())
+                }
+            }
         }
     }
 
@@ -1825,6 +1964,98 @@ impl Expression {
         match &self.kind {
             ExprKind::Literal(val) => Some(val),
             _ => None,
+        }
+    }
+
+    /// Create a language intrinsic call expression.
+    ///
+    /// Used for `lang.*` intrinsic functions that are handled specially by the compiler.
+    /// The return type is `Never` for panic_unwind, or the target type for casts.
+    pub fn lang_intrinsic(intrinsic: LangIntrinsic, arguments: Vec<CallArgument>, span: Span) -> Self {
+        use crate::ty::{FloatBits, IntBits};
+        let ty = match intrinsic {
+            LangIntrinsic::PanicUnwind => Ty::never(span.clone()),
+            LangIntrinsic::Cast { to, .. } => {
+                // Return the target primitive type
+                match to {
+                    LangPrimitive::I8 => Ty::int(IntBits::I8, span.clone()),
+                    LangPrimitive::I16 => Ty::int(IntBits::I16, span.clone()),
+                    LangPrimitive::I32 => Ty::int(IntBits::I32, span.clone()),
+                    LangPrimitive::I64 => Ty::int(IntBits::I64, span.clone()),
+                    // Unsigned integers use signed type at semantic level,
+                    // MIR lowering handles signedness based on LangPrimitive
+                    LangPrimitive::U8 => Ty::int(IntBits::I8, span.clone()),
+                    LangPrimitive::U16 => Ty::int(IntBits::I16, span.clone()),
+                    LangPrimitive::U32 => Ty::int(IntBits::I32, span.clone()),
+                    LangPrimitive::U64 => Ty::int(IntBits::I64, span.clone()),
+                    LangPrimitive::F32 => Ty::float(FloatBits::F32, span.clone()),
+                    LangPrimitive::F64 => Ty::float(FloatBits::F64, span.clone()),
+                }
+            }
+        };
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::LangIntrinsic {
+                intrinsic,
+                arguments,
+            },
+            ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a reference to a language intrinsic function (not yet called).
+    ///
+    /// This is similar to `symbol_ref` but for intrinsics that don't have real symbols.
+    /// The type is the function signature of the intrinsic.
+    pub fn lang_intrinsic_ref(intrinsic: LangIntrinsic, span: Span) -> Self {
+        use crate::ty::{FloatBits, IntBits};
+        // Create a function type for the intrinsic
+        let ty = match intrinsic {
+            LangIntrinsic::PanicUnwind => {
+                // (String) -> Never
+                Ty::function(
+                    vec![Ty::string(span.clone())],
+                    Ty::never(span.clone()),
+                    span.clone(),
+                )
+            }
+            LangIntrinsic::Cast { from, to } => {
+                // (From) -> To
+                let from_ty = match from {
+                    LangPrimitive::I8 => Ty::int(IntBits::I8, span.clone()),
+                    LangPrimitive::I16 => Ty::int(IntBits::I16, span.clone()),
+                    LangPrimitive::I32 => Ty::int(IntBits::I32, span.clone()),
+                    LangPrimitive::I64 => Ty::int(IntBits::I64, span.clone()),
+                    LangPrimitive::U8 => Ty::int(IntBits::I8, span.clone()),
+                    LangPrimitive::U16 => Ty::int(IntBits::I16, span.clone()),
+                    LangPrimitive::U32 => Ty::int(IntBits::I32, span.clone()),
+                    LangPrimitive::U64 => Ty::int(IntBits::I64, span.clone()),
+                    LangPrimitive::F32 => Ty::float(FloatBits::F32, span.clone()),
+                    LangPrimitive::F64 => Ty::float(FloatBits::F64, span.clone()),
+                };
+                let to_ty = match to {
+                    LangPrimitive::I8 => Ty::int(IntBits::I8, span.clone()),
+                    LangPrimitive::I16 => Ty::int(IntBits::I16, span.clone()),
+                    LangPrimitive::I32 => Ty::int(IntBits::I32, span.clone()),
+                    LangPrimitive::I64 => Ty::int(IntBits::I64, span.clone()),
+                    LangPrimitive::U8 => Ty::int(IntBits::I8, span.clone()),
+                    LangPrimitive::U16 => Ty::int(IntBits::I16, span.clone()),
+                    LangPrimitive::U32 => Ty::int(IntBits::I32, span.clone()),
+                    LangPrimitive::U64 => Ty::int(IntBits::I64, span.clone()),
+                    LangPrimitive::F32 => Ty::float(FloatBits::F32, span.clone()),
+                    LangPrimitive::F64 => Ty::float(FloatBits::F64, span.clone()),
+                };
+                Ty::function(vec![from_ty], to_ty, span.clone())
+            }
+        };
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::LangIntrinsicRef(intrinsic),
+            ty,
+            span,
+            mutable: false,
         }
     }
 }

@@ -30,7 +30,7 @@ public struct UInt64:
     public static var bitWidth: Int { 64 }
 
     public init(intLiteral value: Int) {
-        self.value = value as lang.u64
+        self.value = lang.cast_i64_u64(value)
     }
 
     public func equals(other: UInt64) -> Bool {
@@ -58,20 +58,20 @@ public struct UInt64:
     public func bitwiseOr(other: UInt64) -> UInt64 { UInt64(value: lang.u64_or(self.value, other.value)) }
     public func bitwiseXor(other: UInt64) -> UInt64 { UInt64(value: lang.u64_xor(self.value, other.value)) }
     public func bitwiseNot() -> UInt64 { UInt64(value: lang.u64_not(self.value)) }
-    public func shiftLeft(by count: Int) -> UInt64 { UInt64(value: lang.u64_shl(self.value, count as lang.u64)) }
-    public func shiftRight(by count: Int) -> UInt64 { UInt64(value: lang.u64_shr(self.value, count as lang.u64)) }
+    public func shiftLeft(by count: Int) -> UInt64 { UInt64(value: lang.u64_shl(self.value, lang.cast_i64_u64(count))) }
+    public func shiftRight(by count: Int) -> UInt64 { UInt64(value: lang.u64_shr(self.value, lang.cast_i64_u64(count))) }
 
     // Helper to convert to bytes for hashing
     public func toBytes() -> [UInt8] {
         [
-            (self.value & 0xFF) as UInt8,
-            ((self.value >> 8) & 0xFF) as UInt8,
-            ((self.value >> 16) & 0xFF) as UInt8,
-            ((self.value >> 24) & 0xFF) as UInt8,
-            ((self.value >> 32) & 0xFF) as UInt8,
-            ((self.value >> 40) & 0xFF) as UInt8,
-            ((self.value >> 48) & 0xFF) as UInt8,
-            ((self.value >> 56) & 0xFF) as UInt8
+            UInt8(self.value & 0xFF),
+            UInt8((self.value >> 8) & 0xFF),
+            UInt8((self.value >> 16) & 0xFF),
+            UInt8((self.value >> 24) & 0xFF),
+            UInt8((self.value >> 32) & 0xFF),
+            UInt8((self.value >> 40) & 0xFF),
+            UInt8((self.value >> 48) & 0xFF),
+            UInt8((self.value >> 56) & 0xFF)
         ]
     }
 }

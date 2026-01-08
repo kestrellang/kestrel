@@ -28,7 +28,7 @@ public struct RawPointer: Equatable, FFISafe {
     }
 
     public func as[T]() -> Pointer[T] {
-        Pointer(raw: self.raw as lang.ptr[T])
+        Pointer(raw: lang.cast_ptr[T](self.raw))
     }
 
     public func offset(by bytes: Int) -> RawPointer {
@@ -53,7 +53,7 @@ public struct Pointer[T]: Equatable {
     }
 
     public static func nilPointer() -> Pointer[T] {
-        Pointer(raw: lang.ptr_null() as lang.ptr[T])
+        Pointer(raw: lang.cast_ptr[T](lang.ptr_null()))
     }
 
     public var pointee: T {
@@ -62,11 +62,11 @@ public struct Pointer[T]: Equatable {
     }
 
     public var address: UInt {
-        lang.ptr_to_address(self.raw as lang.ptr[lang.u8])
+        lang.ptr_to_address(lang.cast_ptr[lang.u8](self.raw))
     }
 
     public var isNull: Bool {
-        lang.ptr_is_null(self.raw as lang.ptr[lang.u8])
+        lang.ptr_is_null(lang.cast_ptr[lang.u8](self.raw))
     }
 
     public func read() -> T {
@@ -78,11 +78,11 @@ public struct Pointer[T]: Equatable {
     }
 
     public func offset(by n: Int) -> Pointer[T] {
-        Pointer(raw: lang.ptr_offset(self.raw, n * lang.sizeof[T]()) as lang.ptr[T])
+        Pointer(raw: lang.cast_ptr[T](lang.ptr_offset(self.raw, n * lang.sizeof[T]())))
     }
 
     public func asRaw() -> RawPointer {
-        RawPointer(raw: self.raw as lang.ptr[lang.u8])
+        RawPointer(raw: lang.cast_ptr[lang.u8](self.raw))
     }
 
     public func equals(other: Pointer[T]) -> Bool {

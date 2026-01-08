@@ -134,6 +134,33 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         return Expression::error(span);
     }
 
+    // Check for lang.* intrinsic functions
+    // These are handled specially by the compiler and don't exist as real symbols
+    if path.len() == 2 && path[0] == kestrel_prelude::lang::LANG {
+        use kestrel_semantic_tree::expr::{LangIntrinsic, LangPrimitive};
+
+        // lang.panic_unwind(message: String) -> Never
+        if path[1] == kestrel_prelude::lang::PANIC_UNWIND {
+            return Expression::lang_intrinsic_ref(LangIntrinsic::PanicUnwind, span);
+        }
+
+        // lang.cast_<from>_<to>(value: From) -> To
+        // e.g., lang.cast_i64_i32, lang.cast_f64_i64
+        if let Some(suffix) = path[1].strip_prefix("cast_") {
+            // Parse "i64_i32" -> (from: i64, to: i32)
+            if let Some((from_str, to_str)) = suffix.split_once('_') {
+                if let (Some(from), Some(to)) =
+                    (LangPrimitive::from_str(from_str), LangPrimitive::from_str(to_str))
+                {
+                    return Expression::lang_intrinsic_ref(
+                        LangIntrinsic::Cast { from, to },
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
     // Extract type arguments from the path if present
     let explicit_type_args = extract_type_arguments_from_path(node, ctx);
 

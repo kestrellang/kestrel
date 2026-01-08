@@ -408,6 +408,26 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
             Divergence::None
         }
+        // Lang intrinsics - analyze arguments, then check for divergence (panic never returns)
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => {
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            // Check divergence based on intrinsic type
+            match intrinsic {
+                // panic_unwind never returns
+                kestrel_semantic_tree::expr::LangIntrinsic::PanicUnwind => Divergence::Returns,
+                // Cast intrinsics return a value normally
+                kestrel_semantic_tree::expr::LangIntrinsic::Cast { .. } => Divergence::None,
+            }
+        }
+
         // Leaf expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -417,6 +437,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         | ExprKind::TypeParameterRef(_)
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => Divergence::None,
 
         // Match expressions - all arms must diverge for the match to diverge

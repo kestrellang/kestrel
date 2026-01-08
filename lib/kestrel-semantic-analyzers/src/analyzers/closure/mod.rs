@@ -378,6 +378,13 @@ fn find_assignments_to_locals(
             }
         }
 
+        // Lang intrinsics - walk arguments
+        ExprKind::LangIntrinsic { arguments, .. } => {
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        }
+
         // Leaf expressions - no sub-expressions to check
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -389,6 +396,7 @@ fn find_assignments_to_locals(
         | ExprKind::EnumCase { .. }
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
+        | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error => {}
 
         ExprKind::Match { scrutinee, arms } => {

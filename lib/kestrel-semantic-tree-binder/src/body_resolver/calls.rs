@@ -410,6 +410,61 @@ pub fn resolve_call(
             }
         }
 
+        // Language intrinsic reference - create an intrinsic call
+        ExprKind::LangIntrinsicRef(intrinsic) => {
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+
+            // Lang intrinsics cannot have explicit type arguments
+            if let Some(ref type_args) = explicit_type_args {
+                if !type_args.is_empty() {
+                    ctx.diagnostics.add_diagnostic(
+                        TypeArgsOnNonGenericError {
+                            span: span.clone(),
+                            callee_description: "a language intrinsic".to_string(),
+                        }
+                        .into_diagnostic(),
+                    );
+                    return Expression::error(span);
+                }
+            }
+
+            // Validate argument count and types based on intrinsic
+            match intrinsic {
+                LangIntrinsic::PanicUnwind => {
+                    // panic_unwind(message: String) -> Never
+                    if arguments.len() != 1 {
+                        ctx.diagnostics.add_diagnostic(
+                            ClosureArityError {
+                                span: span.clone(),
+                                expected: 1,
+                                provided: arguments.len(),
+                            }
+                            .into_diagnostic(),
+                        );
+                        return Expression::error(span);
+                    }
+                    // Create the lang intrinsic call expression
+                    Expression::lang_intrinsic(LangIntrinsic::PanicUnwind, arguments, span)
+                }
+                LangIntrinsic::Cast { from, to } => {
+                    // cast_<from>_<to>(value: From) -> To
+                    if arguments.len() != 1 {
+                        ctx.diagnostics.add_diagnostic(
+                            ClosureArityError {
+                                span: span.clone(),
+                                expected: 1,
+                                provided: arguments.len(),
+                            }
+                            .into_diagnostic(),
+                        );
+                        return Expression::error(span);
+                    }
+                    // Create the cast intrinsic call expression
+                    Expression::lang_intrinsic(LangIntrinsic::Cast { from, to }, arguments, span)
+                }
+            }
+        }
+
         // Local variable reference - could be calling a function stored in a variable
         ExprKind::LocalRef(_local_id) => {
             // Variables cannot have explicit type arguments

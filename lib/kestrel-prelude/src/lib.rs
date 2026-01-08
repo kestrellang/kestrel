@@ -9,6 +9,8 @@ pub mod lang {
     pub const LANG: &str = "lang";
     /// Pointer type name
     pub const PTR: &str = "ptr";
+    /// Panic unwind intrinsic function name
+    pub const PANIC_UNWIND: &str = "panic_unwind";
 }
 
 /// Primitive type name constants

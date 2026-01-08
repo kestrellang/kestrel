@@ -807,6 +807,17 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             // If no value, block type should be unit (already set in AST)
         }
 
+        // Language intrinsics - process arguments
+        ExprKind::LangIntrinsic { arguments, .. } => {
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+                ctx.register_type(&arg.value.ty);
+            }
+        }
+
+        // Language intrinsic reference - no constraints needed
+        ExprKind::LangIntrinsicRef(_) => {}
+
         ExprKind::Error => {}
     }
 }
