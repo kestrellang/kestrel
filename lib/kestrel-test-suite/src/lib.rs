@@ -228,7 +228,7 @@ impl Test {
                 .map(|spanned| (spanned.value, spanned.span))
                 .collect();
 
-            let result = Parser::parse(content, tokens.into_iter(), parse_source_file);
+            let result = Parser::parse(content, tokens.into_iter(), parse_source_file, file_id);
 
             if !result.errors.is_empty() {
                 has_parse_errors = true;

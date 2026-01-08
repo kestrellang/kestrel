@@ -300,7 +300,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
         }
     }
@@ -317,7 +317,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_stmt(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();

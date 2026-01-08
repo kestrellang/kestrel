@@ -19,7 +19,7 @@ use crate::common::{
     token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
@@ -187,7 +187,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
         }
     }
@@ -204,7 +204,7 @@ mod tests {
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         ProtocolDeclaration {

@@ -74,7 +74,8 @@ impl Compilation {
                 .collect();
 
             // Phase 2: Parsing
-            let parse_result = Parser::parse(&source, tokens.into_iter(), parse_source_file);
+            let parse_result =
+                Parser::parse(&source, tokens.into_iter(), parse_source_file, file_id);
 
             // Collect parse errors
             for error in &parse_result.errors {

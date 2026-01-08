@@ -799,7 +799,7 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
         }
         PatternVariant::Error(span) => {
             sink.start_node(SyntaxKind::ErrorPattern);
-            sink.error_at("Invalid pattern".to_string(), span.clone());
+            sink.error_at_span("Invalid pattern".to_string(), span.clone());
             sink.finish_node();
         }
     }
@@ -1029,7 +1029,7 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
         }
         PatternVariant::Error(span) => {
             sink.start_node(SyntaxKind::ErrorPattern);
-            sink.error_at("Invalid pattern".to_string(), span.clone());
+            sink.error_at_span("Invalid pattern".to_string(), span.clone());
             sink.finish_node();
         }
     }
@@ -1053,7 +1053,7 @@ where
             sink.start_node(SyntaxKind::ErrorPattern);
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
             sink.finish_node(); // ErrorPattern
             sink.finish_node(); // Pattern
@@ -1072,7 +1072,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_pattern(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();

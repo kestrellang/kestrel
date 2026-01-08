@@ -148,6 +148,7 @@ impl Parser {
     /// * `source` - The source code to parse
     /// * `tokens` - Iterator of tokens (from the lexer)
     /// * `parse_fn` - The parse function to use (e.g., `parse_source_file`)
+    /// * `file_id` - The file ID for error span reporting
     ///
     /// # Returns
     ///
@@ -161,21 +162,22 @@ impl Parser {
     /// use kestrel_lexer::lex;
     ///
     /// let source = "module Main";
-    /// let tokens: Vec<_> = lex(source, 0)
+    /// let file_id = 0;
+    /// let tokens: Vec<_> = lex(source, file_id)
     ///     .filter_map(|t| t.ok())
     ///     .map(|spanned| (spanned.value, spanned.span))
     ///     .collect();
     ///
-    /// let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+    /// let result = Parser::parse(source, tokens.into_iter(), parse_source_file, file_id);
     /// assert!(result.errors.is_empty());
     /// ```
-    pub fn parse<I, F>(source: &str, tokens: I, parse_fn: F) -> ParseResult
+    pub fn parse<I, F>(source: &str, tokens: I, parse_fn: F, file_id: usize) -> ParseResult
     where
         I: Iterator<Item = (Token, Span)> + Clone,
         F: FnOnce(&str, I, &mut EventSink),
     {
-        // Create event sink
-        let mut sink = EventSink::new();
+        // Create event sink with file_id for proper error span reporting
+        let mut sink = EventSink::new(file_id);
 
         // Parse and collect events
         // Use stacker to grow the stack if needed for deeply nested types
@@ -218,7 +220,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -235,7 +237,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -266,7 +268,7 @@ public struct B {}
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(valid_source, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(valid_source, tokens.into_iter(), parse_source_file, 0);
         assert_eq!(result.errors.len(), 0, "Valid code should have no errors");
         assert_eq!(
             result.tree.children().count(),
@@ -281,7 +283,7 @@ public struct B {}
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source_with_errors, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(source_with_errors, tokens.into_iter(), parse_source_file, 0);
         // Parser creates a SourceFile node even when parsing fails
         assert_eq!(
             result.tree.kind(),
@@ -305,7 +307,7 @@ public struct B {}
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
 
         // Parser should report errors or successfully parse depending on error recovery
         // The important thing is that IF errors are reported, they should have spans
@@ -333,7 +335,7 @@ public struct B {}
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -351,7 +353,7 @@ public struct B {}
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -359,5 +361,28 @@ public struct B {}
             2,
             "Should have 2 children (module + struct)"
         );
+    }
+
+    #[test]
+    fn test_error_spans_have_correct_file_id() {
+        // Test that parse errors get the correct file_id
+        let source = "struct 123"; // Invalid syntax
+        let file_id = 42;
+        let tokens: Vec<_> = lex(source, file_id)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, file_id);
+
+        // If there are errors, they should have the correct file_id
+        for error in &result.errors {
+            if let Some(span) = &error.span {
+                assert_eq!(
+                    span.file_id, file_id,
+                    "Error span should have correct file_id"
+                );
+            }
+        }
     }
 }

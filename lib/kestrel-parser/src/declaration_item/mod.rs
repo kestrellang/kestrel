@@ -44,7 +44,7 @@ use crate::extension::{
 use crate::field::{FieldDeclaration, parse_field_declaration};
 use crate::function::{FunctionDeclaration, parse_function_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::protocol::{
     ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
@@ -138,7 +138,7 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
     F: FnOnce(&str, I, &mut EventSink),
 {
-    let mut temp_sink = EventSink::new();
+    let mut temp_sink = EventSink::new(0);
     parse_fn(source, tokens, &mut temp_sink);
 
     let has_errors = temp_sink
@@ -323,7 +323,7 @@ where
         Err(errors) => {
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
         }
     }
@@ -345,7 +345,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_declaration_item(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -363,7 +363,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_declaration_item(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -381,7 +381,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -402,7 +402,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -430,7 +430,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -458,7 +458,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -483,7 +483,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -519,7 +519,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -563,7 +563,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
@@ -611,7 +611,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -645,7 +645,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -685,7 +685,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
@@ -737,7 +737,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();
@@ -780,7 +780,7 @@ mod tests {
             .map(|spanned| (spanned.value, spanned.span))
             .collect::<Vec<_>>();
 
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         parse_source_file(source, tokens.into_iter(), &mut sink);
 
         let events = sink.events();

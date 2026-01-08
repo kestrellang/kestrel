@@ -2604,7 +2604,7 @@ where
             sink.start_node(SyntaxKind::Error);
             for error in errors {
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
             sink.finish_node(); // Error
             sink.finish_node(); // Expression

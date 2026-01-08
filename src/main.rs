@@ -197,12 +197,13 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
             }
         };
 
-        let tokens: Vec<_> = lex(&content, 0) // Use file_id=0 for parse-only mode
+        let file_id = 0; // Use file_id=0 for parse-only mode
+        let tokens: Vec<_> = lex(&content, file_id)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = KestrelParser::parse(&content, tokens.into_iter(), parse_source_file);
+        let result = KestrelParser::parse(&content, tokens.into_iter(), parse_source_file, file_id);
 
         println!("=== {} ===", file);
 

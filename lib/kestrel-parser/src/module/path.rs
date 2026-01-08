@@ -4,7 +4,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::common::module_path_parser_internal;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{create_input, prepare_tokens};
 
 /// Represents a module path like A.B.C
 ///
@@ -26,7 +26,7 @@ impl ModulePath {
     /// Create a new ModulePath from segments, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
     pub fn new(source: &str, segments: Vec<Span>) -> Self {
-        let mut sink = EventSink::new();
+        let mut sink = EventSink::new(0);
         crate::common::emit_module_path(&mut sink, &segments);
         Self::from_events(source, sink.into_events())
     }
@@ -94,7 +94,7 @@ where
             for error in errors {
                 // Chumsky errors have span information
                 let span = error.span();
-                sink.error_at(format!("Parse error: {:?}", error), to_kestrel_span(*span));
+                sink.error_at(format!("Parse error: {:?}", error), *span);
             }
         }
     }
