@@ -230,7 +230,7 @@ pub fn type_alias_declaration_parser_internal<'tokens>()
         .then(type_parameter_list_parser().or_not())
         .then(associated_type_bounds_parser().or_not())
         .then(token(Token::Equals).then(ty_parser()).or_not())
-        .then(token(Token::Semicolon))
+        .then(token(Token::Semicolon).or_not())
         .map(
             |(
                 (((((visibility, type_span), target), type_params), bounds), aliased),

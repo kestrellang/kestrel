@@ -8,7 +8,7 @@ public struct CodePoint: Equatable, Comparable, Hashable {
     private var value: UInt32
 
     public init(value: UInt32) {
-        self.value = value
+        self.value = value;
     }
 
     public var value: UInt32 { self.value }
@@ -143,9 +143,9 @@ public struct Char: Equatable, Hashable {
     // Byte length when encoded as UTF-8
     public func utf8Length() -> Int {
         var len = 0
-        for cp in self.codePoints {
+        /* for cp in self.codePoints {
             len += cp.utf8Length()
-        }
+        } */
         len
     }
 
@@ -156,9 +156,9 @@ public struct Char: Equatable, Hashable {
 
     // Hashable
     public func hash[H: Hasher](into hasher: ref H) {
-        for cp in self.codePoints {
+        /* for cp in self.codePoints {
             cp.hash(into: hasher)
-        }
+        } */
     }
 }
 

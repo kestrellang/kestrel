@@ -1,13 +1,14 @@
 // Error protocol and related types
 
 public protocol Error {
-    var description: String { get }
+    func description() -> String
 }
 
 // Residual enum - the fundamental type for early return semantics
 public enum Residual[Output, Early] {
-    case Output(Output)  // continue with value
-    case Early(Early)    // break/return early with value
+    // TODO: remove parameter names when unnamed associated values are supported
+    case Output(value: Output)  // continue with value
+    case Early(value: Early)    // break/return early with value
 }
 
 extension Residual[Output, Early]: Equatable

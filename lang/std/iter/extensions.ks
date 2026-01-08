@@ -89,7 +89,7 @@ extension Iterator {
     public func reduce(combine: (Item, Item) -> Item) -> Optional[Item] {
         var result: Optional[Item] = self.next()
         while let item = self.next() {
-            result = result.map { combine($0, item) }
+            result = result.map { |acc| combine(acc, item) }
         }
         result
     }
@@ -170,11 +170,11 @@ extension Iterator {
     }
 
     public func min() -> Optional[Item] where Item: Comparable {
-        self.reduce { a, b in if a < b { a } else { b } }
+        self.reduce { (a, b) in if a < b { a } else { b } }
     }
 
     public func max() -> Optional[Item] where Item: Comparable {
-        self.reduce { a, b in if a > b { a } else { b } }
+        self.reduce { (a, b) in if a > b { a } else { b } }
     }
 
     public func minBy(compare: (Item, Item) -> Ordering) -> Optional[Item] {
@@ -196,11 +196,11 @@ extension Iterator {
     }
 
     public func sum() -> Item where Item: Addable[Item] + Numeric {
-        self.fold(initial: Item.zero) { acc, item in acc + item }
+        self.fold(initial: Item.zero) { (acc, item) in acc + item }
     }
 
     public func product() -> Item where Item: Multipliable[Item] + Numeric {
-        self.fold(initial: Item.one) { acc, item in acc * item }
+        self.fold(initial: Item.one) { (acc, item) in acc * item }
     }
 
     // Try operations

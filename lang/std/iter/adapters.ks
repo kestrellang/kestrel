@@ -1,15 +1,15 @@
 // Iterator adapter types
 
 // MapIterator
-public struct MapIterator[I: Iterator, U]: Iterator {
+public struct MapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
     private var inner: I
     private var transform: (I.Item) -> U
 
     public init(inner: I, transform: (I.Item) -> U) {
-        self.inner = inner
-        self.transform = transform
+        self.inner = inner;
+        self.transform = transform;
     }
 
     public func next() -> Optional[U] {
@@ -18,15 +18,15 @@ public struct MapIterator[I: Iterator, U]: Iterator {
 }
 
 // FilterIterator
-public struct FilterIterator[I: Iterator]: Iterator {
+public struct FilterIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var predicate: (I.Item) -> Bool
 
     public init(inner: I, predicate: (I.Item) -> Bool) {
-        self.inner = inner
-        self.predicate = predicate
+        self.inner = inner;
+        self.predicate = predicate;
     }
 
     public func next() -> Optional[I.Item] {
@@ -40,15 +40,15 @@ public struct FilterIterator[I: Iterator]: Iterator {
 }
 
 // FilterMapIterator
-public struct FilterMapIterator[I: Iterator, U]: Iterator {
+public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
     private var inner: I
     private var transform: (I.Item) -> Optional[U]
 
     public init(inner: I, transform: (I.Item) -> Optional[U]) {
-        self.inner = inner
-        self.transform = transform
+        self.inner = inner;
+        self.transform = transform;
     }
 
     public func next() -> Optional[U] {
@@ -62,7 +62,7 @@ public struct FilterMapIterator[I: Iterator, U]: Iterator {
 }
 
 // FlatMapIterator
-public struct FlatMapIterator[I: Iterator, Inner: Iterable]: Iterator {
+public struct FlatMapIterator[I, Inner]: Iterator where I: Iterator, Inner: Iterable {
     type Item = Inner.Item
 
     private var inner: I
@@ -70,9 +70,9 @@ public struct FlatMapIterator[I: Iterator, Inner: Iterable]: Iterator {
     private var current: Optional[Inner.Iter]
 
     public init(inner: I, transform: (I.Item) -> Inner, current: Optional[Inner.Iter]) {
-        self.inner = inner
-        self.transform = transform
-        self.current = current
+        self.inner = inner;
+        self.transform = transform;
+        self.current = current;
     }
 
     public func next() -> Optional[Inner.Item] {
@@ -94,19 +94,19 @@ public struct FlatMapIterator[I: Iterator, Inner: Iterable]: Iterator {
 }
 
 // InspectIterator
-public struct InspectIterator[I: Iterator]: Iterator {
+public struct InspectIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var action: (I.Item) -> Void
 
     public init(inner: I, action: (I.Item) -> Void) {
-        self.inner = inner
-        self.action = action
+        self.inner = inner;
+        self.action = action;
     }
 
     public func next() -> Optional[I.Item] {
-        self.inner.next().map { item in
+        self.inner.next().map { (item) in
             self.action(item)
             item
         }
@@ -114,15 +114,15 @@ public struct InspectIterator[I: Iterator]: Iterator {
 }
 
 // TakeIterator
-public struct TakeIterator[I: Iterator]: Iterator {
+public struct TakeIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var remaining: Int
 
     public init(inner: I, remaining: Int) {
-        self.inner = inner
-        self.remaining = remaining
+        self.inner = inner;
+        self.remaining = remaining;
     }
 
     public func next() -> Optional[I.Item] {
@@ -136,7 +136,7 @@ public struct TakeIterator[I: Iterator]: Iterator {
 }
 
 // TakeWhileIterator
-public struct TakeWhileIterator[I: Iterator]: Iterator {
+public struct TakeWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
@@ -144,9 +144,9 @@ public struct TakeWhileIterator[I: Iterator]: Iterator {
     private var done: Bool
 
     public init(inner: I, predicate: (I.Item) -> Bool, done: Bool) {
-        self.inner = inner
-        self.predicate = predicate
-        self.done = done
+        self.inner = inner;
+        self.predicate = predicate;
+        self.done = done;
     }
 
     public func next() -> Optional[I.Item] {
@@ -158,22 +158,22 @@ public struct TakeWhileIterator[I: Iterator]: Iterator {
             if self.predicate(item) {
                 return .Some(item)
             }
-            self.done = true
+            self.done = true;
         }
         .None
     }
 }
 
 // SkipIterator
-public struct SkipIterator[I: Iterator]: Iterator {
+public struct SkipIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var remaining: Int
 
     public init(inner: I, remaining: Int) {
-        self.inner = inner
-        self.remaining = remaining
+        self.inner = inner;
+        self.remaining = remaining;
     }
 
     public func next() -> Optional[I.Item] {
@@ -188,7 +188,7 @@ public struct SkipIterator[I: Iterator]: Iterator {
 }
 
 // SkipWhileIterator
-public struct SkipWhileIterator[I: Iterator]: Iterator {
+public struct SkipWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
@@ -196,9 +196,9 @@ public struct SkipWhileIterator[I: Iterator]: Iterator {
     private var done: Bool
 
     public init(inner: I, predicate: (I.Item) -> Bool, done: Bool) {
-        self.inner = inner
-        self.predicate = predicate
-        self.done = done
+        self.inner = inner;
+        self.predicate = predicate;
+        self.done = done;
     }
 
     public func next() -> Optional[I.Item] {
@@ -208,7 +208,7 @@ public struct SkipWhileIterator[I: Iterator]: Iterator {
 
         while let item = self.inner.next() {
             if not self.predicate(item) {
-                self.done = true
+                self.done = true;
                 return .Some(item)
             }
         }
@@ -217,7 +217,7 @@ public struct SkipWhileIterator[I: Iterator]: Iterator {
 }
 
 // StepByIterator
-public struct StepByIterator[I: Iterator]: Iterator {
+public struct StepByIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
@@ -225,36 +225,36 @@ public struct StepByIterator[I: Iterator]: Iterator {
     private var first: Bool
 
     public init(inner: I, step: Int, first: Bool) {
-        self.inner = inner
-        self.step = step
-        self.first = first
+        self.inner = inner;
+        self.step = step;
+        self.first = first;
     }
 
     public func next() -> Optional[I.Item] {
         if self.first {
-            self.first = false
+            self.first = false;
             return self.inner.next()
         }
 
-        for _ in 0..<(self.step - 1) {
+        /* for _ in 0..<(self.step - 1) {
             if self.inner.next().isNone {
                 return .None
             }
-        }
+        } */
         self.inner.next()
     }
 }
 
 // EnumerateIterator
-public struct EnumerateIterator[I: Iterator]: Iterator {
+public struct EnumerateIterator[I]: Iterator where I: Iterator {
     type Item = (Int, I.Item)
 
     private var inner: I
     private var index: Int
 
     public init(inner: I, index: Int) {
-        self.inner = inner
-        self.index = index
+        self.inner = inner;
+        self.index = index;
     }
 
     public func next() -> Optional[(Int, I.Item)] {
@@ -267,15 +267,15 @@ public struct EnumerateIterator[I: Iterator]: Iterator {
 }
 
 // ZipIterator
-public struct ZipIterator[A: Iterator, B: Iterator]: Iterator {
+public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
     type Item = (A.Item, B.Item)
 
     private var first: A
     private var second: B
 
     public init(first: A, second: B) {
-        self.first = first
-        self.second = second
+        self.first = first;
+        self.second = second;
     }
 
     public func next() -> Optional[(A.Item, B.Item)] {
@@ -289,8 +289,8 @@ public struct ZipIterator[A: Iterator, B: Iterator]: Iterator {
 }
 
 // ChainIterator
-public struct ChainIterator[A: Iterator, B: Iterator]: Iterator
-    where B.Item == A.Item
+public struct ChainIterator[A, B]: Iterator
+    where A: Iterator, B: Iterator, B.Item == A.Item
 {
     type Item = A.Item
 
@@ -299,8 +299,8 @@ public struct ChainIterator[A: Iterator, B: Iterator]: Iterator
     private var firstDone: Bool
 
     public init(first: A, second: B, firstDone: Bool) {
-        self.first = first
-        self.second = second
+        self.first = first;
+        self.second = second;
         self.firstDone = firstDone
     }
 
@@ -316,15 +316,15 @@ public struct ChainIterator[A: Iterator, B: Iterator]: Iterator
 }
 
 // CycleIterator
-public struct CycleIterator[I: Iterator + Cloneable]: Iterator {
+public struct CycleIterator[I]: Iterator where I: Iterator + Cloneable {
     type Item = I.Item
 
     private var original: I
     private var current: I
 
     public init(original: I, current: I) {
-        self.original = original
-        self.current = current
+        self.original = original;
+        self.current = current;
     }
 
     public func next() -> Optional[I.Item] {
@@ -337,7 +337,7 @@ public struct CycleIterator[I: Iterator + Cloneable]: Iterator {
 }
 
 // IntersperseIterator
-public struct IntersperseIterator[I: Iterator]: Iterator where I.Item: Cloneable {
+public struct IntersperseIterator[I]: Iterator where I: Iterator, I.Item: Cloneable {
     type Item = I.Item
 
     private var inner: I
@@ -345,8 +345,8 @@ public struct IntersperseIterator[I: Iterator]: Iterator where I.Item: Cloneable
     private var needsSeparator: Bool
 
     public init(inner: I, separator: I.Item, needsSeparator: Bool) {
-        self.inner = inner
-        self.separator = separator
+        self.inner = inner;
+        self.separator = separator;
         self.needsSeparator = needsSeparator
     }
 
@@ -364,15 +364,15 @@ public struct IntersperseIterator[I: Iterator]: Iterator where I.Item: Cloneable
 }
 
 // PeekableIterator
-public struct PeekableIterator[I: Iterator]: Iterator {
+public struct PeekableIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var peeked: Optional[Optional[I.Item]]
 
-    public init(inner: I, peeked: Optional[Optional[I.Item]>) {
-        self.inner = inner
-        self.peeked = peeked
+    public init(inner: I, peeked: Optional[Optional[I.Item]]) {
+        self.inner = inner;
+        self.peeked = peeked;
     }
 
     public func peek() -> Optional[I.Item] {
@@ -401,15 +401,15 @@ public struct PeekableIterator[I: Iterator]: Iterator {
 }
 
 // FuseIterator - stops permanently after first None
-public struct FuseIterator[I: Iterator]: Iterator {
+public struct FuseIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
     private var done: Bool
 
     public init(inner: I, done: Bool) {
-        self.inner = inner
-        self.done = done
+        self.inner = inner;
+        self.done = done;
     }
 
     public func next() -> Optional[I.Item] {
@@ -420,7 +420,7 @@ public struct FuseIterator[I: Iterator]: Iterator {
         match self.inner.next() {
             .Some(let item) => .Some(item),
             .None => {
-                self.done = true
+                self.done = true;
                 .None
             }
         }
@@ -456,13 +456,13 @@ public struct OnceIterator[T]: Iterator {
 }
 
 // RepeatIterator
-public struct RepeatIterator[T: Cloneable]: Iterator {
+public struct RepeatIterator[T]: Iterator where T: Cloneable {
     type Item = T
 
     private var value: T
 
     public init(value: T) {
-        self.value = value
+        self.value = value;
     }
 
     public func next() -> Optional[T] {
@@ -471,15 +471,15 @@ public struct RepeatIterator[T: Cloneable]: Iterator {
 }
 
 // RepeatNIterator
-public struct RepeatNIterator[T: Cloneable]: Iterator {
+public struct RepeatNIterator[T]: Iterator where T: Cloneable {
     type Item = T
 
     private var value: T
     private var remaining: Int
 
     public init(value: T, count: Int) {
-        self.value = value
-        self.remaining = count
+        self.value = value;
+        self.remaining = count;
     }
 
     public func next() -> Optional[T] {
@@ -501,10 +501,10 @@ public func once[T](value: T) -> OnceIterator[T] {
     OnceIterator(value: value)
 }
 
-public func repeat[T: Cloneable](value: T) -> RepeatIterator[T] {
+public func repeat[T](value: T) -> RepeatIterator[T] where T: Cloneable {
     RepeatIterator(value: value)
 }
 
-public func repeatN[T: Cloneable](value: T, count: Int) -> RepeatNIterator[T] {
+public func repeatN[T](value: T, count: Int) -> RepeatNIterator[T] where T: Cloneable {
     RepeatNIterator(value: value, count: count)
 }

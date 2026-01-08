@@ -1,14 +1,14 @@
 // String views for different representations
 
 // BytesView - raw UTF-8 bytes (O(1) indexing)
-public struct BytesView[A: Allocator]: Iterable {
+public struct BytesView[A]: Iterable where A: Allocator {
     type Item = Byte
     type Iter = BytesIterator[A]
 
     private var string: String[A]
 
     public init(string: String[A]) {
-        self.string = string
+        self.string = string;
     }
 
     public var count: Int {
@@ -54,15 +54,15 @@ public struct BytesView[A: Allocator]: Iterable {
     }
 }
 
-public struct BytesIterator[A: Allocator]: Iterator {
+public struct BytesIterator[A]: Iterator where A: Allocator {
     type Item = Byte
 
     private var string: String[A]
     private var index: Int
 
     public init(string: String[A], index: Int) {
-        self.string = string
-        self.index = index
+        self.string = string;
+        self.index = index;
     }
 
     public func next() -> Optional[Byte] {
@@ -77,14 +77,14 @@ public struct BytesIterator[A: Allocator]: Iterator {
 }
 
 // CodePointsView - Unicode code points (O(1) iteration, O(n) indexing)
-public struct CodePointsView[A: Allocator]: Iterable {
+public struct CodePointsView[A]: Iterable where A: Allocator {
     type Item = CodePoint
     type Iter = CodePointsIterator[A]
 
     private var string: String[A]
 
     public init(string: String[A]) {
-        self.string = string
+        self.string = string;
     }
 
     public func iter() -> CodePointsIterator[A] {
@@ -94,21 +94,21 @@ public struct CodePointsView[A: Allocator]: Iterable {
     // Count is O(n) - must decode all code points
     public func count() -> Int {
         var n = 0
-        for _ in self {
+        /* for _ in self {
             n += 1
-        }
+        } */
         n
     }
 }
 
-public struct CodePointsIterator[A: Allocator]: Iterator {
+public struct CodePointsIterator[A]: Iterator where A: Allocator {
     type Item = CodePoint
 
     private var string: String[A]
     private var byteIndex: Int
 
     public init(string: String[A], byteIndex: Int) {
-        self.string = string
+        self.string = string;
         self.byteIndex = byteIndex
     }
 
@@ -131,14 +131,14 @@ public struct CodePointsIterator[A: Allocator]: Iterator {
 // CharsView - Extended grapheme clusters (O(1) iteration, O(n) indexing)
 // Note: Full grapheme cluster support requires Unicode segmentation tables
 // This is a simplified implementation that treats each code point as a char
-public struct CharsView[A: Allocator]: Iterable {
+public struct CharsView[A]: Iterable where A: Allocator {
     type Item = Char
     type Iter = CharsIterator[A]
 
     private var string: String[A]
 
     public init(string: String[A]) {
-        self.string = string
+        self.string = string;
     }
 
     public func iter() -> CharsIterator[A] {
@@ -148,14 +148,14 @@ public struct CharsView[A: Allocator]: Iterable {
     // Count is O(n) - must process all grapheme clusters
     public var count: Int {
         var n = 0
-        for _ in self {
+        /* for _ in self {
             n += 1
-        }
+        } */
         n
     }
 }
 
-public struct CharsIterator[A: Allocator]: Iterator {
+public struct CharsIterator[A]: Iterator where A: Allocator {
     type Item = Char
 
     private var codePointsIter: CodePointsIterator[A]
@@ -174,14 +174,14 @@ public struct CharsIterator[A: Allocator]: Iterator {
 }
 
 // LinesView - line iterator
-public struct LinesView[A: Allocator]: Iterable {
+public struct LinesView[A]: Iterable where A: Allocator {
     type Item = String[A]
     type Iter = LinesIterator[A]
 
     private var string: String[A]
 
     public init(string: String[A]) {
-        self.string = string
+        self.string = string;
     }
 
     public func iter() -> LinesIterator[A] {
@@ -189,7 +189,7 @@ public struct LinesView[A: Allocator]: Iterable {
     }
 }
 
-public struct LinesIterator[A: Allocator]: Iterator {
+public struct LinesIterator[A]: Iterator where A: Allocator {
     type Item = String[A]
 
     private var string: String[A]
@@ -197,9 +197,9 @@ public struct LinesIterator[A: Allocator]: Iterator {
     private var done: Bool
 
     public init(string: String[A], byteIndex: Int, done: Bool) {
-        self.string = string
+        self.string = string;
         self.byteIndex = byteIndex
-        self.done = done
+        self.done = done;
     }
 
     public func next() -> Optional[String[A]] {
@@ -230,7 +230,7 @@ public struct LinesIterator[A: Allocator]: Iterator {
 
         // Last line (no trailing newline)
         if start < self.string.byteCount {
-            self.done = true
+            self.done = true;
             return .Some(self.string.substringBytes(from: start, to: self.string.byteCount))
         }
 
@@ -243,7 +243,7 @@ public struct ByteIndex: Equatable, Comparable {
     public var value: Int
 
     public init(value: Int) {
-        self.value = value
+        self.value = value;
     }
 
     public func equals(other: ByteIndex) -> Bool {

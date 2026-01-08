@@ -295,7 +295,7 @@ pub struct TypeAliasDeclarationData {
     /// Optional equals span and aliased type (= Type)
     /// For associated types in protocols, this may be None (abstract associated type)
     pub aliased: Option<(Span, TyVariant)>,
-    pub semicolon_span: Span,
+    pub semicolon_span: Option<Span>,
 }
 
 /// Target for type alias - either simple name or qualified path

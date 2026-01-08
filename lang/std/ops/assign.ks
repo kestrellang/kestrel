@@ -1,50 +1,60 @@
 // Compound assignment operator protocols
 
+// TODO: Add back 
 @operator(+=)
 public protocol AddAssign[Rhs = Self] {
     func addAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(-=)
 public protocol SubtractAssign[Rhs = Self] {
     func subtractAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(*=)
 public protocol MultiplyAssign[Rhs = Self] {
     func multiplyAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(/=)
 public protocol DivideAssign[Rhs = Self] {
     func divideAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(%=)
 public protocol ModuloAssign[Rhs = Self] {
     func modAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(&=)
 public protocol BitwiseAndAssign[Rhs = Self] {
     func bitwiseAndAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(|=)
 public protocol BitwiseOrAssign[Rhs = Self] {
     func bitwiseOrAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(^=)
 public protocol BitwiseXorAssign[Rhs = Self] {
     func bitwiseXorAssign(other: Rhs)
 }
 
+// TODO: Add back 
 @operator(<<=)
 public protocol LeftShiftAssign[Rhs = Int] {
     func shiftLeftAssign(by count: Rhs)
 }
 
+// TODO: Add back 
 @operator(>>=)
 public protocol RightShiftAssign[Rhs = Int] {
     func shiftRightAssign(by count: Rhs)

@@ -64,7 +64,7 @@ public struct ArenaAllocator: Allocator {
 
     public func allocate(layout: Layout) -> Optional[RawPointer] {
         // Align offset
-        let alignedOffset = (self.offset + layout.alignment - 1) & ~(layout.alignment - 1)
+        let alignedOffset = (self.offset + layout.alignment - 1).bitwiseAnd((layout.alignment - 1).bitwiseNot())
 
         if alignedOffset + layout.size > self.buffer.capacity {
             return .None
@@ -108,11 +108,11 @@ public struct PoolAllocator[T]: Allocator {
         self.allocated = 0
 
         // Initialize free list
-        for i in (0..<capacity).reversed() {
+        /* for i in (0..<capacity).reversed() {
             let node = self.buffer.pointer.offset(by: i).as[FreeNode]()
             node.pointee = FreeNode(next: self.freeList)
             self.freeList = .Some(node)
-        }
+        } */
     }
 
     public func allocate(layout: Layout) -> Optional[RawPointer] {

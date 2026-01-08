@@ -1,6 +1,6 @@
 // Dictionary type - hash map with COW semantics
 
-public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
+public struct Dictionary[K, V, A]:
     Iterable,
     ExpressibleByDictionaryLiteral,
     Cloneable
@@ -19,14 +19,14 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
         var occupied: Bool
     }
 
-    struct DictionaryStorage[K, V, A: Allocator] {
+    struct DictionaryStorage[K, V, A] where A: Allocator {
         var entries: Buffer[Entry[K, V], A]
         var count: Int
         var capacity: Int
     }
 
     // Constructors
-    public init() where A == GlobalAllocator {
+    public init() {
         self.storage = ArcBox(value: DictionaryStorage(
             entries: Buffer(capacity: 0),
             count: 0,
@@ -42,7 +42,7 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
         ))
     }
 
-    public init(minimumCapacity: Int) where A == GlobalAllocator {
+    public init(minimumCapacity: Int) {
         let capacity = Self.nextPowerOfTwo(minimumCapacity)
         self.storage = ArcBox(value: DictionaryStorage(
             entries: Buffer(capacity: capacity),
@@ -55,9 +55,9 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
     // ExpressibleByDictionaryLiteral
     public init(dictionaryLiteral pairs: [(K, V)]) {
         self.init(minimumCapacity: pairs.count)
-        for (key, value) in pairs {
+        /* for (key, value) in pairs {
             self.insert(value: value, for: key)
-        }
+        } */
     }
 
     private static func nextPowerOfTwo(n: Int) -> Int {
@@ -69,14 +69,14 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
     }
 
     private func initializeEntries() {
-        for i in 0..<self.storage.value.capacity {
+        /* for i in 0..<self.storage.value.capacity {
             self.storage.value.entries(unchecked: i) = Entry(
                 key: lang.uninitialized[K](),
                 value: lang.uninitialized[V](),
                 hash: 0,
                 occupied: false
             )
-        }
+        } */
     }
 
     // Properties
@@ -121,12 +121,12 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
         self.initializeEntries()
 
         // Rehash all entries
-        for i in 0..<oldCapacity {
+        /* for i in 0..<oldCapacity {
             let entry = oldEntries(unchecked: i)
             if entry.occupied {
                 self.insertEntry(key: entry.key, value: entry.value, hash: entry.hash)
             }
-        }
+        } */
     }
 
     private func hash(key: K) -> UInt64 {
@@ -258,9 +258,9 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
 
     public func clear() {
         self.ensureUnique()
-        for i in 0..<self.storage.value.capacity {
+        /* for i in 0..<self.storage.value.capacity {
             self.storage.value.entries(unchecked: i).occupied = false
-        }
+        } */
         self.storage.value.count = 0
     }
 
@@ -272,9 +272,9 @@ public struct Dictionary[K: Hashable, V, A: Allocator = GlobalAllocator]:
     // Cloneable
     public func clone() -> Dictionary[K, V, A] where K: Cloneable, V: Cloneable {
         var result = Dictionary[K, V, A](minimumCapacity: self.count)
-        for (key, value) in self {
+        /* for (key, value) in self {
             result.insert(value: value.clone(), for: key.clone())
-        }
+        } */
         result
     }
 
@@ -303,7 +303,7 @@ extension Dictionary[K, V, A]: Equatable where K: Equatable, V: Equatable {
         if self.count != other.count {
             return false
         }
-        for (key, value) in self {
+        /* for (key, value) in self {
             match other[key] {
                 .Some(let otherValue) => {
                     if value != otherValue {
@@ -312,7 +312,7 @@ extension Dictionary[K, V, A]: Equatable where K: Equatable, V: Equatable {
                 },
                 .None => return false
             }
-        }
+        } */
         true
     }
 }
@@ -325,8 +325,8 @@ public struct DictionaryIterator[K, V]: Iterator {
     private var index: Int
 
     public init(dict: Dictionary[K, V], index: Int) {
-        self.dict = dict
-        self.index = index
+        self.dict = dict;
+        self.index = index;
     }
 
     public func next() -> Optional[(K, V)] {
@@ -342,14 +342,14 @@ public struct DictionaryIterator[K, V]: Iterator {
 }
 
 // Keys view
-public struct KeysView[K, V, A: Allocator]: Iterable {
+public struct KeysView[K, V, A]: Iterable where A: Allocator {
     type Item = K
     type Iter = KeysIterator[K, V]
 
     private var dict: Dictionary[K, V, A]
 
     public init(dict: Dictionary[K, V, A]) {
-        self.dict = dict
+        self.dict = dict;
     }
 
     public func iter() -> KeysIterator[K, V] {
@@ -372,14 +372,14 @@ public struct KeysIterator[K, V]: Iterator {
 }
 
 // Values view
-public struct ValuesView[K, V, A: Allocator]: Iterable {
+public struct ValuesView[K, V, A]: Iterable where A: Allocator {
     type Item = V
     type Iter = ValuesIterator[K, V]
 
     private var dict: Dictionary[K, V, A]
 
     public init(dict: Dictionary[K, V, A]) {
-        self.dict = dict
+        self.dict = dict;
     }
 
     public func iter() -> ValuesIterator[K, V] {

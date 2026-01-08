@@ -49,12 +49,12 @@ public struct JsonError: Error {
     public var position: Optional[Int]
 
     public init(message: String) {
-        self.message = message
+        self.message = message;
         self.position = .None
     }
 
     public init(message: String, at position: Int) {
-        self.message = message
+        self.message = message;
         self.position = .Some(position)
     }
 
@@ -186,21 +186,21 @@ public enum JsonValue: Equatable {
             (.String(let a), .String(let b)) => a == b,
             (.Array(let a), .Array(let b)) => {
                 if a.count != b.count { return false }
-                for i in 0..<a.count {
+                /* for i in 0..<a.count {
                     if a(unchecked: i) != b(unchecked: i) { return false }
-                }
+                } */
                 true
             },
             (.Object(let a), .Object(let b)) => {
                 if a.count != b.count { return false }
-                for (key, value) in a {
+                /* for (key, value) in a {
                     match b(key) {
                         .Some(let otherValue) => {
                             if value != otherValue { return false }
                         },
                         .None => return false
                     }
-                }
+                } */
                 true
             },
             _ => false
@@ -218,16 +218,16 @@ extension JsonValue: Serialize {
             .String(let v) => serializer.serializeString(value: v),
             .Array(let arr) => {
                 let arrSerializer = try serializer.beginArray(length: arr.count)
-                for item in arr {
+                /* for item in arr {
                     try arrSerializer.serializeElement(value: item)
-                }
+                } */
                 arrSerializer.end()
             },
             .Object(let obj) => {
                 let objSerializer = try serializer.beginObject(name: "", fieldCount: obj.count)
-                for (key, value) in obj {
+                /* for (key, value) in obj {
                     try objSerializer.serializeField(name: key, value: value)
-                }
+                } */
                 objSerializer.end()
             }
         }
@@ -287,7 +287,7 @@ struct JsonParser {
     private var position: Int
 
     public init(input: String) {
-        self.input = input
+        self.input = input;
         self.position = 0
     }
 
@@ -415,7 +415,7 @@ struct JsonParser {
 
     private func parseHexEscape() -> Result[UInt32, JsonError] {
         var value: UInt32 = 0
-        for _ in 0..<4 {
+        /* for _ in 0..<4 {
             if self.isAtEnd() {
                 return .Err(JsonError(message: "incomplete unicode escape", at: self.position))
             }
@@ -433,7 +433,7 @@ struct JsonParser {
             }
 
             value = (value << 4) | digit
-        }
+        } */
         .Ok(value)
     }
 
@@ -608,11 +608,11 @@ struct JsonParser {
         if self.position + keyword.byteCount > self.input.byteCount {
             return false
         }
-        for i in 0..<keyword.byteCount {
+        /* for i in 0..<keyword.byteCount {
             if self.input.byteAt(index: self.position + i) != keyword.byteAt(index: i) {
                 return false
             }
-        }
+        } */
         self.position += keyword.byteCount
         true
     }
@@ -637,7 +637,7 @@ struct JsonWriter {
 
     public init(pretty: Bool) {
         self.output = String()
-        self.pretty = pretty
+        self.pretty = pretty;
         self.indent = 0
     }
 
@@ -655,7 +655,7 @@ struct JsonWriter {
     private func writeString(value: String) {
         self.output.append(codePoint: CodePoint(value: 34)) // '"'
 
-        for cp in value.codePoints {
+        /* for cp in value.codePoints {
             let v = cp.value
             if v == 34 { // '"'
                 self.output.append(string: "\\\"")
@@ -677,17 +677,17 @@ struct JsonWriter {
             } else {
                 self.output.append(codePoint: cp)
             }
-        }
+        } */
 
         self.output.append(codePoint: CodePoint(value: 34)) // '"'
     }
 
     private func writeHex4(value: UInt32) {
         let hexChars = "0123456789abcdef"
-        for i in [12, 8, 4, 0] {
+        /* for i in [12, 8, 4, 0] {
             let digit = ((value >> i) & 0xF) as Int
             self.output.append(codePoint: hexChars.codePoints.nth(digit).unwrap())
-        }
+        } */
     }
 
     private func writeArray(arr: Array[JsonValue]) {
@@ -703,7 +703,7 @@ struct JsonWriter {
             self.writeNewline()
         }
 
-        for i in 0..<arr.count {
+        /* for i in 0..<arr.count {
             if i > 0 {
                 self.output.append(codePoint: CodePoint(value: 44)) // ','
                 if self.pretty {
@@ -711,7 +711,7 @@ struct JsonWriter {
                 }
             }
             self.write(value: arr(unchecked: i))
-        }
+        } */
 
         if self.pretty {
             self.indent -= 1
@@ -735,7 +735,7 @@ struct JsonWriter {
         }
 
         var first = true
-        for (key, value) in obj {
+        /* for (key, value) in obj {
             if not first {
                 self.output.append(codePoint: CodePoint(value: 44)) // ','
                 if self.pretty {
@@ -750,7 +750,7 @@ struct JsonWriter {
                 self.output.append(codePoint: CodePoint(value: 32)) // ' '
             }
             self.write(value: value)
-        }
+        } */
 
         if self.pretty {
             self.indent -= 1
@@ -762,9 +762,9 @@ struct JsonWriter {
 
     private func writeNewline() {
         self.output.append(codePoint: CodePoint(value: 10)) // '\n'
-        for _ in 0..<(self.indent * 2) {
+        /* for _ in 0..<(self.indent * 2) {
             self.output.append(codePoint: CodePoint(value: 32)) // ' '
-        }
+        } */
     }
 }
 
@@ -871,19 +871,19 @@ public struct JsonSerializer: Serializer {
     // Compound types
     public func serializeArray[S: Serialize](values: Array[S]) -> Result[(), JsonError] {
         var arr = try self.beginArray(length: values.count)
-        for item in values {
+        /* for item in values {
             try arr.serializeElement(value: item)
-        }
+        } */
         arr.end()
     }
 
     public func serializeMap[K: Serialize, V: Serialize](entries: Array[(K, V)]) -> Result[(), JsonError] {
         var obj = try self.beginObject(name: "", fieldCount: entries.count)
-        for (key, value) in entries {
+        /* for (key, value) in entries {
             // For JSON, keys should be strings
             // This is a simplification; full impl would serialize key to string
             try obj.serializeField(name: key.toString(), value: value)
-        }
+        } */
         obj.end()
     }
 
@@ -909,7 +909,7 @@ public struct JsonObjectSerializer: ObjectSerializer {
     private var currentField: Int
 
     public init(serializer: ref JsonSerializer, fieldCount: Int) {
-        self.serializer = serializer
+        self.serializer = serializer;
         self.fieldCount = fieldCount
         self.currentField = 0
         self.serializer.writer.output.append(codePoint: CodePoint(value: 123)) // '{'
@@ -941,8 +941,8 @@ public struct JsonArraySerializer: ArraySerializer {
     private var currentIndex: Int
 
     public init(serializer: ref JsonSerializer, length: Int) {
-        self.serializer = serializer
-        self.length = length
+        self.serializer = serializer;
+        self.length = length;
         self.currentIndex = 0
         self.serializer.writer.output.append(codePoint: CodePoint(value: 91)) // '['
     }
@@ -1118,13 +1118,13 @@ public struct JsonDeserializer: Deserializer {
         match value {
             .Array(let arr) => {
                 var result: Array[T] = []
-                for item in arr {
+                /* for item in arr {
                     // Re-serialize and deserialize each item
                     // This is inefficient but type-safe
                     var itemDeserializer = JsonDeserializer(input: Json.stringify(item))
                     let deserialized = try T.deserialize(from: itemDeserializer)
                     result.append(deserialized)
-                }
+                } */
                 .Ok(result)
             },
             _ => .Err(JsonError(message: "expected array"))
@@ -1136,7 +1136,7 @@ public struct JsonDeserializer: Deserializer {
         match value {
             .Object(let obj) => {
                 var result: Dictionary[K, V] = [:]
-                for (key, val) in obj {
+                /* for (key, val) in obj {
                     // Deserialize key and value
                     var keyDeserializer = JsonDeserializer(input: "\"" + key + "\"")
                     let deserializedKey = try K.deserialize(from: keyDeserializer)
@@ -1145,7 +1145,7 @@ public struct JsonDeserializer: Deserializer {
                     let deserializedVal = try V.deserialize(from: valDeserializer)
 
                     result(deserializedKey) = deserializedVal
-                }
+                } */
                 .Ok(result)
             },
             _ => .Err(JsonError(message: "expected object"))
@@ -1174,7 +1174,7 @@ public struct JsonObjectAccess: ObjectAccess {
     private var currentKey: Optional[String]
 
     public init(object: Dictionary[String, JsonValue]) {
-        self.object = object
+        self.object = object;
         self.keys = object.keys.collect[Array[String]]()
         self.index = 0
         self.currentKey = .None

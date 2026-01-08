@@ -1,13 +1,13 @@
 // Result type
 
-@throws(defaultError: any Error)
-public enum Result[T, E: Error]:
+public enum Result[T, E]:
     Tryable[T, E],
     Throwable[E],
     Returnable[T]
 {
-    case Ok(T)
-    case Err(E)
+    // TODO: remove parameter names when unnamed associated values are supported
+    case Ok(value: T)
+    case Err(error: E)
 
     // Convenience constructors
     public static func ok(value: T) -> Result[T, E] {
@@ -55,7 +55,7 @@ public enum Result[T, E: Error]:
     public func unwrap() -> T {
         match self {
             .Ok(let value) => value,
-            .Err(let error) => panic("called unwrap() on Err: " + error.description)
+            .Err(let error) => panic("called unwrap() on Err: " + error.description())
         }
     }
 
@@ -84,7 +84,7 @@ public enum Result[T, E: Error]:
     public func expect(message: String) -> T {
         match self {
             .Ok(let value) => value,
-            .Err(let error) => panic(message + ": " + error.description)
+            .Err(let error) => panic(message + ": " + error.description())
         }
     }
 
@@ -103,7 +103,7 @@ public enum Result[T, E: Error]:
         }
     }
 
-    public func mapErr[F: Error](transform: (E) -> F) -> Result[T, F] {
+    public func mapErr[F](transform: (E) -> F) -> Result[T, F] where F: Error {
         match self {
             .Ok(let value) => .Ok(value),
             .Err(let error) => .Err(transform(error))
@@ -117,7 +117,7 @@ public enum Result[T, E: Error]:
         }
     }
 
-    public func flatMapErr[F: Error](transform: (E) -> Result[T, F]) -> Result[T, F] {
+    public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F] where F: Error {
         match self {
             .Ok(let value) => .Ok(value),
             .Err(let error) => transform(error)
@@ -158,7 +158,7 @@ public enum Result[T, E: Error]:
         }
     }
 
-    public func orElse[F: Error](alternative: (E) -> Result[T, F]) -> Result[T, F] {
+    public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F] where F: Error {
         match self {
             .Ok(let value) => .Ok(value),
             .Err(let error) => alternative(error)

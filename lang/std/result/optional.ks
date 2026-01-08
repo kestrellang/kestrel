@@ -1,7 +1,8 @@
 // Optional type
 
 public enum Optional[T]: ExpressibleByNilLiteral {
-    case Some(T)
+    // TODO: remove parameter name when unnamed associated values are supported
+    case Some(value: T)
     case None
 
     // ExpressibleByNilLiteral
@@ -192,7 +193,7 @@ public struct OptionalIterator[T]: Iterator {
     private var value: Optional[T]
 
     public init(value: Optional[T]) {
-        self.value = value
+        self.value = value;
     }
 
     public func next() -> Optional[T] {

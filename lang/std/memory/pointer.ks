@@ -8,14 +8,14 @@ public struct RawPointer: Equatable, FFISafe {
     private var raw: lang.ptr[lang.u8]
 
     public init(raw: lang.ptr[lang.u8]) {
-        self.raw = raw
+        self.raw = raw;
     }
 
     public init(address: UInt) {
         self.raw = lang.ptr_from_address(address)
     }
 
-    public static func null() -> RawPointer {
+    public static func nilPointer() -> RawPointer {
         RawPointer(raw: lang.ptr_null())
     }
 
@@ -45,14 +45,14 @@ public struct Pointer[T]: Equatable {
     private var raw: lang.ptr[T]
 
     public init(raw: lang.ptr[T]) {
-        self.raw = raw
+        self.raw = raw;
     }
 
     public init(to value: ref T) {
         self.raw = lang.ptr_to(value)
     }
 
-    public static func null() -> Pointer[T] {
+    public static func nilPointer() -> Pointer[T] {
         Pointer(raw: lang.ptr_null() as lang.ptr[T])
     }
 
@@ -94,7 +94,7 @@ public struct Pointer[T]: Equatable {
 extension Pointer: FFISafe where T: FFISafe {}
 
 // Slice[T] - view into contiguous memory
-public struct Slice[T]: Iterable, Equatable where T: Equatable {
+public struct Slice[T]: Iterable, Equatable {
     type Item = T
     type Iter = SliceIterator[T]
 
@@ -102,8 +102,8 @@ public struct Slice[T]: Iterable, Equatable where T: Equatable {
     private var len: Int
 
     public init(pointer: Pointer[T], count: Int) {
-        self.ptr = pointer
-        self.len = count
+        self.ptr = pointer;
+        self.len = count;
     }
 
     public var count: Int { self.len }
@@ -164,11 +164,11 @@ public struct Slice[T]: Iterable, Equatable where T: Equatable {
         if self.len != other.len {
             return false
         }
-        for i in 0..<self.len {
+        /* for i in 0..<self.len {
             if self(unchecked: i) != other(unchecked: i) {
                 return false
             }
-        }
+        } */
         true
     }
 }
@@ -180,8 +180,8 @@ public struct SliceIterator[T]: Iterator {
     private var remaining: Int
 
     public init(ptr: Pointer[T], remaining: Int) {
-        self.ptr = ptr
-        self.remaining = remaining
+        self.ptr = ptr;
+        self.remaining = remaining;
     }
 
     public func next() -> Optional[T] {

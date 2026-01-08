@@ -8,14 +8,14 @@ public protocol Iterator {
 // Type that can produce an iterator
 public protocol Iterable {
     type Item
-    type Iter: Iterator where Iter.Item == Item
+    type Iter: Iterator where Iter.Item = Item
     func iter() -> Iter
 }
 
 // Type that can be built from an iterator
 public protocol Collectable {
     type Item
-    init[I: Iterator](from iter: I) where I.Item == Item
+    init[I](from iter: I) where I: Iterator, I.Item = Item
 }
 
 // Functor protocol - for map operations

@@ -4,9 +4,9 @@ public struct Layout: Equatable {
     public var size: Int
     public var alignment: Int
 
-    public init(size: Int, alignment: Int) {
-        self.size = size
-        self.alignment = alignment
+    public init(size size: Int, alignment alignment: Int) {
+        self.size = size;
+        self.alignment = alignment;
     }
 
     public static func of[T]() -> Layout {

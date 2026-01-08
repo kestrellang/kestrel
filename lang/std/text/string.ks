@@ -1,6 +1,6 @@
 // String type - UTF-8 encoded string with COW semantics
 
-public struct String[A: Allocator = GlobalAllocator]:
+public struct String[A]:
     ExpressibleByStringLiteral,
     Addable,
     Equatable,
@@ -12,13 +12,13 @@ public struct String[A: Allocator = GlobalAllocator]:
 
     private var storage: ArcBox[StringStorage[A]]
 
-    struct StringStorage[A: Allocator] {
+    struct StringStorage[A] where A: Allocator {
         var buffer: Buffer[UInt8, A]
         var length: Int  // byte length
     }
 
     // Constructors
-    public init() where A == GlobalAllocator {
+    public init() {
         self.storage = ArcBox(value: StringStorage(
             buffer: Buffer(capacity: 0),
             length: 0
@@ -32,7 +32,7 @@ public struct String[A: Allocator = GlobalAllocator]:
         ))
     }
 
-    public init(capacity: Int) where A == GlobalAllocator {
+    public init(capacity: Int) {
         self.storage = ArcBox(value: StringStorage(
             buffer: Buffer(capacity: capacity),
             length: 0
@@ -45,22 +45,22 @@ public struct String[A: Allocator = GlobalAllocator]:
     }
 
     // From bytes (must be valid UTF-8)
-    public init(utf8 bytes: Slice[UInt8]) where A == GlobalAllocator {
+    public init(utf8 bytes: Slice[UInt8]) {
         self.storage = ArcBox(value: StringStorage(
             buffer: Buffer(capacity: bytes.count),
             length: bytes.count
         ))
-        for i in 0..<bytes.count {
+        /* for i in 0..<bytes.count {
             self.storage.value.buffer(unchecked: i) = bytes(unchecked: i)
-        }
+        } */
     }
 
     // From code points
-    public init(codePoints: Array[CodePoint]) where A == GlobalAllocator {
+    public init(codePoints: Array[CodePoint]) {
         var bytes: [UInt8] = []
-        for cp in codePoints {
+        /* for cp in codePoints {
             cp.encodeUtf8(into: bytes)
-        }
+        } */
         self.init(utf8: bytes.asSlice())
     }
 
@@ -116,20 +116,20 @@ public struct String[A: Allocator = GlobalAllocator]:
     // Mutation
     public func append(string other: String) {
         self.ensureCapacity(minCapacity: self.byteCount + other.byteCount)
-        for i in 0..<other.byteCount {
+        /* for i in 0..<other.byteCount {
             self.storage.value.buffer(unchecked: self.storage.value.length) = other.storage.value.buffer(unchecked: i)
             self.storage.value.length += 1
-        }
+        } */
     }
 
     public func append(codePoint cp: CodePoint) {
         var bytes: [UInt8] = []
         cp.encodeUtf8(into: bytes)
         self.ensureCapacity(minCapacity: self.byteCount + bytes.count)
-        for byte in bytes {
+        /* for byte in bytes {
             self.storage.value.buffer(unchecked: self.storage.value.length) = byte
             self.storage.value.length += 1
-        }
+        } */
     }
 
     public func clear() {
@@ -151,7 +151,7 @@ public struct String[A: Allocator = GlobalAllocator]:
         if substring.isEmpty { return true }
         if substring.byteCount > self.byteCount { return false }
 
-        for i in 0..=(self.byteCount - substring.byteCount) {
+        /* for i in 0..=(self.byteCount - substring.byteCount) {
             var found = true
             for j in 0..<substring.byteCount {
                 if self.storage.value.buffer(unchecked: i + j) != substring.storage.value.buffer(unchecked: j) {
@@ -160,28 +160,28 @@ public struct String[A: Allocator = GlobalAllocator]:
                 }
             }
             if found { return true }
-        }
+        } */
         false
     }
 
     public func starts(with prefix: String) -> Bool {
         if prefix.byteCount > self.byteCount { return false }
-        for i in 0..<prefix.byteCount {
+        /* for i in 0..<prefix.byteCount {
             if self.storage.value.buffer(unchecked: i) != prefix.storage.value.buffer(unchecked: i) {
                 return false
             }
-        }
+        } */
         true
     }
 
     public func ends(with suffix: String) -> Bool {
         if suffix.byteCount > self.byteCount { return false }
         let offset = self.byteCount - suffix.byteCount
-        for i in 0..<suffix.byteCount {
+        /* for i in 0..<suffix.byteCount {
             if self.storage.value.buffer(unchecked: offset + i) != suffix.storage.value.buffer(unchecked: i) {
                 return false
             }
-        }
+        } */
         true
     }
 
@@ -189,7 +189,7 @@ public struct String[A: Allocator = GlobalAllocator]:
         if substring.isEmpty { return .Some(0) }
         if substring.byteCount > self.byteCount { return .None }
 
-        for i in 0..=(self.byteCount - substring.byteCount) {
+        /* for i in 0..=(self.byteCount - substring.byteCount) {
             var found = true
             for j in 0..<substring.byteCount {
                 if self.storage.value.buffer(unchecked: i + j) != substring.storage.value.buffer(unchecked: j) {
@@ -198,7 +198,7 @@ public struct String[A: Allocator = GlobalAllocator]:
                 }
             }
             if found { return .Some(i) }
-        }
+        } */
         .None
     }
 
@@ -235,17 +235,17 @@ public struct String[A: Allocator = GlobalAllocator]:
 
     public func lowercase() -> String[A] {
         var result = String[A](capacity: self.byteCount)
-        for cp in self.codePoints {
+        /* for cp in self.codePoints {
             result.append(codePoint: cp.toLowercase())
-        }
+        } */
         result
     }
 
     public func uppercase() -> String[A] {
         var result = String[A](capacity: self.byteCount)
-        for cp in self.codePoints {
+        /* for cp in self.codePoints {
             result.append(codePoint: cp.toUppercase())
-        }
+        } */
         result
     }
 
@@ -258,12 +258,12 @@ public struct String[A: Allocator = GlobalAllocator]:
         while i < self.byteCount {
             if i + pattern.byteCount <= self.byteCount {
                 var found = true
-                for j in 0..<pattern.byteCount {
+                /* for j in 0..<pattern.byteCount {
                     if self.storage.value.buffer(unchecked: i + j) != pattern.storage.value.buffer(unchecked: j) {
                         found = false
                         break
                     }
-                }
+                } */
                 if found {
                     result.append(string: replacement)
                     i += pattern.byteCount
@@ -286,51 +286,51 @@ public struct String[A: Allocator = GlobalAllocator]:
     // Substring by byte indices (internal)
     private func substringBytes(from start: Int, to end: Int) -> String[A] {
         var result = String[A](capacity: end - start)
-        for i in start..<end {
+        /* for i in start..<end {
             result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i)
             result.storage.value.length += 1
-        }
+        } */
         result
     }
 
     // Equatable
     public func equals(other: String[A]) -> Bool {
         if self.byteCount != other.byteCount { return false }
-        for i in 0..<self.byteCount {
+        /* for i in 0..<self.byteCount {
             if self.storage.value.buffer(unchecked: i) != other.storage.value.buffer(unchecked: i) {
                 return false
             }
-        }
+        } */
         true
     }
 
     // Comparable
     public func compare(other: String[A]) -> Ordering {
         let minLen = if self.byteCount < other.byteCount { self.byteCount } else { other.byteCount }
-        for i in 0..<minLen {
+        /* for i in 0..<minLen {
             let a = self.storage.value.buffer(unchecked: i)
             let b = other.storage.value.buffer(unchecked: i)
             if a < b { return .Less }
             if a > b { return .Greater }
-        }
+        } */
         if self.byteCount < other.byteCount { .Less }
         else if self.byteCount > other.byteCount { .Greater }
         else { .Equal }
     }
 
     // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
-        for i in 0..<self.byteCount {
+    public func hash[H](into hasher: ref H) where H: Hasher {
+        /* for i in 0..<self.byteCount {
             hasher.write(bytes: [self.storage.value.buffer(unchecked: i)])
-        }
+        } */
     }
 
     // Cloneable
     public func clone() -> String[A] {
         var result = String[A](capacity: self.byteCount)
-        for i in 0..<self.byteCount {
+        /* for i in 0..<self.byteCount {
             result.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i)
-        }
+        } */
         result.storage.value.length = self.byteCount
         result
     }
@@ -342,7 +342,7 @@ public struct String[A: Allocator = GlobalAllocator]:
 }
 
 // SplitIterator
-public struct SplitIterator[A: Allocator]: Iterator {
+public struct SplitIterator[A]: Iterator where A: Allocator {
     type Item = String[A]
 
     private var string: String[A]
@@ -351,10 +351,10 @@ public struct SplitIterator[A: Allocator]: Iterator {
     private var done: Bool
 
     public init(string: String[A], separator: String[A], index: Int, done: Bool) {
-        self.string = string
-        self.separator = separator
-        self.index = index
-        self.done = done
+        self.string = string;
+        self.separator = separator;
+        self.index = index;
+        self.done = done;
     }
 
     public func next() -> Optional[String[A]] {
@@ -363,7 +363,7 @@ public struct SplitIterator[A: Allocator]: Iterator {
         if self.separator.isEmpty {
             // Empty separator - iterate code points
             if self.index >= self.string.byteCount {
-                self.done = true
+                self.done = true;
                 return .None
             }
             // Find next code point
@@ -372,19 +372,19 @@ public struct SplitIterator[A: Allocator]: Iterator {
                 self.index += len
                 return .Some(result)
             }
-            self.done = true
+            self.done = true;
             return .None
         }
 
         var start = self.index
         while self.index + self.separator.byteCount <= self.string.byteCount {
             var found = true
-            for j in 0..<self.separator.byteCount {
+            /* for j in 0..<self.separator.byteCount {
                 if self.string.byteAt(index: self.index + j) != self.separator.byteAt(index: j) {
                     found = false
                     break
                 }
-            }
+            } */
             if found {
                 let result = self.string.substringBytes(from: start, to: self.index)
                 self.index += self.separator.byteCount
@@ -395,11 +395,11 @@ public struct SplitIterator[A: Allocator]: Iterator {
 
         // Remainder
         if start < self.string.byteCount {
-            self.done = true
+            self.done = true;
             return .Some(self.string.substringBytes(from: start, to: self.string.byteCount))
         }
 
-        self.done = true
+        self.done = true;
         .None
     }
 }

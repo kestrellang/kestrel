@@ -10,7 +10,7 @@ public struct SerializeError: Error {
     public var message: String
 
     public init(message: String) {
-        self.message = message
+        self.message = message;
     }
 
     public var description: String {
@@ -24,12 +24,12 @@ public struct DeserializeError: Error {
     public var position: Optional[Int]
 
     public init(message: String) {
-        self.message = message
+        self.message = message;
         self.position = .None
     }
 
     public init(message: String, at position: Int) {
-        self.message = message
+        self.message = message;
         self.position = .Some(position)
     }
 
@@ -304,9 +304,9 @@ extension Optional[T]: Serialize where T: Serialize {
 extension Array[T]: Serialize where T: Serialize {
     public func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
         let arr = try serializer.beginArray(length: self.count)
-        for item in self {
+        /* for item in self {
             try arr.serializeElement(value: item)
-        }
+        } */
         arr.end()
     }
 }
@@ -314,9 +314,9 @@ extension Array[T]: Serialize where T: Serialize {
 extension Dictionary[K, V]: Serialize where K: Serialize, V: Serialize {
     public func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
         var entries: Array[(K, V)] = []
-        for (key, value) in self {
+        /* for (key, value) in self {
             entries.append((key, value))
-        }
+        } */
         serializer.serializeMap(entries: entries)
     }
 }

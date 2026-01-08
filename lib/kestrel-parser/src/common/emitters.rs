@@ -579,7 +579,9 @@ pub fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarat
         sink.finish_node(); // AliasedType
     }
 
-    sink.add_token(SyntaxKind::Semicolon, data.semicolon_span);
+    if let Some(semicolon_span) = data.semicolon_span {
+        sink.add_token(SyntaxKind::Semicolon, semicolon_span);
+    }
 
     sink.finish_node(); // TypeAliasDeclaration
 }

@@ -1,11 +1,13 @@
 // Range operator protocols and types
 
+// TODO: Add back 
 @operator(..)
 public protocol RangeConstructible[Rhs = Self] {
     type Output
     func rangeExclusive(to end: Rhs) -> Output
 }
 
+// TODO: Add back 
 @operator(..=)
 public protocol ClosedRangeConstructible[Rhs = Self] {
     type Output
@@ -18,8 +20,8 @@ public struct Range[T: Comparable]: Equatable where T: Steppable {
     public var end: T
 
     public init(start: T, end: T) {
-        self.start = start
-        self.end = end
+        self.start = start;
+        self.end = end;
     }
 
     public func contains(value: T) -> Bool {
@@ -51,8 +53,8 @@ public struct RangeIterator[T: Steppable + Comparable]: Iterator {
     private var end: T
 
     public init(current: T, end: T) {
-        self.current = current
-        self.end = end
+        self.current = current;
+        self.end = end;
     }
 
     public func next() -> Optional[T] {
@@ -72,8 +74,8 @@ public struct ClosedRange[T: Comparable]: Equatable where T: Steppable {
     public var end: T
 
     public init(start: T, end: T) {
-        self.start = start
-        self.end = end
+        self.start = start;
+        self.end = end;
     }
 
     public func contains(value: T) -> Bool {
@@ -106,16 +108,16 @@ public struct ClosedRangeIterator[T: Steppable + Comparable]: Iterator {
     private var finished: Bool
 
     public init(current: T, end: T, finished: Bool) {
-        self.current = current
-        self.end = end
-        self.finished = finished
+        self.current = current;
+        self.end = end;
+        self.finished = finished;
     }
 
     public func next() -> Optional[T] {
         if self.finished {
             .None
         } else if self.current == self.end {
-            self.finished = true
+            self.finished = true;
             .Some(self.current)
         } else if self.current < self.end {
             let value = self.current

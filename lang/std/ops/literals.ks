@@ -1,37 +1,37 @@
 // Literal protocols - types that can be constructed from literals
 
-@literal
+@builtin(.ExpressibleByBoolLiteral)
 public protocol ExpressibleByBoolLiteral {
     init(boolLiteral value: Bool)
 }
 
-@literal
+@builtin(.ExpressibleByIntLiteral)
 public protocol ExpressibleByIntLiteral {
     init(intLiteral value: Int)
 }
 
-@literal
+@builtin(.ExpressibleByFloatLiteral)
 public protocol ExpressibleByFloatLiteral {
     init(floatLiteral value: Float64)
 }
 
-@literal
+@builtin(.ExpressibleByStringLiteral)
 public protocol ExpressibleByStringLiteral {
     init(stringLiteral value: String)
 }
 
-@literal
+@builtin(.ExpressibleByNilLiteral)
 public protocol ExpressibleByNilLiteral {
-    init(nilLiteral value: Nil)
+    init()
 }
 
-@literal
+@builtin(.ExpressibleByArrayLiteral)
 public protocol ExpressibleByArrayLiteral {
     type Element
     init(arrayLiteral elements: [Element])
 }
 
-@literal
+@builtin(.ExpressibleByDictionaryLiteral)
 public protocol ExpressibleByDictionaryLiteral {
     type Key
     type Value

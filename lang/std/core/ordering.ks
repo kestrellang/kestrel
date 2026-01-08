@@ -18,7 +18,9 @@ public enum Ordering: Equatable {
         match self {
             .Less => .Greater,
             .Equal => .Equal,
-            .Greater => .Less
+            .Greater => .Less,
+
+            _ => .Equal, // todo: remove this case
         }
     }
 

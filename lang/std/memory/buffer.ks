@@ -1,30 +1,30 @@
 // Buffer[T] - owning contiguous memory region
 
-public struct Buffer[T, A: Allocator = GlobalAllocator]: NonCopyable {
+public struct Buffer[T, A]: NonCopyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int
     private var allocator: A
 
     // Allocate buffer with capacity
-    public init(capacity: Int) where A == GlobalAllocator {
+    public init(capacity: Int) {
         self.allocator = GlobalAllocator()
         let layout = Layout.array[T](count: capacity)
         match self.allocator.allocate(layout: layout) {
             .Some(let rawPtr) => {
                 self.ptr = rawPtr.as[T]()
-                self.cap = capacity
+                self.cap = capacity;
             },
             .None => panic("Buffer allocation failed")
         }
     }
 
     public init(capacity: Int, allocator: A) {
-        self.allocator = allocator
+        self.allocator = allocator;
         let layout = Layout.array[T](count: capacity)
         match self.allocator.allocate(layout: layout) {
             .Some(let rawPtr) => {
                 self.ptr = rawPtr.as[T]()
-                self.cap = capacity
+                self.cap = capacity;
             },
             .None => panic("Buffer allocation failed")
         }
@@ -32,9 +32,9 @@ public struct Buffer[T, A: Allocator = GlobalAllocator]: NonCopyable {
 
     // Create from existing pointer (non-owning view)
     private init(pointer: Pointer[T], capacity: Int, allocator: A) {
-        self.ptr = pointer
-        self.cap = capacity
-        self.allocator = allocator
+        self.ptr = pointer;
+        self.cap = capacity;
+        self.allocator = allocator;
     }
 
     deinit {
@@ -83,10 +83,10 @@ public struct Buffer[T, A: Allocator = GlobalAllocator]: NonCopyable {
     }
 
     // Bulk operations
-    public func fill(with value: T) where T: Cloneable {
-        for i in 0..<self.cap {
+    public func fill(with value: T) {
+        /* for i in 0..<self.cap {
             self.ptr.offset(by: i).write(value.clone())
-        }
+        } */
     }
 
     public func copy(from source: Buffer[T, A>, count: Int) {
@@ -167,7 +167,7 @@ public struct ArcBox[T] {
         ArcBox(ptr: self.ptr)
     }
 
-    public func deepClone() -> ArcBox[T] where T: Cloneable {
+    public func deepClone[T]() -> ArcBox[T] where T: Cloneable {
         ArcBox(value: self.ptr.pointee.value.clone())
     }
 

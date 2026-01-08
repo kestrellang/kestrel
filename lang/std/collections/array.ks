@@ -1,6 +1,6 @@
 // Array type - dynamic growable array with COW semantics
 
-public struct Array[T, A: Allocator = GlobalAllocator]:
+public struct Array[T, A]:
     Iterable,
     Collectable,
     Functor,
@@ -14,13 +14,13 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
 
     private var storage: ArcBox[ArrayStorage[T, A]]
 
-    struct ArrayStorage[T, A: Allocator] {
+    struct ArrayStorage[T, A] where A: Allocator {
         var buffer: Buffer[T, A]
         var count: Int
     }
 
     // Constructors
-    public init() where A == GlobalAllocator {
+    public init() {
         self.storage = ArcBox(value: ArrayStorage(
             buffer: Buffer(capacity: 0),
             count: 0
@@ -34,7 +34,7 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
         ))
     }
 
-    public init(capacity: Int) where A == GlobalAllocator {
+    public init(capacity: Int) {
         self.storage = ArcBox(value: ArrayStorage(
             buffer: Buffer(capacity: capacity),
             count: 0
@@ -51,13 +51,13 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
     // ExpressibleByArrayLiteral
     public init(arrayLiteral elements: [T]) {
         self.init(capacity: elements.count)
-        for element in elements {
-            self.append(element)
-        }
+        // for element in elements {
+        //     self.append(element)
+        // }
     }
 
     // Collectable
-    public init[I: Iterator](from iter: I) where I.Item == T {
+    public init[I](from iter: I) where I: Iterator, I.Item == T {
         self.init()
         while let item = iter.next() {
             self.append(item)
@@ -160,10 +160,10 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
 
     public func append(contentsOf other: Array[T, A]) {
         self.ensureCapacity(minCapacity: self.count + other.count)
-        for i in 0..<other.count {
+        /* for i in 0..<other.count {
             self.storage.value.buffer(unchecked: self.storage.value.count) = other(unchecked: i)
             self.storage.value.count += 1
-        }
+        } */
     }
 
     public func insert(element: T, at index: Int) {
@@ -193,9 +193,9 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
         let removed = self.storage.value.buffer(unchecked: index)
 
         // Shift elements left
-        for i in index..<(self.storage.value.count - 1) {
+        /* for i in index..<(self.storage.value.count - 1) {
             self.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i + 1)
-        }
+        } */
 
         self.storage.value.count -= 1
         removed
@@ -245,18 +245,18 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
     // Functor
     public func map[U](transform: (T) -> U) -> Array[U, A] {
         var result = Array[U, A](capacity: self.count)
-        for i in 0..<self.count {
+        /* for i in 0..<self.count {
             result.append(transform(self.storage.value.buffer(unchecked: i)))
-        }
+        } */
         result
     }
 
     // Cloneable
     public func clone() -> Array[T, A] where T: Cloneable {
         var result = Array[T, A](capacity: self.count)
-        for i in 0..<self.count {
+        /* for i in 0..<self.count {
             result.append(self.storage.value.buffer(unchecked: i).clone())
-        }
+        } */
         result
     }
 
@@ -264,7 +264,7 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
     public func sort() where T: Comparable {
         self.ensureUnique()
         // Simple insertion sort for now
-        for i in 1..<self.count {
+        /* for i in 1..<self.count {
             let key = self.storage.value.buffer(unchecked: i)
             var j = i - 1
             while j >= 0 and self.storage.value.buffer(unchecked: j) > key {
@@ -272,7 +272,7 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
                 j -= 1
             }
             self.storage.value.buffer(unchecked: j + 1) = key
-        }
+        } */
     }
 
     public func sorted() -> Array[T, A] where T: Comparable + Cloneable {
@@ -302,20 +302,20 @@ public struct Array[T, A: Allocator = GlobalAllocator]:
 
     // Search
     public func contains(element: T) -> Bool where T: Equatable {
-        for i in 0..<self.count {
+        /* for i in 0..<self.count {
             if self.storage.value.buffer(unchecked: i) == element {
                 return true
             }
-        }
+        } */
         false
     }
 
     public func indexOf(element: T) -> Optional[Int] where T: Equatable {
-        for i in 0..<self.count {
+        /* for i in 0..<self.count {
             if self.storage.value.buffer(unchecked: i) == element {
                 return .Some(i)
             }
-        }
+        } */
         .None
     }
 }
@@ -326,21 +326,21 @@ extension Array[T, A]: Equatable where T: Equatable {
         if self.count != other.count {
             return false
         }
-        for i in 0..<self.count {
+        /* for i in 0..<self.count {
             if self(unchecked: i) != other(unchecked: i) {
                 return false
             }
-        }
+        } */
         true
     }
 }
 
 // Hashable when T is Hashable
 extension Array[T, A]: Hashable where T: Hashable {
-    public func hash[H: Hasher](into hasher: ref H) {
-        for i in 0..<self.count {
+    public func hash[H](into hasher: ref H) where H: Hasher {
+        /* for i in 0..<self.count {
             self(unchecked: i).hash(into: hasher)
-        }
+        } */
     }
 }
 
@@ -352,8 +352,8 @@ public struct ArrayIterator[T]: Iterator {
     private var index: Int
 
     public init(array: Array[T], index: Int) {
-        self.array = array
-        self.index = index
+        self.array = array;
+        self.index = index;
     }
 
     public func next() -> Optional[T] {

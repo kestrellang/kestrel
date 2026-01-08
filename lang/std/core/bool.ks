@@ -24,11 +24,11 @@ public struct Bool:
     }
 
     // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
+    public func hash[H](into hasher: H) where H: Hasher {
         if self.value {
-            hasher.write(bytes: [1 as UInt8])
+            hasher.write(bytes: [1])
         } else {
-            hasher.write(bytes: [0 as UInt8])
+            hasher.write(bytes: [0])
         }
     }
 
