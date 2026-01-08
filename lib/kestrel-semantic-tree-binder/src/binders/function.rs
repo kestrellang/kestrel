@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
-use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::callable::{
+    CallableBehavior, ParameterAccessMode, ReceiverKind,
+};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -307,23 +309,8 @@ impl FunctionBinder {
             }
         }
 
-        // Validation 3: Parameters cannot use borrow or mutating access mode
-        // (extern functions implicitly treat all parameters as consuming since FFI
-        // can't handle Kestrel's borrowing semantics)
-        if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-            use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
-            for param in callable.parameters() {
-                // Only error if the user explicitly used borrow/mutating
-                // Default (Borrow) without explicit keyword is implicitly treated as consuming
-                if param.access_mode == ParameterAccessMode::Mutating {
-                    context.diagnostics.throw(ExternParameterNotConsumingError {
-                        span: param.bind_name.span.clone(),
-                        param_name: param.bind_name.value.clone(),
-                    });
-                    // Continue checking other parameters to report all errors
-                }
-            }
-        }
+        // Validation 3 (mutating param check) is now done in bind_members before
+        // CallableBehavior is created, so we can check the original access modes.
 
         // Validation 4: All parameter types and return type must conform to FFISafe
         if let Some(ffi_safe_id) = context
@@ -409,6 +396,37 @@ impl DeclarationBinder for FunctionBinder {
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
+
+        // Check if this is an extern function - extern functions always use consuming params
+        // because FFI can't handle Kestrel's borrowing semantics
+        let is_extern = attributes_behavior
+            .get_kind(AttributeKind::Extern)
+            .is_some();
+
+        // For extern functions, validate that no parameter uses 'mutating' access mode,
+        // then force all parameters to Consuming access mode
+        let resolved_params = if is_extern {
+            // Validate: error if user explicitly wrote 'mutating'
+            for param in &resolved_params {
+                if param.access_mode == ParameterAccessMode::Mutating {
+                    context.diagnostics.throw(ExternParameterNotConsumingError {
+                        span: param.bind_name.span.clone(),
+                        param_name: param.bind_name.value.clone(),
+                    });
+                }
+            }
+
+            // Transform: force all params to Consuming for FFI compatibility
+            resolved_params
+                .into_iter()
+                .map(|mut p| {
+                    p.access_mode = ParameterAccessMode::Consuming;
+                    p
+                })
+                .collect()
+        } else {
+            resolved_params
+        };
 
         // Add a new CallableBehavior with resolved types
         let resolved_callable = match receiver_kind {

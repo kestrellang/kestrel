@@ -3,6 +3,18 @@
 
 module AlchemyLab
 
+// Extern C bindings for printing
+@extern(.C, mangleName: "kestrel_print_string")
+func c_print_string(ptr: lang.ptr[I8], len: Int) -> Int
+
+@extern(.C, mangleName: "kestrel_print_newline")
+func c_print_newline(dummy: Int) -> Int
+
+func printLine(s: String) {
+    let _ = c_print_string(s.unsafePtr(), s.length());
+    let _ = c_print_newline(0);
+}
+
 protocol Reagent {
     func essence() -> String
 }
@@ -29,7 +41,7 @@ struct Alchemist[A, B] where A: Reagent, B: Reagent {
     }
 }
 
-func main() {
+func main() -> Int {
     let mercury = Mercury();
     let sulfur = Sulfur();
 
@@ -45,16 +57,12 @@ func main() {
 
     let description = match result {
         .Success(name, potency) if potency > 50 => {
-            "Gaze upon {name}! It is truly potent."
+            "Gaze upon the potion! It is truly potent."
         },
-        .Success(name, _) => "Created {name}, but it's a bit weak.",
-        .Failed(msg) => "The lab smells like {msg}."
+        .Success(name, _) => "Created a potion, but it's a bit weak.",
+        .Failed(msg) => "The lab smells terrible."
     };
 
-    print(description);
+    printLine(description);
+    0
 }
-
-func print(msg: String) {
-    // Dummy print function
-}
-

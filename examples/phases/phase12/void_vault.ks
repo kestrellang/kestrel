@@ -3,6 +3,25 @@
 
 module VoidVault
 
+// Extern C bindings for printing
+@extern(.C, mangleName: "kestrel_print_string")
+func c_print_string(ptr: lang.ptr[I8], len: Int) -> Int
+
+@extern(.C, mangleName: "kestrel_print_int")
+func c_print_int(value: Int) -> Int
+
+@extern(.C, mangleName: "kestrel_print_newline")
+func c_print_newline(dummy: Int) -> Int
+
+func printLine(s: String) {
+    let _ = c_print_string(s.unsafePtr(), s.length());
+    let _ = c_print_newline(0);
+}
+
+func printInt(i: Int) {
+    let _ = c_print_int(i);
+}
+
 @builtin(.Copyable)
 protocol Copyable {}
 
@@ -28,7 +47,7 @@ struct Vault {
                 self.slot = .Occupied(artifact: item);
             },
             .Occupied(existing) => {
-                self.slot = .Collapsed(reason: "Tried to double-stuff the vault with {item.name}");
+                self.slot = .Collapsed(reason: "Tried to double-stuff the vault");
                 // both existing and item would be dropped here
             },
             _ => {}
@@ -44,27 +63,39 @@ struct Vault {
 
 func inspect(slot: VaultSlot) -> String {
     match slot {
-        .Occupied(item) => "The vault holds the {item.name}, glowing with power {item.powerLevel}.",
+        .Occupied(item) => "The vault holds a powerful artifact!",
         .Empty => "The vault is hauntingly empty.",
-        .Collapsed(reason) => "The vault has imploded: {reason}",
+        .Collapsed(reason) => "The vault has imploded!",
     }
 }
 
-func print(msg: String) {
-    // Dummy print function
-}
-
-func main() {
+func main() -> Int {
+    printLine("=== The Vault of Eternal Silence ===");
+    
     var myVault = Vault(slot: .Empty);
+    printLine("Created an empty vault");
+    
     let crown = Artifact(name: "Crown of the Void", powerLevel: 9001);
+    printLine("Created artifact: Crown of the Void");
+    printLine("Power level:");
+    printInt(crown.powerLevel);
+    let _ = c_print_newline(0);
 
     // crown is moved into the vault
+    printLine("Depositing artifact into vault...");
     myVault.deposit(crown);
 
     // let illegalCopy = crown; // Error: use of moved value
 
+    printLine("Withdrawing from vault...");
     let retrieved = myVault.withdraw();
     let report = inspect(retrieved);
-    print(report);
+    printLine(report);
+    
+    printLine("Checking vault again...");
+    let empty = myVault.withdraw();
+    let report2 = inspect(empty);
+    printLine(report2);
+    
+    0
 }
-

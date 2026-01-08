@@ -126,6 +126,8 @@ pub enum ReturnType {
     String,
     /// Always returns Int64
     Int,
+    /// Returns lang.ptr[I8] (pointer to bytes)
+    PointerToI8,
 }
 
 /// Macro to define primitive methods with their metadata in one place.
@@ -272,13 +274,66 @@ define_primitive_methods! {
     BoolNe        { ty: Bool, name: "ne", returns: Bool },
 
     // String methods
-    StringLength  { ty: String, name: "length", returns: Int },
-    StringIsEmpty { ty: String, name: "isEmpty", returns: Bool },
-    StringEq      { ty: String, name: "eq", returns: Bool },
-    StringNe      { ty: String, name: "ne", returns: Bool },
+    StringLength    { ty: String, name: "length", returns: Int },
+    StringIsEmpty   { ty: String, name: "isEmpty", returns: Bool },
+    StringEq        { ty: String, name: "eq", returns: Bool },
+    StringNe        { ty: String, name: "ne", returns: Bool },
+    StringUnsafePtr { ty: String, name: "unsafePtr", returns: PointerToI8 },
 }
 
 impl PrimitiveMethod {
+    /// Get the number of arguments this primitive method takes (not counting the receiver).
+    pub fn arity(&self) -> usize {
+        match self {
+            // Unary methods (0 arguments, just receiver)
+            PrimitiveMethod::IntToString
+            | PrimitiveMethod::IntAbs
+            | PrimitiveMethod::IntNeg
+            | PrimitiveMethod::IntIdentity
+            | PrimitiveMethod::IntBitNot
+            | PrimitiveMethod::FloatNeg
+            | PrimitiveMethod::FloatIdentity
+            | PrimitiveMethod::BoolNot
+            | PrimitiveMethod::StringLength
+            | PrimitiveMethod::StringIsEmpty
+            | PrimitiveMethod::StringUnsafePtr => 0,
+
+            // Binary methods (1 argument besides receiver)
+            PrimitiveMethod::IntAdd
+            | PrimitiveMethod::IntSub
+            | PrimitiveMethod::IntMul
+            | PrimitiveMethod::IntDiv
+            | PrimitiveMethod::IntRem
+            | PrimitiveMethod::IntEq
+            | PrimitiveMethod::IntNe
+            | PrimitiveMethod::IntLt
+            | PrimitiveMethod::IntLe
+            | PrimitiveMethod::IntGt
+            | PrimitiveMethod::IntGe
+            | PrimitiveMethod::IntBitAnd
+            | PrimitiveMethod::IntBitOr
+            | PrimitiveMethod::IntBitXor
+            | PrimitiveMethod::IntShl
+            | PrimitiveMethod::IntShr
+            | PrimitiveMethod::FloatAdd
+            | PrimitiveMethod::FloatSub
+            | PrimitiveMethod::FloatMul
+            | PrimitiveMethod::FloatDiv
+            | PrimitiveMethod::FloatEq
+            | PrimitiveMethod::FloatNe
+            | PrimitiveMethod::FloatLt
+            | PrimitiveMethod::FloatLe
+            | PrimitiveMethod::FloatGt
+            | PrimitiveMethod::FloatGe
+            | PrimitiveMethod::BoolAnd
+            | PrimitiveMethod::BoolOr
+            | PrimitiveMethod::BoolEq
+            | PrimitiveMethod::BoolNe
+            | PrimitiveMethod::StringEq
+            | PrimitiveMethod::StringNe => 1,
+        }
+    }
+
     /// Get the return type of this primitive method.
     pub fn return_type(&self, receiver_ty: &Ty, span: Span) -> Ty {
         use crate::ty::{IntBits, TyKind};
@@ -294,6 +349,7 @@ impl PrimitiveMethod {
             ReturnType::Bool => Ty::bool(span),
             ReturnType::String => Ty::string(span),
             ReturnType::Int => Ty::int(IntBits::I64, span),
+            ReturnType::PointerToI8 => Ty::pointer(Ty::int(IntBits::I8, span.clone()), span),
         }
     }
 
@@ -407,6 +463,15 @@ pub enum ExprKind {
         receiver: Box<Expression>,
         method: PrimitiveMethod,
         arguments: Vec<CallArgument>,
+    },
+
+    /// Primitive method reference: `5.toString`, `"hello".length` (not yet called).
+    /// This is created when a primitive method is accessed but not immediately called.
+    /// Primitive methods cannot be used as first-class values, so if this expression
+    /// is not immediately called, an error will be emitted during call resolution.
+    PrimitiveMethodRef {
+        receiver: Box<Expression>,
+        method: PrimitiveMethod,
     },
 
     /// Deferred method call: method call on a receiver with inferred type.
@@ -857,6 +922,9 @@ impl Expression {
                     method.name(),
                     args.join(", ")
                 )
+            }
+            ExprKind::PrimitiveMethodRef { receiver, method } => {
+                format!("{}.{}", receiver.debug_compact(), method.name())
             }
             ExprKind::DeferredMethodCall {
                 receiver,
@@ -1344,6 +1412,25 @@ impl Expression {
                 arguments,
             },
             ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a primitive method reference expression.
+    /// This is used when a primitive method is accessed but not immediately called.
+    /// Primitive methods cannot be used as first-class values, so call resolution
+    /// will emit an error if this reference is not converted to a PrimitiveMethodCall.
+    pub fn primitive_method_ref(receiver: Expression, method: PrimitiveMethod, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::PrimitiveMethodRef {
+                receiver: Box::new(receiver),
+                method,
+            },
+            // Type is infer since primitive methods can't be first-class values.
+            // Call resolution will convert this to a proper call with the return type.
+            ty: Ty::infer(span.clone()),
             span,
             mutable: false,
         }

@@ -294,6 +294,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         ExprKind::FieldAccess { object, .. } => analyze_expression(object),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver),
+        ExprKind::PrimitiveMethodRef { receiver, .. } => analyze_expression(receiver),
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,

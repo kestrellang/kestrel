@@ -1271,13 +1271,27 @@ pub fn compile_call(
                 .collect();
 
             // Look up the Cranelift FuncId for this function.
-            let mangled_name = mangle_name(ctx.mir, *name, &concrete_args);
+            // For extern functions, use the symbol name from extern_info.
+            // Otherwise, use the mangled name.
+            let callee_def = ctx
+                .mir
+                .functions
+                .iter()
+                .find(|(_, def)| def.name == *name)
+                .map(|(_, def)| def);
 
-            let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
+            let lookup_name = match callee_def {
+                Some(def) if def.extern_info.is_some() => {
+                    def.extern_info.as_ref().unwrap().symbol_name.clone()
+                }
+                _ => mangle_name(ctx.mir, *name, &concrete_args),
+            };
+
+            let cl_func_id = ctx.func_ids_by_name.get(&lookup_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
-                    "function not found: {} (mangled: {})",
+                    "function not found: {} (lookup: {})",
                     ctx.mir.name(*name),
-                    mangled_name
+                    lookup_name
                 ))
             })?;
 

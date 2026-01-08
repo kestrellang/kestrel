@@ -334,6 +334,7 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
         ExprKind::FieldAccess { object, .. } => analyze_expression(object, errors),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple, errors),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver, errors),
+        ExprKind::PrimitiveMethodRef { receiver, .. } => analyze_expression(receiver, errors),
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
@@ -495,6 +496,7 @@ fn expression_contains_break(expr: &Expression) -> bool {
         ExprKind::FieldAccess { object, .. } => expression_contains_break(object),
         ExprKind::TupleIndex { tuple, .. } => expression_contains_break(tuple),
         ExprKind::MethodRef { receiver, .. } => expression_contains_break(receiver),
+        ExprKind::PrimitiveMethodRef { receiver, .. } => expression_contains_break(receiver),
         ExprKind::Call {
             callee, arguments, ..
         } => {

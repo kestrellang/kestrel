@@ -275,3 +275,4 @@ func substringFrom(str: String, start: Int) -> String {
     }
     result
 }
+

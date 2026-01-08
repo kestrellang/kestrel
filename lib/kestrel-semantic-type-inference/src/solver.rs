@@ -106,7 +106,14 @@ fn try_solve(
             field_bindings,
             has_rest,
             span,
-        } => resolve_struct_pattern_binding(ctx, *struct_ty, struct_name, field_bindings, *has_rest, span),
+        } => resolve_struct_pattern_binding(
+            ctx,
+            *struct_ty,
+            struct_name,
+            field_bindings,
+            *has_rest,
+            span,
+        ),
     }
 }
 
@@ -142,14 +149,22 @@ fn unify(
         // One is an inference placeholder - substitute it
         (TyKind::Infer, _) => {
             if occurs_check(ty_a.id(), &ty_b, ctx) {
-                return Err(InferenceError::occurs_check(ty_a.id(), ty_b.clone(), span.clone()));
+                return Err(InferenceError::occurs_check(
+                    ty_a.id(),
+                    ty_b.clone(),
+                    span.clone(),
+                ));
             }
             ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
             Ok(SolveResult::Solved)
         }
         (_, TyKind::Infer) => {
             if occurs_check(ty_b.id(), &ty_a, ctx) {
-                return Err(InferenceError::occurs_check(ty_b.id(), ty_a.clone(), span.clone()));
+                return Err(InferenceError::occurs_check(
+                    ty_b.id(),
+                    ty_a.clone(),
+                    span.clone(),
+                ));
             }
             ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
             Ok(SolveResult::Solved)
@@ -263,11 +278,21 @@ fn unify(
                     // One is unconstrained, the other's constraints win
                     // Just unify return types
                 }
-                (ParamInfo::ImplicitIt { it_type: it_a }, ParamInfo::ImplicitIt { it_type: it_b }) => {
+                (
+                    ParamInfo::ImplicitIt { it_type: it_a },
+                    ParamInfo::ImplicitIt { it_type: it_b },
+                ) => {
                     // Both use it - unify the it types
                     ctx.equate(it_a.id(), it_b.id(), span.clone());
                 }
-                (ParamInfo::Explicit { param_types: params_a }, ParamInfo::Explicit { param_types: params_b }) => {
+                (
+                    ParamInfo::Explicit {
+                        param_types: params_a,
+                    },
+                    ParamInfo::Explicit {
+                        param_types: params_b,
+                    },
+                ) => {
                     // Both have explicit params - must match arity
                     if params_a.len() != params_b.len() {
                         return Err(InferenceError::closure_arity_mismatch(
@@ -280,8 +305,8 @@ fn unify(
                         ctx.equate(a.id(), b.id(), span.clone());
                     }
                 }
-                (ParamInfo::ImplicitIt { it_type }, ParamInfo::Explicit { param_types }) |
-                (ParamInfo::Explicit { param_types }, ParamInfo::ImplicitIt { it_type }) => {
+                (ParamInfo::ImplicitIt { it_type }, ParamInfo::Explicit { param_types })
+                | (ParamInfo::Explicit { param_types }, ParamInfo::ImplicitIt { it_type }) => {
                     // ImplicitIt requires exactly 1 param
                     if param_types.len() != 1 {
                         return Err(InferenceError::closure_arity_mismatch(
@@ -301,8 +326,8 @@ fn unify(
         (TyKind::Tuple(elems_a), TyKind::Tuple(elems_b)) => {
             if elems_a.len() != elems_b.len() {
                 return Err(InferenceError::tuple_arity_mismatch(
-                    elems_b.len(),  // expected (the scrutinee type)
-                    elems_a.len(),  // found (the pattern)
+                    elems_b.len(), // expected (the scrutinee type)
+                    elems_a.len(), // found (the pattern)
                     span.clone(),
                 ));
             }
@@ -313,6 +338,11 @@ fn unify(
         }
 
         (TyKind::Array(elem_a), TyKind::Array(elem_b)) => {
+            ctx.equate(elem_a.id(), elem_b.id(), span.clone());
+            Ok(SolveResult::Solved)
+        }
+
+        (TyKind::Pointer(elem_a), TyKind::Pointer(elem_b)) => {
             ctx.equate(elem_a.id(), elem_b.id(), span.clone());
             Ok(SolveResult::Solved)
         }
@@ -329,9 +359,15 @@ fn unify(
         ) => {
             // Check if either side is a closure - if so, emit closure-specific errors
             // Check both the resolved type ID and the original ID
-            let closure_a = ctx.closure_metadata().get(&ty_a.id()).cloned()
+            let closure_a = ctx
+                .closure_metadata()
+                .get(&ty_a.id())
+                .cloned()
                 .or_else(|| ctx.closure_metadata().get(&original_a).cloned());
-            let closure_b = ctx.closure_metadata().get(&ty_b.id()).cloned()
+            let closure_b = ctx
+                .closure_metadata()
+                .get(&ty_b.id())
+                .cloned()
                 .or_else(|| ctx.closure_metadata().get(&original_b).cloned());
 
             // Determine which type is the closure and which is the expected type
@@ -350,13 +386,18 @@ fn unify(
 
                 // 2. Check arity mismatch
                 // For implicit-it closures (param_count=0 and no explicit params), arity is determined by uses_it
-                let expected_arity = if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
-                    // Implicit-it closure: arity is 1 if uses_it, else 0
-                    if closure_meta.uses_it { 1 } else { 0 }
-                } else {
-                    // Explicit-param closure: use param_count directly
-                    closure_meta.param_count
-                };
+                let expected_arity =
+                    if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
+                        // Implicit-it closure: arity is 1 if uses_it, else 0
+                        if closure_meta.uses_it {
+                            1
+                        } else {
+                            0
+                        }
+                    } else {
+                        // Explicit-param closure: use param_count directly
+                        closure_meta.param_count
+                    };
 
                 if expected_arity != expected_params.len() {
                     return Err(InferenceError::closure_arity_mismatch(
@@ -390,13 +431,18 @@ fn unify(
 
                 // 2. Check arity mismatch
                 // For implicit-it closures (param_count=0 and no explicit params), arity is determined by uses_it
-                let expected_arity = if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
-                    // Implicit-it closure: arity is 1 if uses_it, else 0
-                    if closure_meta.uses_it { 1 } else { 0 }
-                } else {
-                    // Explicit-param closure: use param_count directly
-                    closure_meta.param_count
-                };
+                let expected_arity =
+                    if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
+                        // Implicit-it closure: arity is 1 if uses_it, else 0
+                        if closure_meta.uses_it {
+                            1
+                        } else {
+                            0
+                        }
+                    } else {
+                        // Explicit-param closure: use param_count directly
+                        closure_meta.param_count
+                    };
 
                 if expected_arity != expected_params.len() {
                     return Err(InferenceError::closure_arity_mismatch(
@@ -443,8 +489,8 @@ fn unify(
                 substitutions: subs_b,
             },
         ) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
             let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
@@ -494,8 +540,8 @@ fn unify(
                 substitutions: subs_b,
             },
         ) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
             let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
@@ -542,8 +588,8 @@ fn unify(
                 substitutions: subs_b,
             },
         ) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let id_a = Symbol::<KestrelLanguage>::metadata(sym_a.as_ref()).id();
             let id_b = Symbol::<KestrelLanguage>::metadata(sym_b.as_ref()).id();
@@ -582,8 +628,8 @@ fn unify(
 
         // Type parameters - only equal if they're the same parameter
         (TyKind::TypeParameter(param_a), TyKind::TypeParameter(param_b)) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let id_a = Symbol::<KestrelLanguage>::metadata(param_a.as_ref()).id();
             let id_b = Symbol::<KestrelLanguage>::metadata(param_b.as_ref()).id();
@@ -610,14 +656,13 @@ fn unify(
         (TyKind::SelfType, TyKind::Struct { .. }) | (TyKind::Struct { .. }, TyKind::SelfType) => {
             Ok(SolveResult::Solved)
         }
-        (TyKind::SelfType, TyKind::Protocol { .. }) | (TyKind::Protocol { .. }, TyKind::SelfType) => {
-            Ok(SolveResult::Solved)
-        }
+        (TyKind::SelfType, TyKind::Protocol { .. })
+        | (TyKind::Protocol { .. }, TyKind::SelfType) => Ok(SolveResult::Solved),
 
         // Struct to Protocol - check conformance
         (TyKind::Struct { .. }, TyKind::Protocol { symbol, .. }) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_a, protocol_id) {
@@ -631,8 +676,8 @@ fn unify(
             }
         }
         (TyKind::Protocol { symbol, .. }, TyKind::Struct { .. }) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_b, protocol_id) {
@@ -648,8 +693,8 @@ fn unify(
 
         // Enum to Protocol - check conformance
         (TyKind::Enum { .. }, TyKind::Protocol { symbol, .. }) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_a, protocol_id) {
@@ -663,8 +708,8 @@ fn unify(
             }
         }
         (TyKind::Protocol { symbol, .. }, TyKind::Enum { .. }) => {
-            use semantic_tree::symbol::Symbol;
             use kestrel_semantic_tree::language::KestrelLanguage;
+            use semantic_tree::symbol::Symbol;
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_b, protocol_id) {
@@ -683,7 +728,9 @@ fn unify(
         (TyKind::Bool, TyKind::Bool) => Ok(SolveResult::Solved),
         (TyKind::String, TyKind::String) => Ok(SolveResult::Solved),
         (TyKind::Int(bits_a), TyKind::Int(bits_b)) if bits_a == bits_b => Ok(SolveResult::Solved),
-        (TyKind::Float(bits_a), TyKind::Float(bits_b)) if bits_a == bits_b => Ok(SolveResult::Solved),
+        (TyKind::Float(bits_a), TyKind::Float(bits_b)) if bits_a == bits_b => {
+            Ok(SolveResult::Solved)
+        }
 
         // Type aliases - expand and retry
         (TyKind::TypeAlias { .. }, _) => {
@@ -702,7 +749,7 @@ fn unify(
             ty_a.clone(),
             ty_b.clone(),
             span.clone(),
-        ))
+        )),
     }
 }
 
@@ -851,7 +898,9 @@ fn resolve_implicit_member(
 
     // Find the case by name
     let cases = enum_symbol.cases();
-    let case = cases.iter().find(|c| c.metadata().name().value == member_name);
+    let case = cases
+        .iter()
+        .find(|c| c.metadata().name().value == member_name);
 
     let Some(case) = case else {
         return Err(InferenceError::member_not_found(
@@ -908,10 +957,12 @@ fn resolve_implicit_member(
 
             // Check labels and equate types
             let mut labels_match = true;
-            let provided_labels: Vec<Option<String>> = argument_tys.iter()
+            let provided_labels: Vec<Option<String>> = argument_tys
+                .iter()
                 .map(|(label, _)| label.clone())
                 .collect();
-            let expected_labels: Vec<Option<String>> = params.iter()
+            let expected_labels: Vec<Option<String>> = params
+                .iter()
                 .map(|p| p.label.as_ref().map(|l| l.value.clone()))
                 .collect();
 
@@ -984,7 +1035,9 @@ fn resolve_enum_pattern_binding(
 
     // Find the case by name
     let cases = enum_symbol.cases();
-    let case = cases.iter().find(|c| c.metadata().name().value == case_name);
+    let case = cases
+        .iter()
+        .find(|c| c.metadata().name().value == case_name);
 
     let Some(case) = case else {
         // Case not found - emit an error
@@ -1074,7 +1127,7 @@ fn resolve_struct_pattern_binding(
         .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
         .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
         .collect();
-    
+
     // Collect field names from the struct
     let struct_field_names: std::collections::HashSet<_> = fields
         .iter()
@@ -1083,7 +1136,9 @@ fn resolve_struct_pattern_binding(
 
     // Match bindings to fields by name
     for (field_name, binding_ty_id) in field_bindings {
-        let field = fields.iter().find(|f| &f.metadata().name().value == field_name);
+        let field = fields
+            .iter()
+            .find(|f| &f.metadata().name().value == field_name);
 
         if let Some(field) = field {
             // Get field type from TypedBehavior (resolved type) or fallback to field_type
@@ -1092,7 +1147,7 @@ fn resolve_struct_pattern_binding(
                 .get_behavior::<TypedBehavior>()
                 .map(|typed| typed.ty().clone())
                 .unwrap_or_else(|| field.field_type().clone());
-            
+
             // Apply substitutions to handle generic structs
             let field_ty = raw_field_ty.apply_substitutions(substitutions);
             ctx.register_type(&field_ty);
@@ -1106,19 +1161,19 @@ fn resolve_struct_pattern_binding(
             ));
         }
     }
-    
+
     // Check for missing fields if no rest pattern
     if !has_rest {
         let matched_field_names: std::collections::HashSet<_> = field_bindings
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
-        
+
         let missing: Vec<_> = struct_field_names
             .difference(&matched_field_names)
             .cloned()
             .collect();
-        
+
         if !missing.is_empty() {
             return Err(InferenceError::missing_struct_fields(
                 struct_name.to_string(),
@@ -1195,6 +1250,7 @@ fn occurs_check_inner(
             .iter()
             .any(|e| occurs_check_inner(var, e, ctx, visited)),
         TyKind::Array(elem) => occurs_check_inner(var, elem, ctx, visited),
+        TyKind::Pointer(elem) => occurs_check_inner(var, elem, ctx, visited),
         TyKind::Function {
             params,
             return_type,
@@ -1210,12 +1266,10 @@ fn occurs_check_inner(
         | TyKind::TypeAlias { substitutions, .. } => substitutions
             .iter()
             .any(|(_, t)| occurs_check_inner(var, t, ctx, visited)),
-        TyKind::AssociatedType { container, .. } => {
-            container
-                .as_ref()
-                .map(|c| occurs_check_inner(var, c, ctx, visited))
-                .unwrap_or(false)
-        }
+        TyKind::AssociatedType { container, .. } => container
+            .as_ref()
+            .map(|c| occurs_check_inner(var, c, ctx, visited))
+            .unwrap_or(false),
         TyKind::UnresolvedFunction {
             param_info,
             return_type,
@@ -1224,9 +1278,7 @@ fn occurs_check_inner(
                 return true;
             }
             match param_info {
-                ParamInfo::ImplicitIt { it_type } => {
-                    occurs_check_inner(var, it_type, ctx, visited)
-                }
+                ParamInfo::ImplicitIt { it_type } => occurs_check_inner(var, it_type, ctx, visited),
                 ParamInfo::Explicit { param_types } => param_types
                     .iter()
                     .any(|p| occurs_check_inner(var, p, ctx, visited)),
@@ -1240,7 +1292,7 @@ fn occurs_check_inner(
 
 /// Check that all inference placeholders have been resolved.
 /// If any remain unresolved, adds an Ambiguous error to the context.
-/// 
+///
 /// Also processes any remaining constraints that may now be solvable
 /// (e.g., ImplicitMember constraints that were deferred waiting for type info).
 fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
@@ -1256,7 +1308,10 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
             Ok(SolveResult::Deferred) => {
                 // Still can't solve - check if it's an ImplicitMember that we can
                 // report a better error for
-                if let Constraint::ImplicitMember { member_name, span, .. } = &constraint {
+                if let Constraint::ImplicitMember {
+                    member_name, span, ..
+                } = &constraint
+                {
                     // Report specific error for unresolved enum shorthand
                     ctx.add_error(InferenceError::cannot_infer_enum_type(
                         member_name.clone(),

@@ -201,6 +201,9 @@ fn walk_expression(
             ExprKind::MethodRef { receiver, .. } => {
                 walk_expression(receiver, analyzers, model, ctx);
             }
+            ExprKind::PrimitiveMethodRef { receiver, .. } => {
+                walk_expression(receiver, analyzers, model, ctx);
+            }
             ExprKind::Call {
                 callee, arguments, ..
             } => {

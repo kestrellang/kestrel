@@ -97,17 +97,11 @@ pub fn resolve_member_access(
     }
 
     // 1. Check for primitive method (e.g., 5.toString, "hello".length)
-    // Primitive methods can only be called, not used as first-class values
+    // Primitive methods can only be called, not used as first-class values.
+    // Return a PrimitiveMethodRef that call resolution can convert to a call.
+    // If this expression is NOT called, call resolution will emit an error.
     if let Some(primitive_method) = PrimitiveMethod::lookup(base_ty, member_name) {
-        // Primitive methods cannot be used as first-class values.
-        // Report an error - they must be called directly.
-        let error = PrimitiveMethodNotCallableError {
-            span: full_span.clone(),
-            method_name: primitive_method.name().to_string(),
-            receiver_type: base_ty.to_string(),
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
+        return Expression::primitive_method_ref(base, primitive_method, full_span);
     }
 
     // 2. Handle type parameter specially - we can't access fields, only methods

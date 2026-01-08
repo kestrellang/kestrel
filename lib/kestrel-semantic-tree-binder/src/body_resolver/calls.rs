@@ -32,8 +32,9 @@ use crate::diagnostics::{
     ImplicitInitArityError, ImplicitInitLabelError, InstanceMethodOnTypeError,
     MemberNotVisibleError, NoInitInTypeParameterBoundsError, NoMatchingInitializerError,
     NoMatchingMethodError, NoMatchingOverloadError, NoMatchingTypeParameterInitError,
-    NonCallableError, NotGenericError, OverloadDescription, TooFewTypeArgumentsError,
-    TooManyTypeArgumentsError, TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
+    NonCallableError, NotGenericError, OverloadDescription, PrimitiveMethodArityError,
+    PrimitiveMethodNotCallableError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
+    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -337,6 +338,42 @@ pub fn resolve_call(
             // 1. A field with callable type (first-class function)
             // 2. A method call
             resolve_member_call(object, field, arguments, arg_labels, span, ctx)
+        }
+
+        // Primitive method reference - convert to a primitive method call
+        ExprKind::PrimitiveMethodRef {
+            ref receiver,
+            ref method,
+        } => {
+            // Primitive methods don't support explicit type arguments
+            if let Some(ref type_args) = explicit_type_args {
+                if !type_args.is_empty() {
+                    ctx.diagnostics.add_diagnostic(
+                        TypeArgsOnNonGenericError {
+                            span: span.clone(),
+                            callee_description: format!("primitive method '{}'", method.name()),
+                        }
+                        .into_diagnostic(),
+                    );
+                    return Expression::error(span);
+                }
+            }
+            // Validate argument count (primitive methods typically take no extra arguments)
+            let expected_args = method.arity();
+            if arguments.len() != expected_args {
+                ctx.diagnostics.add_diagnostic(
+                    PrimitiveMethodArityError {
+                        call_span: span.clone(),
+                        method_name: method.name().to_string(),
+                        receiver_type: receiver.ty.to_string(),
+                        expected_arity: expected_args,
+                        provided_arity: arguments.len(),
+                    }
+                    .into_diagnostic(),
+                );
+                return Expression::error(span);
+            }
+            Expression::primitive_method_call((**receiver).clone(), method.clone(), arguments, span)
         }
 
         // Type reference - struct instantiation

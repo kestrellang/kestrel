@@ -299,6 +299,9 @@ fn analyze_expression(
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
         }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+        }
         ExprKind::TupleIndex { tuple, .. } => {
             state = analyze_expression(tuple, state, false, ctx);
         }

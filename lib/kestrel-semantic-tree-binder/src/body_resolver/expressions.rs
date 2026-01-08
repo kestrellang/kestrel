@@ -1220,6 +1220,10 @@ fn expression_references_local(
 
         ExprKind::MethodRef { receiver, .. } => expression_references_local(receiver, local_id),
 
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            expression_references_local(receiver, local_id)
+        }
+
         ExprKind::Call {
             callee, arguments, ..
         } => {
@@ -1879,6 +1883,9 @@ where
             }
         }
         ExprKind::MethodRef { receiver, .. } => {
+            collect_captures_from_expression(receiver, process);
+        }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
         }
         ExprKind::FieldAccess { object, .. } => {

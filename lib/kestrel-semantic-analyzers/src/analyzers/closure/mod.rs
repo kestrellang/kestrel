@@ -322,6 +322,10 @@ fn find_assignments_to_locals(
             find_assignments_to_locals(receiver, target_locals, container_id, ctx);
         }
 
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            find_assignments_to_locals(receiver, target_locals, container_id, ctx);
+        }
+
         ExprKind::Call {
             callee, arguments, ..
         } => {

@@ -126,11 +126,14 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             params,
             return_type,
         } => {
+            eprintln!("[DEBUG] lower_type: TyKind::Function -> FuncThick");
             let mir_params: Vec<_> = params.iter().map(|p| lower_type(ctx, p)).collect();
             let mir_ret = lower_type(ctx, return_type);
-            // Use thin function type for now (no captures)
-            // TODO: Distinguish between thin and thick based on context
-            ctx.mir.intern_type(MirTy::FuncThin {
+            // Use thick function type for all function values.
+            // This allows any function value (closure or non-closure) to be stored
+            // in the same type. Thin function types are only used internally for
+            // direct function calls where we know the target at compile time.
+            ctx.mir.intern_type(MirTy::FuncThick {
                 params: mir_params,
                 ret: mir_ret,
             })

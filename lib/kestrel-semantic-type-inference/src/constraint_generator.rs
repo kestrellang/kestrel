@@ -351,6 +351,18 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             generate_expression_constraints(ctx, receiver);
         }
 
+        // Primitive method reference: this should only appear if the primitive method
+        // was NOT called. Emit an error because primitive methods can't be first-class values.
+        ExprKind::PrimitiveMethodRef { receiver, method } => {
+            generate_expression_constraints(ctx, receiver);
+            // Emit error - primitive methods must be called
+            ctx.add_error(crate::InferenceError::primitive_method_not_called(
+                method.name().to_string(),
+                receiver.ty.to_string(),
+                expr.span.clone(),
+            ));
+        }
+
         // Calls
         ExprKind::Call {
             callee, arguments, ..

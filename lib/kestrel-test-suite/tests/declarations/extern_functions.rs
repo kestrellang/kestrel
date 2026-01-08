@@ -2,6 +2,7 @@ use kestrel_test_suite::*;
 
 mod positive {
     use super::*;
+    use kestrel_test_suite::mir::{Mir, MirTy};
 
     #[test]
     fn extern_basic_c_convention() {
@@ -87,6 +88,80 @@ mod positive {
         "#,
         )
         .expect(Compiles);
+    }
+
+    /// Extern function parameters should be passed by value, not by reference.
+    /// This test verifies that the MIR uses value types (not &T) for extern params.
+    #[test]
+    fn extern_params_are_value_types_not_references() {
+        Test::new(
+            r#"
+            module Test
+            import Prelude
+
+            struct MyInt: FFISafe {}
+
+            @extern(.C)
+            func c_add(a: MyInt, b: MyInt) -> MyInt
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        // Parameters should be value types (MyInt), NOT reference types (&MyInt)
+        .expect(
+            Mir::mir_function("Test.c_add")
+                .has_param("a", MirTy::named("Test.MyInt"))
+                .has_param("b", MirTy::named("Test.MyInt"))
+                .returns(MirTy::named("Test.MyInt")),
+        );
+    }
+
+    /// Extern function parameters without explicit 'consuming' keyword should
+    /// still be treated as consuming (value types in MIR).
+    #[test]
+    fn extern_params_implicit_consuming() {
+        Test::new(
+            r#"
+            module Test
+            import Prelude
+
+            struct MyInt: FFISafe {}
+
+            // No explicit 'consuming' keyword, but params should still be value types
+            @extern(.C)
+            func implicit_consuming(x: MyInt) -> MyInt
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.implicit_consuming")
+                .has_param("x", MirTy::named("Test.MyInt"))
+                .returns(MirTy::named("Test.MyInt")),
+        );
+    }
+
+    /// Extern function parameters with explicit 'consuming' keyword.
+    #[test]
+    fn extern_params_explicit_consuming() {
+        Test::new(
+            r#"
+            module Test
+            import Prelude
+
+            struct MyInt: FFISafe {}
+
+            @extern(.C)
+            func explicit_consuming(consuming x: MyInt) -> MyInt
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Mir::compiles())
+        .expect(
+            Mir::mir_function("Test.explicit_consuming")
+                .has_param("x", MirTy::named("Test.MyInt"))
+                .returns(MirTy::named("Test.MyInt")),
+        );
     }
 }
 

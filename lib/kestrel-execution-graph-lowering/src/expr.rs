@@ -471,6 +471,20 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             arguments,
         } => lower_primitive_method_call(ctx, receiver, *method, arguments, expr),
 
+        // Primitive method reference (not called) - this shouldn't reach lowering
+        // If it does, it means the primitive method was used as a first-class value,
+        // which is not allowed.
+        ExprKind::PrimitiveMethodRef { method, .. } => {
+            ctx.emit_error(LoweringError::internal(
+                format!(
+                    "primitive method '{}' cannot be used as a value",
+                    method.name()
+                ),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        }
+
         // === Struct Construction ===
         ExprKind::ImplicitStructInit {
             struct_type,
@@ -899,6 +913,11 @@ fn lower_primitive_method_call(
                     rhs: Value::Immediate(Immediate::i64(0)),
                 },
             );
+        }
+
+        PrimitiveMethod::StringUnsafePtr => {
+            // string.unsafePtr() -> StrPtr(string)
+            ctx.emit_assign(result_place.clone(), Rvalue::StrPtr(receiver_value));
         }
 
         // === Int methods (unary) ===

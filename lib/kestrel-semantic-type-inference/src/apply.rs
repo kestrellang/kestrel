@@ -176,6 +176,11 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             method_name: method_name.clone(),
         },
 
+        ExprKind::PrimitiveMethodRef { receiver, method } => ExprKind::PrimitiveMethodRef {
+            receiver: Box::new(apply_to_expression(receiver, solution)),
+            method: *method,
+        },
+
         ExprKind::Call {
             callee,
             arguments,

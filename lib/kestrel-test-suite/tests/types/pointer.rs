@@ -490,3 +490,67 @@ mod mir_lowering {
 // Note: Type checking tests with actual pointer values will require
 // lang.ptr_null(), lang.ptr_to(), etc. intrinsic functions to be implemented.
 // For now, we test type resolution and MIR lowering only.
+
+mod string_intrinsics {
+    use super::*;
+
+    #[test]
+    fn string_unsafe_ptr_compiles() {
+        Test::new(
+            r#"module Test
+            func getPtr(s: String) -> lang.ptr[I8] {
+                s.unsafePtr()
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn string_unsafe_ptr_return_type() {
+        Test::new(
+            r#"module Test
+            struct Holder {
+                let ptr: lang.ptr[I8]
+            }
+            func wrap(s: String) -> Holder {
+                Holder(ptr: s.unsafePtr())
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn string_length_still_works() {
+        // Ensure we didn't break the existing length() method
+        Test::new(
+            r#"module Test
+            func len(s: String) -> Int {
+                s.length()
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn string_unsafe_ptr_in_struct_field() {
+        Test::new(
+            r#"module Test
+            struct StringView {
+                let ptr: lang.ptr[I8]
+                let len: Int
+            }
+            func makeView(s: String) -> StringView {
+                StringView(ptr: s.unsafePtr(), len: s.length())
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+}

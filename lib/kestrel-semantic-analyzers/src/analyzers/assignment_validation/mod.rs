@@ -105,6 +105,7 @@ fn validate_assignment_target(
         | ExprKind::Grouping(_)
         | ExprKind::Call { .. }
         | ExprKind::PrimitiveMethodCall { .. }
+        | ExprKind::PrimitiveMethodRef { .. }
         | ExprKind::DeferredMethodCall { .. }
         | ExprKind::ImplicitStructInit { .. }
         | ExprKind::MethodRef { .. }

@@ -641,6 +641,9 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         ExprKind::MethodRef { receiver, .. } => {
             collect_closure_local_ids_from_expr(receiver, ids);
         }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+        }
         ExprKind::Return { value } => {
             if let Some(e) = value {
                 collect_closure_local_ids_from_expr(e, ids);

@@ -383,6 +383,9 @@ fn analyze_expression(
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
         }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+        }
         ExprKind::Call {
             callee, arguments, ..
         } => {

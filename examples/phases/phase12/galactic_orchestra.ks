@@ -3,6 +3,18 @@
 
 module GalacticOrchestra
 
+// Extern C bindings for printing
+@extern(.C, mangleName: "kestrel_print_string")
+func c_print_string(ptr: lang.ptr[I8], len: Int) -> Int
+
+@extern(.C, mangleName: "kestrel_print_newline")
+func c_print_newline(dummy: Int) -> Int
+
+func printLine(s: String) {
+    let _ = c_print_string(s.unsafePtr(), s.length());
+    let _ = c_print_newline(0);
+}
+
 struct Note {
     let frequency: Float
     let duration: Float
@@ -14,13 +26,13 @@ protocol Instrument {
 
 struct StarFlute : Instrument {
     func play(note note: Note) -> String {
-        "A shimmering whistle at {note.frequency}Hz"
+        "A shimmering whistle from the StarFlute"
     }
 }
 
 struct NebulaCello : Instrument {
     func play(note note: Note) -> String {
-        "A deep cosmic resonance at {note.frequency}Hz"
+        "A deep cosmic resonance from the NebulaCello"
     }
 }
 
@@ -29,20 +41,7 @@ func conductor(perform: (String) -> String) -> String {
     perform(base)
 }
 
-func compose(notes notes: [Note], transform: (Note) -> String) -> [String] {
-    // In a real implementation, we'd iterate and map
-    // For this example, we'll simulate the behavior
-    let n1 = Note(frequency: 440.0, duration: 1.0);
-    let n2 = Note(frequency: 880.0, duration: 0.5);
-    
-    [transform(n1), transform(n2)]
-}
-
-func print(msg: String) {
-    // Dummy print function
-}
-
-func main() {
+func main() -> Int {
     let flute = StarFlute();
     let cello = NebulaCello();
 
@@ -50,23 +49,13 @@ func main() {
     let symphony = conductor {
         it + "The stars are singing!"
     };
-    print(symphony);
-
-    // Explicit parameters in closure
-    let arrangement = compose(notes: []) { (note) in
-        if note.frequency > 500.0 {
-            flute.play(note: note)
-        } else {
-            cello.play(note: note)
-        }
-    };
+    printLine(symphony);
 
     // Nested closures and "pipelining" via function calls
     let finale = conductor { (intro) in
-        let layers = ["Stardust", "Solar Wind", "Void"];
-        // In reality, we'd use a real map here
         intro + " and the void echoes back."
     };
-    print(finale);
+    printLine(finale);
+    
+    0
 }
-
