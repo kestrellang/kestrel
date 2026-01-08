@@ -487,7 +487,7 @@ mod make_adder {
         .expect(Mir::compiles())
         .expect(
             Mir::mir_function("Main.makeAdder")
-                .returns(MirTy::func(vec![MirTy::I64], MirTy::I64))
+                .returns(MirTy::func_thick(vec![MirTy::I64], MirTy::I64))
                 .has_param("n", MirTy::ref_(MirTy::I64)),
         )
         .expect(

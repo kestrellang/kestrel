@@ -4,8 +4,8 @@ use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use crate::symbol::type_parameter::TypeParameterSymbol;
-use crate::ty::substitutions::Substitutions;
 use crate::ty::Ty;
+use crate::ty::substitutions::Substitutions;
 use std::sync::Arc;
 
 /// Integer bit widths

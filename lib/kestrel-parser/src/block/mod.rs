@@ -12,14 +12,14 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::expr::{emit_expr_variant, emit_if_condition, expr_parser, ExprVariant, IfCondition};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::pattern::pattern_parser;
-use crate::stmt::{emit_stmt_variant, StmtVariant};
+use crate::stmt::{StmtVariant, emit_stmt_variant};
 
 /// Parser that skips trivia tokens (whitespace and comments)
-fn skip_trivia<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+fn skip_trivia<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
     any()
         .filter(|token: &Token| {
             matches!(
@@ -129,8 +129,8 @@ pub struct CodeBlockData {
 /// - Empty blocks: { }
 /// - Statement-only blocks: { stmt; stmt; }
 /// - Trailing expression blocks: { stmt; expr }
-pub fn code_block_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone {
+pub fn code_block_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_items_parser())
@@ -159,8 +159,8 @@ fn is_statement_like_expr(expr: &ExprVariant) -> bool {
 /// Parser for items inside a guard-let else block.
 /// This is a simplified version that doesn't allow nested guard-let statements
 /// to avoid recursive parser types.
-fn guard_let_else_items_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ElseBlockItem>, ParserExtra<'tokens>> + Clone {
+fn guard_let_else_items_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<ElseBlockItem>, ParserExtra<'tokens>> + Clone {
     // Variable declaration: let/var pattern: Type = expr;
     let var_decl = skip_trivia()
         .ignore_then(
@@ -242,8 +242,8 @@ fn guard_let_else_items_parser<'tokens>(
 }
 
 /// Parser for the items inside a code block
-fn code_block_items_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<BlockItem>, ParserExtra<'tokens>> + Clone {
+fn code_block_items_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<BlockItem>, ParserExtra<'tokens>> + Clone {
     // We need to handle:
     // 1. Guard-let statements (guard let pattern = expr else { block })
     // 2. Variable declarations (let/var name: Type = expr;)

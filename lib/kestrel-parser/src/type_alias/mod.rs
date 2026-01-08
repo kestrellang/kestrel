@@ -33,12 +33,12 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    emit_type_alias_declaration, identifier, token, visibility_parser_internal,
     AssociatedTypeBoundsData, AssociatedTypeTargetData, TypeAliasDeclarationData,
+    emit_type_alias_declaration, identifier, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
-use crate::ty::{ty_parser, TyVariant};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::type_parameter_list_parser;
 
 /// Represents a type alias declaration: (visibility)? type Name[T]? = Type;
@@ -139,8 +139,8 @@ impl TypeAliasDeclaration {
 }
 
 /// Parser for associated type bounds (: Equatable, Hashable)
-fn associated_type_bounds_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AssociatedTypeBoundsData, ParserExtra<'tokens>> + Clone
+fn associated_type_bounds_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AssociatedTypeBoundsData, ParserExtra<'tokens>> + Clone
 {
     token(Token::Colon)
         .then(
@@ -162,8 +162,8 @@ fn associated_type_bounds_parser<'tokens>(
 /// If we see a dot, we need to determine if it's part of a type path or the
 /// associated type accessor. The key insight is that the qualified form always
 /// ends with `.Name` where Name is a simple identifier.
-fn associated_type_target_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AssociatedTypeTargetData, ParserExtra<'tokens>> + Clone
+fn associated_type_target_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AssociatedTypeTargetData, ParserExtra<'tokens>> + Clone
 {
     // Simple approach: parse identifier, optionally followed by more path segments
     // and a final .name
@@ -221,8 +221,8 @@ fn associated_type_target_parser<'tokens>(
 /// - Regular: `type Alias = Type;`
 /// - Associated type (protocol): `type Item;` or `type Item: Bound;` or `type Item = Default;`
 /// - Qualified binding (struct): `type Iterator.Item = Int;`
-pub fn type_alias_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeAliasDeclarationData, ParserExtra<'tokens>> + Clone
+pub fn type_alias_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeAliasDeclarationData, ParserExtra<'tokens>> + Clone
 {
     visibility_parser_internal()
         .then(token(Token::Type))
@@ -366,10 +366,12 @@ mod tests {
         // No aliased type for abstract associated types
         assert_eq!(decl.aliased_type(), None);
         // No AliasedType node should exist
-        assert!(!decl
-            .syntax
-            .children()
-            .any(|c| c.kind() == SyntaxKind::AliasedType));
+        assert!(
+            !decl
+                .syntax
+                .children()
+                .any(|c| c.kind() == SyntaxKind::AliasedType)
+        );
     }
 
     #[test]

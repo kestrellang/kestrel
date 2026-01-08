@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use kestrel_prelude::primitives;
-use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -244,12 +244,24 @@ fn resolve_associated_type_from_type_param_with_context(
         if let Some(symbol) = model.query(SymbolFor { id }) {
             // Check GenericsBehavior
             if let Some(generics_beh) = symbol.metadata().get_behavior::<GenericsBehavior>() {
-                all_bounds.extend(generics_beh.where_clause().bounds_for(param_id).into_iter().cloned());
+                all_bounds.extend(
+                    generics_beh
+                        .where_clause()
+                        .bounds_for(param_id)
+                        .into_iter()
+                        .cloned(),
+                );
             }
 
             // Check ExtensionTargetBehavior
             if let Some(target_beh) = symbol.metadata().get_behavior::<ExtensionTargetBehavior>() {
-                all_bounds.extend(target_beh.where_clause().bounds_for(param_id).into_iter().cloned());
+                all_bounds.extend(
+                    target_beh
+                        .where_clause()
+                        .bounds_for(param_id)
+                        .into_iter()
+                        .cloned(),
+                );
             }
 
             current_id = symbol.metadata().parent().map(|p| p.metadata().id());

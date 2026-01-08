@@ -15,7 +15,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::utils::attributes::{
-    parse_builtin_attribute, parse_extern_attribute, BuiltinParseResult, ExternParseResult,
+    BuiltinParseResult, ExternParseResult, parse_builtin_attribute, parse_extern_attribute,
 };
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
@@ -23,8 +23,8 @@ use crate::diagnostics::{
     DuplicateBuiltinError, ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
     ExternParameterNotConsumingError, TypeNotFFISafeError,
 };
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::resolution::LocalScope;
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_semantic_tree::attributes::AttributeKind;
 use kestrel_semantic_tree::behavior::extern_fn::ExternBehavior;
 use kestrel_semantic_type_inference::TypeOracle;
@@ -490,10 +490,10 @@ fn resolve_function_body(
     source: &str,
     file_id: usize,
 ) {
+    use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
         create_local_scope_for_body, resolve_body_and_attach_executable,
     };
-    use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 

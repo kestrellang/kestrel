@@ -14,7 +14,7 @@ use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
+use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinWrongKindError, CloneableFieldRequiresCloneableConformance, DuplicateBuiltinError,

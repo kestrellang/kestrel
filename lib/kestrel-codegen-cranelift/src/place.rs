@@ -467,9 +467,36 @@ pub fn compile_place_write(
             Ok(())
         }
 
-        PlaceKind::Index { .. } => Err(CodegenError::Unsupported("index write".to_string())),
+        PlaceKind::Index { parent, index } => {
+            // Index write is used for:
+            // 1. Tuple field assignment (tuple.0 = value)
+            // 2. Enum payload field assignment after downcast (enum.SomeCase.0 = value)
+            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
 
-        PlaceKind::Downcast { .. } => Err(CodegenError::Unsupported("downcast write".to_string())),
+            // Get the parent type to find the field at this index
+            let parent_ty = get_place_type(ctx, parent, local_map)?;
+
+            // Find the field offset for this index
+            let (field_offset, _field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+
+            // Store the value at parent_ptr + offset
+            builder
+                .ins()
+                .store(MemFlags::new(), value, parent_ptr, field_offset as i32);
+            Ok(())
+        }
+
+        PlaceKind::Downcast { parent, variant: _ } => {
+            // Downcast write is used when assigning to an enum variant's payload area.
+            // The enum layout is: [discriminant: i32][payload...]
+            // We need to get the pointer to the payload area and store there.
+            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+
+            // The payload is at offset 4 (after the i32 discriminant)
+            // Store the value at the payload area
+            builder.ins().store(MemFlags::new(), value, enum_ptr, 4);
+            Ok(())
+        }
 
         PlaceKind::Deref(inner) => {
             // Get the pointer value from the inner place

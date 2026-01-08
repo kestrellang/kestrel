@@ -343,8 +343,8 @@ mod executable_behavior {
     use super::*;
     #[test]
     fn executable_behavior_creation() {
-        use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
         use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+        use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
         use semantic_tree::behavior::Behavior;
 
         let block = CodeBlock::empty();

@@ -8,12 +8,12 @@ use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_span::Spanned;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree::utils::{extract_identifier_from_name, find_child, get_node_span};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 
 /// Binder for enum case declarations
 pub struct EnumCaseBinder;
@@ -36,8 +36,11 @@ impl DeclarationBinder for EnumCaseBinder {
         let file_id = context.file_id_for_symbol(symbol);
 
         // 2. Resolve attributes
-        let attributes_behavior =
-            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+            syntax,
+            &source,
+            context.diagnostics,
+        );
         symbol.metadata().add_behavior(attributes_behavior);
 
         // 3. Check if case has parameters (associated values)

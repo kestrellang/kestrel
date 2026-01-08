@@ -98,8 +98,9 @@ public protocol FFISafe {}
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser};
+use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
@@ -107,7 +108,6 @@ use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_binder::{SemanticBinder, SemanticModel};
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -257,7 +257,7 @@ impl Test {
         // Run analyzers (during migration we mirror builder validations here)
         {
             use kestrel_semantic_analyzers::{
-                default_analyzers, run_all, AnalysisContext, Analyzer,
+                AnalysisContext, Analyzer, default_analyzers, run_all,
             };
             let mut owned = default_analyzers();
             let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
@@ -1123,8 +1123,8 @@ fn get_function_data_behavior(
 fn get_implements_protocol_info(
     symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
 ) -> Option<(String, String)> {
-    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 
     // Look for ImplementsBehavior in the symbol's behaviors
     let impl_behavior = symbol

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use kestrel_compiler::{Compilation, TargetConfig};
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser as KestrelParser};
+use kestrel_parser::{Parser as KestrelParser, parse_source_file};
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;

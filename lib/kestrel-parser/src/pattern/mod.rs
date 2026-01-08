@@ -17,7 +17,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 
 /// Represents a pattern syntax node
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,8 +187,8 @@ pub enum LiteralPatternKind {
 /// Parser for patterns
 ///
 /// Uses boxed() on recursive sub-parsers to manage compile time.
-pub fn pattern_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, PatternVariant, ParserExtra<'tokens>> + Clone {
+pub fn pattern_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, PatternVariant, ParserExtra<'tokens>> + Clone {
     recursive(|pattern| {
         // Wildcard pattern: _
         let wildcard = skip_trivia()

@@ -204,7 +204,11 @@ impl SemanticModel {
                         format!("{}: {}", label, p.ty)
                     })
                     .collect();
-                return format!("Callable(({}) -> {})", params.join(", "), callable.return_type());
+                return format!(
+                    "Callable(({}) -> {})",
+                    params.join(", "),
+                    callable.return_type()
+                );
             }
 
             if let Some(fd) = b.downcast_ref::<FunctionDataBehavior>() {
@@ -220,7 +224,8 @@ impl SemanticModel {
             }
 
             if let Some(cb) = b.downcast_ref::<ConformancesBehavior>() {
-                let conformances: Vec<String> = cb.conformances().iter().map(|t| t.to_string()).collect();
+                let conformances: Vec<String> =
+                    cb.conformances().iter().map(|t| t.to_string()).collect();
                 return format!("Conformances({})", conformances.join(", "));
             }
 

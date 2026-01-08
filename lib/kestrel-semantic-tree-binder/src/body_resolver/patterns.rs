@@ -17,11 +17,13 @@ use std::collections::HashMap;
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::expr::LiteralValue;
-use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern, PatternKind, RangeBound, StructPatternField};
+use kestrel_semantic_tree::pattern::{
+    EnumPatternBinding, Mutability, Pattern, PatternKind, RangeBound, StructPatternField,
+};
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_syntax_tree::utils::get_node_span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use super::context::BodyResolutionContext;
@@ -99,7 +101,9 @@ fn resolve_pattern_inner(
 ) -> Pattern {
     match node.kind() {
         SyntaxKind::WildcardPattern => resolve_wildcard_pattern(node, ctx, expected_ty),
-        SyntaxKind::BindingPattern => resolve_binding_pattern(node, ctx, expected_ty, force_mutable),
+        SyntaxKind::BindingPattern => {
+            resolve_binding_pattern(node, ctx, expected_ty, force_mutable)
+        }
         SyntaxKind::TuplePattern => resolve_tuple_pattern(node, ctx, expected_ty, force_mutable),
         SyntaxKind::LiteralPattern => resolve_literal_pattern(node, ctx, expected_ty),
         SyntaxKind::EnumPattern => resolve_enum_pattern(node, ctx, expected_ty, force_mutable),
@@ -124,7 +128,9 @@ fn resolve_wildcard_pattern(
     expected_ty: Option<&Ty>,
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
-    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| Ty::infer(span.clone()));
     Pattern::wildcard(ty, span)
 }
 
@@ -161,7 +167,9 @@ fn resolve_binding_pattern(
     };
 
     // Determine type from expected type or use infer
-    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
     // Get span for the name token
     let name_span = node
@@ -170,17 +178,17 @@ fn resolve_binding_pattern(
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| {
             let text_range = t.text_range();
-            Span::new(ctx.file_id, text_range.start().into()..text_range.end().into())
+            Span::new(
+                ctx.file_id,
+                text_range.start().into()..text_range.end().into(),
+            )
         })
         .unwrap_or_else(|| span.clone());
 
     // Bind the local variable
-    let local_id = ctx.local_scope.bind(
-        name.clone(),
-        ty.clone(),
-        is_mutable,
-        name_span.clone(),
-    );
+    let local_id = ctx
+        .local_scope
+        .bind(name.clone(), ty.clone(), is_mutable, name_span.clone());
 
     Pattern::local(local_id, mutability, name, ty, span)
 }
@@ -199,7 +207,7 @@ fn resolve_tuple_pattern(
         .children()
         .filter(|c| c.kind() == SyntaxKind::TuplePatternElement)
         .collect();
-    
+
     // Check if this is a single-element pattern in parentheses (grouping, not a tuple)
     // A single-element tuple requires a trailing comma like (x,), while (x) is grouping
     // Since the parser doesn't distinguish, we check: if there's exactly one element
@@ -209,11 +217,17 @@ fn resolve_tuple_pattern(
         let is_expected_single_tuple = expected_ty
             .map(|ty| matches!(ty.kind(), kestrel_semantic_tree::ty::TyKind::Tuple(elems) if elems.len() == 1))
             .unwrap_or(false);
-        
+
         if !is_expected_single_tuple {
             // This is grouping, not a tuple. Unwrap the inner pattern.
             if let Some(inner_pattern) = element_nodes[0].children().next() {
-                return resolve_pattern_inner(&inner_pattern, ctx, expected_ty, span, force_mutable);
+                return resolve_pattern_inner(
+                    &inner_pattern,
+                    ctx,
+                    expected_ty,
+                    span,
+                    force_mutable,
+                );
             }
         }
     }
@@ -265,12 +279,16 @@ fn resolve_tuple_pattern(
         .iter()
         .enumerate()
         .map(|(i, elem_node)| {
-            let expected_elem_ty = expected_element_types
-                .as_ref()
-                .and_then(|tys| tys.get(i));
-            
+            let expected_elem_ty = expected_element_types.as_ref().and_then(|tys| tys.get(i));
+
             if let Some(inner_pattern) = elem_node.children().next() {
-                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(elem_node, ctx.file_id), force_mutable)
+                resolve_pattern_inner(
+                    &inner_pattern,
+                    ctx,
+                    expected_elem_ty,
+                    get_node_span(elem_node, ctx.file_id),
+                    force_mutable,
+                )
             } else {
                 Pattern::error(get_node_span(elem_node, ctx.file_id))
             }
@@ -289,9 +307,15 @@ fn resolve_tuple_pattern(
                 let suffix_start = tys.len().saturating_sub(suffix_nodes.len());
                 tys.get(suffix_start + i)
             });
-            
+
             if let Some(inner_pattern) = elem_node.children().next() {
-                resolve_pattern_inner(&inner_pattern, ctx, expected_elem_ty, get_node_span(elem_node, ctx.file_id), force_mutable)
+                resolve_pattern_inner(
+                    &inner_pattern,
+                    ctx,
+                    expected_elem_ty,
+                    get_node_span(elem_node, ctx.file_id),
+                    force_mutable,
+                )
             } else {
                 Pattern::error(get_node_span(elem_node, ctx.file_id))
             }
@@ -305,7 +329,8 @@ fn resolve_tuple_pattern(
         expected_ty.cloned().unwrap_or_else(|| {
             // Fallback: create a tuple type from prefix + suffix
             // This may be wrong but type inference will catch it
-            let element_types: Vec<Ty> = prefix.iter()
+            let element_types: Vec<Ty> = prefix
+                .iter()
                 .chain(suffix.iter())
                 .map(|p| p.ty.clone())
                 .collect();
@@ -420,7 +445,9 @@ fn resolve_enum_pattern(
         .collect();
 
     // Type is inferred from context - will be resolved during type inference
-    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
     // case_id is None - resolved during type inference
     Pattern::enum_variant(None, case_name, bindings, ty, span)
@@ -435,14 +462,18 @@ fn get_enum_case_binding_types(expected_ty: Option<&Ty>, case_name: &str) -> Opt
 
     // Check if the expected type is an enum
     let (enum_sym, substitutions) = match ty.kind() {
-        TyKind::Enum { symbol, substitutions } => (symbol, substitutions),
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => (symbol, substitutions),
         _ => return None,
     };
 
     // Find the case by name
-    let case = enum_sym.cases().into_iter().find(|c| {
-        c.metadata().name().value == case_name
-    })?;
+    let case = enum_sym
+        .cases()
+        .into_iter()
+        .find(|c| c.metadata().name().value == case_name)?;
 
     // Get the CallableBehavior (contains parameter types)
     let callable: CallableBehavior = (*case.callable_behavior()?).clone();
@@ -514,9 +545,15 @@ fn resolve_enum_pattern_arg(
 
         // Create a binding pattern for this label.
         // Use expected type if available, otherwise create inference placeholder.
-        let binding_ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
+        let binding_ty = expected_ty
+            .cloned()
+            .unwrap_or_else(|| Ty::infer(span.clone()));
         let is_mutable = force_mutable;
-        let mutability = if is_mutable { Mutability::Mutable } else { Mutability::Immutable };
+        let mutability = if is_mutable {
+            Mutability::Mutable
+        } else {
+            Mutability::Immutable
+        };
         let local_id = ctx.local_scope.bind(
             label_str.clone(),
             binding_ty.clone(),
@@ -563,7 +600,9 @@ fn resolve_struct_pattern(
         .collect();
 
     // Type is inferred from context - will be resolved during type inference
-    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()));
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| Ty::infer(span.clone()));
 
     // struct_id is None - resolved during type inference
     Pattern::struct_pattern(None, struct_name, fields, has_rest, ty, span)
@@ -605,14 +644,24 @@ fn resolve_struct_pattern_field(
         // `{ x }` is equivalent to `{ x: x }`
         let binding_ty = Ty::infer(span.clone());
         let is_mutable = force_mutable;
-        let mutability = if is_mutable { Mutability::Mutable } else { Mutability::Immutable };
+        let mutability = if is_mutable {
+            Mutability::Mutable
+        } else {
+            Mutability::Immutable
+        };
         let local_id = ctx.local_scope.bind(
             field_name.clone(),
             binding_ty.clone(),
             is_mutable,
             span.clone(),
         );
-        let pattern = Pattern::local(local_id, mutability, field_name.clone(), binding_ty, span.clone());
+        let pattern = Pattern::local(
+            local_id,
+            mutability,
+            field_name.clone(),
+            binding_ty,
+            span.clone(),
+        );
 
         StructPatternField::new(field_name, pattern, span)
     }
@@ -714,12 +763,14 @@ fn resolve_range_pattern(
 
     // Determine the type based on the bounds
     let ty = match (&start, &end) {
-        (RangeBound::Integer(_), RangeBound::Integer(_)) => {
-            expected_ty.cloned().unwrap_or_else(|| Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span.clone()))
-        }
+        (RangeBound::Integer(_), RangeBound::Integer(_)) => expected_ty
+            .cloned()
+            .unwrap_or_else(|| Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span.clone())),
         (RangeBound::Char(_), RangeBound::Char(_)) => {
             // We'd need a Char type here - for now use infer
-            expected_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()))
+            expected_ty
+                .cloned()
+                .unwrap_or_else(|| Ty::infer(span.clone()))
         }
         // Mismatched bounds (e.g., int..=char) - error
         _ => return Pattern::error(span),
@@ -736,7 +787,7 @@ fn resolve_or_pattern(
     force_mutable: bool,
 ) -> Pattern {
     use std::collections::HashMap;
-    
+
     let span = get_node_span(node, ctx.file_id);
 
     // Collect all child pattern nodes (filter out the `or` keywords)
@@ -771,7 +822,7 @@ fn resolve_or_pattern(
     for alt_node in alt_nodes.iter().skip(1) {
         // Restore to pre-or-pattern state before resolving this alternative
         ctx.local_scope.restore_bindings(pre_or_bindings.clone());
-        
+
         let alt = resolve_pattern_inner(
             alt_node,
             ctx,
@@ -803,7 +854,10 @@ fn resolve_or_pattern(
                     collect_bindings_inner(elem, bindings);
                 }
             }
-            PatternKind::EnumVariant { bindings: enum_bindings, .. } => {
+            PatternKind::EnumVariant {
+                bindings: enum_bindings,
+                ..
+            } => {
                 for binding in enum_bindings {
                     collect_bindings_inner(&binding.pattern, bindings);
                 }
@@ -824,11 +878,11 @@ fn resolve_or_pattern(
     // Check all alternatives have the same bindings
     for (i, alt) in alternatives.iter().enumerate().skip(1) {
         let alt_bindings = collect_bindings(alt);
-        
+
         // Check that both have the same set of names
         let first_names: std::collections::HashSet<_> = first_bindings.keys().collect();
         let alt_names: std::collections::HashSet<_> = alt_bindings.keys().collect();
-        
+
         if first_names != alt_names {
             use crate::diagnostics::InconsistentOrPatternBindingsError;
             let error = InconsistentOrPatternBindingsError {
@@ -838,12 +892,14 @@ fn resolve_or_pattern(
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Pattern::error(span);
         }
-        
+
         // TODO: Also check that the types are compatible
     }
 
     // Type is the type of the first alternative (they should all be compatible)
-    let ty = expected_ty.cloned().unwrap_or_else(|| alternatives[0].ty.clone());
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| alternatives[0].ty.clone());
 
     Pattern::or_pattern(alternatives, ty, span)
 }
@@ -868,7 +924,10 @@ fn resolve_array_pattern(
 
     let mut prefix: Vec<Pattern> = Vec::new();
     let mut suffix: Vec<Pattern> = Vec::new();
-    let mut rest: Option<(Option<String>, Option<kestrel_semantic_tree::symbol::local::LocalId>)> = None;
+    let mut rest: Option<(
+        Option<String>,
+        Option<kestrel_semantic_tree::symbol::local::LocalId>,
+    )> = None;
     let mut in_suffix = false;
 
     for child in node.children() {
@@ -890,33 +949,33 @@ fn resolve_array_pattern(
             SyntaxKind::ArrayPatternRest => {
                 // We're now in the suffix
                 in_suffix = true;
-                
+
                 // Check if there's a named binding
                 let name_token = child
                     .children_with_tokens()
                     .filter_map(|elem| elem.into_token())
                     .find(|t| t.kind() == SyntaxKind::Identifier);
-                
+
                 if let Some(token) = name_token {
                     let name = token.text().to_string();
                     let name_span = {
                         let text_range = token.text_range();
-                        Span::new(ctx.file_id, text_range.start().into()..text_range.end().into())
+                        Span::new(
+                            ctx.file_id,
+                            text_range.start().into()..text_range.end().into(),
+                        )
                     };
-                    
+
                     // The rest binding will be a slice/array of the element type
                     let rest_ty = expected_element_ty
                         .cloned()
                         .map(|elem_ty| Ty::array(elem_ty, span.clone()))
                         .unwrap_or_else(|| Ty::infer(span.clone()));
-                    
+
                     let is_mutable = force_mutable;
-                    let local_id = ctx.local_scope.bind(
-                        name.clone(),
-                        rest_ty,
-                        is_mutable,
-                        name_span,
-                    );
+                    let local_id =
+                        ctx.local_scope
+                            .bind(name.clone(), rest_ty, is_mutable, name_span);
                     rest = Some((Some(name), Some(local_id)));
                 } else {
                     // Anonymous rest: `..` - just ignore remaining elements
@@ -939,10 +998,14 @@ fn resolve_array_pattern(
     let element_ty = if let Some(first) = prefix.first() {
         first.ty.clone()
     } else {
-        expected_element_ty.cloned().unwrap_or_else(|| Ty::infer(span.clone()))
+        expected_element_ty
+            .cloned()
+            .unwrap_or_else(|| Ty::infer(span.clone()))
     };
 
-    let ty = expected_ty.cloned().unwrap_or_else(|| Ty::array(element_ty, span.clone()));
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| Ty::array(element_ty, span.clone()));
 
     Pattern::array(prefix, rest, suffix, ty, span)
 }
@@ -986,7 +1049,10 @@ fn resolve_at_pattern(
         .find(|t| t.kind() == SyntaxKind::Identifier)
         .map(|t| {
             let text_range = t.text_range();
-            Span::new(ctx.file_id, text_range.start().into()..text_range.end().into())
+            Span::new(
+                ctx.file_id,
+                text_range.start().into()..text_range.end().into(),
+            )
         })
         .unwrap_or_else(|| span.clone());
 
@@ -1006,15 +1072,14 @@ fn resolve_at_pattern(
     }
 
     // Determine type from expected type or subpattern's type
-    let ty = expected_ty.cloned().unwrap_or_else(|| subpattern.ty.clone());
+    let ty = expected_ty
+        .cloned()
+        .unwrap_or_else(|| subpattern.ty.clone());
 
     // Bind the local variable
-    let local_id = ctx.local_scope.bind(
-        name.clone(),
-        ty.clone(),
-        is_mutable,
-        name_span,
-    );
+    let local_id = ctx
+        .local_scope
+        .bind(name.clone(), ty.clone(), is_mutable, name_span);
 
     Pattern::at_pattern(name, local_id, mutability, subpattern, ty, span)
 }
@@ -1082,7 +1147,10 @@ fn collect_bindings_for_duplicate_check(
                 collect_bindings_for_duplicate_check(elem, bindings, ctx);
             }
         }
-        PatternKind::EnumVariant { bindings: enum_bindings, .. } => {
+        PatternKind::EnumVariant {
+            bindings: enum_bindings,
+            ..
+        } => {
             for binding in enum_bindings {
                 collect_bindings_for_duplicate_check(&binding.pattern, bindings, ctx);
             }
@@ -1104,7 +1172,9 @@ fn collect_bindings_for_duplicate_check(
             // For or-patterns, each alternative can have the same bindings
             // (they should have the same set of names). Don't check across alternatives.
         }
-        PatternKind::At { name, subpattern, .. } => {
+        PatternKind::At {
+            name, subpattern, ..
+        } => {
             if let Some(first_span) = bindings.get(name) {
                 use crate::diagnostics::DuplicateBindingInPatternError;
                 let error = DuplicateBindingInPatternError {

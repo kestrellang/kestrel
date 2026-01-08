@@ -77,7 +77,7 @@ fn compile_and_run_impl(source: &str, include_prelude: bool) -> RunResult {
 /// Internal compilation function.
 fn compile_source(source: &str, temp_dir: &PathBuf, include_prelude: bool) -> RunResult {
     use kestrel_lexer::lex;
-    use kestrel_parser::{parse_source_file, Parser};
+    use kestrel_parser::{Parser, parse_source_file};
     use kestrel_reporting::DiagnosticContext;
     use kestrel_semantic_tree_binder::SemanticBinder;
     use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -138,7 +138,7 @@ fn compile_source(source: &str, temp_dir: &PathBuf, include_prelude: bool) -> Ru
 
     // Run analyzers
     {
-        use kestrel_semantic_analyzers::{default_analyzers, run_all, AnalysisContext, Analyzer};
+        use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, default_analyzers, run_all};
         let mut owned = default_analyzers();
         let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
         for a in owned.iter_mut() {
@@ -180,7 +180,7 @@ fn compile_source(source: &str, temp_dir: &PathBuf, include_prelude: bool) -> Ru
 
     // Codegen
     use kestrel_codegen::TargetConfig;
-    use kestrel_codegen_cranelift::{compile_and_link, CodegenOptions};
+    use kestrel_codegen_cranelift::{CodegenOptions, compile_and_link};
 
     let target = TargetConfig::host();
     let options = CodegenOptions::default();

@@ -13,7 +13,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::binders::utils::type_paths::resolve_protocol_bound_path;
 use crate::declaration_binder::BindingContext;
 use crate::diagnostics::WhereClauseAssociatedTypeNotFoundError;
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
 pub(crate) fn resolve_generics(

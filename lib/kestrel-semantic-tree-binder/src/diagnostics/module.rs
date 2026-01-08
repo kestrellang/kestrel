@@ -12,8 +12,10 @@ impl IntoDiagnostic for NoModuleDeclarationError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("no module declaration found in file")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("module declaration should appear here")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("module declaration should appear here"),
+            ])
             .with_notes(vec![
                 "Every Kestrel file must start with a module declaration.".to_string(),
                 "Example: module MyModule".to_string(),
@@ -75,7 +77,7 @@ impl IntoDiagnostic for MultipleModuleDeclarationsError {
             ))
             .with_labels(labels)
             .with_notes(vec![
-                "Only one module declaration is allowed per file.".to_string()
+                "Only one module declaration is allowed per file.".to_string(),
             ])
     }
 }

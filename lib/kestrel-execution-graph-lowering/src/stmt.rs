@@ -130,11 +130,7 @@ pub fn lower_statement(ctx: &mut LoweringContext, stmt: &Statement) {
 ///     <bindings are in scope>
 ///     <continue with statements after guard>
 /// ```
-fn lower_guard_let(
-    ctx: &mut LoweringContext,
-    conditions: &[IfCondition],
-    else_block: &CodeBlock,
-) {
+fn lower_guard_let(ctx: &mut LoweringContext, conditions: &[IfCondition], else_block: &CodeBlock) {
     // Create blocks
     let success_block = ctx.create_block();
     let else_block_id = ctx.create_block();

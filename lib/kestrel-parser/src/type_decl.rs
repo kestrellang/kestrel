@@ -16,13 +16,13 @@ use kestrel_span::Span;
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
-    deinit_declaration_parser_internal, field_declaration_parser_internal,
-    function_declaration_parser_internal, identifier, import_declaration_parser_internal,
-    initializer_declaration_parser_internal, module_declaration_parser_internal, token,
-    visibility_parser_internal, ConformanceListData, EnumCaseDeclarationData,
-    EnumCaseParameterData, EnumDeclarationData, StructDeclarationData, TypeDeclarationBodyItem,
+    ConformanceListData, EnumCaseDeclarationData, EnumCaseParameterData, EnumDeclarationData,
+    StructDeclarationData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
+    field_declaration_parser_internal, function_declaration_parser_internal, identifier,
+    import_declaration_parser_internal, initializer_declaration_parser_internal,
+    module_declaration_parser_internal, token, visibility_parser_internal,
 };
-use crate::input::{to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::ty_parser;
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
@@ -35,9 +35,8 @@ pub enum TypeDeclarationData {
 }
 
 /// Parser for enum case parameter: `label: Type`
-fn enum_case_parameter_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone
-{
+fn enum_case_parameter_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone {
     identifier()
         .then(token(Token::Colon))
         .then(ty_parser())
@@ -45,8 +44,8 @@ fn enum_case_parameter_parser<'tokens>(
 }
 
 /// Parser for enum case declaration: `(@attr)* case Name` or `(@attr)* case Name(label: Type, ...)`
-fn enum_case_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseDeclarationData, ParserExtra<'tokens>> + Clone
+fn enum_case_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseDeclarationData, ParserExtra<'tokens>> + Clone
 {
     attribute_list_parser()
         .then(token(Token::Case))
@@ -75,8 +74,8 @@ fn enum_case_parser<'tokens>(
 }
 
 /// Parser that skips trivia tokens
-fn skip_trivia<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+fn skip_trivia<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
     any()
         .filter(|token: &Token| {
             matches!(
@@ -89,8 +88,8 @@ fn skip_trivia<'tokens>(
 }
 
 /// Parser for the optional `indirect` modifier
-fn indirect_modifier_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
+fn indirect_modifier_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Indirect).map_with(|_, e| Some(to_kestrel_span(e.span()))))
         .or(empty().to(None))
@@ -102,8 +101,8 @@ fn indirect_modifier_parser<'tokens>(
 /// allowing mutual nesting without separate recursive contexts.
 fn type_body_item_parser_internal<'tokens>(
     type_parser: impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
-        + Clone
-        + 'tokens,
+    + Clone
+    + 'tokens,
     is_enum: bool,
 ) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
 {
@@ -168,8 +167,8 @@ fn type_body_item_parser_internal<'tokens>(
 /// which allows mutual nesting (struct containing enum containing struct, etc.)
 /// without creating separate recursive parser contexts that would cause
 /// stack overflow on deeply nested types.
-pub fn type_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>> + Clone {
+pub fn type_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>> + Clone {
     recursive(|type_parser| {
         // Box the recursive reference to reduce stack frame size
         let type_parser = type_parser.boxed();
@@ -295,9 +294,8 @@ pub fn type_declaration_parser_internal<'tokens>(
 }
 
 /// Parser that only returns struct declarations (filters out enums)
-pub fn struct_declaration_parser_unified<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
-{
+pub fn struct_declaration_parser_unified<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone {
     type_declaration_parser_internal().try_map(|data, span| match data {
         TypeDeclarationData::Struct(s) => Ok(s),
         TypeDeclarationData::Enum(_) => Err(Rich::custom(span, "Expected struct, found enum")),
@@ -305,8 +303,8 @@ pub fn struct_declaration_parser_unified<'tokens>(
 }
 
 /// Parser that only returns enum declarations (filters out structs)
-pub fn enum_declaration_parser_unified<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
+pub fn enum_declaration_parser_unified<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
     type_declaration_parser_internal().try_map(|data, span| match data {
         TypeDeclarationData::Enum(e) => Ok(e),
         TypeDeclarationData::Struct(_) => Err(Rich::custom(span, "Expected enum, found struct")),

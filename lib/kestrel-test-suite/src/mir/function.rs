@@ -2,7 +2,7 @@
 
 use crate::mir::block::MirBlock;
 use crate::mir::context::MirTestContext;
-use crate::mir::types::{format_actual_ty, MirTy};
+use crate::mir::types::{MirTy, format_actual_ty};
 use crate::{Expectable, TestContext};
 use kestrel_execution_graph::{Callee, FunctionDef, Rvalue, StatementData, StatementKind};
 
@@ -384,15 +384,25 @@ impl MirFunction {
             }
 
             FunctionExpectation::IsNonCapturing => {
-                // A non-capturing closure should not have an env parameter
-                // Check if this looks like a closure and has no env-related parameters
-                let has_env = def.params.iter().any(|p| {
-                    let param = &mir_ctx.mir.params[*p];
-                    param.name.contains("env")
-                });
-                if has_env {
+                // A non-capturing closure should not have a ClosureCall origin with an env struct.
+                // Note: All closures now have an env parameter for ABI consistency with thick calls,
+                // but non-capturing closures use a raw pointer type (unused) instead of a reference
+                // to an environment struct.
+                //
+                // We check this by looking at the function's Origin metadata - if it's a ClosureCall
+                // with an env_struct, it's a capturing closure.
+                use kestrel_execution_graph::Origin;
+                let is_capturing = match &def.meta.origin {
+                    Some(Origin::ClosureCall { env_struct, .. }) => {
+                        // Check if the env_struct has any fields (captures)
+                        let env_def = mir_ctx.mir.struct_def(*env_struct);
+                        !env_def.fields.is_empty()
+                    }
+                    _ => false,
+                };
+                if is_capturing {
                     return Err(format!(
-                        "Function '{}' appears to capture (has env parameter)",
+                        "Function '{}' appears to capture (has env struct with fields)",
                         self.name
                     ));
                 }

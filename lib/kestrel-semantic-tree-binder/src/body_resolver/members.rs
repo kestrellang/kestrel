@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SymbolFor};
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
@@ -1285,8 +1285,8 @@ fn filter_applicable_extensions(
     ctx: &BodyResolutionContext,
 ) -> Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>> {
     use super::utils::type_satisfies_bound;
-    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 
     // Get substitutions from actual type (struct or enum)
     let actual_subs = if let Some((_, subs)) = actual_ty.as_struct_with_subs() {

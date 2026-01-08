@@ -178,8 +178,10 @@ fn parse_type_bound(
 
     let param_name = name_token.text().to_string();
     let text_range = name_token.text_range();
-    let param_span: kestrel_span::Span =
-        Span::new(file_id, (text_range.start().into())..(text_range.end().into()));
+    let param_span: kestrel_span::Span = Span::new(
+        file_id,
+        (text_range.start().into())..(text_range.end().into()),
+    );
 
     let param_id = type_params
         .iter()

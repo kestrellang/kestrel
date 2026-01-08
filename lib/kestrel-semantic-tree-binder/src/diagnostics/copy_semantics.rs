@@ -23,11 +23,10 @@ impl IntoDiagnostic for ConflictingCopyableConformanceError {
                 "cannot conform to `{}` and opt out of `Copyable`",
                 self.refining_protocol
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
-                    "`{}` refines `Copyable`",
-                    self.refining_protocol
-                ))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("`{}` refines `Copyable`", self.refining_protocol)),
+            ])
             .with_notes(vec![
                 format!(
                     "`{}` inherits from `Copyable`, so types conforming to `{}` must be `Copyable`",

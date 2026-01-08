@@ -19,7 +19,7 @@ impl IntoDiagnostic for UnresolvedTypeError {
                 self.type_name
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message("not found")
+                Label::primary(self.span.file_id, self.span.range()).with_message("not found"),
             ])
     }
 }
@@ -35,13 +35,14 @@ impl IntoDiagnostic for AmbiguousTypeError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type '{}' is ambiguous", self.type_name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "{} types with this name in scope",
                     self.candidate_count
-                ))])
+                )),
+            ])
             .with_notes(vec![
-                "Use a fully qualified path to disambiguate.".to_string()
+                "Use a fully qualified path to disambiguate.".to_string(),
             ])
     }
 }
@@ -57,7 +58,7 @@ impl IntoDiagnostic for NotATypeError {
         Diagnostic::error()
             .with_message(format!("'{}' is not a type", self.name))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message("not a type")
+                Label::primary(self.span.file_id, self.span.range()).with_message("not a type"),
             ])
     }
 }
@@ -75,8 +76,10 @@ impl IntoDiagnostic for NotGenericError {
                 "type '{}' does not accept type arguments",
                 self.type_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("not a generic type")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not a generic type"),
+            ])
             .with_notes(vec![format!(
                 "'{}' is not declared with type parameters",
                 self.type_name
@@ -96,11 +99,12 @@ impl IntoDiagnostic for TooFewTypeArgumentsError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("too few type arguments for '{}'", self.type_name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "expected at least {}, found {}",
                     self.min_expected, self.got
-                ))])
+                )),
+            ])
     }
 }
 
@@ -116,11 +120,12 @@ impl IntoDiagnostic for TooManyTypeArgumentsError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("too many type arguments for '{}'", self.type_name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "expected at most {}, found {}",
                     self.max_expected, self.got
-                ))])
+                )),
+            ])
     }
 }
 
@@ -160,9 +165,9 @@ impl IntoDiagnostic for LangPtrArityError {
                 self.got
             )
         };
-        Diagnostic::error()
-            .with_message(message)
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("type argument required")])
+        Diagnostic::error().with_message(message).with_labels(vec![
+            Label::primary(self.span.file_id, self.span.range())
+                .with_message("type argument required"),
+        ])
     }
 }

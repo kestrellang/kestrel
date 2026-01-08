@@ -150,11 +150,7 @@ pub fn is_useful_impl(matrix: &PatternMatrix, query: &PatternRow) -> UsefulnessR
 }
 
 /// Check if a wildcard pattern (at the head) is useful.
-fn is_wildcard_useful(
-    matrix: &PatternMatrix,
-    query: &PatternRow,
-    ty: &Ty,
-) -> UsefulnessResult {
+fn is_wildcard_useful(matrix: &PatternMatrix, query: &PatternRow, ty: &Ty) -> UsefulnessResult {
     // Check if any row in the matrix starts with a catch-all (wildcard/binding)
     // If so, this wildcard is not useful for the first column
     let has_catch_all = matrix.rows.iter().any(|row| {
@@ -169,12 +165,14 @@ fn is_wildcard_useful(
         // There's already a wildcard covering the first column
         // We need to check if the query is useful in the default matrix
         let default = matrix.default_matrix();
-        let default_query = PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
+        let default_query =
+            PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
         return is_useful_impl(&default, &default_query);
     }
 
     // Get all constructors covered by the matrix's first column
-    let covered_ctors: HashSet<Constructor> = matrix.unique_head_constructors().into_iter().collect();
+    let covered_ctors: HashSet<Constructor> =
+        matrix.unique_head_constructors().into_iter().collect();
 
     // Get all constructors for the type
     match Constructor::all_constructors(ty) {
@@ -218,10 +216,11 @@ fn is_wildcard_useful(
                     return UsefulnessResult::useful(witness);
                 }
             }
-            
+
             // Fall back to default matrix approach
             let default = matrix.default_matrix();
-            let default_query = PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
+            let default_query =
+                PatternRow::new(query.rest().to_vec(), query.arm_index, query.has_guard);
 
             if default.is_unit() && default.is_empty() {
                 // No wildcards in matrix and infinite constructors
@@ -243,7 +242,7 @@ fn is_constructor_useful(
 ) -> UsefulnessResult {
     // Get field types for the constructor
     let field_types = get_constructor_field_types(ctor, ty);
-    
+
     // Specialize matrix and query for this constructor
     let specialized_matrix = matrix.specialize(ctor, &field_types);
     let specialized_query = specialize_query(query, ctor, ty);
@@ -263,7 +262,9 @@ fn is_constructor_useful(
 
 /// Specialize a query row for a constructor.
 fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternRow {
-    let first = query.first().expect("Query should have at least one pattern");
+    let first = query
+        .first()
+        .expect("Query should have at least one pattern");
     let field_types = get_constructor_field_types(ctor, ty);
 
     // Extract sub-patterns from the first pattern
@@ -278,7 +279,11 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                 .collect()
         }
 
-        kestrel_semantic_tree::pattern::PatternKind::Tuple { prefix, has_rest, suffix } => {
+        kestrel_semantic_tree::pattern::PatternKind::Tuple {
+            prefix,
+            has_rest,
+            suffix,
+        } => {
             // For tuple patterns with rest, expand to full tuple arity
             if *has_rest {
                 if let TyKind::Tuple(elem_tys) = first.ty.kind() {
@@ -308,8 +313,12 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
             // in the order they appear in the struct, not just the ones matched
             use kestrel_semantic_tree::behavior::typed::TypedBehavior;
             use semantic_tree::symbol::Symbol;
-            
-            if let TyKind::Struct { symbol, substitutions } = first.ty.kind() {
+
+            if let TyKind::Struct {
+                symbol,
+                substitutions,
+            } = first.ty.kind()
+            {
                 // Get all field names from the struct in order
                 let struct_fields: Vec<_> = symbol
                     .metadata()
@@ -318,14 +327,14 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                     .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
                     .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
                     .collect();
-                
+
                 // Build the result by matching pattern fields to struct fields
                 let mut result = Vec::with_capacity(struct_fields.len());
                 for struct_field in &struct_fields {
                     let field_name = &struct_field.metadata().name().value;
                     // Find the pattern field for this struct field
                     let matched_field = fields.iter().find(|f| &f.field_name == field_name);
-                    
+
                     if let Some(pf) = matched_field {
                         result.push(pf.pattern.clone());
                     } else {
@@ -347,22 +356,32 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
             }
         }
 
-        kestrel_semantic_tree::pattern::PatternKind::Array { prefix, rest, suffix } => {
+        kestrel_semantic_tree::pattern::PatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
             // Array pattern specialization - same logic as extract_pattern_children
-            if let Constructor::Array { prefix_len: target_prefix, suffix_len: target_suffix, has_rest: target_has_rest } = ctor {
-                let target_arity = target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
-                
+            if let Constructor::Array {
+                prefix_len: target_prefix,
+                suffix_len: target_suffix,
+                has_rest: target_has_rest,
+            } = ctor
+            {
+                let target_arity =
+                    target_prefix + target_suffix + if *target_has_rest { 1 } else { 0 };
+
                 // Get element type from array type
                 let elem_ty = if let TyKind::Array(elem_ty) = first.ty.kind() {
                     (**elem_ty).clone()
                 } else {
                     first.ty.clone()
                 };
-                
+
                 if rest.is_some() && !target_has_rest {
                     // Pattern has rest, target doesn't - expand rest to wildcards
                     let mut result = Vec::with_capacity(target_arity);
-                    
+
                     for i in 0..*target_prefix {
                         if i < prefix.len() {
                             result.push(prefix[i].clone());
@@ -370,7 +389,7 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                             result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
                         }
                     }
-                    
+
                     for i in 0..*target_suffix {
                         let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
                         if suffix_idx < suffix.len() {
@@ -379,12 +398,12 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                             result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
                         }
                     }
-                    
+
                     result
                 } else if rest.is_none() && *target_has_rest {
                     // Pattern doesn't have rest, target does - compress to target arity
                     let mut result = Vec::with_capacity(target_arity);
-                    
+
                     for i in 0..*target_prefix {
                         if i < prefix.len() {
                             result.push(prefix[i].clone());
@@ -392,10 +411,10 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                             result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
                         }
                     }
-                    
+
                     // Add a wildcard for the rest slot
                     result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
-                    
+
                     for i in 0..*target_suffix {
                         let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
                         if suffix_idx < suffix.len() {
@@ -404,12 +423,12 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                             result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
                         }
                     }
-                    
+
                     result
                 } else if rest.is_some() && *target_has_rest {
                     // Both have rest - map prefix, rest, suffix
                     let mut result = Vec::with_capacity(target_arity);
-                    
+
                     for i in 0..*target_prefix {
                         if i < prefix.len() {
                             result.push(prefix[i].clone());
@@ -417,9 +436,9 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                             result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
                         }
                     }
-                    
+
                     result.push(Pattern::wildcard(first.ty.clone(), first.span.clone()));
-                    
+
                     for i in 0..*target_suffix {
                         let suffix_idx = suffix.len().saturating_sub(*target_suffix - i);
                         if suffix_idx < suffix.len() {
@@ -428,7 +447,7 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
                             result.push(Pattern::wildcard(elem_ty.clone(), first.span.clone()));
                         }
                     }
-                    
+
                     result
                 } else {
                     // Neither has rest - direct mapping
@@ -461,11 +480,8 @@ fn specialize_query(query: &PatternRow, ctor: &Constructor, ty: &Ty) -> PatternR
             // Use first matching alternative
             // TODO: This is a simplification; proper handling would try all
             if let Some(first_alt) = alternatives.first() {
-                let alt_query = PatternRow::new(
-                    vec![first_alt.clone()],
-                    query.arm_index,
-                    query.has_guard,
-                );
+                let alt_query =
+                    PatternRow::new(vec![first_alt.clone()], query.arm_index, query.has_guard);
                 return specialize_query(&alt_query, ctor, ty);
             }
             vec![]
@@ -502,7 +518,13 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             }
         }
 
-        (Constructor::Variant { name, arity }, TyKind::Enum { symbol, substitutions }) => {
+        (
+            Constructor::Variant { name, arity },
+            TyKind::Enum {
+                symbol,
+                substitutions,
+            },
+        ) => {
             if let Some(case) = symbol
                 .cases()
                 .iter()
@@ -510,17 +532,25 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
             {
                 if let Some(cb) = case.callable_behavior() {
                     // Apply type substitutions to get concrete types
-                    return cb.parameters().iter().map(|p| {
-                        substitutions.apply(&p.ty)
-                    }).collect();
+                    return cb
+                        .parameters()
+                        .iter()
+                        .map(|p| substitutions.apply(&p.ty))
+                        .collect();
                 }
             }
             vec![ty.clone(); *arity]
         }
 
-        (Constructor::Struct { arity, .. }, TyKind::Struct { symbol, substitutions }) => {
+        (
+            Constructor::Struct { arity, .. },
+            TyKind::Struct {
+                symbol,
+                substitutions,
+            },
+        ) => {
             use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-            
+
             // Get Field children and their types
             let fields: Vec<_> = symbol
                 .metadata()
@@ -534,24 +564,34 @@ fn get_constructor_field_types(ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
                     }
                 })
                 .collect();
-            
+
             if fields.len() == *arity {
                 // Get the resolved type from TypedBehavior, falling back to field_type
                 // Then apply substitutions for generic structs
-                fields.iter().map(|f| {
-                    let raw_field_ty = f
-                        .metadata()
-                        .get_behavior::<TypedBehavior>()
-                        .map(|typed| typed.ty().clone())
-                        .unwrap_or_else(|| f.field_type().clone());
-                    raw_field_ty.apply_substitutions(substitutions)
-                }).collect()
+                fields
+                    .iter()
+                    .map(|f| {
+                        let raw_field_ty = f
+                            .metadata()
+                            .get_behavior::<TypedBehavior>()
+                            .map(|typed| typed.ty().clone())
+                            .unwrap_or_else(|| f.field_type().clone());
+                        raw_field_ty.apply_substitutions(substitutions)
+                    })
+                    .collect()
             } else {
                 vec![ty.clone(); *arity]
             }
         }
 
-        (Constructor::Array { prefix_len, suffix_len, has_rest }, TyKind::Array(element_type)) => {
+        (
+            Constructor::Array {
+                prefix_len,
+                suffix_len,
+                has_rest,
+            },
+            TyKind::Array(element_type),
+        ) => {
             let elem_ty = (**element_type).clone();
             let mut types = vec![elem_ty.clone(); *prefix_len];
             if *has_rest {
@@ -578,28 +618,26 @@ fn ctor_to_witness(ctor: &Constructor, _ty: &Ty) -> Witness {
                 Witness::enum_case_with_args(name, args)
             }
         }
-        Constructor::Tuple { arity } => {
-            Witness::tuple(vec![Witness::any(); *arity])
-        }
-        Constructor::Struct { name, .. } => {
-            Witness::EnumCase {
-                name: name.clone(),
-                args: vec![],
-            }
-        }
+        Constructor::Tuple { arity } => Witness::tuple(vec![Witness::any(); *arity]),
+        Constructor::Struct { name, .. } => Witness::EnumCase {
+            name: name.clone(),
+            args: vec![],
+        },
         Constructor::IntLiteral(n) => Witness::integer(*n),
         Constructor::IntRange { start, .. } => {
             // For ranges, pick the start value as witness
             Witness::integer(*start)
         }
         Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
-        Constructor::CharRange { start, .. } => {
-            Witness::Literal(format!("'{}'", start))
-        }
+        Constructor::CharRange { start, .. } => Witness::Literal(format!("'{}'", start)),
         Constructor::StringLiteral(s) => Witness::string(s),
         Constructor::Unit => Witness::tuple(vec![]),
         Constructor::Wildcard => Witness::any(),
-        Constructor::Array { prefix_len, suffix_len, has_rest } => {
+        Constructor::Array {
+            prefix_len,
+            suffix_len,
+            has_rest,
+        } => {
             let mut elements = vec![Witness::any(); *prefix_len + *suffix_len];
             if *has_rest {
                 elements.push(Witness::any()); // Simplified
@@ -636,12 +674,10 @@ fn wrap_witness_with_constructor(inner: Witness, ctor: &Constructor, _ty: &Ty) -
                 other => Witness::tuple(vec![other]),
             }
         }
-        Constructor::Struct { name, .. } => {
-            Witness::EnumCase {
-                name: format!("{} {{ .. }}", name),
-                args: vec![],
-            }
-        }
+        Constructor::Struct { name, .. } => Witness::EnumCase {
+            name: format!("{} {{ .. }}", name),
+            args: vec![],
+        },
         _ => inner,
     }
 }

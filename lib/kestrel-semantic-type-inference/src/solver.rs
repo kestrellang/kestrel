@@ -389,11 +389,7 @@ fn unify(
                 let expected_arity =
                     if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
                         // Implicit-it closure: arity is 1 if uses_it, else 0
-                        if closure_meta.uses_it {
-                            1
-                        } else {
-                            0
-                        }
+                        if closure_meta.uses_it { 1 } else { 0 }
                     } else {
                         // Explicit-param closure: use param_count directly
                         closure_meta.param_count
@@ -434,11 +430,7 @@ fn unify(
                 let expected_arity =
                     if closure_meta.param_count == 0 && !closure_meta.has_explicit_params {
                         // Implicit-it closure: arity is 1 if uses_it, else 0
-                        if closure_meta.uses_it {
-                            1
-                        } else {
-                            0
-                        }
+                        if closure_meta.uses_it { 1 } else { 0 }
                     } else {
                         // Explicit-param closure: use param_count directly
                         closure_meta.param_count

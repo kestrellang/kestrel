@@ -14,8 +14,10 @@ impl IntoDiagnostic for ExternRequiresCallingConventionError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("@extern requires a calling convention")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("expected @extern(.C)")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected @extern(.C)"),
+            ])
     }
 }
 
@@ -28,8 +30,10 @@ impl IntoDiagnostic for ExternInvalidCallingConventionError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("invalid calling convention argument")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("expected implicit member like .C")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected implicit member like .C"),
+            ])
     }
 }
 
@@ -44,7 +48,7 @@ impl IntoDiagnostic for ExternUnknownCallingConventionError {
         Diagnostic::error()
             .with_message(format!("unknown calling convention '{}'", self.name))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message("expected .C")
+                Label::primary(self.span.file_id, self.span.range()).with_message("expected .C"),
             ])
     }
 }
@@ -58,10 +62,12 @@ impl IntoDiagnostic for ExternFunctionCannotBeGenericError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("@extern functions cannot be generic")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("extern functions must have concrete types")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("extern functions must have concrete types"),
+            ])
             .with_notes(vec![
-                "generic functions cannot have a stable ABI".to_string()
+                "generic functions cannot have a stable ABI".to_string(),
             ])
     }
 }
@@ -75,10 +81,12 @@ impl IntoDiagnostic for ExternFunctionCannotHaveBodyError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("@extern functions cannot have a body")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("remove the function body")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("remove the function body"),
+            ])
             .with_notes(vec![
-                "extern functions are implemented in external code".to_string()
+                "extern functions are implemented in external code".to_string(),
             ])
     }
 }
@@ -96,8 +104,10 @@ impl IntoDiagnostic for ExternParameterNotConsumingError {
                 "@extern function parameter '{}' must use consuming access mode",
                 self.param_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("parameter must be passed by value")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("parameter must be passed by value"),
+            ])
             .with_notes(vec![
                 "extern functions receive values, not references".to_string(),
                 "use Pointer[T] to pass a pointer explicitly".to_string(),
@@ -119,8 +129,10 @@ impl IntoDiagnostic for TypeNotFFISafeError {
                 "{} type '{}' does not conform to FFISafe",
                 self.context, self.ty
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("type is not FFI-safe")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("type is not FFI-safe"),
+            ])
             .with_notes(vec![
                 "only types conforming to FFISafe can cross FFI boundaries".to_string(),
                 "consider using Pointer[T] or primitive types".to_string(),
@@ -198,8 +210,10 @@ impl IntoDiagnostic for ProtocolDisallowsEnumConformanceError {
                 "enum '{}' cannot conform to protocol '{}'",
                 self.enum_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("enums cannot conform to this protocol")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("enums cannot conform to this protocol"),
+            ])
             .with_notes(vec![format!(
                 "'{}' only allows struct conformance",
                 self.protocol_name

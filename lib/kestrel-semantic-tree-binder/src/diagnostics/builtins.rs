@@ -14,8 +14,10 @@ impl IntoDiagnostic for BuiltinRequiresArgumentError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("@builtin requires a language feature argument")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("expected @builtin(.Feature)")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected @builtin(.Feature)"),
+            ])
             .with_notes(vec!["example: @builtin(.Copyable)".to_string()])
     }
 }
@@ -29,8 +31,10 @@ impl IntoDiagnostic for BuiltinInvalidArgumentError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("@builtin expected implicit member syntax (.Feature)")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("expected implicit member syntax")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("expected implicit member syntax"),
+            ])
             .with_notes(vec!["example: @builtin(.Copyable)".to_string()])
     }
 }
@@ -45,8 +49,10 @@ impl IntoDiagnostic for UnknownLanguageFeatureError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("unknown language feature '.{}'", self.name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("unknown feature")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("unknown feature"),
+            ])
     }
 }
 
@@ -65,8 +71,10 @@ impl IntoDiagnostic for BuiltinWrongKindError {
                 "@builtin(.{}) can only be applied to a {}",
                 self.feature_name, self.expected_kind
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("this is a {}", self.actual_kind))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("this is a {}", self.actual_kind)),
+            ])
     }
 }
 
@@ -83,8 +91,10 @@ impl IntoDiagnostic for BuiltinMustBeMarkerError {
                 "@builtin(.{}) must be a marker protocol (no required methods or types)",
                 self.feature_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("protocol has required members")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("protocol has required members"),
+            ])
     }
 }
 
@@ -101,8 +111,10 @@ impl IntoDiagnostic for DuplicateBuiltinError {
                 "language feature '.{}' is already defined by another symbol",
                 self.feature_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("duplicate builtin definition")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("duplicate builtin definition"),
+            ])
     }
 }
 
@@ -120,8 +132,10 @@ impl IntoDiagnostic for BuiltinMethodNotInProtocolError {
                 "@builtin(.{}) must be on a method inside @builtin(.{}) protocol",
                 self.method_feature, self.required_protocol_feature
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("method not in required protocol")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("method not in required protocol"),
+            ])
     }
 }
 
@@ -139,7 +153,9 @@ impl IntoDiagnostic for BuiltinMethodWrongSignatureError {
                 "@builtin(.{}) method has wrong signature",
                 self.method_feature
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("expected `{}`", self.expected_signature))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("expected `{}`", self.expected_signature)),
+            ])
     }
 }

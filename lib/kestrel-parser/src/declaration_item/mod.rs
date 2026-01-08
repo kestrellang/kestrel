@@ -13,6 +13,14 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
+    EnumDeclarationData,
+    ExtensionDeclarationData,
+    FieldDeclarationData,
+    FunctionDeclarationData,
+    ProtocolDeclarationData,
+    // Shared data types
+    StructDeclarationData,
+    TypeAliasDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
     emit_field_declaration,
@@ -27,33 +35,25 @@ use crate::common::{
     function_declaration_parser_internal,
     import_declaration_parser_internal,
     module_declaration_parser_internal,
-    EnumDeclarationData,
-    ExtensionDeclarationData,
-    FieldDeclarationData,
-    FunctionDeclarationData,
-    ProtocolDeclarationData,
-    // Shared data types
-    StructDeclarationData,
-    TypeAliasDeclarationData,
 };
-use crate::enum_decl::{parse_enum_declaration, EnumDeclaration};
+use crate::enum_decl::{EnumDeclaration, parse_enum_declaration};
 use crate::event::EventSink;
 use crate::extension::{
-    extension_declaration_parser_internal, parse_extension_declaration, ExtensionDeclaration,
+    ExtensionDeclaration, extension_declaration_parser_internal, parse_extension_declaration,
 };
-use crate::field::{parse_field_declaration, FieldDeclaration};
-use crate::function::{parse_function_declaration, FunctionDeclaration};
-use crate::import::{parse_import_declaration, ImportDeclaration};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
-use crate::module::{parse_module_declaration, ModuleDeclaration};
+use crate::field::{FieldDeclaration, parse_field_declaration};
+use crate::function::{FunctionDeclaration, parse_function_declaration};
+use crate::import::{ImportDeclaration, parse_import_declaration};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::protocol::{
-    parse_protocol_declaration, protocol_declaration_parser_internal, ProtocolDeclaration,
+    ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
 };
-use crate::r#struct::{parse_struct_declaration, StructDeclaration};
+use crate::r#struct::{StructDeclaration, parse_struct_declaration};
 use crate::type_alias::{
-    parse_type_alias_declaration, type_alias_declaration_parser_internal, TypeAliasDeclaration,
+    TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
 };
-use crate::type_decl::{type_declaration_parser_internal, TypeDeclarationData};
+use crate::type_decl::{TypeDeclarationData, type_declaration_parser_internal};
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,8 +154,8 @@ where
 }
 
 /// Parser that skips trivia tokens
-fn skip_trivia<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+fn skip_trivia<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
     any()
         .filter(|token: &Token| {
             matches!(
@@ -171,8 +171,8 @@ fn skip_trivia<'tokens>(
 ///
 /// This parser ROUTES to the module-specific parsers - it does not implement
 /// parsing logic itself.
-fn declaration_item_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
+fn declaration_item_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
     // Route to module-specific parsers
     let module_parser = module_declaration_parser_internal()
         .map(|(span, path)| DeclarationItemData::Module(span, path));
@@ -213,8 +213,8 @@ fn declaration_item_parser_internal<'tokens>(
 }
 
 /// Internal Chumsky parser for multiple declaration items
-fn declaration_items_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<DeclarationItemData>, ParserExtra<'tokens>> + Clone
+fn declaration_items_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<DeclarationItemData>, ParserExtra<'tokens>> + Clone
 {
     declaration_item_parser_internal()
         .repeated()

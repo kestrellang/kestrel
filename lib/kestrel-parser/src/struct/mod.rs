@@ -10,9 +10,9 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{emit_struct_declaration, StructDeclarationData};
+use crate::common::{StructDeclarationData, emit_struct_declaration};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::type_decl::struct_declaration_parser_unified;
 
 use chumsky::prelude::*;
@@ -98,9 +98,8 @@ impl StructDeclaration {
 ///
 /// This delegates to the unified type_decl parser which handles both struct and enum
 /// in a single recursive context to avoid stack overflow on deeply nested types.
-pub fn struct_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
-{
+pub fn struct_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone {
     struct_declaration_parser_unified()
 }
 

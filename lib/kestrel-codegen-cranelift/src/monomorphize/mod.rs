@@ -44,5 +44,5 @@ pub use error::MonomorphizeError;
 pub use instantiation::{
     EnumInstantiation, FunctionInstantiation, MonomorphizationSet, StructInstantiation,
 };
-pub use substitute::{build_substitution, Substitution};
+pub use substitute::{Substitution, build_substitution};
 pub use witness::{resolve_associated_type, resolve_witness};

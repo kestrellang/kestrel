@@ -181,8 +181,10 @@ impl<'a> ExhaustivenessChecker<'a> {
         }
 
         // Check exhaustiveness: is a wildcard useful?
-        let wildcard =
-            Pattern::wildcard(self.scrutinee_type.clone(), self.scrutinee_type.span().clone());
+        let wildcard = Pattern::wildcard(
+            self.scrutinee_type.clone(),
+            self.scrutinee_type.span().clone(),
+        );
         let wildcard_row = PatternRow::new(vec![wildcard.clone()], patterns.len(), false);
 
         let exhaustiveness_result = is_useful_impl(&matrix, &wildcard_row);
@@ -208,8 +210,7 @@ impl<'a> ExhaustivenessChecker<'a> {
         use std::collections::HashSet;
 
         // Get covered constructors from the matrix
-        let covered: HashSet<Constructor> =
-            matrix.unique_head_constructors().into_iter().collect();
+        let covered: HashSet<Constructor> = matrix.unique_head_constructors().into_iter().collect();
 
         // Get all constructors for the type
         match Constructor::all_constructors(self.scrutinee_type) {
@@ -253,9 +254,7 @@ impl<'a> ExhaustivenessChecker<'a> {
                 }
             }
             Constructor::Tuple { arity } => Witness::tuple(vec![Witness::any(); *arity]),
-            Constructor::Struct { name, .. } => {
-                Witness::struct_witness(name, vec![])
-            }
+            Constructor::Struct { name, .. } => Witness::struct_witness(name, vec![]),
             Constructor::IntLiteral(n) => Witness::integer(*n),
             Constructor::IntRange { start, end } => {
                 Witness::range(start.to_string(), end.to_string(), true)
@@ -265,9 +264,11 @@ impl<'a> ExhaustivenessChecker<'a> {
                 Witness::range(format!("'{}'", start), format!("'{}'", end), true)
             }
             Constructor::StringLiteral(s) => Witness::string(s),
-            Constructor::Array { prefix_len, suffix_len, .. } => {
-                Witness::array(vec![Witness::any(); prefix_len + suffix_len])
-            }
+            Constructor::Array {
+                prefix_len,
+                suffix_len,
+                ..
+            } => Witness::array(vec![Witness::any(); prefix_len + suffix_len]),
             Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => {
                 Witness::any()
             }
@@ -280,15 +281,17 @@ impl<'a> ExhaustivenessChecker<'a> {
 /// Returns `Some((start, end))` for inclusive ranges.
 fn extract_int_range(pattern: &Pattern) -> Option<(i64, i64)> {
     match &pattern.kind {
-        PatternKind::Range { start, end, inclusive } => {
-            match (start, end) {
-                (RangeBound::Integer(s), RangeBound::Integer(e)) => {
-                    let end_val = if *inclusive { *e } else { e - 1 };
-                    Some((*s, end_val))
-                }
-                _ => None,
+        PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } => match (start, end) {
+            (RangeBound::Integer(s), RangeBound::Integer(e)) => {
+                let end_val = if *inclusive { *e } else { e - 1 };
+                Some((*s, end_val))
             }
-        }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -310,11 +313,14 @@ fn expand_or_patterns(pattern: &Pattern) -> Vec<Pattern> {
     match &pattern.kind {
         PatternKind::Or { alternatives } => {
             // Recursively expand nested or-patterns
-            alternatives.iter()
-                .flat_map(expand_or_patterns)
-                .collect()
+            alternatives.iter().flat_map(expand_or_patterns).collect()
         }
-        PatternKind::At { name, local_id, mutability, subpattern } => {
+        PatternKind::At {
+            name,
+            local_id,
+            mutability,
+            subpattern,
+        } => {
             // Expand the subpattern and wrap each alternative in a new @-pattern
             let expanded_subpatterns = expand_or_patterns(subpattern);
             expanded_subpatterns
@@ -420,10 +426,12 @@ mod tests {
 
         let result = check_exhaustiveness(&patterns, &bool_ty());
         assert!(!result.is_exhaustive);
-        assert!(result
-            .missing_patterns
-            .iter()
-            .any(|w| matches!(w, Witness::Bool(false))));
+        assert!(
+            result
+                .missing_patterns
+                .iter()
+                .any(|w| matches!(w, Witness::Bool(false)))
+        );
     }
 
     #[test]

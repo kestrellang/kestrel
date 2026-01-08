@@ -60,13 +60,14 @@ impl Query for ResolveName {
                         context: id,
                     }) {
                         // Check if the name exists in the module's visible children
-                        if let Some(child) = model.query(crate::queries::VisibleChildrenByName {
-                            parent: module_id,
-                            name: self.name.clone(),
-                            context: self.context,
-                        })
-                        .into_iter()
-                        .next()
+                        if let Some(child) = model
+                            .query(crate::queries::VisibleChildrenByName {
+                                parent: module_id,
+                                name: self.name.clone(),
+                                context: self.context,
+                            })
+                            .into_iter()
+                            .next()
                         {
                             wildcard_candidates.push(child.metadata().id());
                         }

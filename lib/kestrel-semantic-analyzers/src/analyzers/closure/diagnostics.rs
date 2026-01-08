@@ -17,7 +17,7 @@ impl IntoDiagnostic for ItUsedWithWrongArityError {
                 self.expected_arity
             ))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message("used here")
+                Label::primary(self.span.file_id, self.span.range()).with_message("used here"),
             ])
     }
 }

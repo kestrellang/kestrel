@@ -2,8 +2,8 @@
 //!
 //! Ensures that functions outside of protocols have bodies.
 
-use kestrel_semantic_model::queries::AncestorOfKind;
 use kestrel_semantic_model::HasBody;
+use kestrel_semantic_model::queries::AncestorOfKind;
 use kestrel_semantic_tree::behavior::extern_fn::ExternBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;

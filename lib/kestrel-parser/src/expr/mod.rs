@@ -9,12 +9,12 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::block::{emit_code_block, BlockItem, CodeBlockData, ElseBlockItem, GuardLetData};
+use crate::block::{BlockItem, CodeBlockData, ElseBlockItem, GuardLetData, emit_code_block};
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::stmt::{StmtVariant, VariableDeclarationData};
-use crate::ty::{emit_ty_variant, ty_parser, TyVariant};
+use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
 /// Represents an expression
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,8 +148,8 @@ impl Expression {
 
 /// Parser for type arguments with full type support: [T, (A, B), [Int], (X) -> Y]
 /// Returns (lbracket, types, rbracket)
-fn full_type_args_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeArgsData, ParserExtra<'tokens>> + Clone {
+fn full_type_args_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeArgsData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -547,8 +547,8 @@ fn attach_trailing_closures(expr: ExprVariant, trailing: Vec<CallArg>) -> ExprVa
 /// Parser for expressions
 ///
 /// Uses boxed() on key sub-parsers to reduce compile time.
-pub fn expr_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone {
+pub fn expr_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone {
     recursive(|expr| {
         // Literals - these are simple and don't need boxing
         let integer = skip_trivia()

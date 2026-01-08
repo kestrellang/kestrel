@@ -1,6 +1,6 @@
 mod path;
 
-pub use path::{parse_module_path, ModulePath};
+pub use path::{ModulePath, parse_module_path};
 
 use kestrel_lexer::Token;
 use kestrel_span::Span;

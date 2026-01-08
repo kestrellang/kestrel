@@ -37,11 +37,10 @@ impl IntoDiagnostic for NonExhaustiveMatchError {
 
         Diagnostic::error()
             .with_message("non-exhaustive match expression")
-            .with_labels(vec![Label::primary(
-                self.match_span.file_id,
-                self.match_span.range(),
-            )
-            .with_message(missing)])
+            .with_labels(vec![
+                Label::primary(self.match_span.file_id, self.match_span.range())
+                    .with_message(missing),
+            ])
             .with_notes(vec![
                 "ensure all possible values are covered".to_string(),
                 "consider adding a wildcard pattern `_` as a catch-all".to_string(),
@@ -62,14 +61,14 @@ impl IntoDiagnostic for EmptyMatchError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("empty match expression")
-            .with_labels(vec![Label::primary(
-                self.match_span.file_id,
-                self.match_span.range(),
-            )
-            .with_message(format!(
-                "type `{}` is inhabited and requires at least one arm",
-                self.scrutinee_type
-            ))])
+            .with_labels(vec![
+                Label::primary(self.match_span.file_id, self.match_span.range()).with_message(
+                    format!(
+                        "type `{}` is inhabited and requires at least one arm",
+                        self.scrutinee_type
+                    ),
+                ),
+            ])
     }
 }
 
@@ -93,11 +92,10 @@ impl IntoDiagnostic for UnreachablePatternWarning {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message("unreachable pattern")
-            .with_labels(vec![Label::primary(
-                self.pattern_span.file_id,
-                self.pattern_span.range(),
-            )
-            .with_message("this pattern will never be matched")])
+            .with_labels(vec![
+                Label::primary(self.pattern_span.file_id, self.pattern_span.range())
+                    .with_message("this pattern will never be matched"),
+            ])
             .with_notes(vec![
                 "this arm is redundant because earlier patterns cover all its cases".to_string(),
             ])
@@ -124,11 +122,10 @@ impl IntoDiagnostic for OverlappingRangeWarning {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message("overlapping range pattern")
-            .with_labels(vec![Label::primary(
-                self.pattern_span.file_id,
-                self.pattern_span.range(),
-            )
-            .with_message("this range overlaps with a previous pattern")])
+            .with_labels(vec![
+                Label::primary(self.pattern_span.file_id, self.pattern_span.range())
+                    .with_message("this range overlaps with a previous pattern"),
+            ])
             .with_notes(vec![
                 "some values in this range are already covered by earlier patterns".to_string(),
             ])

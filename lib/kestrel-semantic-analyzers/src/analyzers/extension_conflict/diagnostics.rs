@@ -57,13 +57,16 @@ impl IntoDiagnostic for StructExtensionMethodConflictError {
                 self.method_name
             ))
             .with_labels(vec![
-                Label::primary(self.struct_method_span.file_id, self.struct_method_span.range())
-                    .with_message("method defined here on struct"),
+                Label::primary(
+                    self.struct_method_span.file_id,
+                    self.struct_method_span.range(),
+                )
+                .with_message("method defined here on struct"),
                 Label::secondary(
                     self.extension_method_span.file_id,
                     self.extension_method_span.range(),
                 )
-                    .with_message("conflicting extension method here"),
+                .with_message("conflicting extension method here"),
             ])
             .with_notes(vec![
                 "Extensions cannot define methods that already exist on the struct".to_string(),

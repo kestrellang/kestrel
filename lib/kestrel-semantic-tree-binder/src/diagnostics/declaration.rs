@@ -59,11 +59,9 @@ impl IntoDiagnostic for TypeAliasRequiresTypeError {
             ),
         };
 
-        Diagnostic::error()
-            .with_message(main_msg)
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message(context_msg)
-            ])
+        Diagnostic::error().with_message(main_msg).with_labels(vec![
+            Label::primary(self.span.file_id, self.span.range()).with_message(context_msg),
+        ])
     }
 }
 
@@ -77,9 +75,9 @@ impl IntoDiagnostic for AssociatedTypeBoundsInWrongContextError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type alias cannot have bounds: '{}'", self.name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(
-                    "bounds are only allowed on associated types in protocols",
-                )])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("bounds are only allowed on associated types in protocols"),
+            ])
     }
 }

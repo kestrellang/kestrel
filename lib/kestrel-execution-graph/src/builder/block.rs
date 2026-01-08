@@ -1,11 +1,11 @@
 //! Block builder.
 
+use crate::MirContext;
 use crate::function::{
     BasicBlock, BinOp, CallArg, Callee, Immediate, Place, Rvalue, Statement, Terminator, UnOp,
     Value,
 };
 use crate::id::{Block, Function, Id, QualifiedName, Statement as StatementMarker, Ty};
-use crate::MirContext;
 
 /// Builder for constructing basic blocks.
 pub struct BlockBuilder<'ctx> {

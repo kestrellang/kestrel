@@ -45,7 +45,10 @@ pub fn lower_protocol(ctx: &mut LoweringContext, protocol_symbol: &Arc<ProtocolS
     }
 
     // Lower parent protocols from ConformancesBehavior
-    if let Some(conformances) = protocol_symbol.metadata().get_behavior::<ConformancesBehavior>() {
+    if let Some(conformances) = protocol_symbol
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+    {
         for parent_ty in conformances.conformances() {
             if let TyKind::Protocol { symbol, .. } = parent_ty.kind() {
                 let parent_name = qualified_name_for_symbol(ctx, &(symbol.clone() as _));

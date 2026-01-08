@@ -32,7 +32,7 @@ pub fn resolve_conformance_list(
     error_context: NotAProtocolContext,
 ) {
     use crate::diagnostics::NegativeConformanceNotAllowedError;
-    use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+    use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
     use kestrel_semantic_tree::builtins::BuiltinKind;
 
     let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {

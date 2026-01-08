@@ -37,7 +37,7 @@
 
 use kestrel_execution_graph::{BinOp, Immediate, Place, Rvalue, Value};
 use kestrel_semantic_pattern_matching::{
-    compile, AccessPath, Binding, Constructor, DecisionTree, PathElement,
+    AccessPath, Binding, Constructor, DecisionTree, PathElement, compile,
 };
 use kestrel_semantic_tree::expr::{Expression, MatchArm};
 use kestrel_semantic_tree::ty::{Ty, TyKind};
@@ -127,15 +127,46 @@ fn emit_decision_tree(
     join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
 ) {
     match tree {
-        DecisionTree::Success { arm_index, bindings } => {
-            emit_success(ctx, *arm_index, bindings, scrutinee, arms, result_place, join_block);
+        DecisionTree::Success {
+            arm_index,
+            bindings,
+        } => {
+            emit_success(
+                ctx,
+                *arm_index,
+                bindings,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
 
-        DecisionTree::Switch { path, ty, cases, default } => {
-            emit_switch(ctx, path, ty, cases, default, scrutinee, arms, result_place, join_block);
+        DecisionTree::Switch {
+            path,
+            ty,
+            cases,
+            default,
+        } => {
+            emit_switch(
+                ctx,
+                path,
+                ty,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
 
-        DecisionTree::Guard { arm_index, bindings, success, failure } => {
+        DecisionTree::Guard {
+            arm_index,
+            bindings,
+            success,
+            failure,
+        } => {
             emit_guard(
                 ctx,
                 *arm_index,
@@ -238,19 +269,55 @@ fn emit_switch(
 
     match ty.kind() {
         TyKind::Bool => {
-            emit_bool_switch(ctx, &switch_place, cases, default, scrutinee, arms, result_place, join_block);
+            emit_bool_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
 
         TyKind::Enum { .. } => {
-            emit_enum_switch(ctx, &switch_place, cases, default, scrutinee, arms, result_place, join_block);
+            emit_enum_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
 
         TyKind::Int(_) => {
-            emit_int_switch(ctx, &switch_place, cases, default, scrutinee, arms, result_place, join_block);
+            emit_int_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
 
         TyKind::String => {
-            emit_string_switch(ctx, &switch_place, cases, default, scrutinee, arms, result_place, join_block);
+            emit_string_switch(
+                ctx,
+                &switch_place,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
 
         TyKind::Tuple(_) => {
@@ -277,7 +344,17 @@ fn emit_switch(
 
         _ => {
             // For other types, emit a comparison chain
-            emit_comparison_chain(ctx, &switch_place, ty, cases, default, scrutinee, arms, result_place, join_block);
+            emit_comparison_chain(
+                ctx,
+                &switch_place,
+                ty,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
     }
 }
@@ -294,8 +371,14 @@ fn emit_bool_switch(
     join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
 ) {
     // Find true and false cases
-    let true_tree = cases.iter().find(|(c, _)| matches!(c, Constructor::True)).map(|(_, t)| t);
-    let false_tree = cases.iter().find(|(c, _)| matches!(c, Constructor::False)).map(|(_, t)| t);
+    let true_tree = cases
+        .iter()
+        .find(|(c, _)| matches!(c, Constructor::True))
+        .map(|(_, t)| t);
+    let false_tree = cases
+        .iter()
+        .find(|(c, _)| matches!(c, Constructor::False))
+        .map(|(_, t)| t);
 
     // Create blocks for each case
     let true_block = ctx.create_block();
@@ -386,7 +469,16 @@ fn emit_int_switch(
     result_place: &Place,
     join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
 ) {
-    emit_comparison_chain_int(ctx, switch_place, cases, default, scrutinee, arms, result_place, join_block);
+    emit_comparison_chain_int(
+        ctx,
+        switch_place,
+        cases,
+        default,
+        scrutinee,
+        arms,
+        result_place,
+        join_block,
+    );
 }
 
 /// Emit MIR for a string switch (comparison chain).
@@ -400,7 +492,16 @@ fn emit_string_switch(
     result_place: &Place,
     join_block: kestrel_execution_graph::Id<kestrel_execution_graph::Block>,
 ) {
-    emit_comparison_chain_string(ctx, switch_place, cases, default, scrutinee, arms, result_place, join_block);
+    emit_comparison_chain_string(
+        ctx,
+        switch_place,
+        cases,
+        default,
+        scrutinee,
+        arms,
+        result_place,
+        join_block,
+    );
 }
 
 /// Emit a comparison chain for integer literals.
@@ -571,14 +672,14 @@ fn emit_comparison_chain_string(
                 ctx.create_block()
             };
 
-            // Compare: switch_place == value
+            // Compare: switch_place == value (using string comparison)
             let cmp_ty = ctx.mir.ty_bool();
             let cmp_local = ctx.create_temp("cmp", cmp_ty);
             let cmp_place = Place::local(cmp_local);
             ctx.emit_assign(
                 cmp_place.clone(),
                 Rvalue::BinaryOp {
-                    op: BinOp::Eq,
+                    op: BinOp::StrEq,
                     lhs: Value::Place(switch_place.clone()),
                     rhs: Value::Immediate(Immediate::string(value.clone())),
                 },
@@ -619,10 +720,28 @@ fn emit_comparison_chain(
     // For unsupported types, just try int comparison chain as fallback
     match ty.kind() {
         TyKind::Int(_) => {
-            emit_comparison_chain_int(ctx, switch_place, cases, default, scrutinee, arms, result_place, join_block);
+            emit_comparison_chain_int(
+                ctx,
+                switch_place,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
         TyKind::String => {
-            emit_comparison_chain_string(ctx, switch_place, cases, default, scrutinee, arms, result_place, join_block);
+            emit_comparison_chain_string(
+                ctx,
+                switch_place,
+                cases,
+                default,
+                scrutinee,
+                arms,
+                result_place,
+                join_block,
+            );
         }
         _ => {
             // Fallback: just emit default or first case
@@ -655,7 +774,10 @@ fn emit_guard(
     emit_bindings(ctx, bindings, scrutinee);
 
     // Lower the guard expression
-    let guard_expr = arm.guard.as_ref().expect("Guard arm should have guard expression");
+    let guard_expr = arm
+        .guard
+        .as_ref()
+        .expect("Guard arm should have guard expression");
     let guard_value = lower_expression(ctx, guard_expr);
 
     // Create blocks for success and failure

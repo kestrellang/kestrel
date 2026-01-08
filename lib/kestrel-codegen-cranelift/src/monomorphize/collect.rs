@@ -8,7 +8,7 @@ use super::error::MonomorphizeError;
 use super::instantiation::{
     EnumInstantiation, FunctionInstantiation, MonomorphizationSet, StructInstantiation,
 };
-use super::substitute::{build_substitution, Substitution};
+use super::substitute::{Substitution, build_substitution};
 use super::witness;
 use kestrel_execution_graph::{
     Callee, Function, Id, ImmediateKind, MirContext, MirTy, QualifiedName, Rvalue, StatementKind,

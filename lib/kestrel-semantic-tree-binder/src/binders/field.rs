@@ -35,8 +35,11 @@ impl DeclarationBinder for FieldBinder {
         let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve attributes
-        let attributes_behavior =
-            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+            syntax,
+            &source,
+            context.diagnostics,
+        );
         symbol.metadata().add_behavior(attributes_behavior);
 
         // Resolve the type directly from syntax

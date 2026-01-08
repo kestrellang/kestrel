@@ -5,9 +5,9 @@ use kestrel_codegen::TargetConfig;
 use kestrel_codegen_cranelift::CodegenOptions;
 use kestrel_execution_graph_lowering::LoweringResult;
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser};
+use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_analyzers::{run_all, AnalysisContext, Analyzer};
+use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, run_all};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree_binder::SemanticBinder;
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -287,8 +287,10 @@ impl IntoDiagnostic for LexError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("invalid token")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("unrecognized token")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("unrecognized token"),
+            ])
     }
 }
 
@@ -304,10 +306,9 @@ impl IntoDiagnostic for ParseErrorDiagnostic {
 
         // Add span label if available
         if let Some(span) = &self.span {
-            diagnostic =
-                diagnostic
-                    .with_labels(vec![Label::primary(span.file_id, span.range())
-                        .with_message("error occurred here")]);
+            diagnostic = diagnostic.with_labels(vec![
+                Label::primary(span.file_id, span.range()).with_message("error occurred here"),
+            ]);
         }
 
         diagnostic

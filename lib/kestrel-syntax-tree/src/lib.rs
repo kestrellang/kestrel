@@ -103,7 +103,7 @@ pub enum SyntaxKind {
     TyTuple,
     TyFunction,
     TyPath,
-    TyArray, // [T] - array/list type
+    TyArray,    // [T] - array/list type
     TyOptional, // T? - optional type
     TyList,
     TyInferred, // _ - inferred type placeholder
@@ -122,42 +122,42 @@ pub enum SyntaxKind {
     GuardLetCondition,   // let pattern = expr (in guard-let condition chain)
 
     // Expression nodes
-    Expression,     // Wrapper for expression variants
-    ExprUnit,       // ()
-    ExprInteger,    // 42, 0xFF, 0b1010, 0o17
-    ExprFloat,      // 3.14, 1.0e10
-    ExprString,     // "hello"
-    ExprBool,       // true, false
-    ExprArray,      // [1, 2, 3]
-    ExprTuple,      // (1, 2, 3)
-    ExprGrouping,   // (expr)
-    ExprPath,       // a.b.c (path expression)
-    ExprUnary,      // -expr, !expr (prefix)
-    ExprPostfix,    // expr! (postfix)
-    ExprBinary,     // a + b, a * b, etc.
-    ExprNull,       // null
-    ExprCall,       // foo(1, 2) or expr(args)
-    ExprAssignment, // lhs = rhs
-    ExprIf,         // if condition { then } else { else }
-    IfLetCondition, // let pattern = expr (in if-let condition)
-    ElseClause,     // else { ... } or else if ...
-    ExprWhile,      // while condition { body }
-    WhileLetCondition, // let pattern = expr (in while-let condition)
-    ExprLoop,       // loop { body }
-    ExprBreak,      // break or break label
-    ExprContinue,   // continue or continue label
-    ExprReturn,     // return or return expr
-    ExprTupleIndex, // tuple.0, tuple.1 (tuple element access)
-    ExprClosure,            // { params in body } or { body }
-    ClosureParams,          // (param, param) in closure
-    ClosureParam,           // Single closure parameter: name or name: Type
-    LoopLabel,              // label: (before while/loop)
-    ArgumentList,           // (arg1, label: arg2, ...)
-    Argument,               // Single argument: expr or label: expr
+    Expression,               // Wrapper for expression variants
+    ExprUnit,                 // ()
+    ExprInteger,              // 42, 0xFF, 0b1010, 0o17
+    ExprFloat,                // 3.14, 1.0e10
+    ExprString,               // "hello"
+    ExprBool,                 // true, false
+    ExprArray,                // [1, 2, 3]
+    ExprTuple,                // (1, 2, 3)
+    ExprGrouping,             // (expr)
+    ExprPath,                 // a.b.c (path expression)
+    ExprUnary,                // -expr, !expr (prefix)
+    ExprPostfix,              // expr! (postfix)
+    ExprBinary,               // a + b, a * b, etc.
+    ExprNull,                 // null
+    ExprCall,                 // foo(1, 2) or expr(args)
+    ExprAssignment,           // lhs = rhs
+    ExprIf,                   // if condition { then } else { else }
+    IfLetCondition,           // let pattern = expr (in if-let condition)
+    ElseClause,               // else { ... } or else if ...
+    ExprWhile,                // while condition { body }
+    WhileLetCondition,        // let pattern = expr (in while-let condition)
+    ExprLoop,                 // loop { body }
+    ExprBreak,                // break or break label
+    ExprContinue,             // continue or continue label
+    ExprReturn,               // return or return expr
+    ExprTupleIndex,           // tuple.0, tuple.1 (tuple element access)
+    ExprClosure,              // { params in body } or { body }
+    ClosureParams,            // (param, param) in closure
+    ClosureParam,             // Single closure parameter: name or name: Type
+    LoopLabel,                // label: (before while/loop)
+    ArgumentList,             // (arg1, label: arg2, ...)
+    Argument,                 // Single argument: expr or label: expr
     ExprImplicitMemberAccess, // .Case or .Case(args)
-    ExprMatch,              // match scrutinee { arms }
-    MatchArm,               // pattern => expression
-    MatchArmGuard,          // if condition (guard clause in match arm)
+    ExprMatch,                // match scrutinee { arms }
+    MatchArm,                 // pattern => expression
+    MatchArmGuard,            // if condition (guard clause in match arm)
 
     // Pattern nodes
     Pattern,             // Root pattern wrapper

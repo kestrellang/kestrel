@@ -51,9 +51,9 @@ mod usefulness;
 mod witness;
 
 pub use constructor::Constructor;
-pub use decision_tree::{compile, AccessPath, Binding, DecisionTree, PathElement};
-pub use exhaustiveness::{check_exhaustiveness, ExhaustivenessChecker, ExhaustivenessResult};
+pub use decision_tree::{AccessPath, Binding, DecisionTree, PathElement, compile};
+pub use exhaustiveness::{ExhaustivenessChecker, ExhaustivenessResult, check_exhaustiveness};
 pub use irrefutability::is_irrefutable;
 pub use matrix::{PatternMatrix, PatternRow};
-pub use usefulness::{is_useful, is_useful_impl, UsefulnessResult};
+pub use usefulness::{UsefulnessResult, is_useful, is_useful_impl};
 pub use witness::Witness;

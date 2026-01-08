@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use kestrel_execution_graph::{
-    BasicBlock, Block, Callee, CallArg, Function, Id, Immediate, Local, MirContext, Place,
+    BasicBlock, Block, CallArg, Callee, Function, Id, Immediate, Local, MirContext, Place,
     QualifiedName, Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
 };
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
@@ -15,8 +15,8 @@ use kestrel_semantic_tree::symbol::local::LocalId;
 use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::error::LoweringError;
 use crate::LoweringResult;
+use crate::error::LoweringError;
 
 /// Information about a loop for break/continue resolution.
 #[derive(Debug, Clone)]
@@ -418,7 +418,10 @@ impl<'a> LoweringContext<'a> {
 
     /// Emit a switch terminator.
     pub fn emit_switch(&mut self, discriminant: Place, cases: Vec<(String, Id<Block>)>) {
-        self.emit_terminator(TerminatorKind::Switch { discriminant, cases });
+        self.emit_terminator(TerminatorKind::Switch {
+            discriminant,
+            cases,
+        });
     }
 
     /// Emit an unreachable terminator.
@@ -460,20 +463,18 @@ impl<'a> LoweringContext<'a> {
     /// This will be updated when parameter access modes are available during lowering.
     pub fn emit_call(&mut self, dest: Place, callee: Callee, args: Vec<Value>) {
         // Convert values to CallArgs with default Ref passing mode
-        let call_args: Vec<CallArg> = args
-            .into_iter()
-            .map(|v| CallArg::borrow(v))
-            .collect();
-        self.emit_assign(dest, Rvalue::Call { callee, args: call_args });
+        let call_args: Vec<CallArg> = args.into_iter().map(|v| CallArg::borrow(v)).collect();
+        self.emit_assign(
+            dest,
+            Rvalue::Call {
+                callee,
+                args: call_args,
+            },
+        );
     }
 
     /// Emit a call with explicit passing modes for each argument.
-    pub fn emit_call_with_modes(
-        &mut self,
-        dest: Place,
-        callee: Callee,
-        args: Vec<CallArg>,
-    ) {
+    pub fn emit_call_with_modes(&mut self, dest: Place, callee: Callee, args: Vec<CallArg>) {
         self.emit_assign(dest, Rvalue::Call { callee, args });
     }
 
@@ -498,11 +499,11 @@ impl<'a> LoweringContext<'a> {
     /// For now, all arguments default to `PassingMode::Ref` (borrow).
     pub fn emit_call_unit(&mut self, callee: Callee, args: Vec<Value>) {
         // Convert values to CallArgs with default Ref passing mode
-        let call_args: Vec<CallArg> = args
-            .into_iter()
-            .map(|v| CallArg::borrow(v))
-            .collect();
-        self.emit_statement(StatementKind::Call { callee, args: call_args });
+        let call_args: Vec<CallArg> = args.into_iter().map(|v| CallArg::borrow(v)).collect();
+        self.emit_statement(StatementKind::Call {
+            callee,
+            args: call_args,
+        });
     }
 
     /// Emit a call to a unit-returning function with explicit passing modes.
@@ -568,10 +569,7 @@ impl<'a> LoweringContext<'a> {
                         // but wrap them in the conditional check.
                         // For now, emit a simple DeinitIf - the expanded form would need
                         // conditional blocks which adds complexity.
-                        self.emit_statement(StatementKind::DeinitIf {
-                            place,
-                            flag: *flag,
-                        });
+                        self.emit_statement(StatementKind::DeinitIf { place, flag: *flag });
                     }
                     DeinitStatus::Moved => {
                         // Already moved, no deinit needed
@@ -596,10 +594,7 @@ impl<'a> LoweringContext<'a> {
     ///
     /// Used for break/continue to clean up inner scopes before jumping.
     pub fn emit_deinits_to_loop(&mut self, loop_id: LoopId) {
-        let target_depth = self
-            .find_loop(loop_id)
-            .map(|l| l.scope_depth)
-            .unwrap_or(0);
+        let target_depth = self.find_loop(loop_id).map(|l| l.scope_depth).unwrap_or(0);
 
         // Emit deinits for scopes from current down to (but not including) target
         let scopes: Vec<ScopeInfo> = self
@@ -1023,9 +1018,9 @@ impl<'a> LoweringContext<'a> {
     /// 2. It contains fields that need deinit (recursive check), AND
     /// 3. It is NOT copyable
     pub fn type_needs_deinit(&self, ty: &kestrel_semantic_tree::ty::Ty) -> bool {
-        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-        use kestrel_semantic_tree::symbol::field::FieldSymbol;
         use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+        use kestrel_semantic_tree::symbol::field::FieldSymbol;
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
         match ty.kind() {
             TyKind::Struct { symbol, .. } => {
@@ -1051,7 +1046,9 @@ impl<'a> LoweringContext<'a> {
                     .filter_map(|c| c.downcast_arc::<FieldSymbol>().ok())
                     .collect();
 
-                fields.iter().any(|f| self.type_needs_deinit(f.field_type()))
+                fields
+                    .iter()
+                    .any(|f| self.type_needs_deinit(f.field_type()))
             }
 
             TyKind::Enum { symbol, .. } => {
@@ -1113,9 +1110,9 @@ impl<'a> LoweringContext<'a> {
         place: &Place,
         ty: Option<&kestrel_semantic_tree::ty::Ty>,
     ) {
-        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-        use kestrel_semantic_tree::symbol::field::FieldSymbol;
         use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+        use kestrel_semantic_tree::symbol::field::FieldSymbol;
+        use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
         let Some(ty) = ty else {
             // No type info available, emit simple deinit
@@ -1225,8 +1222,7 @@ impl<'a> LoweringContext<'a> {
                         for (i, param) in params.into_iter().rev() {
                             if self.type_needs_deinit(&param.ty) {
                                 // Access the payload field: enum_place.VariantName.i
-                                let payload_place =
-                                    place.clone().downcast(&case_name).index(i);
+                                let payload_place = place.clone().downcast(&case_name).index(i);
                                 self.emit_deinit_for_place(&payload_place, Some(&param.ty));
                             }
                         }

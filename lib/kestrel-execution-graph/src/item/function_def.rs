@@ -1,8 +1,8 @@
 //! Function definitions in MIR.
 
+use crate::MirContext;
 use crate::id::{Block, Id, Local, Param, QualifiedName, Ty, TypeParam};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::collections::HashMap;
 use std::fmt;
 

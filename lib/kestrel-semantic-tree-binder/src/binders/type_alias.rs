@@ -18,7 +18,7 @@ use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError,
 };
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Determines the context in which a type alias declaration appears

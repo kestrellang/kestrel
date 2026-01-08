@@ -16,7 +16,9 @@
 //! match/if-let/guard-let lowering, which uses decision trees.
 
 use kestrel_execution_graph::{Place, Rvalue, Value};
-use kestrel_semantic_tree::pattern::{EnumPatternBinding, Pattern, PatternKind, StructPatternField};
+use kestrel_semantic_tree::pattern::{
+    EnumPatternBinding, Pattern, PatternKind, StructPatternField,
+};
 
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
@@ -325,12 +327,8 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
             prefix,
             has_rest: _,
             suffix,
-        } => {
-            prefix.iter().all(is_irrefutable) && suffix.iter().all(is_irrefutable)
-        }
-        PatternKind::Struct { fields, .. } => {
-            fields.iter().all(|f| is_irrefutable(&f.pattern))
-        }
+        } => prefix.iter().all(is_irrefutable) && suffix.iter().all(is_irrefutable),
+        PatternKind::Struct { fields, .. } => fields.iter().all(|f| is_irrefutable(&f.pattern)),
         PatternKind::At { subpattern, .. } => is_irrefutable(subpattern),
         PatternKind::Rest => true,
         PatternKind::Error => true,

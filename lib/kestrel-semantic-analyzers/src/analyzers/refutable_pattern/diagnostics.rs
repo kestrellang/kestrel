@@ -22,14 +22,11 @@ impl IntoDiagnostic for RefutablePatternError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("refutable pattern in let binding")
-            .with_labels(vec![Label::primary(
-                self.pattern_span.file_id,
-                self.pattern_span.range(),
-            )
-            .with_message(format!(
-                "pattern `{}` might not match",
-                self.pattern_description
-            ))])
+            .with_labels(vec![
+                Label::primary(self.pattern_span.file_id, self.pattern_span.range()).with_message(
+                    format!("pattern `{}` might not match", self.pattern_description),
+                ),
+            ])
             .with_notes(vec![
                 "consider using `if let` or `match` instead".to_string(),
             ])

@@ -14,12 +14,12 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
-    emit_protocol_declaration, function_declaration_parser_internal, identifier,
-    initializer_declaration_parser_internal, token, visibility_parser_internal, ProtocolBodyItem,
-    ProtocolDeclarationData,
+    ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
+    function_declaration_parser_internal, identifier, initializer_declaration_parser_internal,
+    token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
 
@@ -94,8 +94,8 @@ impl ProtocolDeclaration {
 }
 
 /// Parser for protocol body items (functions, associated types, or initializers)
-fn protocol_body_item_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolBodyItem, ParserExtra<'tokens>> + Clone {
+fn protocol_body_item_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ProtocolBodyItem, ParserExtra<'tokens>> + Clone {
     let function = function_declaration_parser_internal().map(ProtocolBodyItem::Function);
 
     let associated_type =
@@ -115,8 +115,8 @@ fn protocol_body_item_parser<'tokens>(
 /// Internal Chumsky parser for protocol declaration
 ///
 /// This is the single source of truth for protocol declaration parsing.
-pub fn protocol_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolDeclarationData, ParserExtra<'tokens>> + Clone
+pub fn protocol_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ProtocolDeclarationData, ParserExtra<'tokens>> + Clone
 {
     attribute_list_parser()
         .then(visibility_parser_internal())

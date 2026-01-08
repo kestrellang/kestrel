@@ -9,10 +9,10 @@
 //! Individual backends (like `kestrel-codegen-cranelift`) use these utilities
 //! to generate target-specific code.
 
-pub mod target;
-pub mod mangle;
 pub mod layout;
+pub mod mangle;
+pub mod target;
 
-pub use target::TargetConfig;
-pub use mangle::{mangle_name, Mangler};
 pub use layout::{Layout, LayoutCache};
+pub use mangle::{Mangler, mangle_name};
+pub use target::TargetConfig;

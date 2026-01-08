@@ -1,9 +1,9 @@
 //! Statements (operations within basic blocks).
 
+use crate::MirContext;
 use crate::function::{Immediate, Place, Value};
 use crate::id::{Id, Local, QualifiedName, Ty};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::fmt;
 
 /// How an argument is passed to a function.
@@ -283,6 +283,8 @@ pub enum BinOp {
     // Boolean
     BoolAnd,
     BoolOr,
+    // String comparison
+    StrEq,
 }
 
 /// Unary operations.
@@ -656,6 +658,7 @@ impl BinOp {
             BinOp::FGe => "f64.ge",
             BinOp::BoolAnd => "bool.and",
             BinOp::BoolOr => "bool.or",
+            BinOp::StrEq => "str.eq",
         }
     }
 }

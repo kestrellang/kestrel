@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
@@ -20,8 +20,8 @@ use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_semantic_type_inference::{MemberError, MemberResolution, TypeOracle};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::queries::{ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType};
 use crate::SemanticModel;
+use crate::queries::{ConformancesForSymbol, ExtensionsFor, ResolvedAliasedType};
 
 impl TypeOracle for SemanticModel {
     fn resolve_member(
@@ -50,7 +50,7 @@ impl TypeOracle for SemanticModel {
                 return Err(MemberError::NotFound {
                     receiver_ty: receiver_ty.clone(),
                     member: member.to_string(),
-                })
+                });
             }
         };
 
@@ -82,7 +82,7 @@ impl TypeOracle for SemanticModel {
                         return Err(MemberError::NotFound {
                             receiver_ty: receiver_ty.clone(),
                             member: member.to_string(),
-                        })
+                        });
                     }
                 }
             }

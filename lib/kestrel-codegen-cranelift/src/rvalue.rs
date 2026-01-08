@@ -2,7 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::monomorphize::{resolve_witness, Substitution};
+use crate::monomorphize::{Substitution, resolve_witness};
 use crate::place::compile_place_read;
 use crate::types::translate_type;
 
@@ -97,16 +97,17 @@ pub fn compile_rvalue(
 
         Rvalue::Tuple(values) => compile_tuple(ctx, func_def, subst, values, builder, local_map),
 
-        Rvalue::Array { .. } => Err(CodegenError::Unsupported(
-            "arrays not yet supported - use std arrays".into(),
-        )),
+        Rvalue::Array { .. } => Err(CodegenError::Unsupported("arrays not yet supported".into())),
 
         Rvalue::ApplyPartial { func, captures } => {
             compile_apply_partial(ctx, func_def, subst, *func, captures, builder, local_map)
         }
 
-        // TODO: Implement remaining rvalues
-        _ => Err(CodegenError::Unsupported(format!("rvalue: {:?}", rvalue))),
+        Rvalue::FuncToEscaping(func) => compile_func_to_escaping(ctx, *func, builder),
+
+        Rvalue::IntToString(_) => Err(CodegenError::Unsupported(
+            "IntToString requires runtime support".into(),
+        )),
     }
 }
 
@@ -1101,7 +1102,7 @@ fn compile_string_literal(
 
 /// Compile a binary operation.
 fn compile_binop(
-    ctx: &CodegenContext<'_>,
+    ctx: &mut CodegenContext<'_>,
     op: BinOp,
     lhs: CraneliftValue,
     rhs: CraneliftValue,
@@ -1223,6 +1224,72 @@ fn compile_binop(
         // Boolean operations
         BinOp::BoolAnd => builder.ins().band(lhs, rhs),
         BinOp::BoolOr => builder.ins().bor(lhs, rhs),
+
+        // String comparison - lhs and rhs are pointers to str fat pointers (ptr, len)
+        BinOp::StrEq => {
+            // String structs are at lhs and rhs addresses
+            // Each has: ptr at offset 0, len at offset 8 (on 64-bit)
+            let ptr_type = if ctx.target.is_64bit() {
+                cranelift_codegen::ir::types::I64
+            } else {
+                cranelift_codegen::ir::types::I32
+            };
+            let ptr_size = if ctx.target.is_64bit() { 8i32 } else { 4i32 };
+
+            // Load lengths from both strings
+            let lhs_len = builder.ins().load(ptr_type, MemFlags::new(), lhs, ptr_size);
+            let rhs_len = builder.ins().load(ptr_type, MemFlags::new(), rhs, ptr_size);
+
+            // Compare lengths first
+            let len_eq = builder.ins().icmp(
+                cranelift_codegen::ir::condcodes::IntCC::Equal,
+                lhs_len,
+                rhs_len,
+            );
+
+            // Create blocks for length-equal path and join
+            let len_eq_block = builder.create_block();
+            let join_block = builder.create_block();
+            builder.append_block_param(join_block, cranelift_codegen::ir::types::I8);
+
+            // If lengths differ, result is false (0)
+            let false_val = builder.ins().iconst(cranelift_codegen::ir::types::I8, 0);
+            builder
+                .ins()
+                .brif(len_eq, len_eq_block, &[], join_block, &[false_val]);
+
+            // Length-equal block: compare contents
+            builder.switch_to_block(len_eq_block);
+            builder.seal_block(len_eq_block);
+
+            // Load pointers
+            let lhs_ptr = builder.ins().load(ptr_type, MemFlags::new(), lhs, 0);
+            let rhs_ptr = builder.ins().load(ptr_type, MemFlags::new(), rhs, 0);
+
+            // Get the memcmp function that was declared at module level
+            let memcmp_id = ctx.func_ids_by_name.get("memcmp").ok_or_else(|| {
+                CodegenError::Unsupported("memcmp function not declared".to_string())
+            })?;
+            let memcmp_ref = ctx.module.declare_func_in_func(*memcmp_id, builder.func);
+
+            // Call memcmp(lhs_ptr, rhs_ptr, len)
+            let memcmp_result = builder.ins().call(memcmp_ref, &[lhs_ptr, rhs_ptr, lhs_len]);
+            let cmp_result = builder.inst_results(memcmp_result)[0];
+
+            // Result is true (1) if memcmp returns 0
+            let zero = builder.ins().iconst(cranelift_codegen::ir::types::I32, 0);
+            let content_eq = builder.ins().icmp(
+                cranelift_codegen::ir::condcodes::IntCC::Equal,
+                cmp_result,
+                zero,
+            );
+            builder.ins().jump(join_block, &[content_eq]);
+
+            // Join block
+            builder.switch_to_block(join_block);
+            builder.seal_block(join_block);
+            builder.block_params(join_block)[0]
+        }
     };
 
     Ok(result)
@@ -1314,6 +1381,55 @@ pub fn compile_call(
                 // Unit return - return a dummy value
                 Ok(builder.ins().iconst(cl_types::I8, 0))
             } else {
+                // Check if the return type is a string - if so, we need to copy the
+                // fat pointer struct from the callee's stack to our own stack,
+                // because the callee's stack will be deallocated.
+                let callee_def = ctx
+                    .mir
+                    .functions
+                    .iter()
+                    .find(|(_, def)| def.name == *name)
+                    .map(|(_, def)| def);
+
+                if let Some(def) = callee_def {
+                    let ret_ty = subst.apply_ty_readonly(ctx.mir, def.ret).unwrap_or(def.ret);
+                    if matches!(ctx.mir.ty(ret_ty), kestrel_execution_graph::MirTy::Str) {
+                        // Copy the string fat pointer to our stack
+                        let ptr_type = if ctx.target.is_64bit() {
+                            cl_types::I64
+                        } else {
+                            cl_types::I32
+                        };
+                        let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+
+                        // The result is a pointer to a (ptr, len) struct in callee's stack
+                        let src_ptr = results[0];
+
+                        // Allocate space in our stack frame
+                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            (ptr_size * 2) as u32,
+                            ptr_size as u8,
+                        ));
+                        let dest_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+                        // Copy the ptr field (offset 0)
+                        let str_ptr = builder.ins().load(ptr_type, MemFlags::new(), src_ptr, 0);
+                        builder.ins().store(MemFlags::new(), str_ptr, dest_ptr, 0);
+
+                        // Copy the len field (offset ptr_size)
+                        let str_len =
+                            builder
+                                .ins()
+                                .load(ptr_type, MemFlags::new(), src_ptr, ptr_size as i32);
+                        builder
+                            .ins()
+                            .store(MemFlags::new(), str_len, dest_ptr, ptr_size as i32);
+
+                        return Ok(dest_ptr);
+                    }
+                }
+
                 Ok(results[0])
             }
         }
@@ -1666,7 +1782,7 @@ fn build_signature_from_func_type(
             return Err(CodegenError::Unsupported(format!(
                 "not a function type: {:?}",
                 mir_ty
-            )))
+            )));
         }
     };
 
@@ -1855,6 +1971,65 @@ fn find_closure_function_and_env(
     )))
 }
 
+/// Compile a function-to-escaping conversion.
+///
+/// This converts a regular function to an escaping (thick) function pointer.
+/// The thick callable has the layout: { func_ptr: *const (), env_ptr: *const () }
+/// Since there are no captures, env_ptr is null.
+///
+/// Note: The function being converted must have a compatible signature. When called
+/// through the thick pointer, it will receive a null env pointer as the first argument,
+/// which it should ignore. This means we need to create a wrapper function that:
+/// 1. Accepts (env_ptr, args...)
+/// 2. Ignores env_ptr and calls the original function with just args...
+///
+/// For now, we assume the function already has the correct signature (env_ptr as first param).
+fn compile_func_to_escaping(
+    ctx: &mut CodegenContext<'_>,
+    func: Id<QualifiedName>,
+    builder: &mut FunctionBuilder<'_>,
+) -> Result<CraneliftValue, CodegenError> {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+
+    // Get the function pointer
+    let mangled_name = mangle_name(ctx.mir, func, &[]);
+    let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
+        CodegenError::Unsupported(format!(
+            "function not found for escaping conversion: {} (mangled: {})",
+            ctx.mir.name(func),
+            mangled_name
+        ))
+    })?;
+
+    let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+    let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
+
+    // Create a null environment pointer (no captures)
+    let env_ptr = builder.ins().iconst(ptr_type, 0);
+
+    // Create the thick callable struct: { func_ptr, env_ptr }
+    let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        (ptr_size * 2) as u32,
+        ptr_size as u8,
+    ));
+    let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
+
+    // Store func_ptr at offset 0
+    builder.ins().store(MemFlags::new(), func_ptr, thick_ptr, 0);
+    // Store env_ptr at offset ptr_size
+    builder
+        .ins()
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
+
+    Ok(thick_ptr)
+}
+
 /// Check if a local is a function parameter (passed by pointer).
 fn is_parameter_local(
     func_def: &FunctionDef,
@@ -1930,6 +2105,15 @@ fn compile_thin_call(
         // Unit return - return a dummy value
         Ok(builder.ins().iconst(cl_types::I8, 0))
     } else {
+        // Check if the return type is a string - if so, copy the fat pointer
+        let resolved_ty = resolve_func_type(ctx, func_ty);
+        if let kestrel_execution_graph::MirTy::FuncThin { ret, .. }
+        | kestrel_execution_graph::MirTy::FuncThick { ret, .. } = ctx.mir.ty(resolved_ty)
+        {
+            if matches!(ctx.mir.ty(*ret), kestrel_execution_graph::MirTy::Str) {
+                return Ok(copy_string_return_value(ctx, results[0], builder));
+            }
+        }
         Ok(results[0])
     }
 }
@@ -2017,12 +2201,48 @@ fn compile_thick_call(
             if results.is_empty() {
                 return Ok(builder.ins().iconst(cl_types::I8, 0));
             } else {
+                // Check if return type is string - if so, copy the fat pointer
+                if matches!(ctx.mir.ty(*ret), MirTy::Str) {
+                    return Ok(copy_string_return_value(ctx, results[0], builder));
+                }
                 return Ok(results[0]);
             }
         }
         MirTy::FuncThick { params, ret } => {
             // For thick function types, the value is a struct with func_ptr and env_ptr
-            let thick_ptr = compile_place_read(ctx, place, builder, local_map, subst)?;
+            let place_value = compile_place_read(ctx, place, builder, local_map, subst)?;
+
+            // Determine the actual thick_ptr based on the place and type
+            // If this is a parameter local with a reference type to a thick function,
+            // we need to dereference appropriately.
+            let thick_ptr = if let PlaceKind::Local(local_id) = place.kind {
+                if is_parameter_local(func_def, local_id, ctx) {
+                    // Parameter locals contain a pointer to the actual value.
+                    // If the local's type is a reference to a thick function,
+                    // we need to load from the parameter pointer to get the reference,
+                    // which is itself the pointer to the thick struct.
+                    let local_ty = ctx.mir.local(local_id).ty;
+                    match ctx.mir.ty(local_ty) {
+                        MirTy::Ref(_) | MirTy::RefMut(_) => {
+                            // Local is &func or &mut func - load from param ptr to get the reference
+                            builder
+                                .ins()
+                                .load(ptr_type, MemFlags::new(), place_value, 0)
+                        }
+                        MirTy::FuncThick { .. } => {
+                            // Local is directly a thick function (not a reference)
+                            // The param pointer points to the thick struct
+                            place_value
+                        }
+                        _ => place_value,
+                    }
+                } else {
+                    // Regular local - use the value directly (it's a pointer to the thick struct)
+                    place_value
+                }
+            } else {
+                place_value
+            };
 
             // Load the function pointer from offset 0
             let func_ptr = builder.ins().load(ptr_type, MemFlags::new(), thick_ptr, 0);
@@ -2068,6 +2288,10 @@ fn compile_thick_call(
             if results.is_empty() {
                 return Ok(builder.ins().iconst(cl_types::I8, 0));
             } else {
+                // Check if return type is string - if so, copy the fat pointer
+                if matches!(ctx.mir.ty(*ret), MirTy::Str) {
+                    return Ok(copy_string_return_value(ctx, results[0], builder));
+                }
                 return Ok(results[0]);
             }
         }
@@ -2075,7 +2299,44 @@ fn compile_thick_call(
             return Err(CodegenError::Unsupported(format!(
                 "not a function type: {:?}",
                 mir_ty
-            )))
+            )));
         }
     }
+}
+
+/// Copy a string return value from callee's stack to caller's stack.
+/// This is necessary because the callee's stack is deallocated after return.
+fn copy_string_return_value(
+    ctx: &CodegenContext<'_>,
+    src_ptr: CraneliftValue,
+    builder: &mut FunctionBuilder<'_>,
+) -> CraneliftValue {
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+    let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+
+    // Allocate space in our stack frame for the fat pointer (ptr, len)
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        (ptr_size * 2) as u32,
+        ptr_size as u8,
+    ));
+    let dest_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Copy the ptr field (offset 0)
+    let str_ptr = builder.ins().load(ptr_type, MemFlags::new(), src_ptr, 0);
+    builder.ins().store(MemFlags::new(), str_ptr, dest_ptr, 0);
+
+    // Copy the len field (offset ptr_size)
+    let str_len = builder
+        .ins()
+        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size as i32);
+    builder
+        .ins()
+        .store(MemFlags::new(), str_len, dest_ptr, ptr_size as i32);
+
+    dest_ptr
 }

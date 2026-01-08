@@ -1,7 +1,7 @@
 //! MIR pass system.
 
-use crate::id::{Function, Id};
 use crate::MirContext;
+use crate::id::{Function, Id};
 use kestrel_reporting::{Diagnostic, Severity};
 
 /// Result of running a pass.

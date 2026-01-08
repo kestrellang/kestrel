@@ -9,7 +9,9 @@ use kestrel_execution_graph::{
     Rvalue, UnOp, Value,
 };
 use kestrel_semantic_model::SymbolFor;
-use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
+use kestrel_semantic_tree::behavior::callable::{
+    CallableBehavior, ParameterAccessMode, ReceiverKind,
+};
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
@@ -144,9 +146,35 @@ fn build_call_args(
                     // For instance methods, the first arg (receiver) uses ReceiverKind
                     // which we handle separately. Skip it in the parameter lookup.
                     if is_instance_method && i == 0 {
-                        // Receiver - use Ref for now (borrowing receiver)
-                        // TODO: Check ReceiverKind for mutating/consuming receivers
-                        CallArg::borrow(value)
+                        // Handle receiver based on ReceiverKind
+                        match beh.receiver() {
+                            Some(ReceiverKind::Borrowing) | None => {
+                                // Immutable borrow of self - use PassingMode::Ref
+                                CallArg::borrow(value)
+                            }
+                            Some(ReceiverKind::Mutating) => {
+                                // Mutable borrow of self - use PassingMode::MutRef
+                                CallArg::mutating(value)
+                            }
+                            Some(ReceiverKind::Consuming) => {
+                                // Takes ownership of self
+                                if let Some(arg_ty) = arg_types.first().copied() {
+                                    let mode = if arg_ty.is_copyable() {
+                                        PassingMode::Copy
+                                    } else {
+                                        PassingMode::Move
+                                    };
+                                    CallArg::new(value, mode)
+                                } else {
+                                    // Fallback: assume move
+                                    CallArg::moving(value)
+                                }
+                            }
+                            Some(ReceiverKind::Initializing) => {
+                                // For initializers, self is being constructed - pass as mutable ref
+                                CallArg::mutating(value)
+                            }
+                        }
                     } else {
                         let param_idx = i - param_offset;
                         if let Some(param) = params.get(param_idx) {
@@ -288,41 +316,40 @@ fn mark_moved_args(ctx: &mut LoweringContext, call_args: &[CallArg]) {
 /// Build call arguments for indirect calls (function pointers/closures).
 ///
 /// For indirect calls, we don't have CallableBehavior, so we determine passing
-/// semantics from the function type itself. In Kestrel, function type parameters
-/// are passed by reference (borrow) by default.
+/// semantics from the function type itself.
+///
+/// For closures and function pointers, the parameters in the function type
+/// represent the actual types expected by the callee. If the function type
+/// says `(i64, i64) -> i64`, the closure expects `i64` values, not references.
 fn build_indirect_call_args(
     ctx: &mut LoweringContext,
     arg_values: Vec<Value>,
     arg_types: &[&Ty],
-    callee_ty: &Ty,
+    _callee_ty: &Ty,
 ) -> Vec<CallArg> {
-    // Get the parameter types from the callee's function type
-    let param_types: Vec<&Ty> = match callee_ty.kind() {
-        TyKind::Function { params, .. } => params.iter().collect(),
-        TyKind::UnresolvedFunction { param_info, .. } => {
-            match param_info {
-                ParamInfo::Explicit { param_types } => param_types.iter().collect(),
-                ParamInfo::ImplicitIt { it_type } => vec![it_type.as_ref()],
-                ParamInfo::Unconstrained => vec![], // No param info available
-            }
-        }
-        _ => vec![], // Not a function type, shouldn't happen
-    };
-
+    // For indirect calls (closures/function pointers), pass arguments by value.
+    // The closure's function type specifies the exact parameter types it expects.
+    // If the closure takes `(i64, i64)`, we pass `i64` values, not references.
+    //
+    // Note: This differs from direct function calls where Kestrel's default
+    // borrow semantics apply. Closures define their own parameter passing
+    // convention through their function type signature.
     arg_values
         .into_iter()
         .enumerate()
         .map(|(i, value)| {
             // Get the argument type if available
             if let Some(&arg_ty) = arg_types.get(i) {
-                // For function pointer/closure calls, parameters are passed by reference
-                // (this matches Kestrel's default borrow semantics)
-                let ref_value = create_ref(ctx, &value, arg_ty, false);
-                CallArg::new(ref_value, PassingMode::Copy)
+                // Pass by value - copy if copyable, move otherwise
+                let mode = if arg_ty.is_copyable() {
+                    PassingMode::Copy
+                } else {
+                    PassingMode::Move
+                };
+                CallArg::new(value, mode)
             } else {
-                // Fallback: no type info, just borrow as-is
-                // This path shouldn't be hit in practice after type checking
-                CallArg::borrow(value)
+                // Fallback: no type info, use copy mode
+                CallArg::new(value, PassingMode::Copy)
             }
         })
         .collect()
@@ -456,9 +483,20 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
             let rhs_value = lower_expression(ctx, value);
 
-            // Assignment uses copy semantics for now
-            // TODO: Use move for non-Copy types
-            ctx.emit_assign_value(target_place, rhs_value);
+            // Use copy for Copy types, move for non-Copy types
+            match rhs_value {
+                Value::Place(src_place) => {
+                    let rvalue = if value.ty.is_copyable() {
+                        Rvalue::Copy(src_place)
+                    } else {
+                        Rvalue::Move(src_place)
+                    };
+                    ctx.emit_assign(target_place, rvalue);
+                }
+                Value::Immediate(imm) => {
+                    ctx.emit_assign(target_place, Rvalue::Use(imm));
+                }
+            }
 
             // Assignment expression yields unit (actually Never in semantic tree)
             Value::Immediate(Immediate::unit())
@@ -1047,8 +1085,8 @@ fn lower_primitive_method_call(
                 PrimitiveMethod::BoolNe => BinOp::Ne,
 
                 // String comparison
-                PrimitiveMethod::StringEq => BinOp::Eq,
-                PrimitiveMethod::StringNe => BinOp::Ne,
+                PrimitiveMethod::StringEq => BinOp::StrEq,
+                PrimitiveMethod::StringNe => BinOp::Ne, // TODO: Add BinOp::StrNe
 
                 // Already handled above
                 _ => unreachable!(),
@@ -1131,8 +1169,8 @@ fn lower_call(
         |ctx: &mut LoweringContext,
          sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>|
          -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
-            use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
             use kestrel_semantic_tree::symbol::EnumSymbol;
+            use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
             use semantic_tree::symbol::SymbolId;
 
             // Try to get type parameters from different symbol types

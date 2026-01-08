@@ -1,7 +1,7 @@
 //! Linker integration.
 
-use crate::error::CodegenError;
 use crate::CodegenOptions;
+use crate::error::CodegenError;
 
 use std::path::Path;
 use std::process::Command;
@@ -27,10 +27,17 @@ pub fn link_executable(
         cmd.arg(format!("-L{}", path));
     }
 
-    // Add libraries (-l)
-    // Supports both library names (e.g., "ssl") and literal filenames (e.g., ":libfoo.a")
+    // Add libraries (-l) and object files
+    // Supports library names (e.g., "ssl") and literal filenames starting with ":"
+    // If it starts with ":" and ends with ".o" or ".a", pass it directly as an object/archive file
     for lib in &options.libraries {
-        cmd.arg(format!("-l{}", lib));
+        if lib.starts_with(':') {
+            // Strip the leading ":" and pass the file directly
+            let path = &lib[1..];
+            cmd.arg(path);
+        } else {
+            cmd.arg(format!("-l{}", lib));
+        }
     }
 
     // Add frameworks (macOS -framework)

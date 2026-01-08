@@ -1,9 +1,9 @@
 //! Block terminators.
 
+use crate::MirContext;
 use crate::function::{Place, Value};
 use crate::id::{Block, Id};
 use crate::metadata::Metadata;
-use crate::MirContext;
 use std::fmt;
 
 /// A terminator ends a basic block.

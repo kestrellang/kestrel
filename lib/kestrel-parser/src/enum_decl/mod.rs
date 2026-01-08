@@ -11,9 +11,9 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{emit_enum_declaration, EnumDeclarationData};
+use crate::common::{EnumDeclarationData, emit_enum_declaration};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::type_decl::enum_declaration_parser_unified;
 
 use chumsky::prelude::*;
@@ -115,8 +115,8 @@ impl EnumDeclaration {
 ///
 /// This delegates to the unified type_decl parser which handles both struct and enum
 /// in a single recursive context to avoid stack overflow on deeply nested types.
-pub fn enum_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
+pub fn enum_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
     enum_declaration_parser_unified()
 }
 
@@ -275,7 +275,9 @@ mod tests {
 
     #[test]
     fn test_enum_full_syntax() {
-        let decl = parse("public indirect enum Result[T, E]: Equatable where E: Error { case Success(value: T) case Failure(error: E) }");
+        let decl = parse(
+            "public indirect enum Result[T, E]: Equatable where E: Error { case Success(value: T) case Failure(error: E) }",
+        );
         assert_eq!(decl.name(), Some("Result".to_string()));
         assert_eq!(decl.visibility(), Some(SyntaxKind::Public));
         assert!(decl.is_indirect());

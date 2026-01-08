@@ -2,12 +2,12 @@
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-use kestrel_semantic_type_inference::{generate_constraints, InferenceContext, Solution};
+use kestrel_semantic_type_inference::{InferenceContext, Solution, generate_constraints};
 use semantic_tree::symbol::SymbolId;
 
-use crate::query::Query;
-use crate::queries::SymbolFor;
 use crate::SemanticModel;
+use crate::queries::SymbolFor;
+use crate::query::Query;
 
 /// Run type inference on a function/initializer body and return the solution.
 ///

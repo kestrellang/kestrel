@@ -11,12 +11,11 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    emit_extension_declaration, function_declaration_parser_internal,
-    initializer_declaration_parser_internal, token, ConformanceListData, ExtensionBodyItem,
-    ExtensionDeclarationData,
+    ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
+    function_declaration_parser_internal, initializer_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::ty::ty_parser;
 use crate::type_param::{conformance_list_parser, where_clause_parser};
 
@@ -83,8 +82,8 @@ impl ExtensionDeclaration {
 /// Internal parser for extension body items
 ///
 /// Extension bodies can contain: functions and initializers
-fn extension_body_item_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
+fn extension_body_item_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
         initializer_declaration_parser_internal().map(ExtensionBodyItem::Initializer);
 
@@ -97,8 +96,8 @@ fn extension_body_item_parser_internal<'tokens>(
 ///
 /// This is the single source of truth for extension declaration parsing.
 /// Syntax: extend Type: Protocol where ... { ... }
-pub fn extension_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionDeclarationData, ParserExtra<'tokens>> + Clone
+pub fn extension_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ExtensionDeclarationData, ParserExtra<'tokens>> + Clone
 {
     token(Token::Extend)
         .then(ty_parser())

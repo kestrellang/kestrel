@@ -1,19 +1,19 @@
 //! Code generation context.
 
+use crate::CodegenOptions;
 use crate::error::CodegenError;
 use crate::monomorphize::{
-    build_substitution, FunctionInstantiation, MonomorphizationSet, Substitution,
+    FunctionInstantiation, MonomorphizationSet, Substitution, build_substitution,
 };
 use crate::types::translate_type;
-use crate::CodegenOptions;
-use kestrel_codegen::{mangle_name, Layout, LayoutCache, TargetConfig};
+use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_name};
 use kestrel_execution_graph::{Function, FunctionDef, Id, MirContext, QualifiedNameData, Ty};
 
+use cranelift_codegen::Context as CraneliftContext;
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{AbiParam, Function as CraneliftFunction, Signature, UserFuncName};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
-use cranelift_codegen::Context as CraneliftContext;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
@@ -86,11 +86,52 @@ impl<'a> CodegenContext<'a> {
 
     /// Compile all functions in the MIR context.
     pub fn compile_all(&mut self) -> Result<(), CodegenError> {
-        // First pass: declare all functions
+        // First pass: declare all functions (including runtime helpers)
         self.declare_all_functions()?;
+        self.declare_runtime_helpers()?;
 
         // Second pass: define all functions
         self.define_all_functions()?;
+
+        Ok(())
+    }
+
+    /// Declare runtime helper functions (e.g., memcmp for string comparison).
+    fn declare_runtime_helpers(&mut self) -> Result<(), CodegenError> {
+        // Declare memcmp for string comparison
+        let ptr_type = if self.target.is_64bit() {
+            cranelift_codegen::ir::types::I64
+        } else {
+            cranelift_codegen::ir::types::I32
+        };
+
+        let mut memcmp_sig =
+            cranelift_codegen::ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
+        memcmp_sig
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(ptr_type));
+        memcmp_sig
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(ptr_type));
+        memcmp_sig
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(ptr_type));
+        memcmp_sig
+            .returns
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I32,
+            ));
+
+        let memcmp_id = self
+            .module
+            .declare_function("memcmp", Linkage::Import, &memcmp_sig)
+            .map_err(|e| CodegenError::FunctionDefinition {
+                name: "memcmp".to_string(),
+                error: e.to_string(),
+            })?;
+
+        self.func_ids_by_name
+            .insert("memcmp".to_string(), memcmp_id);
 
         Ok(())
     }

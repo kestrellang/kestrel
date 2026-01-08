@@ -37,17 +37,16 @@ impl Builder for EnumCaseBuilder {
         // Enum cases inherit visibility from the parent enum
         // For now, we use internal visibility (same as default)
         let visibility_scope = find_visibility_scope(None, parent, root);
-        let visibility_behavior =
-            VisibilityBehavior::new(Some(Visibility::Internal), name_span.clone(), visibility_scope);
+        let visibility_behavior = VisibilityBehavior::new(
+            Some(Visibility::Internal),
+            name_span.clone(),
+            visibility_scope,
+        );
 
         let name = Spanned::new(name_str, name_span);
 
-        let case_symbol = EnumCaseSymbol::new(
-            name,
-            full_span,
-            visibility_behavior,
-            parent.cloned(),
-        );
+        let case_symbol =
+            EnumCaseSymbol::new(name, full_span, visibility_behavior, parent.cloned());
         let case_arc = Arc::new(case_symbol);
         let case_arc_dyn = case_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 

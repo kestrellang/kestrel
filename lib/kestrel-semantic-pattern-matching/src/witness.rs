@@ -183,7 +183,11 @@ impl Witness {
                 }
             }
 
-            Witness::Range { start, end, inclusive } => {
+            Witness::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 if *inclusive {
                     format!("{}..={}", start, end)
                 } else {
@@ -223,10 +227,8 @@ mod tests {
 
     #[test]
     fn test_enum_case_with_multiple_args() {
-        let w = Witness::enum_case_with_args(
-            "Pair",
-            vec![Witness::integer(1), Witness::integer(2)],
-        );
+        let w =
+            Witness::enum_case_with_args("Pair", vec![Witness::integer(1), Witness::integer(2)]);
         assert_eq!(w.display(), ".Pair(1, 2)");
     }
 

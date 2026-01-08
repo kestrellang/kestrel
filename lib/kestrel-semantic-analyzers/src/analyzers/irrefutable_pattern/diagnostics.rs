@@ -28,14 +28,11 @@ impl IntoDiagnostic for IrrefutableIfLetWarning {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message("irrefutable pattern in if-let")
-            .with_labels(vec![Label::primary(
-                self.pattern_span.file_id,
-                self.pattern_span.range(),
-            )
-            .with_message(format!(
-                "pattern `{}` will always match",
-                self.pattern_description
-            ))])
+            .with_labels(vec![
+                Label::primary(self.pattern_span.file_id, self.pattern_span.range()).with_message(
+                    format!("pattern `{}` will always match", self.pattern_description),
+                ),
+            ])
             .with_notes(vec![
                 "consider using a regular `let` binding instead".to_string(),
             ])
@@ -72,14 +69,11 @@ impl IntoDiagnostic for IrrefutableMatchArmWarning {
         };
         Diagnostic::warning()
             .with_message("irrefutable pattern in match makes subsequent arms unreachable")
-            .with_labels(vec![Label::primary(
-                self.pattern_span.file_id,
-                self.pattern_span.range(),
-            )
-            .with_message(format!(
-                "pattern `{}` will always match",
-                self.pattern_description
-            ))])
+            .with_labels(vec![
+                Label::primary(self.pattern_span.file_id, self.pattern_span.range()).with_message(
+                    format!("pattern `{}` will always match", self.pattern_description),
+                ),
+            ])
             .with_notes(vec![format!(
                 "{} {} after this pattern will never be reached",
                 self.unreachable_count, arms_word

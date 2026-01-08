@@ -4,8 +4,8 @@ use crate::monomorphize::Substitution;
 use kestrel_codegen::TargetConfig;
 use kestrel_execution_graph::{Id, MirContext, MirTy, Ty};
 
-use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::Type as CraneliftType;
+use cranelift_codegen::ir::types as cl_types;
 
 /// Translate a MIR type to a Cranelift type.
 ///

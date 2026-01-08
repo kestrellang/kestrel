@@ -105,8 +105,10 @@ impl IntoDiagnostic for CannotAccessMemberOnTypeError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("cannot access member on type '{}'", self.base_type))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("member access not supported")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("member access not supported"),
+            ])
             .with_notes(vec![format!(
                 "type '{}' does not have accessible members",
                 self.base_type
@@ -133,11 +135,10 @@ impl IntoDiagnostic for TupleIndexOutOfBoundsError {
                 "tuple index {} is out of bounds for tuple of length {}",
                 self.index, self.tuple_length
             ))
-            .with_labels(vec![Label::primary(
-                self.index_span.file_id,
-                self.index_span.range(),
-            )
-            .with_message(format!("index {} out of bounds", self.index))])
+            .with_labels(vec![
+                Label::primary(self.index_span.file_id, self.index_span.range())
+                    .with_message(format!("index {} out of bounds", self.index)),
+            ])
             .with_notes(vec![format!(
                 "type '{}' has {} element{}",
                 self.tuple_type,
@@ -164,8 +165,10 @@ impl IntoDiagnostic for TupleIndexOnNonTupleError {
                 "cannot use tuple index on type '{}'",
                 self.base_type
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("not a tuple type")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not a tuple type"),
+            ])
             .with_notes(vec![format!(
                 "tuple indexing (e.g., '.{}') can only be used on tuple types",
                 self.index
@@ -194,11 +197,12 @@ impl IntoDiagnostic for UnconstrainedTypeParameterMemberError {
                 "cannot call '{}' on type '{}'",
                 self.member_name, self.type_param_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "cannot call '{}' on type '{}'",
                     self.member_name, self.type_param_name
-                ))])
+                )),
+            ])
             .with_notes(vec![
                 format!(
                     "'{}' is a type parameter with no constraints",
@@ -237,11 +241,10 @@ impl IntoDiagnostic for MethodNotInBoundsError {
                 "no method '{}' found for type '{}'",
                 self.method_name, self.type_param_name
             ))
-            .with_labels(vec![Label::primary(
-                self.call_span.file_id,
-                self.call_span.range(),
-            )
-            .with_message("method not found")])
+            .with_labels(vec![
+                Label::primary(self.call_span.file_id, self.call_span.range())
+                    .with_message("method not found"),
+            ])
             .with_notes(vec![
                 format!(
                     "'{}' is constrained to: {}",
@@ -355,8 +358,10 @@ impl IntoDiagnostic for UnsupportedGenericProtocolBoundError {
                 "generic protocol bounds are not yet supported: '{}'",
                 self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("generic protocol bound")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("generic protocol bound"),
+            ])
             .with_notes(vec![
                 "generic protocol bounds require associated types".to_string(),
                 "this feature is coming in a future version".to_string(),
@@ -391,8 +396,10 @@ impl IntoDiagnostic for NoInitInTypeParameterBoundsError {
                 "no initializer found for type parameter '{}'",
                 self.type_param_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("no matching initializer")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("no matching initializer"),
+            ])
             .with_notes(vec![
                 format!(
                     "'{}' is constrained to: {}",
@@ -472,8 +479,10 @@ pub struct AmbiguousTypeParameterInitError {
 
 impl IntoDiagnostic for AmbiguousTypeParameterInitError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
-        let mut labels = vec![Label::primary(self.span.file_id, self.span.range())
-            .with_message("ambiguous initializer call")];
+        let mut labels = vec![
+            Label::primary(self.span.file_id, self.span.range())
+                .with_message("ambiguous initializer call"),
+        ];
 
         // Add secondary labels for each definition
         for (proto_name, span) in &self.definition_spans {

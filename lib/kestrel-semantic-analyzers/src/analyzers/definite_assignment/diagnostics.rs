@@ -14,7 +14,9 @@ impl IntoDiagnostic for UninitializedVariableAccessError {
                 "access to uninitialized variable '{}'",
                 self.variable_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("uninitialized variable access here")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("uninitialized variable access here"),
+            ])
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::analyzer::Analyzer;
-use crate::context::{reset_node_flags, AnalysisContext};
+use crate::context::{AnalysisContext, reset_node_flags};
 use crate::runner::AnalyzerId;
 
 use kestrel_semantic_model::SemanticModel;

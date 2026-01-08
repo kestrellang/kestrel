@@ -23,11 +23,15 @@ pub fn lower_enum(ctx: &mut LoweringContext, enum_symbol: &Arc<EnumSymbol>) {
     // Register type parameters so they can be referenced when lowering case payloads
     for type_param in enum_symbol.type_parameters() {
         let param_name = type_param.metadata().name().value.clone();
-        let mir_type_param = ctx.mir.type_params.alloc(
-            kestrel_execution_graph::TypeParamDef::new(param_name, TypeParamOwner::Enum(enum_id)),
-        );
+        let mir_type_param = ctx
+            .mir
+            .type_params
+            .alloc(kestrel_execution_graph::TypeParamDef::new(
+                param_name,
+                TypeParamOwner::Enum(enum_id),
+            ));
         ctx.map_type_param(type_param.metadata().id(), mir_type_param);
-        
+
         // Also add to the enum's type_params list
         ctx.mir.enums[enum_id].type_params.push(mir_type_param);
     }
@@ -57,10 +61,12 @@ fn lower_enum_case(
     let mut case_struct_parts: Vec<String> = enum_name_data.segments.clone();
     case_struct_parts.push("cases".to_string());
     case_struct_parts.push(case_name.clone());
-    
-    let case_struct_name = ctx.mir.intern_name(
-        kestrel_execution_graph::QualifiedNameData::new(case_struct_parts),
-    );
+
+    let case_struct_name = ctx
+        .mir
+        .intern_name(kestrel_execution_graph::QualifiedNameData::new(
+            case_struct_parts,
+        ));
 
     // Add the case to the enum
     let case_id = ctx.mir.add_enum_case(enum_id, &case_name, case_struct_name);
@@ -73,7 +79,7 @@ fn lower_enum_case(
         if let Some(callable) = case_symbol.callable_behavior() {
             // Create struct for payload
             let struct_id = ctx.mir.add_struct(case_struct_name);
-            
+
             // Copy the enum's type parameters to the case struct
             ctx.mir.structs[struct_id].type_params = enum_type_params;
 

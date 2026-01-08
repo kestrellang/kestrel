@@ -126,7 +126,6 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             params,
             return_type,
         } => {
-            eprintln!("[DEBUG] lower_type: TyKind::Function -> FuncThick");
             let mir_params: Vec<_> = params.iter().map(|p| lower_type(ctx, p)).collect();
             let mir_ret = lower_type(ctx, return_type);
             // Use thick function type for all function values.
