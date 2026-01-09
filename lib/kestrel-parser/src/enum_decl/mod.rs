@@ -232,6 +232,48 @@ mod tests {
     }
 
     #[test]
+    fn test_enum_case_with_unnamed_parameter() {
+        // Unnamed parameter: just Type without label
+        let decl = parse("enum Option[T] { case Some(T) case None }");
+        let cases = decl.cases();
+        assert_eq!(cases.len(), 2);
+
+        // Check that Some has parameters
+        let some_case = &cases[0];
+        let has_param_list = some_case
+            .children()
+            .any(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
+        assert!(has_param_list);
+
+        // Check that None has no parameters
+        let none_case = &cases[1];
+        let none_has_params = none_case
+            .children()
+            .any(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
+        assert!(!none_has_params);
+    }
+
+    #[test]
+    fn test_enum_case_with_multiple_unnamed_parameters() {
+        let decl = parse("enum Pair[A, B] { case Both(A, B) }");
+        let cases = decl.cases();
+        assert_eq!(cases.len(), 1);
+
+        let case_node = &cases[0];
+        let param_list = case_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::EnumCaseParameterList);
+        assert!(param_list.is_some());
+
+        let param_count = param_list
+            .unwrap()
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::EnumCaseParameter)
+            .count();
+        assert_eq!(param_count, 2);
+    }
+
+    #[test]
     fn test_enum_case_with_multiple_associated_values() {
         let decl = parse("enum Event { case Click(x: Int, y: Int) }");
         let cases = decl.cases();

@@ -5,9 +5,8 @@ public enum Result[T, E]:
     Throwable[E],
     Returnable[T]
 {
-    // TODO: remove parameter names when unnamed associated values are supported
-    case Ok(value: T)
-    case Err(error: E)
+    case Ok(T)
+    case Err(E)
 
     // Convenience constructors
     public static func ok(value: T) -> Result[T, E] {

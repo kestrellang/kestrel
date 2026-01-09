@@ -1,8 +1,7 @@
 // Optional type
 
 public enum Optional[T]: ExpressibleByNilLiteral {
-    // TODO: remove parameter name when unnamed associated values are supported
-    case Some(value: T)
+    case Some(T)
     case None
 
     // ExpressibleByNilLiteral

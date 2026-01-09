@@ -434,6 +434,11 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        }
         ExprKind::Match { scrutinee, arms } => {
             // Analyze scrutinee
             state = analyze_expression(scrutinee, state, false, ctx);

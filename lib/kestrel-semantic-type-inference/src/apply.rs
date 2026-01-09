@@ -265,6 +265,19 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .collect(),
         },
 
+        ExprKind::DelegatingInit {
+            initializer,
+            arguments,
+            substitutions,
+        } => ExprKind::DelegatingInit {
+            initializer: *initializer,
+            arguments: arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect(),
+            substitutions: substitutions.clone(),
+        },
+
         ExprKind::Assignment { target, value } => ExprKind::Assignment {
             target: Box::new(apply_to_expression(target, solution)),
             value: Box::new(apply_to_expression(value, solution)),

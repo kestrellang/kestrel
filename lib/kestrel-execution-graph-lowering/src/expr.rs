@@ -12,6 +12,7 @@ use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
+use semantic_tree::symbol::SymbolId;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
 };
@@ -528,6 +529,13 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             struct_type,
             arguments,
         } => lower_struct_init(ctx, struct_type, arguments, expr),
+
+        // === Delegating Initializer ===
+        ExprKind::DelegatingInit {
+            initializer,
+            arguments,
+            substitutions,
+        } => lower_delegating_init(ctx, *initializer, arguments, substitutions, expr),
 
         // === Function/Method Calls ===
         ExprKind::Call {
@@ -1232,6 +1240,56 @@ fn lower_struct_init(
     );
 
     Value::Place(result_place)
+}
+
+/// Lower a delegating initializer call: `self.init(...)`
+///
+/// This is called from within an initializer body and calls another initializer
+/// on the same struct. The `self` parameter is passed implicitly.
+fn lower_delegating_init(
+    ctx: &mut LoweringContext,
+    initializer: SymbolId,
+    arguments: &[CallArgument],
+    _substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    _expr: &Expression,
+) -> Value {
+    use kestrel_semantic_tree::symbol::local::LocalId;
+    use semantic_tree::symbol::Symbol;
+
+    // Get the initializer symbol
+    let Some(init_sym) = ctx.model.query(SymbolFor { id: initializer }) else {
+        ctx.emit_error(LoweringError::internal(
+            "delegating init: initializer symbol not found",
+            None,
+        ));
+        return Value::Immediate(Immediate::unit());
+    };
+
+    // Get the qualified name for the initializer
+    let init_name = qualified_name_for_symbol(ctx, &init_sym);
+
+    // Lower the arguments (excluding self - it's passed implicitly)
+    let arg_values: Vec<Value> = arguments
+        .iter()
+        .map(|arg| lower_expression(ctx, &arg.value))
+        .collect();
+
+    // Get `self` as the first argument - it's always local 0 in initializers
+    // self is already a &var Self in initializers
+    let self_local = ctx.get_local_unwrap(LocalId(0));
+    let self_value = Value::Place(Place::local(self_local));
+
+    // Build the full argument list: self + other args
+    let mut all_args = vec![self_value];
+    all_args.extend(arg_values);
+
+    // Emit the call to the delegated initializer
+    // Delegating inits return unit (they modify self in-place)
+    let callee = Callee::direct(init_name);
+    ctx.emit_call_unit(callee, all_args);
+
+    // Delegating init returns unit
+    Value::Immediate(Immediate::unit())
 }
 
 /// Lower a function call.

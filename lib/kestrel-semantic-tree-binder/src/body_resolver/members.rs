@@ -19,6 +19,8 @@ use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveM
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::ty::Substitutions;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -27,9 +29,10 @@ use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
-    AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError, MemberNotAccessibleError,
-    MemberNotVisibleError, MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError,
-    NoSuchMethodError, PrimitiveMethodNotCallableError, UnconstrainedTypeParameterMemberError,
+    AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError,
+    DelegatingInitOutsideInitializerError, MemberNotAccessibleError, MemberNotVisibleError,
+    MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError,
+    PrimitiveMethodNotCallableError, UnconstrainedTypeParameterMemberError,
     UnsupportedGenericProtocolBoundError,
 };
 
@@ -443,6 +446,31 @@ pub fn resolve_member_call(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     let base_ty = &object.ty;
+
+    // Check for delegating initializer: self.init(...)
+    if member_name == "init" {
+        if let ExprKind::LocalRef(local_id) = &object.kind {
+            // Check if this is the "self" local (local ID 0 in initializers)
+            if *local_id == LocalId(0) {
+                // Check if we're inside an initializer
+                if let Some(symbol) = ctx.model.query(SymbolFor {
+                    id: ctx.function_id,
+                }) {
+                    if symbol.metadata().kind() == KestrelSymbolKind::Initializer {
+                        return resolve_delegating_init(
+                            &symbol, arguments, arg_labels, span, ctx,
+                        );
+                    }
+                }
+
+                // Not in an initializer - error
+                ctx.diagnostics.add_diagnostic(
+                    DelegatingInitOutsideInitializerError { span: span.clone() }.into_diagnostic(),
+                );
+                return Expression::error(span);
+            }
+        }
+    }
 
     // First check for primitive method
     if let Some(primitive_method) = PrimitiveMethod::lookup(base_ty, member_name) {
@@ -1506,4 +1534,70 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
         }
         _ => ty.clone(),
     }
+}
+
+/// Resolve a delegating initializer call: `self.init(...)`
+///
+/// Called when inside an initializer body and `self.init(...)` is encountered.
+/// Finds a matching initializer on the parent struct and creates a DelegatingInit expression.
+pub fn resolve_delegating_init(
+    current_init: &Arc<dyn Symbol<KestrelLanguage>>,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Get the parent struct
+    let Some(parent) = current_init.metadata().parent() else {
+        return Expression::error(span);
+    };
+
+    if parent.metadata().kind() != KestrelSymbolKind::Struct {
+        // Initializer should always be inside a struct
+        return Expression::error(span);
+    }
+
+    // Find all initializers in the parent struct
+    let initializers: Vec<Arc<dyn Symbol<KestrelLanguage>>> = parent
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Initializer)
+        .collect();
+
+    // Find matching initializer by arity and labels
+    for init_sym in &initializers {
+        // Skip self-delegation (can't call the same initializer)
+        if init_sym.metadata().id() == current_init.metadata().id() {
+            continue;
+        }
+
+        if let Some(callable) = get_callable_behavior(init_sym) {
+            if matches_signature(&callable, arguments.len(), arg_labels) {
+                // Found matching initializer
+                let init_id = init_sym.metadata().id();
+
+                // Validate access modes for arguments
+                validate_argument_access_modes(&callable, &arguments, &span, ctx);
+
+                // Build substitutions from the parent struct's type parameters
+                // (if the struct is generic, we need to pass them to the delegated init)
+                let substitutions = Substitutions::new();
+
+                return Expression::delegating_init(init_id, arguments, substitutions, span);
+            }
+        }
+    }
+
+    // No matching initializer found - report error
+    let struct_name = parent.metadata().name().value.clone();
+
+    // Use the existing NoMatchingMethodError for simplicity
+    let error = NoSuchMethodError {
+        call_span: span.clone(),
+        method_name: "init".to_string(),
+        receiver_type: struct_name,
+    };
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+    Expression::error(span)
 }

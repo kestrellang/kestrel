@@ -338,6 +338,15 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             ReturnState::MayFallThrough
         }
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                let s = analyze_expression(&arg.value);
+                if s.definitely_returns() {
+                    return s;
+                }
+            }
+            ReturnState::MayFallThrough
+        }
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {

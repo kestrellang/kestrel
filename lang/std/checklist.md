@@ -5,9 +5,9 @@ This checklist tracks language features required for `lang/std/` to compile succ
 ## Summary
 
 - **Total Features Needed**: 23
-- **Implemented**: 5 (Associated Type Visibility, Static Methods, Protocol Inheritance, `lang.panic_unwind`, Type Cast Intrinsics)
+- **Implemented**: 6 (Associated Type Visibility, Static Methods, Protocol Inheritance, `lang.panic_unwind`, Type Cast Intrinsics, Unnamed Enum Case Parameters)
 - **Low-Hanging Fruit**: 0
-- **Blocked**: 18
+- **Blocked**: 17
 
 ## ✅ Recently Implemented
 
@@ -16,6 +16,7 @@ This checklist tracks language features required for `lang/std/` to compile succ
 | Associated type visibility | 2025-01-08 | Protocol associated types inherit visibility |
 | `lang.panic_unwind()` | 2025-01-08 | Intrinsic that emits `Terminator::Panic` |
 | Type cast intrinsics | 2025-01-08 | `lang.cast_<from>_<to>()` for all primitive conversions |
+| Unnamed enum case params | 2025-01-08 | `case Some(T)` instead of `case Some(value: T)` |
 
 ## 🍎 Nearly Complete (Testing/Edge Cases)
 
@@ -327,7 +328,42 @@ lang.cast_f64_f32(value)    // Float64 to Float32
 
 ---
 
-### 3.4 ArcBox / Reference-Counted Box Type
+### 3.4 Unnamed Enum Case Parameters ✅
+**Status**: Implemented (2025-01-08)
+
+Enum cases can now use unnamed (positional) parameters instead of requiring labels:
+```kestrel
+// Before (still works)
+case Some(value: T)
+case Ok(value: T)
+
+// After (now also works)
+case Some(T)
+case Ok(T)
+```
+
+**Implementation:**
+- Parser (`type_decl.rs`): `enum_case_parameter_parser()` tries named form first, falls back to unnamed
+- Data structure (`data.rs`): `EnumCaseParameterData.label` and `.colon` are now `Option<Span>`
+- Binder (`enum_case.rs`): Generates synthetic names (`_0`, `_1`) for unnamed params, sets `label: None`
+- Pattern matching already supported `EnumPatternArgData::Unlabeled` - no changes needed
+
+**Pattern matching syntax:**
+```kestrel
+match opt {
+    .Some(value) => value,  // Positional binding
+    .None => default,
+}
+```
+
+**Files updated**:
+- `result/optional.ks` - `case Some(T)` ✅
+- `result/result.ks` - `case Ok(T)`, `case Err(E)` ✅
+- `result/error.ks` - `case Output(Output)`, `case Early(Early)` ✅
+
+---
+
+### 3.6 ArcBox / Reference-Counted Box Type
 **Status**: Not Implemented
 **Blocking**: All COW collections
 
@@ -349,7 +385,7 @@ self.storage.value  // Access inner value
 
 ---
 
-### 3.5 Tuple Types and Access
+### 3.7 Tuple Types and Access
 **Status**: Partially Working
 **Blocking**: Hasher seed, dictionary literals
 
@@ -522,8 +558,8 @@ match (self, other) {
 The Residual, Tryable, Throwable, Returnable protocol system for error handling:
 ```kestrel
 public enum Residual[T, E] {
-    case Output(value: T)
-    case Early(error: E)
+    case Output(T)  // Uses unnamed enum case parameters
+    case Early(E)
 }
 
 public protocol Tryable[T, E] {

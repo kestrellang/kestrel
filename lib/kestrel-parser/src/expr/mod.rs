@@ -756,11 +756,13 @@ pub fn expr_parser<'tokens>()
             .boxed();
 
         // Member access: .identifier or .identifier[T] or tuple index: .0, .1
+        // Also allows .init for delegating initializers (self.init(...))
         let member_access = skip_trivia()
             .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
             .then(skip_trivia().ignore_then(select! {
                 Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
                 Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
+                Token::Init = e => (Token::Init, to_kestrel_span(e.span())),
             }))
             .then(full_type_args_parser().or_not())
             .map(|((dot, (token, span)), type_args)| match token {

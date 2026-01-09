@@ -1259,6 +1259,10 @@ fn expression_references_local(
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
 
+        ExprKind::DelegatingInit { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
+
         ExprKind::Assignment { target, value } => {
             expression_references_local(target, local_id)
                 || expression_references_local(value, local_id)
@@ -1901,6 +1905,11 @@ where
             collect_captures_from_expression(tuple, process);
         }
         ExprKind::ImplicitStructInit { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+        ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }

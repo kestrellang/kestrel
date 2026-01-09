@@ -639,11 +639,17 @@ pub fn emit_indirect_modifier(sink: &mut EventSink, indirect_span: Span) {
     sink.finish_node();
 }
 
-/// Emit events for an enum case parameter (label: Type)
+/// Emit events for an enum case parameter
+///
+/// Supports both named (`label: Type`) and unnamed (`Type`) forms.
 pub fn emit_enum_case_parameter(sink: &mut EventSink, data: &super::data::EnumCaseParameterData) {
     sink.start_node(SyntaxKind::EnumCaseParameter);
-    emit_name(sink, data.label.clone());
-    sink.add_token(SyntaxKind::Colon, data.colon.clone());
+    // Emit label and colon if present (named parameter)
+    if let (Some(label), Some(colon)) = (&data.label, &data.colon) {
+        emit_name(sink, label.clone());
+        sink.add_token(SyntaxKind::Colon, colon.clone());
+    }
+    // Always emit the type
     emit_ty_variant(sink, &data.ty);
     sink.finish_node();
 }

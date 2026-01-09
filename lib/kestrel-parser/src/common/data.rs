@@ -234,11 +234,18 @@ pub enum TypeDeclarationBodyItem {
 #[deprecated(note = "Use TypeDeclarationBodyItem instead")]
 pub type StructBodyItem = TypeDeclarationBodyItem;
 
-/// Raw parsed data for enum case parameter (label: Type)
+/// Raw parsed data for enum case parameter
+///
+/// Supports both named (`label: Type`) and unnamed (`Type`) forms:
+/// - Named: `case Some(value: T)` - label and colon present
+/// - Unnamed: `case Some(T)` - label and colon are None
 #[derive(Debug, Clone)]
 pub struct EnumCaseParameterData {
-    pub label: Span,
-    pub colon: Span,
+    /// Optional label name (None for unnamed parameters)
+    pub label: Option<Span>,
+    /// Optional colon (present only when label is present)
+    pub colon: Option<Span>,
+    /// The type of the parameter
     pub ty: TyVariant,
 }
 

@@ -549,6 +549,11 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
         }
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        }
         ExprKind::Assignment { target, value } => {
             collect_closure_local_ids_from_expr(target, ids);
             collect_closure_local_ids_from_expr(value, ids);

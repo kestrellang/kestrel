@@ -363,6 +363,12 @@ fn find_assignments_to_locals(
             }
         }
 
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        }
+
         ExprKind::Return { value } => {
             if let Some(val) = value {
                 find_assignments_to_locals(val, target_locals, container_id, ctx);

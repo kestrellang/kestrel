@@ -458,6 +458,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             }
         }
 
+        // Delegating init - just generate constraints for arguments
+        ExprKind::DelegatingInit { arguments, .. } => {
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+        }
+
         // Assignment
         ExprKind::Assignment { target, value } => {
             generate_expression_constraints(ctx, target);

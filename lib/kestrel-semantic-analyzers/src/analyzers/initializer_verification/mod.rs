@@ -344,6 +344,20 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
+        ExprKind::DelegatingInit { arguments, .. } => {
+            // Analyze the arguments first
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+            // After a delegating init call, ALL fields are considered initialized
+            // because the delegated initializer handles field initialization
+            for field in &ctx.all_fields {
+                state.assigned.insert(field.clone());
+            }
+            for field in &ctx.let_fields {
+                state.let_assigned.insert(field.clone());
+            }
+        }
         ExprKind::Assignment { target, value } => {
             state = analyze_expression(value, state, false, ctx);
             if let ExprKind::FieldAccess { object, field } = &target.kind {

@@ -604,6 +604,23 @@ pub enum ExprKind {
         arguments: Vec<CallArgument>,
     },
 
+    /// Delegating initializer call: `self.init(...)` from within an initializer.
+    /// Calls another initializer on the same struct, passing the current `self`.
+    ///
+    /// This is used when:
+    /// - Inside an initializer body
+    /// - Calling another initializer with `self.init(...)`
+    ///
+    /// After this call, all fields are considered initialized by the delegated initializer.
+    DelegatingInit {
+        /// The initializer being called
+        initializer: SymbolId,
+        /// Arguments to the initializer
+        arguments: Vec<CallArgument>,
+        /// Type argument substitutions for generic structs
+        substitutions: Substitutions,
+    },
+
     /// Assignment expression: target = value
     /// Type is Never (assignment doesn't produce a usable value)
     Assignment {
@@ -1074,6 +1091,19 @@ impl Expression {
                     })
                     .collect();
                 format!("{}({})", struct_type, args.join(", "))
+            }
+            ExprKind::DelegatingInit { arguments, .. } => {
+                let args: Vec<String> = arguments
+                    .iter()
+                    .map(|a| {
+                        if let Some(ref label) = a.label {
+                            format!("{}: {}", label, a.value.debug_compact())
+                        } else {
+                            a.value.debug_compact()
+                        }
+                    })
+                    .collect();
+                format!("self.init({})", args.join(", "))
             }
             ExprKind::Assignment { target, value } => {
                 format!("{} = {}", target.debug_compact(), value.debug_compact())
@@ -1621,6 +1651,29 @@ impl Expression {
                 arguments,
             },
             ty: struct_type,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a delegating initializer call expression.
+    ///
+    /// Used when calling `self.init(...)` from within an initializer.
+    /// The type is unit since the initializer modifies self in place.
+    pub fn delegating_init(
+        initializer: SymbolId,
+        arguments: Vec<CallArgument>,
+        substitutions: Substitutions,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DelegatingInit {
+                initializer,
+                arguments,
+                substitutions,
+            },
+            ty: Ty::unit(span.clone()),
             span,
             mutable: false,
         }

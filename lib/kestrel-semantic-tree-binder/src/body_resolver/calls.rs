@@ -40,7 +40,7 @@ use kestrel_syntax_tree::utils::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
-use super::members::{resolve_member_call, substitute_callable_self};
+use super::members::{resolve_delegating_init, resolve_member_call, substitute_callable_self};
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     get_callable_behavior, get_type_parameter_bounds_by_id, infer_type_arguments,
@@ -68,6 +68,33 @@ pub fn resolve_call_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     let arg_list_node = node
         .children()
         .find(|c| c.kind() == SyntaxKind::ArgumentList);
+
+    // Check for delegating initializer pattern: self.init(...)
+    // We must detect this BEFORE resolving the callee, because self.init as a member
+    // access will fail (init is a keyword/initializer, not a regular member).
+    if is_self_init_call(&callee_node) {
+        // Parse arguments first
+        let arguments = if let Some(ref arg_list) = arg_list_node {
+            resolve_argument_list(arg_list, ctx)
+        } else {
+            vec![]
+        };
+        let arg_labels: Vec<Option<String>> = arguments.iter().map(|a| a.label.clone()).collect();
+
+        // Validate we're inside an initializer
+        if let Some(init_sym) = ctx.model.query(SymbolFor { id: ctx.function_id }) {
+            if init_sym.metadata().kind() == KestrelSymbolKind::Initializer {
+                return resolve_delegating_init(&init_sym, arguments, &arg_labels, span, ctx);
+            }
+        }
+
+        // Not in an initializer - emit error
+        use crate::diagnostics::DelegatingInitOutsideInitializerError;
+        ctx.diagnostics.add_diagnostic(
+            DelegatingInitOutsideInitializerError { span: span.clone() }.into_diagnostic(),
+        );
+        return Expression::error(span);
+    }
 
     // Resolve callee first
     let callee = resolve_expression(&callee_node, ctx);
@@ -1865,4 +1892,57 @@ pub fn validate_argument_access_modes(
     }
 
     valid
+}
+
+/// Detect if the callee syntax node represents a `self.init` pattern.
+///
+/// This checks the raw syntax tree BEFORE expression resolution, because
+/// `self.init` cannot be resolved as a normal member access (init is a keyword).
+fn is_self_init_call(callee_node: &SyntaxNode) -> bool {
+    // The callee for `self.init(...)` is an ExprPath containing: self, ., init
+    // Structure: ExprPath { Identifier("self"), Dot, Init }
+
+    fn check_expr_path(node: &SyntaxNode) -> bool {
+        // Collect tokens in order: should be "self" . "init"
+        let tokens: Vec<_> = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| {
+                !matches!(
+                    t.kind(),
+                    SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
+                )
+            })
+            .collect();
+
+        // We expect exactly 3 tokens: Identifier("self"), Dot, Init
+        if tokens.len() != 3 {
+            return false;
+        }
+
+        let first_is_self = tokens[0].kind() == SyntaxKind::Identifier && tokens[0].text() == "self";
+        let second_is_dot = tokens[1].kind() == SyntaxKind::Dot;
+        // Accept either Init keyword or Identifier with text "init" (parser may represent it either way)
+        let third_is_init = tokens[2].kind() == SyntaxKind::Init
+            || (tokens[2].kind() == SyntaxKind::Identifier && tokens[2].text() == "init");
+
+        first_is_self && second_is_dot && third_is_init
+    }
+
+    // Check if this is an ExprPath directly
+    if callee_node.kind() == SyntaxKind::ExprPath {
+        return check_expr_path(callee_node);
+    }
+
+    // Or if it's wrapped in an Expression node
+    if callee_node.kind() == SyntaxKind::Expression {
+        if let Some(expr_path) = callee_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ExprPath)
+        {
+            return check_expr_path(&expr_path);
+        }
+    }
+
+    false
 }

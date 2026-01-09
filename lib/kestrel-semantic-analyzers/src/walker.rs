@@ -249,6 +249,14 @@ fn walk_expression(
                     }
                 }
             }
+            ExprKind::DelegatingInit { arguments, .. } => {
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            }
             ExprKind::Assignment { target, value } => {
                 walk_expression(target, analyzers, model, ctx);
                 walk_expression(value, analyzers, model, ctx);

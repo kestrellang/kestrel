@@ -34,13 +34,32 @@ pub enum TypeDeclarationData {
     Enum(EnumDeclarationData),
 }
 
-/// Parser for enum case parameter: `label: Type`
+/// Parser for enum case parameter: `label: Type` or just `Type`
+///
+/// Supports both:
+/// - Named: `label: Type` (e.g., `value: Int`)
+/// - Unnamed: `Type` (e.g., `Int` or `T`)
 fn enum_case_parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone {
-    identifier()
+    // Try named form first: `identifier: Type`
+    let named = identifier()
         .then(token(Token::Colon))
         .then(ty_parser())
-        .map(|((label, colon), ty)| EnumCaseParameterData { label, colon, ty })
+        .map(|((label, colon), ty)| EnumCaseParameterData {
+            label: Some(label),
+            colon: Some(colon),
+            ty,
+        });
+
+    // Unnamed form: just `Type`
+    let unnamed = ty_parser().map(|ty| EnumCaseParameterData {
+        label: None,
+        colon: None,
+        ty,
+    });
+
+    // Try named first, fall back to unnamed
+    named.or(unnamed)
 }
 
 /// Parser for enum case declaration: `(@attr)* case Name` or `(@attr)* case Name(label: Type, ...)`
