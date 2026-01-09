@@ -2,7 +2,7 @@
 
 This checklist tracks compiler features needed for `lang/std/` to compile.
 
-**Current Status:** 44 errors across 25 files
+**Current Status:** 49 errors across ~25 files
 
 Run: `cargo run -- check lang/std/**/*.ks`
 
@@ -129,43 +129,65 @@ extension Addable[Rhs] where Output = Self: AddAssign[Rhs] { ... }
 
 ---
 
-## 6. Import Symbol Resolution (2 errors, 2 files)
+## 6. Import Symbol Resolution (6 errors, 2 files)
 
 **Status:** Partially working
 **Priority:** High
 
-Module resolution works but symbol lookup within modules fails.
+Module resolution works but symbol lookup within modules fails when compiling files individually or in isolation.
 
 ```kestrel
 import std.core.(Equatable)  // Module found, symbol not found
-import std.core.(Float64)    // Module found, symbol not found
+import std.core.(Int64, Float64)  // Module found, symbols not found
 ```
 
 **Files affected:**
 - `core/ordering.ks:5` - `import std.core.(Equatable)`
-- `ops/literals.ks:5` - `import std.core.(Float64)`
+- `ops/literals.ks:5` - `import std.core.(Int64, Float64)`
 
 **Error messages:**
 - `symbol 'Equatable' not found in module 'std.core'`
+- `symbol 'Int64' not found in module 'std.core'`
 - `symbol 'Float64' not found in module 'std.core'`
+- `cannot find type 'Equatable' in this scope`
+- `cannot find type 'Int64' in this scope`
+- `cannot find type 'Float64' in this scope`
+
+**Note:** These errors occur because files are compiled in isolation. A proper module system that loads dependencies would resolve these.
 
 ---
 
-## 7. Builtin Literal Protocol Attributes (3 errors, 1 file)
+## 7. Builtin Literal Protocol Attributes
 
-**Status:** Not implemented
+**Status:** ✅ COMPLETED
 **Priority:** Low - only affects literal syntax
 
-Unknown `@builtin` attribute values for literal protocols.
+The following builtin attributes are now registered:
+- `@builtin(.ExpressibleByNilLiteral)`
+- `@builtin(.ExpressibleByArrayLiteral)`
+- `@builtin(.ExpressibleByDictionaryLiteral)`
+- `@builtin(.DefaultIntegerLiteralType)` - for type aliases
+- `@builtin(.DefaultFloatLiteralType)` - for type aliases
 
-```kestrel
-@builtin(.ExpressibleByNilLiteral)
-@builtin(.ExpressibleByArrayLiteral)
-@builtin(.ExpressibleByDictionaryLiteral)
+Type aliases can now use `@builtin` attributes (parser updated to support attributes on type aliases).
+
+---
+
+## 7b. Literal Protocol Conformance (4 errors, 1 file)
+
+**Status:** Not implemented
+**Priority:** Medium - blocks literal syntax usage
+
+Core types don't conform to literal protocols yet.
+
+```
+error: type `Bool` does not conform to protocol `ExpressibleByBoolLiteral`
 ```
 
 **Files affected:**
-- `collections/array.ks:28,33,37` - All three attributes
+- `core/bool.ks` - Bool needs to conform to `ExpressibleByBoolLiteral`
+
+**Note:** This is a new error that appears now that the literal protocol infrastructure is working. The conformance declarations exist but the types don't have the required `init(boolLiteral:)` initializers implemented correctly.
 
 ---
 
@@ -215,8 +237,8 @@ Various parse errors from unsupported syntax:
 ## Summary by Priority
 
 ### High Priority (blocks most files)
-1. **Computed properties** - 20 errors
-2. **Import symbol resolution** - 2 errors
+1. **Computed properties** - ~20 errors
+2. **Import symbol resolution** - 6 errors
 3. **Protocol property requirements** - 1 error
 
 ### Medium Priority (blocks specific features)
@@ -224,11 +246,15 @@ Various parse errors from unsupported syntax:
 5. **Extension adding conformance** - 3 errors
 6. **Where on associated types** - 1 error
 7. **Subscripts** - 1 error
+8. **Literal protocol conformance** - 4 errors (new)
 
 ### Low Priority (minor features)
-8. **Builtin literal attributes** - 3 errors
 9. **Cascade errors** - 6 errors (auto-fix)
-10. **Other parse issues** - 5 errors
+10. **Other parse issues** - ~5 errors
+
+### Completed ✅
+- **Builtin literal attributes** - All literal protocol builtins registered
+- **@builtin on type aliases** - Parser now supports attributes on type aliases
 
 ---
 
@@ -248,7 +274,7 @@ Various parse errors from unsupported syntax:
 | `iter/adapters.ks` | 1 | Parse error |
 | `ops/assign.ks` | 1 | Extension conformance |
 | `ops/range.ks` | 1 | Computed property |
-| `ops/literals.ks` | 2 | Import resolution |
+| `ops/literals.ks` | 4 | Import resolution |
 | `result/optional.ks` | 1 | Computed property |
 | `result/result.ks` | 1 | Computed property |
 | `result/error.ks` | 1 | Extension on protocol |
@@ -263,7 +289,7 @@ Various parse errors from unsupported syntax:
 | `json/json.ks` | 1 | Computed property |
 | `collections/dictionary.ks` | 1 | Parse error |
 | `collections/set.ks` | 1 | Where clause |
-| `core/bool.ks` | 1 | Parse error |
+| `core/bool.ks` | 5 | Parse error, literal conformance |
 
 ---
 

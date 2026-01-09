@@ -370,7 +370,7 @@ fn build_indirect_call_args(
 pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
     match &expr.kind {
         // === Literals ===
-        ExprKind::Literal(lit) => lower_literal(lit, expr),
+        ExprKind::Literal(lit) => lower_literal(ctx, lit, expr),
 
         // === Variable References ===
         ExprKind::LocalRef(local_id) => {
@@ -944,14 +944,168 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 }
 
 /// Lower a literal expression.
-fn lower_literal(lit: &LiteralValue, _expr: &Expression) -> Value {
-    match lit {
-        LiteralValue::Unit => Value::Immediate(Immediate::unit()),
-        LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
-        LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
-        LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
-        LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+///
+/// For primitive types (lang.i64, lang.f64, lang.i1, lang.str), returns the
+/// immediate value directly.
+///
+/// For struct types (Int64, Float64, Bool, String, etc. that conform to
+/// ExpressibleBy* protocols), generates an init call like:
+///   Int64.init(intLiteral: <immediate value>)
+fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expression) -> Value {
+    // Check the resolved type of the literal expression
+    match expr.ty.kind() {
+        // Primitive types - return immediate directly
+        TyKind::Int(_) => {
+            let LiteralValue::Integer(n) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(Immediate::i64(*n))
+        }
+        TyKind::Float(_) => {
+            let LiteralValue::Float(f) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(Immediate::f64(*f))
+        }
+        TyKind::Bool => {
+            let LiteralValue::Bool(b) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(Immediate::bool(*b))
+        }
+        TyKind::String => {
+            let LiteralValue::String(s) = lit else {
+                return Value::Immediate(Immediate::error());
+            };
+            Value::Immediate(Immediate::string(s.clone()))
+        }
+        TyKind::Unit => Value::Immediate(Immediate::unit()),
+
+        // Struct types - generate init call
+        TyKind::Struct { symbol, .. } => {
+            lower_literal_init_call(ctx, lit, expr, symbol)
+        }
+
+        // For inference variables or error types, fall back to immediate
+        TyKind::Infer | TyKind::Error => {
+            match lit {
+                LiteralValue::Unit => Value::Immediate(Immediate::unit()),
+                LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
+                LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
+                LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+                LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+            }
+        }
+
+        // Other types - this shouldn't happen for literals
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                format!("unexpected type for literal: {:?}", expr.ty.kind()),
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        }
     }
+}
+
+/// Lower a literal to an init call for struct types that conform to ExpressibleBy* protocols.
+///
+/// For example, `42` with type `Int64` becomes:
+///   1. Allocate temp for Int64 result
+///   2. Create mutable reference to it
+///   3. Call Int64.init(intLiteral: Immediate::i64(42))
+fn lower_literal_init_call(
+    ctx: &mut LoweringContext,
+    lit: &LiteralValue,
+    expr: &Expression,
+    struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Determine the init parameter label and primitive value based on literal type
+    let (init_label, primitive_value) = match lit {
+        LiteralValue::Integer(n) => ("intLiteral", Value::Immediate(Immediate::i64(*n))),
+        LiteralValue::Float(f) => ("floatLiteral", Value::Immediate(Immediate::f64(*f))),
+        LiteralValue::Bool(b) => ("boolLiteral", Value::Immediate(Immediate::bool(*b))),
+        LiteralValue::String(s) => ("stringLiteral", Value::Immediate(Immediate::string(s.clone()))),
+        LiteralValue::Unit => return Value::Immediate(Immediate::unit()),
+    };
+
+    // Find the init with the matching parameter label
+    let init_symbol = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|child| {
+            if child.metadata().kind() != KestrelSymbolKind::Initializer {
+                return false;
+            }
+            // Check if this init has a parameter with the right label
+            if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+                callable.parameters().first().map_or(false, |p| {
+                    p.label.as_ref().map_or(false, |l| l.value == init_label)
+                })
+            } else {
+                false
+            }
+        });
+
+    let Some(_init_sym) = init_symbol else {
+        // No init found - fall back to immediate (this is the case for types
+        // where the init is trivial or the type doesn't have the protocol)
+        return match lit {
+            LiteralValue::Integer(n) => Value::Immediate(Immediate::i64(*n)),
+            LiteralValue::Float(f) => Value::Immediate(Immediate::f64(*f)),
+            LiteralValue::Bool(b) => Value::Immediate(Immediate::bool(*b)),
+            LiteralValue::String(s) => Value::Immediate(Immediate::string(s.clone())),
+            LiteralValue::Unit => Value::Immediate(Immediate::unit()),
+        };
+    };
+
+    // Build the qualified name for the init function
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(struct_symbol.clone() as std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+        &mut name_parts,
+    );
+    name_parts.push("init".to_string());
+
+    let init_name = ctx
+        .mir
+        .intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    // Emit: %self_ref = ref var %result
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: self_ref first (MutRef), then the primitive value (Copy)
+    let call_args = vec![
+        CallArg::mutating(Value::Place(self_ref_place)),
+        CallArg::copy(primitive_value),
+    ];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Call the init function
+    let mir_callee = Callee::direct(init_name);
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized struct
+    Value::Place(result_place)
 }
 
 /// Lower a primitive method call (operators).

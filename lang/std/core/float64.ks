@@ -30,11 +30,11 @@ public struct Float64:
     public static var e: Float64 { Float64(value: 2.718281828459045) }
     public static var tau: Float64 { Float64(value: 6.283185307179586) }
 
-    public init(floatLiteral value: Float64) {
-        self.value = value.value
+    public init(floatLiteral value: lang.f64) {
+        self.value = value
     }
 
-    public init(intLiteral value: Int) {
+    public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_f64(value)
     }
 

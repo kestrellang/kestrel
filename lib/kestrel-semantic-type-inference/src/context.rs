@@ -393,6 +393,13 @@ mod tests {
         fn symbol_name(&self, _symbol_id: SymbolId) -> Option<String> {
             None
         }
+
+        fn builtin_protocol(
+            &self,
+            _feature: kestrel_semantic_tree::builtins::LanguageFeature,
+        ) -> Option<SymbolId> {
+            None
+        }
     }
 
     #[test]

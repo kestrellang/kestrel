@@ -32,8 +32,8 @@ public struct Int64:
     public static var maxValue: Int64 { Int64(value: 9223372036854775807) }
     public static var bitWidth: Int { 64 }
 
-    public init(intLiteral value: Int) {
-        self.value = lang.cast_i64_i64(value)
+    public init(intLiteral value: lang.i64) {
+        self.value = value
     }
 
     public func equals(other: Int64) -> Bool {

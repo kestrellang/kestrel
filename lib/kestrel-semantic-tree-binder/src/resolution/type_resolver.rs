@@ -9,7 +9,7 @@ use kestrel_prelude::{lang, primitives};
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ResolveTypePath, SemanticModel, TypePathResolution};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -242,17 +242,52 @@ impl<'a> TypeResolver<'a> {
             let segments = extract_path_segments(&path_node);
 
             if !segments.is_empty() {
-                // Check for lang.ptr[T] built-in generic pointer type
-                if segments.len() == 2 && segments[0] == lang::LANG && segments[1] == lang::PTR {
-                    let type_args = self.extract_type_arguments(ty_path_node);
-                    if type_args.len() != 1 {
-                        self.diagnostics.throw(LangPtrArityError {
-                            span: ty_span.clone(),
-                            got: type_args.len(),
-                        });
-                        return Ty::error(ty_span);
+                // Check for lang.* built-in primitive types
+                if segments.len() == 2 && segments[0] == lang::LANG {
+                    // Check for lang.ptr[T] generic pointer type
+                    if segments[1] == lang::PTR {
+                        let type_args = self.extract_type_arguments(ty_path_node);
+                        if type_args.len() != 1 {
+                            self.diagnostics.throw(LangPtrArityError {
+                                span: ty_span.clone(),
+                                got: type_args.len(),
+                            });
+                            return Ty::error(ty_span);
+                        }
+                        return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
                     }
-                    return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
+
+                    // Check for lang.i* signed integer types
+                    if segments[1] == lang::I8 {
+                        return Ty::int(IntBits::I8, ty_span);
+                    }
+                    if segments[1] == lang::I16 {
+                        return Ty::int(IntBits::I16, ty_span);
+                    }
+                    if segments[1] == lang::I32 {
+                        return Ty::int(IntBits::I32, ty_span);
+                    }
+                    if segments[1] == lang::I64 {
+                        return Ty::int(IntBits::I64, ty_span);
+                    }
+
+                    // Check for lang.i1 boolean type
+                    if segments[1] == lang::I1 {
+                        return Ty::bool(ty_span);
+                    }
+
+                    // Check for lang.f* float types
+                    if segments[1] == lang::F32 {
+                        return Ty::float(FloatBits::F32, ty_span);
+                    }
+                    if segments[1] == lang::F64 {
+                        return Ty::float(FloatBits::F64, ty_span);
+                    }
+
+                    // Check for lang.str string type
+                    if segments[1] == lang::STR {
+                        return Ty::string(ty_span);
+                    }
                 }
 
                 let type_args = self.extract_type_arguments(ty_path_node);

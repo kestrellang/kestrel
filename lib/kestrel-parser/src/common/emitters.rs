@@ -557,6 +557,7 @@ fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoun
 pub fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarationData) {
     sink.start_node(SyntaxKind::TypeAliasDeclaration);
 
+    emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Type, data.type_span);
 

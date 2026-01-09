@@ -45,22 +45,26 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprInteger => {
             let value = extract_integer_value(expr_node);
-            Expression::integer(value, span)
+            // Use inference type so literal protocols can be applied
+            Expression::integer_infer(value, span)
         }
 
         SyntaxKind::ExprFloat => {
             let value = extract_float_value(expr_node);
-            Expression::float(value, span)
+            // Use inference type so literal protocols can be applied
+            Expression::float_infer(value, span)
         }
 
         SyntaxKind::ExprString => {
             let value = extract_string_value(expr_node);
-            Expression::string(value, span)
+            // Use inference type so literal protocols can be applied
+            Expression::string_infer(value, span)
         }
 
         SyntaxKind::ExprBool => {
             let value = extract_bool_value(expr_node);
-            Expression::bool(value, span)
+            // Use inference type so literal protocols can be applied
+            Expression::bool_infer(value, span)
         }
 
         SyntaxKind::ExprArray => resolve_array_expression(expr_node, ctx),

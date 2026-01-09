@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
@@ -13,10 +14,12 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
-    AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
-    TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError,
+    AssociatedTypeBoundsInWrongContextError, BuiltinWrongKindError, DuplicateBuiltinError,
+    NotAProtocolContext, NotAProtocolError, TypeAliasContext as DiagTypeAliasContext,
+    TypeAliasRequiresTypeError,
 };
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
@@ -67,6 +70,19 @@ impl DeclarationBinder for TypeAliasBinder {
                 let alias_context = determine_context(symbol.metadata().parent().as_ref());
                 let name = symbol.metadata().name().value.clone();
                 let span = symbol.metadata().span().clone();
+
+                // Resolve attributes for module-level type aliases
+                if alias_context == TypeAliasContext::Module {
+                    let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+                        syntax,
+                        &source,
+                        context.diagnostics,
+                    );
+                    symbol.metadata().add_behavior(attributes_behavior.clone());
+
+                    // Process @builtin attribute if present
+                    process_builtin_attribute(symbol, &attributes_behavior, &source, context);
+                }
 
                 // Check for bounds in module-level type aliases (not allowed)
                 if alias_context == TypeAliasContext::Module {
@@ -817,5 +833,52 @@ fn add_conforms_to_behavior(
                 break; // Only one per protocol
             }
         }
+    }
+}
+
+/// Process @builtin attribute on a type alias.
+///
+/// Validates that:
+/// 1. The feature expects a type alias
+/// 2. The feature isn't already registered
+fn process_builtin_attribute(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    attributes: &AttributesBehavior,
+    source: &str,
+    context: &mut BindingContext,
+) {
+    let feature = match parse_builtin_attribute(attributes, source, context.diagnostics) {
+        BuiltinParseResult::Success(f) => f,
+        BuiltinParseResult::NotBuiltin | BuiltinParseResult::Error => return,
+    };
+
+    let definition = feature.definition();
+    let attr_span = attributes
+        .get_kind(kestrel_semantic_tree::attributes::AttributeKind::Builtin)
+        .map(|a| a.span.clone())
+        .unwrap_or_else(|| symbol.metadata().span().clone());
+
+    // Validate: feature must expect a type alias
+    if !definition.kind.is_type_alias() {
+        context.diagnostics.throw(BuiltinWrongKindError {
+            span: attr_span,
+            feature_name: feature.name().to_string(),
+            expected_kind: definition.kind.kind_name().to_string(),
+            actual_kind: "type alias".to_string(),
+        });
+        return;
+    }
+
+    // Register the builtin
+    let symbol_id = symbol.metadata().id();
+    if !context
+        .model
+        .builtin_registry()
+        .register_type_alias(feature, symbol_id)
+    {
+        context.diagnostics.throw(DuplicateBuiltinError {
+            span: attr_span,
+            feature_name: feature.name().to_string(),
+        });
     }
 }

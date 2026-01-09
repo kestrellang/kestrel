@@ -455,6 +455,32 @@ fn desugar_unary_op(
         return Expression::primitive_method_call(operand, prim_method, vec![], full_span);
     }
 
+    // If operand type is Infer, don't emit error yet - type inference will resolve it.
+    if matches!(operand.ty.kind(), TyKind::Infer) {
+        // For unary operations where the type is unknown, we need to set an appropriate
+        // result type based on the operator:
+        // - Neg, Identity: result has same type as operand
+        // - LogicalNot: result is Bool
+        // - BitNot: result has same type as operand (for integers)
+        // - Unwrap: result is infer (the unwrapped type)
+        let result_ty = match op {
+            // Logical not returns Bool
+            UnaryOp::LogicalNot => Ty::bool(full_span.clone()),
+            // Other operators return the same type as operand
+            UnaryOp::Neg | UnaryOp::Identity | UnaryOp::BitNot => operand.ty.clone(),
+            // Unwrap returns the unwrapped type (infer for now)
+            UnaryOp::Unwrap => Ty::infer(full_span.clone()),
+        };
+        // Use a placeholder method - type inference will correct this
+        return Expression::primitive_method_call_with_type(
+            operand,
+            placeholder_method_for_unary_op(op),
+            vec![],
+            result_ty,
+            full_span,
+        );
+    }
+
     // For non-primitive types, emit an error since we don't support user-defined operators yet
     let error = UnsupportedUnaryOperator {
         operator_span: op_span.clone(),
@@ -464,6 +490,18 @@ fn desugar_unary_op(
     };
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(full_span)
+}
+
+/// Get a placeholder primitive method for a unary operator.
+/// This is used when the operand type is Infer and we need to create a placeholder.
+fn placeholder_method_for_unary_op(op: UnaryOp) -> PrimitiveMethod {
+    match op {
+        UnaryOp::Neg => PrimitiveMethod::IntNeg,
+        UnaryOp::Identity => PrimitiveMethod::IntAdd, // Placeholder - identity is a no-op
+        UnaryOp::LogicalNot => PrimitiveMethod::BoolNot,
+        UnaryOp::BitNot => PrimitiveMethod::IntBitNot,
+        UnaryOp::Unwrap => PrimitiveMethod::IntAdd, // Placeholder - unwrap is handled specially
+    }
 }
 
 /// Look up a primitive method on a type for binary operators.

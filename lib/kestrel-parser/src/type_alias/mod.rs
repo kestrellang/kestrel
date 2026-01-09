@@ -32,6 +32,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, TypeAliasDeclarationData,
     emit_type_alias_declaration, identifier, token, visibility_parser_internal,
@@ -224,7 +225,8 @@ fn associated_type_target_parser<'tokens>()
 pub fn type_alias_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, TypeAliasDeclarationData, ParserExtra<'tokens>> + Clone
 {
-    visibility_parser_internal()
+    attribute_list_parser()
+        .then(visibility_parser_internal())
         .then(token(Token::Type))
         .then(associated_type_target_parser())
         .then(type_parameter_list_parser().or_not())
@@ -233,10 +235,11 @@ pub fn type_alias_declaration_parser_internal<'tokens>()
         .then(token(Token::Semicolon).or_not())
         .map(
             |(
-                (((((visibility, type_span), target), type_params), bounds), aliased),
+                ((((((attributes, visibility), type_span), target), type_params), bounds), aliased),
                 semicolon_span,
             )| {
                 TypeAliasDeclarationData {
+                    attributes,
                     visibility,
                     type_span,
                     target,

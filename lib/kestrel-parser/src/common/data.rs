@@ -292,6 +292,7 @@ pub struct ProtocolDeclarationData {
 /// Raw parsed data for type alias declaration internals
 #[derive(Debug, Clone)]
 pub struct TypeAliasDeclarationData {
+    pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub type_span: Span,
     /// The target of the type alias - simple name or qualified path

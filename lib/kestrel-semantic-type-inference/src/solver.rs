@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyId, TyKind};
 use kestrel_span::Span;
 
@@ -36,10 +37,100 @@ pub fn solve(mut ctx: InferenceContext<'_>) -> Solution {
         }
     }
 
+    // Apply default types for unresolved literal types
+    apply_default_literal_types(&mut ctx);
+
+    // Run another round to verify conformances after defaults are applied
+    loop {
+        let progress = solve_round(&mut ctx);
+        if !progress {
+            break;
+        }
+    }
+
     // Check that everything was resolved, add error if not
     check_fully_resolved(&mut ctx);
 
     ctx.into_solution()
+}
+
+/// Apply default types for unresolved literal types.
+///
+/// When a literal's type is still ambiguous (Infer) after the main solving loop,
+/// we apply the default type for that literal kind:
+/// - Integer literals → Int64 (configurable via DefaultIntegerLiteralType)
+/// - Float literals → Float64 (configurable via DefaultFloatLiteralType)
+/// - String literals → String
+/// - Bool literals → Bool
+fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
+    // Collect literal constraints where the type is still Infer
+    let constraints = ctx.take_constraints();
+    let mut literals_to_default: Vec<(TyId, LanguageFeature, Span)> = Vec::new();
+
+    for constraint in &constraints {
+        if let Constraint::Conforms { ty, protocol } = constraint {
+            let resolved = resolve_type(ctx, *ty);
+            if matches!(resolved.kind(), TyKind::Infer) {
+                // Check if this is a literal protocol
+                if let Some(feature) = get_literal_feature_for_protocol(ctx, protocol.symbol_id) {
+                    literals_to_default.push((*ty, feature, protocol.span.clone()));
+                }
+            }
+        }
+    }
+
+    // Put constraints back (except for literal constraints that we're defaulting)
+    for constraint in constraints {
+        if let Constraint::Conforms { ty, protocol } = &constraint {
+            let resolved = resolve_type(ctx, *ty);
+            if matches!(resolved.kind(), TyKind::Infer) {
+                if get_literal_feature_for_protocol(ctx, protocol.symbol_id).is_some() {
+                    // Skip this constraint - we're applying a default type
+                    continue;
+                }
+            }
+        }
+        ctx.push_constraint(constraint);
+    }
+
+    // Apply defaults
+    for (ty_id, feature, span) in literals_to_default {
+        let default_ty = match feature {
+            LanguageFeature::ExpressibleByIntLiteral => ctx.oracle().default_integer_type(span),
+            LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
+            LanguageFeature::ExpressibleByStringLiteral => Ty::string(span),
+            LanguageFeature::ExpressibleByBoolLiteral => Ty::bool(span),
+            _ => continue,
+        };
+
+        // Register the default type and substitute
+        ctx.register_type(&default_ty);
+        ctx.substitutions_mut().insert(ty_id, default_ty);
+    }
+}
+
+/// Check if a protocol symbol ID corresponds to a literal expression protocol.
+fn get_literal_feature_for_protocol(
+    ctx: &InferenceContext<'_>,
+    protocol_id: semantic_tree::symbol::SymbolId,
+) -> Option<LanguageFeature> {
+    // Check each literal protocol
+    let features = [
+        LanguageFeature::ExpressibleByIntLiteral,
+        LanguageFeature::ExpressibleByFloatLiteral,
+        LanguageFeature::ExpressibleByStringLiteral,
+        LanguageFeature::ExpressibleByBoolLiteral,
+    ];
+
+    for feature in features {
+        if let Some(id) = ctx.oracle().builtin_protocol(feature) {
+            if id == protocol_id {
+                return Some(feature);
+            }
+        }
+    }
+
+    None
 }
 
 /// Run one round of constraint solving.
@@ -1429,6 +1520,10 @@ mod tests {
         }
 
         fn symbol_name(&self, _symbol_id: SymbolId) -> Option<String> {
+            None
+        }
+
+        fn builtin_protocol(&self, _feature: LanguageFeature) -> Option<SymbolId> {
             None
         }
     }

@@ -32,7 +32,7 @@ public struct Int32:
     public static var maxValue: Int32 { Int32(value: 2147483647) }
     public static var bitWidth: Int { 32 }
 
-    public init(intLiteral value: Int) {
+    public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_i32(value)
     }
 

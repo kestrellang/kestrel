@@ -3,7 +3,9 @@
 //! The [`TypeOracle`] trait allows the inference solver to query type information
 //! without depending directly on the semantic model implementation.
 
-use kestrel_semantic_tree::ty::{Substitutions, Ty};
+use kestrel_semantic_tree::builtins::LanguageFeature;
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Substitutions, Ty};
+use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
 /// Describes a successfully resolved member access.
@@ -112,4 +114,31 @@ pub trait TypeOracle {
     ///
     /// The symbol's name, or None if not found.
     fn symbol_name(&self, symbol_id: SymbolId) -> Option<String>;
+
+    /// Get the symbol ID for a builtin protocol.
+    ///
+    /// Used by type inference to look up ExpressibleBy* protocols for literal type inference.
+    ///
+    /// # Arguments
+    ///
+    /// * `feature` - The language feature to look up (e.g., ExpressibleByIntLiteral)
+    ///
+    /// # Returns
+    ///
+    /// The protocol's symbol ID, or None if not registered.
+    fn builtin_protocol(&self, feature: LanguageFeature) -> Option<SymbolId>;
+
+    /// Get the default type for integer literals when type is ambiguous.
+    ///
+    /// Returns Int64 by default.
+    fn default_integer_type(&self, span: Span) -> Ty {
+        Ty::int(IntBits::I64, span)
+    }
+
+    /// Get the default type for float literals when type is ambiguous.
+    ///
+    /// Returns Float64 by default.
+    fn default_float_type(&self, span: Span) -> Ty {
+        Ty::float(FloatBits::F64, span)
+    }
 }

@@ -31,7 +31,7 @@ public struct UInt8:
     public static var maxValue: UInt8 { UInt8(value: 255) }
     public static var bitWidth: Int { 8 }
 
-    public init(intLiteral value: Int) {
+    public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_u8(value)
     }
 

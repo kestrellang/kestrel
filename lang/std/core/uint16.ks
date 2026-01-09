@@ -31,7 +31,7 @@ public struct UInt16:
     public static var maxValue: UInt16 { UInt16(value: 65535) }
     public static var bitWidth: Int { 16 }
 
-    public init(intLiteral value: Int) {
+    public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_u16(value)
     }
 

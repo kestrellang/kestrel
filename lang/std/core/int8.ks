@@ -36,7 +36,7 @@ public struct Int8:
     public static var bitWidth: Int { 8 }
 
     // ExpressibleByIntLiteral
-    public init(intLiteral value: Int) {
+    public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_i8(value)
     }
 

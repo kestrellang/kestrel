@@ -13,6 +13,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::Symbol;
 
+use crate::constraint::ProtocolRef;
 use crate::context::InferenceContext;
 
 /// Generate type inference constraints for a code block.
@@ -285,8 +286,44 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
     ctx.register_type(&expr.ty);
 
     match &expr.kind {
-        // Literals have concrete types - no constraints needed
-        ExprKind::Literal(_) => {}
+        // Literals: generate ExpressibleBy* protocol constraints or use default types
+        ExprKind::Literal(lit_val) => {
+            use kestrel_semantic_tree::builtins::LanguageFeature;
+            use kestrel_semantic_tree::expr::LiteralValue;
+            use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty};
+
+            let (feature, default_ty) = match lit_val {
+                LiteralValue::Integer(_) => (
+                    Some(LanguageFeature::ExpressibleByIntLiteral),
+                    Some(Ty::int(IntBits::I64, expr.span.clone())),
+                ),
+                LiteralValue::Float(_) => (
+                    Some(LanguageFeature::ExpressibleByFloatLiteral),
+                    Some(Ty::float(FloatBits::F64, expr.span.clone())),
+                ),
+                LiteralValue::String(_) => (
+                    Some(LanguageFeature::ExpressibleByStringLiteral),
+                    Some(Ty::string(expr.span.clone())),
+                ),
+                LiteralValue::Bool(_) => (
+                    Some(LanguageFeature::ExpressibleByBoolLiteral),
+                    Some(Ty::bool(expr.span.clone())),
+                ),
+                LiteralValue::Unit => (None, None), // Unit literal has concrete type
+            };
+
+            if let Some(feature) = feature {
+                if let Some(protocol_id) = ctx.oracle().builtin_protocol(feature) {
+                    // Protocol is registered - use protocol-based inference
+                    let protocol_ref = ProtocolRef::new(protocol_id, expr.span.clone());
+                    ctx.conforms(expr.ty.id(), protocol_ref);
+                } else if let Some(default_ty) = default_ty {
+                    // Protocol not registered (e.g., in tests) - use default type directly
+                    ctx.register_type(&default_ty);
+                    ctx.equate(expr.ty.id(), default_ty.id(), expr.span.clone());
+                }
+            }
+        }
 
         // Arrays: all elements must have the same type
         ExprKind::Array(elements) => {

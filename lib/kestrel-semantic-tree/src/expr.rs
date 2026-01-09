@@ -1276,7 +1276,9 @@ impl Expression {
         }
     }
 
-    /// Create an integer literal expression.
+    /// Create an integer literal expression with default type Int64.
+    ///
+    /// For protocol-based literal inference, use `integer_infer` instead.
     pub fn integer(value: i64, span: Span) -> Self {
         Expression {
             id: ExprId::new(),
@@ -1287,7 +1289,23 @@ impl Expression {
         }
     }
 
-    /// Create a float literal expression.
+    /// Create an integer literal expression with inference type.
+    ///
+    /// During type inference, an ExpressibleByIntLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to Int64 if ambiguous).
+    pub fn integer_infer(value: i64, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Integer(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a float literal expression with default type Float64.
+    ///
+    /// For protocol-based literal inference, use `float_infer` instead.
     pub fn float(value: f64, span: Span) -> Self {
         Expression {
             id: ExprId::new(),
@@ -1298,7 +1316,23 @@ impl Expression {
         }
     }
 
-    /// Create a string literal expression.
+    /// Create a float literal expression with inference type.
+    ///
+    /// During type inference, an ExpressibleByFloatLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to Float64 if ambiguous).
+    pub fn float_infer(value: f64, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Float(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a string literal expression with default type String.
+    ///
+    /// For protocol-based literal inference, use `string_infer` instead.
     pub fn string(value: String, span: Span) -> Self {
         Expression {
             id: ExprId::new(),
@@ -1309,12 +1343,42 @@ impl Expression {
         }
     }
 
-    /// Create a boolean literal expression.
+    /// Create a string literal expression with inference type.
+    ///
+    /// During type inference, an ExpressibleByStringLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to String if ambiguous).
+    pub fn string_infer(value: String, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::String(value)),
+            ty: Ty::infer(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a boolean literal expression with default type Bool.
+    ///
+    /// For protocol-based literal inference, use `bool_infer` instead.
     pub fn bool(value: bool, span: Span) -> Self {
         Expression {
             id: ExprId::new(),
             kind: ExprKind::Literal(LiteralValue::Bool(value)),
             ty: Ty::bool(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a boolean literal expression with inference type.
+    ///
+    /// During type inference, an ExpressibleByBoolLiteral constraint will be added
+    /// and the type will be resolved based on context (defaulting to Bool if ambiguous).
+    pub fn bool_infer(value: bool, span: Span) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::Literal(LiteralValue::Bool(value)),
+            ty: Ty::infer(span.clone()),
             span,
             mutable: false,
         }

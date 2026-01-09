@@ -25,9 +25,16 @@ pub enum LanguageFeature {
     ExpressibleByFloatLiteral,
     ExpressibleByStringLiteral,
     ExpressibleByBoolLiteral,
+    ExpressibleByNilLiteral,
+    ExpressibleByArrayLiteral,
+    ExpressibleByDictionaryLiteral,
 
     // Protocol builtins - FFI
     FFISafe,
+
+    // Type alias builtins - default literal types
+    DefaultIntegerLiteralType,
+    DefaultFloatLiteralType,
     // Future: Operator protocols
     // Add, Sub, Mul, Div, Rem, Neg,
     // BitAnd, BitOr, BitXor, BitNot,
@@ -46,7 +53,12 @@ impl LanguageFeature {
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
+            "ExpressibleByNilLiteral" => Some(Self::ExpressibleByNilLiteral),
+            "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
+            "ExpressibleByDictionaryLiteral" => Some(Self::ExpressibleByDictionaryLiteral),
             "FFISafe" => Some(Self::FFISafe),
+            "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
+            "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
             _ => None,
         }
     }
@@ -61,7 +73,12 @@ impl LanguageFeature {
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
+            Self::ExpressibleByNilLiteral => "ExpressibleByNilLiteral",
+            Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
+            Self::ExpressibleByDictionaryLiteral => "ExpressibleByDictionaryLiteral",
             Self::FFISafe => "FFISafe",
+            Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
+            Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
         }
     }
 
@@ -134,6 +151,36 @@ impl LanguageFeature {
                     disallow_enum_conformance: false,
                 },
             },
+            Self::ExpressibleByNilLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::ExpressibleByArrayLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::ExpressibleByDictionaryLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
             Self::FFISafe => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
@@ -143,6 +190,14 @@ impl LanguageFeature {
                     requires_fields_conform: true,
                     disallow_enum_conformance: true,
                 },
+            },
+            Self::DefaultIntegerLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultFloatLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
             },
         }
     }
@@ -177,6 +232,8 @@ pub enum BuiltinKind {
     Function,
     /// A builtin variable/constant.
     Variable,
+    /// A builtin type alias (e.g., DefaultIntegerLiteralType).
+    TypeAlias,
 }
 
 impl BuiltinKind {
@@ -210,6 +267,11 @@ impl BuiltinKind {
         matches!(self, Self::Variable)
     }
 
+    /// Check if this kind is for a type alias.
+    pub fn is_type_alias(&self) -> bool {
+        matches!(self, Self::TypeAlias)
+    }
+
     /// Get the expected symbol kind name for error messages.
     pub fn kind_name(&self) -> &'static str {
         match self {
@@ -219,6 +281,7 @@ impl BuiltinKind {
             Self::Enum => "enum",
             Self::Function => "function",
             Self::Variable => "variable",
+            Self::TypeAlias => "type alias",
         }
     }
 }
@@ -261,6 +324,10 @@ pub struct BuiltinRegistry {
     // Method builtins
     methods: RwLock<HashMap<LanguageFeature, SymbolId>>,
     method_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
+
+    // Type alias builtins
+    type_aliases: RwLock<HashMap<LanguageFeature, SymbolId>>,
+    type_alias_features: RwLock<HashMap<SymbolId, LanguageFeature>>,
 }
 
 impl BuiltinRegistry {
@@ -471,6 +538,37 @@ impl BuiltinRegistry {
     }
 
     // =========================================================================
+    // Type alias methods
+    // =========================================================================
+
+    /// Register a type alias as a builtin. Returns true if successful,
+    /// false if the feature was already registered.
+    pub fn register_type_alias(&self, feature: LanguageFeature, id: SymbolId) -> bool {
+        let mut type_aliases = self.type_aliases.write();
+        if type_aliases.contains_key(&feature) {
+            return false;
+        }
+        type_aliases.insert(feature, id);
+        self.type_alias_features.write().insert(id, feature);
+        true
+    }
+
+    /// Get the symbol ID for a builtin type alias.
+    pub fn type_alias(&self, feature: LanguageFeature) -> Option<SymbolId> {
+        self.type_aliases.read().get(&feature).copied()
+    }
+
+    /// Check if a symbol is a builtin type alias.
+    pub fn is_builtin_type_alias(&self, id: SymbolId) -> bool {
+        self.type_alias_features.read().contains_key(&id)
+    }
+
+    /// Get the feature for a builtin type alias.
+    pub fn type_alias_feature(&self, id: SymbolId) -> Option<LanguageFeature> {
+        self.type_alias_features.read().get(&id).copied()
+    }
+
+    // =========================================================================
     // Generic methods
     // =========================================================================
 
@@ -482,5 +580,6 @@ impl BuiltinRegistry {
             || self.functions.read().contains_key(&feature)
             || self.variables.read().contains_key(&feature)
             || self.methods.read().contains_key(&feature)
+            || self.type_aliases.read().contains_key(&feature)
     }
 }

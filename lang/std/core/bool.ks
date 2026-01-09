@@ -16,8 +16,8 @@ public struct Bool:
     private var value: lang.bool
 
     // ExpressibleByBoolLiteral
-    public init(boolLiteral value: Bool) {
-        self.value = value.value
+    public init(boolLiteral value: lang.i1) {
+        self.value = value
     }
 
     // Equatable

@@ -25,11 +25,11 @@ public struct Float32:
     public static var nan: Float32 { Float32(value: lang.f32_nan()) }
     public static var bitWidth: Int { 32 }
 
-    public init(floatLiteral value: Float64) {
+    public init(floatLiteral value: lang.f64) {
         self.value = lang.cast_f64_f32(value)
     }
 
-    public init(intLiteral value: Int) {
+    public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_f32(value)
     }
 

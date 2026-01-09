@@ -334,6 +334,49 @@ impl TypeOracle for SemanticModel {
         let symbol = self.query(SymbolFor { id: symbol_id })?;
         Some(symbol.metadata().name().value.clone())
     }
+
+    fn builtin_protocol(
+        &self,
+        feature: kestrel_semantic_tree::builtins::LanguageFeature,
+    ) -> Option<SymbolId> {
+        self.builtin_registry().protocol(feature)
+    }
+
+    fn default_integer_type(&self, span: kestrel_span::Span) -> Ty {
+        use kestrel_semantic_tree::builtins::LanguageFeature;
+        use kestrel_semantic_tree::ty::IntBits;
+
+        // Try to look up the DefaultIntegerLiteralType type alias
+        if let Some(type_alias_id) = self
+            .builtin_registry()
+            .type_alias(LanguageFeature::DefaultIntegerLiteralType)
+        {
+            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
+                return resolved;
+            }
+        }
+
+        // Fall back to default Int64
+        Ty::int(IntBits::I64, span)
+    }
+
+    fn default_float_type(&self, span: kestrel_span::Span) -> Ty {
+        use kestrel_semantic_tree::builtins::LanguageFeature;
+        use kestrel_semantic_tree::ty::FloatBits;
+
+        // Try to look up the DefaultFloatLiteralType type alias
+        if let Some(type_alias_id) = self
+            .builtin_registry()
+            .type_alias(LanguageFeature::DefaultFloatLiteralType)
+        {
+            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
+                return resolved;
+            }
+        }
+
+        // Fall back to default Float64
+        Ty::float(FloatBits::F64, span)
+    }
 }
 
 /// Get the container symbol and substitutions from a type.
