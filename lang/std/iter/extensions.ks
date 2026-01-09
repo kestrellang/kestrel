@@ -1,5 +1,7 @@
 // Iterator extension methods
 
+module std.iter
+
 extension Iterator {
     // Transform
     public func map[U](transform: (Item) -> U) -> MapIterator[Self, U] {

@@ -2,6 +2,8 @@
 // These are raw operator protocols with flexible return types.
 // Semantic protocols (Equatable, Comparable) provide Bool-returning implementations.
 
+module std.ops
+
 // TODO: Add back 
 //@operator(==)
 public protocol Equal[Rhs = Self] {

@@ -1,5 +1,7 @@
 // Numeric protocols
 
+module std.core
+
 // Base numeric protocol
 public protocol Numeric: Equatable, ExpressibleByIntLiteral {
     static var zero: Self { get }

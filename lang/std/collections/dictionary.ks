@@ -1,5 +1,7 @@
 // Dictionary type - hash map with COW semantics
 
+module std.collections
+
 public struct Dictionary[K, V, A]:
     Iterable,
     ExpressibleByDictionaryLiteral,

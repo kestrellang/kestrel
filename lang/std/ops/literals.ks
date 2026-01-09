@@ -1,5 +1,9 @@
 // Literal protocols - types that can be constructed from literals
 
+module std.ops
+
+import std.core.(Float64)
+
 @builtin(.ExpressibleByBoolLiteral)
 public protocol ExpressibleByBoolLiteral {
     init(boolLiteral value: Bool)

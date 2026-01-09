@@ -1,5 +1,7 @@
 // Buffer[T] - owning contiguous memory region
 
+module std.memory
+
 public struct Buffer[T, A]: NonCopyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int

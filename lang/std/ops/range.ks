@@ -1,5 +1,7 @@
 // Range operator protocols and types
 
+module std.ops
+
 // TODO: Add back 
 //@operator(..)
 public protocol RangeConstructible[Rhs = Self] {

@@ -1,5 +1,7 @@
 // Bool type
 
+module std.core
+
 import std.ffi.(FFISafe)
 
 public struct Bool:
@@ -35,17 +37,17 @@ public struct Bool:
     // And
     type Output = Bool
 
-    public func and(other: Bool) -> Bool {
+    public func logicalAnd(other: Bool) -> Bool {
         Bool(value: lang.bool_and(self.value, other.value))
     }
 
     // Or
-    public func or(other: Bool) -> Bool {
+    public func logicalOr(other: Bool) -> Bool {
         Bool(value: lang.bool_or(self.value, other.value))
     }
 
     // Not
-    public func not() -> Bool {
+    public func logicalNot() -> Bool {
         Bool(value: lang.bool_not(self.value))
     }
 }

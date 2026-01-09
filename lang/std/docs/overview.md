@@ -629,37 +629,38 @@ extension Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqu
 
 ### Logical Operators
 
-Kestrel uses keyword-style logical operators for clarity:
+Kestrel uses keyword-style logical operators (`and`, `or`, `not`) for clarity.
+Since these are keywords, the protocol method names use the `logical*` prefix:
 
 ```kestrel
-// TODO: Add back 
+// TODO: Add back
 //@operator(and)
 public protocol And[Rhs = Self] {
     type Output
-    func and(other: Rhs) -> Output
+    func logicalAnd(other: Rhs) -> Output
 }
 
-// TODO: Add back 
+// TODO: Add back
 //@operator(or)
 public protocol Or[Rhs = Self] {
     type Output
-    func or(other: Rhs) -> Output
+    func logicalOr(other: Rhs) -> Output
 }
 
-// TODO: Add back 
+// TODO: Add back
 //@operator(not)
 public protocol Not {
     type Output
-    func not() -> Output
+    func logicalNot() -> Output
 }
 
 // Bool implements these with Output = Bool
 extension Bool: And[Bool], Or[Bool], Not {
     type Output = Bool
-    // ...
+    // logicalAnd, logicalOr, logicalNot implementations
 }
 
-// Usage
+// Usage (operators desugar to protocol method calls)
 if x > 0 and x < 100 {
     // ...
 }

@@ -1,5 +1,7 @@
 // Character types
 
+module std.text
+
 // Byte - single UTF-8 byte
 public type Byte = UInt8
 

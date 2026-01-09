@@ -1,5 +1,7 @@
 // Core iterator protocol
 
+module std.iter
+
 public protocol Iterator {
     type Item
     func next() -> Optional[Item]

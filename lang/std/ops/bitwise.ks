@@ -1,5 +1,7 @@
 // Bitwise operator protocols
 
+module std.ops
+
 // TODO: Add back 
 //@operator(&)
 public protocol BitwiseAnd[Rhs = Self] {

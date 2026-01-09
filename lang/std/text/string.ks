@@ -1,5 +1,7 @@
 // String type - UTF-8 encoded string with COW semantics
 
+module std.text
+
 public struct String[A]:
     ExpressibleByStringLiteral,
     Addable,

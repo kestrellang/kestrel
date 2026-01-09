@@ -1,6 +1,8 @@
 // Float32 - 32-bit floating point
 // Generated from templates/float.ks.template
 
+module std.core
+
 import std.ffi.(FFISafe)
 
 public struct Float32:

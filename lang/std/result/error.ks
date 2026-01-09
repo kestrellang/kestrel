@@ -1,5 +1,7 @@
 // Error protocol and related types
 
+module std.result
+
 public protocol Error {
     func description() -> String
 }

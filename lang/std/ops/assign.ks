@@ -1,5 +1,7 @@
 // Compound assignment operator protocols
 
+module std.ops
+
 // TODO: Add back 
 //@operator(+=)
 public protocol AddAssign[Rhs = Self] {
@@ -61,61 +63,61 @@ public protocol RightShiftAssign[Rhs = Int] {
 }
 
 // Default implementations from base operators
-extension Addable[Rhs] where Output = Self: AddAssign[Rhs] {
+extension Addable[Rhs]: AddAssign[Rhs] where Output = Self {
     func addAssign(other: Rhs) {
         self = self.add(other)
     }
 }
 
-extension Subtractable[Rhs] where Output = Self: SubtractAssign[Rhs] {
+extension Subtractable[Rhs]: SubtractAssign[Rhs] where Output = Self {
     func subtractAssign(other: Rhs) {
         self = self.subtract(other)
     }
 }
 
-extension Multipliable[Rhs] where Output = Self: MultiplyAssign[Rhs] {
+extension Multipliable[Rhs]: MultiplyAssign[Rhs] where Output = Self {
     func multiplyAssign(other: Rhs) {
         self = self.multiply(other)
     }
 }
 
-extension Divisible[Rhs] where Output = Self: DivideAssign[Rhs] {
+extension Divisible[Rhs]: DivideAssign[Rhs] where Output = Self {
     func divideAssign(other: Rhs) {
         self = self.divide(other)
     }
 }
 
-extension Modulo[Rhs] where Output = Self: ModuloAssign[Rhs] {
+extension Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
     func modAssign(other: Rhs) {
         self = self.mod(other)
     }
 }
 
-extension BitwiseAnd[Rhs] where Output = Self: BitwiseAndAssign[Rhs] {
+extension BitwiseAnd[Rhs]: BitwiseAndAssign[Rhs] where Output = Self {
     func bitwiseAndAssign(other: Rhs) {
         self = self.bitwiseAnd(other)
     }
 }
 
-extension BitwiseOr[Rhs] where Output = Self: BitwiseOrAssign[Rhs] {
+extension BitwiseOr[Rhs]: BitwiseOrAssign[Rhs] where Output = Self {
     func bitwiseOrAssign(other: Rhs) {
         self = self.bitwiseOr(other)
     }
 }
 
-extension BitwiseXor[Rhs] where Output = Self: BitwiseXorAssign[Rhs] {
+extension BitwiseXor[Rhs]: BitwiseXorAssign[Rhs] where Output = Self {
     func bitwiseXorAssign(other: Rhs) {
         self = self.bitwiseXor(other)
     }
 }
 
-extension LeftShift[Rhs] where Output = Self: LeftShiftAssign[Rhs] {
+extension LeftShift[Rhs]: LeftShiftAssign[Rhs] where Output = Self {
     func shiftLeftAssign(by count: Rhs) {
         self = self.shiftLeft(by: count)
     }
 }
 
-extension RightShift[Rhs] where Output = Self: RightShiftAssign[Rhs] {
+extension RightShift[Rhs]: RightShiftAssign[Rhs] where Output = Self {
     func shiftRightAssign(by count: Rhs) {
         self = self.shiftRight(by: count)
     }

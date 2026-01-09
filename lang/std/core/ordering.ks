@@ -1,5 +1,9 @@
 // Ordering enum for comparison results
 
+module std.core
+
+import std.core.(Equatable)
+
 public enum Ordering: Equatable {
     case Less
     case Equal

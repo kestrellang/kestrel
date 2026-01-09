@@ -1,5 +1,7 @@
 // Result type
 
+module std.result
+
 public enum Result[T, E]:
     Tryable[T, E],
     Throwable[E],
@@ -138,8 +140,9 @@ public enum Result[T, E]:
         }
     }
 
-    // Logical operations
-    public func and[U](other: Result[U, E]) -> Result[U, E] {
+    // Combinator operations
+    // Note: 'and'/'or' are keywords, so we use 'andValue'/'orValue'
+    public func andValue[U](other: Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(_) => other,
             .Err(let error) => .Err(error)
@@ -150,7 +153,7 @@ public enum Result[T, E]:
         self.flatMap(transform)
     }
 
-    public func or(other: Result[T, E]) -> Result[T, E] {
+    public func orValue(other: Result[T, E]) -> Result[T, E] {
         match self {
             .Ok(let value) => .Ok(value),
             .Err(_) => other

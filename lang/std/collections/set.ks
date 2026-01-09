@@ -1,5 +1,7 @@
 // Set type - hash set with COW semantics
 
+module std.collections
+
 public struct Set[T, A]:
     Iterable,
     Collectable,

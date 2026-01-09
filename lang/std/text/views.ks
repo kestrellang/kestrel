@@ -1,5 +1,7 @@
 // String views for different representations
 
+module std.text
+
 // BytesView - raw UTF-8 bytes (O(1) indexing)
 public struct BytesView[A]: Iterable where A: Allocator {
     type Item = Byte

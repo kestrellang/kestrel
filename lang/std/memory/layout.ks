@@ -1,5 +1,7 @@
 // Memory layout types
 
+module std.memory
+
 public struct Layout: Equatable {
     public var size: Int
     public var alignment: Int

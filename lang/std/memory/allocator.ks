@@ -1,5 +1,7 @@
 // Allocator protocol and implementations
 
+module std.memory
+
 public protocol Allocator {
     func allocate(layout: Layout) -> Optional[RawPointer]
     func deallocate(ptr: RawPointer, layout: Layout)

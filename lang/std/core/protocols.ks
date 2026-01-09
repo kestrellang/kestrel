@@ -1,5 +1,7 @@
 // Core protocols
 
+module std.core
+
 // Equatable - types that can be compared for equality
 public protocol Equatable {
     func equals(other: Self) -> Bool

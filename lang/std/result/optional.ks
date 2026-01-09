@@ -1,5 +1,7 @@
 // Optional type
 
+module std.result
+
 public enum Optional[T]: ExpressibleByNilLiteral {
     case Some(T)
     case None
@@ -106,8 +108,9 @@ public enum Optional[T]: ExpressibleByNilLiteral {
         }
     }
 
-    // Logical operations
-    public func and[U](other: Optional[U]) -> Optional[U] {
+    // Combinator operations
+    // Note: 'and'/'or' are keywords, so we use 'andValue'/'orValue'
+    public func andValue[U](other: Optional[U]) -> Optional[U] {
         match self {
             .Some(_) => other,
             .None => .None
@@ -118,7 +121,7 @@ public enum Optional[T]: ExpressibleByNilLiteral {
         self.flatMap(transform)
     }
 
-    public func or(other: Optional[T]) -> Optional[T] {
+    public func orValue(other: Optional[T]) -> Optional[T] {
         match self {
             .Some(let value) => .Some(value),
             .None => other

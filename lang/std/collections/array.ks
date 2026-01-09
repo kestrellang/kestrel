@@ -1,5 +1,7 @@
 // Array type - dynamic growable array with COW semantics
 
+module std.collections
+
 public struct Array[T, A]:
     Iterable,
     Collectable,

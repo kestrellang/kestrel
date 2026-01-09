@@ -1,6 +1,8 @@
 // Int16 - 16-bit signed integer
 // Generated from templates/integer.ks.template
 
+module std.core
+
 import std.ffi.(FFISafe)
 
 public struct Int16:

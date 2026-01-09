@@ -1,5 +1,7 @@
 // Pointer types
 
+module std.memory
+
 import std.ffi.(FFISafe)
 
 // RawPointer - untyped pointer

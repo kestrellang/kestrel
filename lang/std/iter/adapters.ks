@@ -1,5 +1,7 @@
 // Iterator adapter types
 
+module std.iter
+
 // MapIterator
 public struct MapIterator[I, U]: Iterator where I: Iterator {
     type Item = U

@@ -1,5 +1,7 @@
 // Arithmetic operator protocols
 
+module std.ops
+
 // TODO: Add back 
 //@operator(+)
 public protocol Addable[Rhs = Self] {
