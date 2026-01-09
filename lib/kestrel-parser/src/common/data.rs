@@ -350,6 +350,7 @@ pub enum ProtocolBodyItem {
     Function(FunctionDeclarationData),
     AssociatedType(TypeAliasDeclarationData),
     Initializer(InitializerDeclarationData),
+    Field(FieldDeclarationData),
 }
 
 /// Raw parsed data for extension declaration internals

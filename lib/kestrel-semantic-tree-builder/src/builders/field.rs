@@ -85,7 +85,13 @@ impl Builder for FieldBuilder {
                 .children()
                 .find(|child| child.kind() == SyntaxKind::CodeBlock);
 
-            // Create getter symbol for either explicit or shorthand form
+            // Check for protocol requirement syntax (just Get token without body)
+            let has_get_token = accessors
+                .children_with_tokens()
+                .filter_map(|elem| elem.into_token())
+                .any(|tok| tok.kind() == SyntaxKind::Get);
+
+            // Create getter symbol for explicit, shorthand, or protocol requirement form
             if let Some(getter_node) = getter_clause {
                 // Explicit: var x: Int { get { ... } }
                 let getter_span = get_node_span(&getter_node, file_id);
@@ -110,12 +116,30 @@ impl Builder for FieldBuilder {
                 );
                 let getter_arc = Arc::new(getter_symbol) as Arc<dyn Symbol<KestrelLanguage>>;
                 field_arc.metadata().add_child(&getter_arc);
+            } else if has_get_token {
+                // Protocol requirement: var x: Int { get }
+                // Use the field's name span for the getter since there's no body
+                let getter_symbol = GetterSymbol::new(
+                    SymbolId::new(),
+                    &field_arc_dyn,
+                    &name_str,
+                    name_span.clone(),
+                    name_span.clone(),
+                );
+                let getter_arc = Arc::new(getter_symbol) as Arc<dyn Symbol<KestrelLanguage>>;
+                field_arc.metadata().add_child(&getter_arc);
             }
 
             // Find setter clause (optional, only in explicit form)
             let setter_clause = accessors
                 .children()
                 .find(|child| child.kind() == SyntaxKind::SetterClause);
+
+            // Check for protocol requirement setter (just Set token without body)
+            let has_set_token = accessors
+                .children_with_tokens()
+                .filter_map(|elem| elem.into_token())
+                .any(|tok| tok.kind() == SyntaxKind::Set);
 
             if let Some(setter_node) = setter_clause {
                 let setter_span = get_node_span(&setter_node, file_id);
@@ -125,6 +149,18 @@ impl Builder for FieldBuilder {
                     &name_str,
                     name_span.clone(),
                     setter_span,
+                );
+                let setter_arc = Arc::new(setter_symbol) as Arc<dyn Symbol<KestrelLanguage>>;
+                field_arc.metadata().add_child(&setter_arc);
+            } else if has_set_token && setter_clause.is_none() {
+                // Protocol requirement: var x: Int { get set }
+                // Use the field's name span for the setter since there's no body
+                let setter_symbol = SetterSymbol::new(
+                    SymbolId::new(),
+                    &field_arc_dyn,
+                    &name_str,
+                    name_span.clone(),
+                    name_span.clone(),
                 );
                 let setter_arc = Arc::new(setter_symbol) as Arc<dyn Symbol<KestrelLanguage>>;
                 field_arc.metadata().add_child(&setter_arc);

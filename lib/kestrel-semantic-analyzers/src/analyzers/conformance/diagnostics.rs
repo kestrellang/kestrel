@@ -125,3 +125,73 @@ impl IntoDiagnostic for AmbiguousProtocolMethodError {
             ])
     }
 }
+
+pub struct MissingProtocolPropertyError {
+    pub span: Span,
+    pub struct_name: String,
+    pub protocol_name: String,
+    pub property_name: String,
+    pub property_type: String,
+}
+
+impl IntoDiagnostic for MissingProtocolPropertyError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type '{}' does not implement property '{}' from protocol '{}'",
+                self.struct_name, self.property_name, self.protocol_name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!(
+                    "missing property '{}' of type '{}'",
+                    self.property_name, self.property_type
+                ))])
+    }
+}
+
+pub struct ProtocolPropertyTypeMismatchError {
+    pub span: Span,
+    pub struct_name: String,
+    pub protocol_name: String,
+    pub property_name: String,
+    pub expected_type: String,
+    pub actual_type: String,
+}
+
+impl IntoDiagnostic for ProtocolPropertyTypeMismatchError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "property '{}' has wrong type for protocol '{}'",
+                self.property_name, self.protocol_name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!(
+                    "expected '{}', found '{}'",
+                    self.expected_type, self.actual_type
+                ))])
+    }
+}
+
+pub struct ProtocolPropertyMissingSetterError {
+    pub span: Span,
+    pub struct_name: String,
+    pub protocol_name: String,
+    pub property_name: String,
+}
+
+impl IntoDiagnostic for ProtocolPropertyMissingSetterError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "property '{}' requires a setter for protocol '{}'",
+                self.property_name, self.protocol_name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message("property must be mutable (var) or have a setter")])
+            .with_notes(vec![format!(
+                "protocol '{}' requires '{{ get set }}' but '{}' only provides '{{ get }}'",
+                self.protocol_name, self.property_name
+            )])
+    }
+}

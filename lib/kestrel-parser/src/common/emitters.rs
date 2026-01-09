@@ -551,6 +551,7 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
             ProtocolBodyItem::Initializer(init_data) => {
                 emit_initializer_declaration(sink, init_data)
             }
+            ProtocolBodyItem::Field(field_data) => emit_field_declaration(sink, field_data),
         }
     }
 

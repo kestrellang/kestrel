@@ -8,10 +8,11 @@ use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, Id, Immediate, Local, MirTy, PassingMode, Place,
     QualifiedNameData, Rvalue, UnOp, Value,
 };
-use kestrel_semantic_model::SymbolFor;
+use kestrel_semantic_model::{StructFields, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use semantic_tree::symbol::SymbolId;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
@@ -440,6 +441,18 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Field Access ===
         ExprKind::FieldAccess { object, field } => {
+            // Check if this is a computed property access
+            // First, try to find the field symbol from the object's type
+            let field_info = find_field_info(ctx, &object.ty, field);
+
+            if let Some((field_id, is_computed)) = field_info {
+                if is_computed {
+                    // Computed property - generate a getter call
+                    return lower_getter_call(ctx, object, field_id, field, expr);
+                }
+            }
+
+            // Not computed - use direct field access
             let obj_value = lower_expression(ctx, object);
             match obj_value {
                 Value::Place(p) => Value::Place(p.field(field)),
@@ -471,6 +484,22 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Assignment ===
         ExprKind::Assignment { target, value } => {
+            // Check if target is a computed property field access
+            if let ExprKind::FieldAccess {
+                object,
+                field: field_name,
+            } = &target.kind
+            {
+                let field_info = find_field_info(ctx, &object.ty, field_name);
+                if let Some((field_id, is_computed)) = field_info {
+                    if is_computed {
+                        // Computed property assignment - generate a setter call
+                        return lower_setter_call(ctx, object, field_id, field_name, value, expr);
+                    }
+                }
+            }
+
+            // Not a computed property - use direct assignment
             let target_place = match lower_expression(ctx, target) {
                 Value::Place(p) => p,
                 Value::Immediate(_) => {
@@ -2005,6 +2034,353 @@ fn lower_call(
     }
 
     Value::Place(result_place)
+}
+
+/// Find field information from a type.
+/// Returns (field_id, is_computed) if the field is found.
+fn find_field_info(
+    ctx: &LoweringContext,
+    ty: &Ty,
+    field_name: &str,
+) -> Option<(SymbolId, bool)> {
+    use semantic_tree::symbol::Symbol;
+
+    // Try to get the struct symbol from the type
+    if let Some(struct_sym) = ty.as_struct() {
+        // Query fields from the struct symbol
+        let struct_id = struct_sym.metadata().id();
+        let fields = ctx.model.query(StructFields { struct_id });
+        for field_info in fields {
+            if field_info.name == field_name {
+                return Some((field_info.field_id, field_info.is_computed));
+            }
+        }
+    }
+
+    // Try enum type - enums can also have computed properties
+    if let Some(enum_sym) = ty.as_enum() {
+        // Look through children for fields
+        for child in enum_sym.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Field
+                && child.metadata().name().value == field_name
+            {
+                // Check if this field is computed
+                if let Ok(field_sym) = child.clone().downcast_arc::<FieldSymbol>() {
+                    return Some((field_sym.metadata().id(), field_sym.is_computed()));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Lower a getter call for a computed property.
+fn lower_getter_call(
+    ctx: &mut LoweringContext,
+    object: &Expression,
+    field_id: SymbolId,
+    field_name: &str,
+    expr: &Expression,
+) -> Value {
+
+    // Get the field symbol to find the getter
+    let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("field symbol not found: {:?}", field_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Downcast to FieldSymbol to get getter
+    let field_sym: std::sync::Arc<FieldSymbol> = match field_symbol.clone().downcast_arc() {
+        Ok(f) => f,
+        Err(_) => {
+            ctx.emit_error(LoweringError::internal(
+                format!("could not downcast to FieldSymbol: {}", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the getter symbol ID
+    let getter_id = match field_sym.getter() {
+        Some(id) => id,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("computed property '{}' has no getter", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the getter symbol
+    let getter_symbol = match ctx.model.query(SymbolFor { id: getter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("getter symbol not found for '{}'", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Check if this is a static computed property
+    let is_static = field_sym.is_static();
+
+    // Get the result type and create a temp for the result
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("getter_result", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Build the qualified name for the getter
+    let getter_name = qualified_name_for_symbol(ctx, &getter_symbol);
+
+    // Look up CallableBehavior to get receiver access mode
+    let callable_beh = getter_symbol.metadata().get_behavior::<CallableBehavior>();
+
+    if is_static {
+        // Static computed property - no receiver
+        let mir_callee = Callee::direct(getter_name);
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
+    } else {
+        // Instance computed property - pass receiver
+        let receiver_value = lower_expression(ctx, object);
+
+        // Build call args with receiver
+        let call_args = if let Some(beh) = callable_beh {
+            match beh.receiver() {
+                Some(ReceiverKind::Borrowing) | None => {
+                    // Getter borrows self
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, false);
+                    vec![CallArg::new(ref_value, PassingMode::Copy)]
+                }
+                Some(ReceiverKind::Mutating) => {
+                    // Getter needs mutable self (unusual but possible)
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+                    vec![CallArg::new(ref_value, PassingMode::Copy)]
+                }
+                Some(ReceiverKind::Consuming) => {
+                    // Getter consumes self
+                    let mode = if object.ty.is_copyable() {
+                        PassingMode::Copy
+                    } else {
+                        PassingMode::Move
+                    };
+                    vec![CallArg::new(receiver_value, mode)]
+                }
+                Some(ReceiverKind::Initializing) => {
+                    // Shouldn't happen for getter
+                    vec![CallArg::mutating(receiver_value)]
+                }
+            }
+        } else {
+            // Default: borrow receiver
+            let ref_value = create_ref(ctx, &receiver_value, &object.ty, false);
+            vec![CallArg::new(ref_value, PassingMode::Copy)]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::direct(getter_name);
+        ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+    }
+
+    Value::Place(result_place)
+}
+
+/// Lower a setter call for a computed property assignment.
+fn lower_setter_call(
+    ctx: &mut LoweringContext,
+    object: &Expression,
+    field_id: SymbolId,
+    field_name: &str,
+    rhs: &Expression,
+    expr: &Expression,
+) -> Value {
+
+    // Get the field symbol to find the setter
+    let field_symbol = match ctx.model.query(SymbolFor { id: field_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("field symbol not found: {:?}", field_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Downcast to FieldSymbol to get setter
+    let field_sym: std::sync::Arc<FieldSymbol> = match field_symbol.clone().downcast_arc() {
+        Ok(f) => f,
+        Err(_) => {
+            ctx.emit_error(LoweringError::internal(
+                format!("could not downcast to FieldSymbol: {}", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the setter symbol ID
+    let setter_id = match field_sym.setter() {
+        Some(id) => id,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!(
+                    "computed property '{}' has no setter (read-only)",
+                    field_name
+                ),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the setter symbol
+    let setter_symbol = match ctx.model.query(SymbolFor { id: setter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("setter symbol not found for '{}'", field_name),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Check if this is a static computed property
+    let is_static = field_sym.is_static();
+
+    // Lower the right-hand side value
+    let rhs_value = lower_expression(ctx, rhs);
+
+    // Create a temp for the unit return value of setter
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("setter_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Build the qualified name for the setter
+    let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
+
+    // Look up CallableBehavior to get parameter access modes
+    let callable_beh = setter_symbol.metadata().get_behavior::<CallableBehavior>();
+
+    if is_static {
+        // Static computed property - just pass the new value
+        let call_args = if let Some(beh) = callable_beh {
+            let params = beh.parameters();
+            if let Some(param) = params.first() {
+                let mode = access_mode_to_passing_mode(param.access_mode(), &rhs.ty);
+                vec![CallArg::new(rhs_value, mode)]
+            } else {
+                // Default: consuming parameter
+                let mode = if rhs.ty.is_copyable() {
+                    PassingMode::Copy
+                } else {
+                    PassingMode::Move
+                };
+                vec![CallArg::new(rhs_value, mode)]
+            }
+        } else {
+            // Default: consuming parameter
+            let mode = if rhs.ty.is_copyable() {
+                PassingMode::Copy
+            } else {
+                PassingMode::Move
+            };
+            vec![CallArg::new(rhs_value, mode)]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::direct(setter_name);
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    } else {
+        // Instance computed property - pass receiver and new value
+        let receiver_value = lower_expression(ctx, object);
+
+        // Build call args with receiver and newValue
+        let call_args = if let Some(beh) = callable_beh {
+            let mut args = Vec::new();
+
+            // Handle receiver based on ReceiverKind
+            // Setters typically need mutable receiver
+            match beh.receiver() {
+                Some(ReceiverKind::Borrowing) | None => {
+                    // Immutable borrow (unusual for setter but respect the behavior)
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, false);
+                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                }
+                Some(ReceiverKind::Mutating) => {
+                    // Mutable borrow - typical for setters
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                }
+                Some(ReceiverKind::Consuming) => {
+                    // Consumes self
+                    let mode = if object.ty.is_copyable() {
+                        PassingMode::Copy
+                    } else {
+                        PassingMode::Move
+                    };
+                    args.push(CallArg::new(receiver_value, mode));
+                }
+                Some(ReceiverKind::Initializing) => {
+                    // Shouldn't happen for setter
+                    let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+                    args.push(CallArg::new(ref_value, PassingMode::Copy));
+                }
+            }
+
+            // Handle newValue parameter
+            let params = beh.parameters();
+            if let Some(param) = params.first() {
+                let mode = access_mode_to_passing_mode(param.access_mode(), &rhs.ty);
+                args.push(CallArg::new(rhs_value, mode));
+            } else {
+                // Default: consuming parameter
+                let mode = if rhs.ty.is_copyable() {
+                    PassingMode::Copy
+                } else {
+                    PassingMode::Move
+                };
+                args.push(CallArg::new(rhs_value, mode));
+            }
+
+            args
+        } else {
+            // Default: mutable receiver, consuming newValue
+            let ref_value = create_ref(ctx, &receiver_value, &object.ty, true);
+            let mode = if rhs.ty.is_copyable() {
+                PassingMode::Copy
+            } else {
+                PassingMode::Move
+            };
+            vec![
+                CallArg::new(ref_value, PassingMode::Copy),
+                CallArg::new(rhs_value, mode),
+            ]
+        };
+
+        mark_moved_args(ctx, &call_args);
+        let mir_callee = Callee::direct(setter_name);
+        ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+    }
+
+    // Assignment expression yields unit
+    Value::Immediate(Immediate::unit())
 }
 
 /// Collect name segments from a symbol (helper for TypeRef init calls).

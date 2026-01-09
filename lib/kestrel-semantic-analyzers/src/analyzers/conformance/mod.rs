@@ -5,14 +5,16 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::{
-    AssociatedTypeBindingsForStruct, ConformancesForSymbol, ExtensionsFor,
+    AssociatedTypeBindingsForStruct, ConformancesForSymbol, ExtensionsFor, PropertyRequirement,
     ProtocolAssociatedTypesWithDefaults, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
-    SemanticModel, SymbolFor,
+    ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
 };
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
+use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -309,6 +311,22 @@ fn check_struct_conformance(
                     }
                 }
             }
+        }
+
+        // Check property requirements
+        let required_properties = model.query(ProtocolRequiredProperties {
+            protocol_id: protocol_symbol.metadata().id(),
+        });
+        if !required_properties.is_empty() {
+            check_property_requirements(
+                struct_sym,
+                dyn_sym,
+                struct_name,
+                protocol_name,
+                &required_properties,
+                model,
+                ctx,
+            );
         }
     }
 }
@@ -647,5 +665,137 @@ fn receiver_kind_to_string(receiver: &Option<ReceiverKind>) -> String {
         Some(ReceiverKind::Mutating) => "mutating".to_string(),
         Some(ReceiverKind::Consuming) => "consuming".to_string(),
         Some(ReceiverKind::Initializing) => "initializing".to_string(),
+    }
+}
+
+/// Check that a struct provides all required properties from a protocol.
+fn check_property_requirements(
+    struct_sym: &Arc<StructSymbol>,
+    _dyn_sym: &Arc<dyn Symbol<KestrelLanguage>>,
+    struct_name: &str,
+    protocol_name: &str,
+    required_properties: &[PropertyRequirement],
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    // Collect all fields from the struct and its extensions
+    let struct_id = struct_sym.metadata().id();
+    let mut all_fields = model.query(StructFields { struct_id });
+
+    // Also check extensions for properties
+    let extensions = model.query(ExtensionsFor {
+        target_id: struct_id,
+    });
+    for extension in extensions {
+        // Get fields from extension
+        for child in extension.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Field {
+                if let Ok(field) = child.clone().into_any_arc().downcast::<FieldSymbol>() {
+                    let ty = child
+                        .metadata()
+                        .get_behavior::<TypedBehavior>()
+                        .map(|typed| typed.ty().clone())
+                        .unwrap_or_else(|| field.field_type().clone());
+                    all_fields.push(kestrel_semantic_model::StructFieldInfo {
+                        field_id: field.metadata().id(),
+                        name: field.metadata().name().value.clone(),
+                        span: field.metadata().span().clone(),
+                        is_mutable: field.is_mutable(),
+                        is_computed: field.is_computed(),
+                        ty,
+                    });
+                }
+            }
+        }
+    }
+
+    // Build a map of field name -> field info for quick lookup
+    let field_map: HashMap<String, &kestrel_semantic_model::StructFieldInfo> = all_fields
+        .iter()
+        .map(|f| (f.name.clone(), f))
+        .collect();
+
+    for requirement in required_properties {
+        // TODO: Handle static properties when needed
+        if requirement.is_static {
+            continue;
+        }
+
+        match field_map.get(&requirement.name) {
+            None => {
+                // Missing property
+                let span = struct_sym.metadata().declaration_span().clone();
+                ctx.report(MissingProtocolPropertyError {
+                    span,
+                    struct_name: struct_name.to_string(),
+                    protocol_name: protocol_name.to_string(),
+                    property_name: requirement.name.clone(),
+                    property_type: format!("{}", requirement.property_type),
+                });
+            }
+            Some(field_info) => {
+                // Check type compatibility
+                // TODO: More sophisticated type comparison with substitutions
+                let field_type_str = format!("{}", field_info.ty);
+                let required_type_str = format!("{}", requirement.property_type);
+                if field_type_str != required_type_str {
+                    let span = struct_sym.metadata().declaration_span().clone();
+                    ctx.report(ProtocolPropertyTypeMismatchError {
+                        span,
+                        struct_name: struct_name.to_string(),
+                        protocol_name: protocol_name.to_string(),
+                        property_name: requirement.name.clone(),
+                        expected_type: required_type_str,
+                        actual_type: field_type_str,
+                    });
+                    continue;
+                }
+
+                // Check setter requirement
+                if requirement.has_setter {
+                    let has_setter = if field_info.is_computed {
+                        // For computed properties, check if it has a setter
+                        if let Some(sym) = model.query(SymbolFor {
+                            id: field_info.field_id,
+                        }) {
+                            if let Ok(field) = sym.downcast_arc::<FieldSymbol>() {
+                                if let Some(setter_id) = field.setter() {
+                                    // Check if setter has a body (is implemented)
+                                    if let Some(setter_sym) =
+                                        model.query(SymbolFor { id: setter_id })
+                                    {
+                                        setter_sym
+                                            .metadata()
+                                            .get_behavior::<ExecutableBehavior>()
+                                            .is_some()
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        // For stored properties, `var` (mutable) satisfies { get set }
+                        field_info.is_mutable
+                    };
+
+                    if !has_setter {
+                        let span = struct_sym.metadata().declaration_span().clone();
+                        ctx.report(ProtocolPropertyMissingSetterError {
+                            span,
+                            struct_name: struct_name.to_string(),
+                            protocol_name: protocol_name.to_string(),
+                            property_name: requirement.name.clone(),
+                        });
+                    }
+                }
+            }
+        }
     }
 }

@@ -15,8 +15,8 @@ use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
     ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
-    function_declaration_parser_internal, identifier, initializer_declaration_parser_internal,
-    token, visibility_parser_internal,
+    field_declaration_parser_internal, function_declaration_parser_internal, identifier,
+    initializer_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
@@ -93,7 +93,7 @@ impl ProtocolDeclaration {
     }
 }
 
-/// Parser for protocol body items (functions, associated types, or initializers)
+/// Parser for protocol body items (functions, associated types, initializers, or property requirements)
 fn protocol_body_item_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolBodyItem, ParserExtra<'tokens>> + Clone {
     let function = function_declaration_parser_internal().map(ProtocolBodyItem::Function);
@@ -103,13 +103,16 @@ fn protocol_body_item_parser<'tokens>()
 
     let initializer = initializer_declaration_parser_internal().map(ProtocolBodyItem::Initializer);
 
-    // Try function first, then associated type, then initializer
+    let field = field_declaration_parser_internal().map(ProtocolBodyItem::Field);
+
+    // Try function first, then associated type, then initializer, then field (property requirement)
     // This works because:
     // - function starts with visibility? followed by (static)? (mutating/consuming)? 'func'
     // - associated type starts with visibility? followed by 'type'
     // - initializer starts with visibility? followed by 'init'
+    // - field starts with visibility? followed by (static)? 'let'/'var'
     // Chumsky will backtrack correctly when the keyword doesn't match
-    function.or(associated_type).or(initializer)
+    function.or(associated_type).or(initializer).or(field)
 }
 
 /// Internal Chumsky parser for protocol declaration
@@ -277,7 +280,8 @@ mod tests {
 
     #[test]
     fn test_protocol_method_with_generics() {
-        let decl = parse("protocol Container { func get[T](index: Int) -> T }");
+        // Note: can't use "get" as function name since it's a keyword for computed properties
+        let decl = parse("protocol Container { func element[T](index: Int) -> T }");
         assert_eq!(decl.name(), Some("Container".to_string()));
         let methods = decl.methods();
         assert_eq!(methods.len(), 1);
