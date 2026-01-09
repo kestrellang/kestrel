@@ -2,18 +2,25 @@
 
 This checklist tracks compiler features needed for `lang/std/` to compile.
 
-**Current Status:** 49 errors across ~25 files
+**Current Status:** ~261 errors (up from 49 due to more code now parsing successfully)
+
+Most errors are cascading from import resolution (49 "undefined name 'lang'" errors) and type resolution issues.
 
 Run: `cargo run -- check lang/std/**/*.ks`
 
 ---
 
-## 1. Computed Properties (20 errors, 16 files)
+## 1. Computed Properties
 
-**Status:** Not implemented
+**Status:** COMPLETED
 **Priority:** High - blocks most files
 
-Parser doesn't support computed property syntax.
+Computed properties are now fully implemented:
+- Parser supports shorthand `{ expr }` and explicit `{ get { } set { } }` syntax
+- Semantic symbols (GetterSymbol, SetterSymbol) created as children of FieldSymbol
+- Binder adds CallableBehavior and ExecutableBehavior to getter/setter
+- Lowering generates getter/setter calls instead of direct field access
+- Assignment to computed properties generates setter calls
 
 ```kestrel
 // Instance computed property
@@ -22,39 +29,25 @@ public var isEmpty: Bool { self.count == 0 }
 // Static computed property
 public static var zero: Int64 { Int64(value: 0) }
 
-// Getter-only shorthand
-public var value: UInt32 { self.value }
+// Getter + setter
+public var value: Int {
+    get { self._value }
+    set { self._value = newValue; }
+}
 ```
-
-**Files affected:**
-- `core/float32.ks:22` - `public static var zero: Float32 { ... }`
-- `core/float64.ks:22` - `public static var zero: Float64 { ... }`
-- `core/int8.ks:30` - `public static var zero: Int8 { ... }`
-- `core/int16.ks:29` - `public static var zero: Int16 { ... }`
-- `core/int32.ks:29` - `public static var zero: Int32 { ... }`
-- `core/int64.ks:29` - `public static var zero: Int64 { ... }`
-- `core/uint8.ks:28` - `public static var zero: UInt8 { ... }`
-- `core/uint16.ks:28` - `public static var zero: UInt16 { ... }`
-- `core/uint32.ks:28` - `public static var zero: UInt32 { ... }`
-- `core/uint64.ks:28` - `public static var zero: UInt64 { ... }`
-- `text/char.ks:16` - `public var value: UInt32 { self.value }`
-- `text/string.ks:71` - `public var isEmpty: Bool { ... }`
-- `text/views.ks:16` - `public var count: Int { ... }`
-- `result/optional.ks:24` - `public var isSome: Bool { ... }`
-- `result/result.ks:23` - `public var isOk: Bool { ... }`
-- `ops/range.ks:33` - `public var isEmpty: Bool { ... }`
-- `memory/pointer.ks:24` - `public var isNull: Bool { ... }`
-- `serde/serde.ks:16` - `public var description: String { ... }`
-- `json/json.ks:61` - `public var description: String { ... }`
 
 ---
 
-## 2. Protocol Property Requirements (1 error, 1 file)
+## 2. Protocol Property Requirements
 
-**Status:** Not implemented
+**Status:** COMPLETED
 **Priority:** High - blocks protocol definitions
 
-Parser doesn't support `var` declarations inside protocols.
+Protocol property requirements are now fully implemented:
+- Parser supports `var` declarations in protocol bodies
+- `{ get }` and `{ get set }` requirement syntax supported
+- Conformance checking validates properties match requirements
+- Stored `var` fields satisfy `{ get set }`, any field satisfies `{ get }`
 
 ```kestrel
 public protocol Numeric {
@@ -62,9 +55,6 @@ public protocol Numeric {
     static var one: Self { get }
 }
 ```
-
-**Files affected:**
-- `core/numeric.ks:7` - `static var zero: Self { get }`
 
 ---
 
@@ -237,22 +227,22 @@ Various parse errors from unsupported syntax:
 ## Summary by Priority
 
 ### High Priority (blocks most files)
-1. **Computed properties** - ~20 errors
-2. **Import symbol resolution** - 6 errors
-3. **Protocol property requirements** - 1 error
+1. **Import symbol resolution** - 6 errors
 
 ### Medium Priority (blocks specific features)
-4. **Extension on protocols** - 2 errors
-5. **Extension adding conformance** - 3 errors
-6. **Where on associated types** - 1 error
-7. **Subscripts** - 1 error
-8. **Literal protocol conformance** - 4 errors (new)
+2. **Extension on protocols** - 2 errors
+3. **Extension adding conformance** - 3 errors
+4. **Where on associated types** - 1 error
+5. **Subscripts** - 1 error
+6. **Literal protocol conformance** - 4 errors (new)
 
 ### Low Priority (minor features)
-9. **Cascade errors** - 6 errors (auto-fix)
-10. **Other parse issues** - ~5 errors
+7. **Cascade errors** - 6 errors (auto-fix)
+8. **Other parse issues** - ~5 errors
 
-### Completed ✅
+### Completed
+- **Computed properties** - Full implementation (parser, semantic, binder, lowering)
+- **Protocol property requirements** - Parser + conformance checking
 - **Builtin literal attributes** - All literal protocol builtins registered
 - **@builtin on type aliases** - Parser now supports attributes on type aliases
 

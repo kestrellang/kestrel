@@ -74,6 +74,10 @@ fn check_struct_for_cycles(
     let struct_name = struct_sym.metadata().name().value.clone();
 
     for field in model.query(StructFieldTypes { struct_id }) {
+        // Skip computed properties - they don't store values, so can't cause infinite-size types
+        if field.is_computed {
+            continue;
+        }
         let field_ty = field.ty;
         let field_name = field.name;
         let field_span = field.span;
@@ -133,6 +137,10 @@ fn check_type_for_struct_cycle(
                 return Some(cycle);
             }
             for field in model.query(StructFieldTypes { struct_id }) {
+                // Skip computed properties - they don't store values
+                if field.is_computed {
+                    continue;
+                }
                 if let Some(c) = check_type_for_struct_cycle(&field.ty, detector, model) {
                     detector.exit();
                     return Some(c);

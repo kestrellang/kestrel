@@ -13,6 +13,7 @@ pub struct StructFieldTypeInfo {
     pub name: String,
     pub span: Span,
     pub ty: Ty,
+    pub is_computed: bool,
 }
 
 /// Get all field types (direct children) for a struct symbol.
@@ -33,6 +34,7 @@ impl Query for StructFieldTypes {
                 name: f.name,
                 span: f.span,
                 ty: f.ty,
+                is_computed: f.is_computed,
             })
             .collect()
     }
