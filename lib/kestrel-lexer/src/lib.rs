@@ -208,6 +208,13 @@ pub enum Token {
     #[token("guard")]
     Guard,
 
+    // ===== Property Accessor Keywords =====
+    #[token("get")]
+    Get,
+
+    #[token("set")]
+    Set,
+
     // ===== Braces =====
     #[token("(")]
     LParen,

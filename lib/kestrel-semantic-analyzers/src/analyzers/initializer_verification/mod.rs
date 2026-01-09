@@ -56,12 +56,13 @@ fn validate_initializer(symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut Ana
         return;
     }
 
-    // Collect field names and mutability
+    // Collect field names and mutability (excluding computed properties)
     let struct_id = parent.metadata().id();
     let fields: Vec<FieldInfo> = ctx
         .model
         .query(StructFields { struct_id })
         .into_iter()
+        .filter(|field| !field.is_computed) // Computed properties don't need initialization
         .map(|field| FieldInfo {
             name: field.name,
             is_let: !field.is_mutable,

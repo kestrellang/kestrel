@@ -1,5 +1,6 @@
 pub mod attributes;
 pub mod callable;
+pub mod computed_member_access;
 pub mod conformances;
 pub mod conforms_to;
 pub mod copy_semantics;
@@ -15,11 +16,14 @@ pub mod typed;
 pub mod valued;
 pub mod visibility;
 
+pub use computed_member_access::ComputedMemberAccessBehavior;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KestrelBehaviorKind {
     AssociatedTypeBounds,
     Attributes,
     Callable,
+    ComputedMemberAccess,
     Conformances,
     ConformsTo,
     CopySemantics,

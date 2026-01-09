@@ -16,7 +16,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
+    ComputedBodyData, DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
     InitializerDeclarationData, ParameterAccessMode, ParameterData, ReceiverModifier,
 };
 use crate::attribute::attribute_list_parser;
@@ -441,9 +441,87 @@ pub fn function_declaration_parser_internal<'tokens>()
         )
 }
 
+// =============================================================================
+// Computed Property Parsers
+// =============================================================================
+
+/// Parser for computed property body
+///
+/// Handles three forms:
+/// 1. Shorthand: `{ expr }` - just a code block with an expression
+/// 2. Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// 3. Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+///
+/// Returns `None` if no `{` follows (stored property), or `Some(ComputedBodyData)`.
+fn computed_body_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<ComputedBodyData>, ParserExtra<'tokens>> + Clone
+{
+    // Protocol requirement: { get } or { get set }
+    // These have no code block bodies, just keywords
+    let protocol_requirement = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .map(|_| true)
+                .or(empty().to(false)),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|has_setter| {
+            ComputedBodyData::Accessors {
+                getter: None,
+                setter: if has_setter { Some(CodeBlockData { lbrace: Span::from(0..0), items: vec![], rbrace: Span::from(0..0) }) } else { None },
+            }
+        });
+
+    // Explicit accessors: { get { body } set { body }? }
+    // getter is required, setter is optional
+    let explicit_accessors = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(code_block_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .ignore_then(code_block_parser())
+                .or_not(),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|(getter_body, setter_body)| {
+            ComputedBodyData::Accessors {
+                getter: Some(getter_body),
+                setter: setter_body,
+            }
+        });
+
+    // Shorthand: { expr } - parsed as a code block
+    // This is just a regular code block
+    let shorthand = code_block_parser().map(ComputedBodyData::Shorthand);
+
+    // Try protocol requirement first (most specific - has get/set keywords but no code blocks)
+    // Then explicit accessors (has get keyword followed by code block)
+    // Then shorthand (just a code block)
+    // Finally, nothing (stored property)
+    protocol_requirement
+        .or(explicit_accessors)
+        .or(shorthand)
+        .map(Some)
+        .or(empty().to(None))
+}
+
 /// Parser for a field declaration
 ///
-/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (;)?`
+/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (ComputedBody)? (;)?`
+///
+/// ComputedBody can be:
+/// - Shorthand: `{ expr }` - just a code block with an expression
+/// - Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// - Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
 ///
 /// This is the single source of truth for field declaration parsing.
 /// An optional trailing semicolon is allowed for inline field declarations.
@@ -456,18 +534,22 @@ pub fn field_declaration_parser_internal<'tokens>()
         .then(identifier())
         .then(token(Token::Colon))
         .then(ty_parser())
+        .then(computed_body_parser())
         .then(token(Token::Semicolon).or_not())
         .map(
             |(
                 (
                     (
                         (
-                            (((attributes, visibility), is_static), (mutability_span, is_mutable)),
-                            name_span,
+                            (
+                                (((attributes, visibility), is_static), (mutability_span, is_mutable)),
+                                name_span,
+                            ),
+                            colon_span,
                         ),
-                        colon_span,
+                        ty,
                     ),
-                    ty,
+                    computed_body,
                 ),
                 semicolon,
             )| {
@@ -480,6 +562,7 @@ pub fn field_declaration_parser_internal<'tokens>()
                     name_span,
                     colon_span,
                     ty,
+                    computed_body,
                     semicolon,
                 }
             },

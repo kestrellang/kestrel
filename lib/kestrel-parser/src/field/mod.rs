@@ -82,6 +82,35 @@ impl FieldDeclaration {
             .children()
             .find(|child| child.kind() == SyntaxKind::Ty)
     }
+
+    /// Check if this is a computed property (has a getter body or accessor clause)
+    pub fn is_computed(&self) -> bool {
+        self.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::PropertyAccessors)
+    }
+
+    /// Get the property accessors node if this is a computed property
+    pub fn property_accessors(&self) -> Option<SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PropertyAccessors)
+    }
+
+    /// Get the getter clause if present (for explicit getter syntax)
+    pub fn getter_clause(&self) -> Option<SyntaxNode> {
+        self.property_accessors()?.children().find(|child| child.kind() == SyntaxKind::GetterClause)
+    }
+
+    /// Get the setter clause if present
+    pub fn setter_clause(&self) -> Option<SyntaxNode> {
+        self.property_accessors()?.children().find(|child| child.kind() == SyntaxKind::SetterClause)
+    }
+
+    /// Check if this computed property is getter-only (no setter)
+    pub fn is_getter_only(&self) -> bool {
+        self.is_computed() && self.setter_clause().is_none()
+    }
 }
 
 /// Parse a field declaration and emit events

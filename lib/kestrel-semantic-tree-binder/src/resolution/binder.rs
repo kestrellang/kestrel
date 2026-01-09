@@ -205,6 +205,8 @@ impl SemanticBinder {
             KestrelSymbolKind::Module => Some(SyntaxKind::ModuleDeclaration),
             KestrelSymbolKind::TypeAlias => Some(SyntaxKind::TypeAliasDeclaration),
             KestrelSymbolKind::TypeParameter => Some(SyntaxKind::TypeParameter),
+            KestrelSymbolKind::Getter => Some(SyntaxKind::GetterClause),
+            KestrelSymbolKind::Setter => Some(SyntaxKind::SetterClause),
             KestrelSymbolKind::SourceFile => None,
         }
     }

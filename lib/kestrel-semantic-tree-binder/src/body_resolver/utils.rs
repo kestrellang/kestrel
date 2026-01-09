@@ -311,6 +311,17 @@ pub fn get_type_container(
                         None
                     }
                 }
+                KestrelSymbolKind::Field => {
+                    // For getters/setters, the hierarchy is Struct -> Field -> Getter/Setter
+                    // We need the grandparent (the Struct)
+                    let grandparent = parent.metadata().parent()?;
+                    match grandparent.metadata().kind() {
+                        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
+                            Some(grandparent)
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             }
         }
@@ -564,6 +575,8 @@ pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
         KestrelSymbolKind::Struct => "struct".to_string(),
         KestrelSymbolKind::TypeAlias => "type alias".to_string(),
         KestrelSymbolKind::TypeParameter => "type parameter".to_string(),
+        KestrelSymbolKind::Getter => "getter".to_string(),
+        KestrelSymbolKind::Setter => "setter".to_string(),
     }
 }
 

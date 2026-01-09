@@ -108,6 +108,12 @@ impl SemanticModelBuilder {
                     self.syntax_map
                         .insert(symbol.metadata().id(), current_syntax.clone());
 
+                    // For field declarations with computed properties, add getter/setter
+                    // syntax mappings for the child symbols created by the field builder
+                    if current_syntax.kind() == kestrel_syntax_tree::SyntaxKind::FieldDeclaration {
+                        self.add_computed_property_syntax_mappings(&symbol, &current_syntax, file_id);
+                    }
+
                     if !builder.is_terminal() {
                         // Add children in reverse order so they're processed left-to-right
                         let children: Vec<_> = current_syntax.children().collect();
@@ -139,6 +145,68 @@ impl SemanticModelBuilder {
         }
 
         first_result
+    }
+}
+
+impl SemanticModelBuilder {
+    /// Add syntax mappings for getter/setter symbols that are children of a field.
+    ///
+    /// The field builder creates getter/setter symbols as children of the field
+    /// for computed properties, but those symbols need their syntax nodes added
+    /// to the syntax_map so the binder can access them.
+    fn add_computed_property_syntax_mappings(
+        &mut self,
+        field_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        field_syntax: &SyntaxNode,
+        _file_id: usize,
+    ) {
+        use kestrel_syntax_tree::SyntaxKind;
+
+        // Find the PropertyAccessors node in the field syntax
+        let Some(accessors) = field_syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PropertyAccessors)
+        else {
+            return;
+        };
+
+        // Get the getter clause syntax (explicit form)
+        let getter_clause = accessors
+            .children()
+            .find(|child| child.kind() == SyntaxKind::GetterClause);
+
+        // Get the shorthand body (CodeBlock directly in PropertyAccessors)
+        let shorthand_body = accessors
+            .children()
+            .find(|child| child.kind() == SyntaxKind::CodeBlock);
+
+        // Get the setter clause syntax
+        let setter_clause = accessors
+            .children()
+            .find(|child| child.kind() == SyntaxKind::SetterClause);
+
+        // Map getter/setter symbols to their syntax nodes
+        for child in field_symbol.metadata().children() {
+            match child.metadata().kind() {
+                KestrelSymbolKind::Getter => {
+                    // Prefer explicit GetterClause, fall back to shorthand CodeBlock
+                    if let Some(ref getter_syntax) = getter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), getter_syntax.clone());
+                    } else if let Some(ref body_syntax) = shorthand_body {
+                        self.syntax_map
+                            .insert(child.metadata().id(), body_syntax.clone());
+                    }
+                }
+                KestrelSymbolKind::Setter => {
+                    if let Some(ref setter_syntax) = setter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), setter_syntax.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 

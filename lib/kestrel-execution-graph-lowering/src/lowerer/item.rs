@@ -144,6 +144,11 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             // Deinit blocks will generate drop instructions in the future
             // For now, just skip - drop handling is Phase 5.3
         }
+
+        KestrelSymbolKind::Getter | KestrelSymbolKind::Setter => {
+            // Getters and setters are lowered on-demand when accessing computed properties
+            // They're children of Field symbols and will be called during field access lowering
+        }
     }
 }
 

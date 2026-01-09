@@ -13,6 +13,7 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
@@ -216,7 +217,7 @@ pub fn resolve_member_access(
         return Expression::error(full_span.clone());
     }
 
-    // 4. Get MemberAccessBehavior and produce expression
+    // 4. Get MemberAccessBehavior or ComputedMemberAccessBehavior and produce expression
     for behavior in member.metadata().behaviors() {
         if behavior.kind() == KestrelBehaviorKind::MemberAccess {
             if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
@@ -225,6 +226,19 @@ pub fn resolve_member_access(
                 // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
 
                 // First, resolve SelfType to the actual type if needed
+                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+
+                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                    result.ty = result.ty.apply_substitutions(substitutions);
+                }
+                return result;
+            }
+        }
+        // Handle computed properties (getter-only access for now)
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess {
+            if let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>() {
+                let mut result = access.access(base.clone(), full_span.clone());
+                // Apply substitutions from the parent's type to the member type
                 let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
 
                 if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {

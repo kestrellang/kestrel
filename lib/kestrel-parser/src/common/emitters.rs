@@ -10,11 +10,11 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,
-    AttributeArgsData, AttributeData, DeinitDeclarationData, EnumCaseDeclarationData,
-    EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData, FieldDeclarationData,
-    FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
-    ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier, StructDeclarationData,
-    TypeAliasDeclarationData, TypeDeclarationBodyItem,
+    AttributeArgsData, AttributeData, ComputedBodyData, DeinitDeclarationData,
+    EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
+    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData,
+    ParameterAccessMode, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
+    ReceiverModifier, StructDeclarationData, TypeAliasDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -371,9 +371,62 @@ pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) 
     sink.add_token(SyntaxKind::Colon, data.colon_span);
     emit_ty_variant(sink, &data.ty);
 
+    // Emit computed property body if present
+    if let Some(computed_body) = &data.computed_body {
+        emit_property_accessors(sink, computed_body);
+    }
+
     // Emit optional trailing semicolon
     if let Some(semicolon_span) = data.semicolon {
         sink.add_token(SyntaxKind::Semicolon, semicolon_span);
+    }
+
+    sink.finish_node();
+}
+
+/// Emit events for property accessors (computed property body)
+fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyData) {
+    sink.start_node(SyntaxKind::PropertyAccessors);
+
+    match computed_body {
+        ComputedBodyData::Shorthand(body) => {
+            // Shorthand: just emit the code block directly
+            emit_code_block(sink, body);
+        }
+        ComputedBodyData::Accessors { getter, setter } => {
+            // Emit getter
+            if let Some(getter_body) = getter {
+                // Full getter with body: emit GetterClause containing Get token and code block
+                sink.start_node(SyntaxKind::GetterClause);
+                // Emit Get token - use the start of the code block as approximate span
+                let get_span =
+                    Span::from(getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start);
+                sink.add_token(SyntaxKind::Get, get_span);
+                emit_code_block(sink, getter_body);
+                sink.finish_node();
+            } else {
+                // Protocol requirement: just emit Get token without body (no GetterClause wrapper)
+                sink.add_token(SyntaxKind::Get, Span::from(0..3));
+            }
+
+            // Emit setter
+            if let Some(setter_body) = setter {
+                // Check if this is a real setter body or a placeholder for protocol requirement
+                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
+                    // Protocol requirement: just emit Set token without body (no SetterClause wrapper)
+                    sink.add_token(SyntaxKind::Set, Span::from(0..3));
+                } else {
+                    // Full setter with body: emit SetterClause containing Set token and code block
+                    sink.start_node(SyntaxKind::SetterClause);
+                    let set_span = Span::from(
+                        setter_body.lbrace.start.saturating_sub(4)..setter_body.lbrace.start,
+                    );
+                    sink.add_token(SyntaxKind::Set, set_span);
+                    emit_code_block(sink, setter_body);
+                    sink.finish_node();
+                }
+            }
+        }
     }
 
     sink.finish_node();

@@ -136,6 +136,18 @@ pub struct FunctionDeclarationData {
     pub body: Option<CodeBlockData>, // Optional code block - None for protocol methods
 }
 
+/// Body data for computed properties
+#[derive(Debug, Clone)]
+pub enum ComputedBodyData {
+    /// Shorthand: `{ expr }`
+    Shorthand(CodeBlockData),
+    /// Explicit: `{ get { } set { } }`
+    Accessors {
+        getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        setter: Option<CodeBlockData>, // None for protocol `{ get set }`
+    },
+}
+
 /// Raw parsed data for field declaration internals
 #[derive(Debug, Clone)]
 pub struct FieldDeclarationData {
@@ -147,6 +159,8 @@ pub struct FieldDeclarationData {
     pub name_span: Span,
     pub colon_span: Span,
     pub ty: TyVariant,
+    /// For computed properties: shorthand body OR accessors
+    pub computed_body: Option<ComputedBodyData>,
     /// Optional trailing semicolon (for inline field declarations)
     pub semicolon: Option<Span>,
 }

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
@@ -50,19 +51,37 @@ impl DeclarationBinder for FieldBinder {
         let typed_behavior = TypedBehavior::new(resolved_type.clone(), span);
         symbol.metadata().add_behavior(typed_behavior);
 
-        // Add a MemberAccessBehavior so this field can be accessed via dot notation
+        // Add appropriate member access behavior so this field can be accessed via dot notation
         let field_name = symbol.metadata().name().value.clone();
 
-        // Get mutability from the FieldSymbol
-        let is_mutable = symbol
-            .as_ref()
-            .downcast_ref::<FieldSymbol>()
-            .map(|f| f.is_mutable())
-            .unwrap_or(false);
-
-        let member_access_behavior =
-            MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
-        symbol.metadata().add_behavior(member_access_behavior);
+        // Get field properties from the FieldSymbol
+        if let Some(field_symbol) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
+            if field_symbol.is_computed() {
+                // Computed property: use ComputedMemberAccessBehavior
+                let getter_id = field_symbol
+                    .getter()
+                    .expect("computed property must have a getter");
+                let setter_id = field_symbol.setter();
+                let computed_behavior = ComputedMemberAccessBehavior::new(
+                    field_name,
+                    resolved_type,
+                    getter_id,
+                    setter_id,
+                );
+                symbol.metadata().add_behavior(computed_behavior);
+            } else {
+                // Stored field: use MemberAccessBehavior
+                let is_mutable = field_symbol.is_mutable();
+                let member_access_behavior =
+                    MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
+                symbol.metadata().add_behavior(member_access_behavior);
+            }
+        } else {
+            // Fallback: treat as immutable stored field
+            let member_access_behavior =
+                MemberAccessBehavior::new(field_name, resolved_type, false);
+            symbol.metadata().add_behavior(member_access_behavior);
+        }
     }
 }
 

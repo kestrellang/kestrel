@@ -141,6 +141,12 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             // Deinit blocks are named "deinit"
             segments.push("deinit".to_string());
         }
+
+        KestrelSymbolKind::Getter | KestrelSymbolKind::Setter => {
+            // Getters and setters use their synthetic name (e.g., "get:fieldName", "set:fieldName")
+            let name = symbol.metadata().name();
+            segments.push(name.value.clone());
+        }
     }
 }
 
