@@ -73,6 +73,6 @@ public struct Int32:
     public func bitwiseOr(other: Int32) -> Int32 { Int32(raw: lang.i32_or(self.value, other.value)) }
     public func bitwiseXor(other: Int32) -> Int32 { Int32(raw: lang.i32_xor(self.value, other.value)) }
     public func bitwiseNot() -> Int32 { Int32(raw: lang.i32_not(self.value)) }
-    public func shiftLeft(by count: Int) -> Int32 { Int32(raw: lang.i32_shl(self.value, lang.cast_i64_i32(count))) }
-    public func shiftRight(by count: Int) -> Int32 { Int32(raw: lang.i32_signed_shr(self.value, lang.cast_i64_i32(count))) }
+    public func shiftLeft(by count: lang.i64) -> Int32 { Int32(raw: lang.i32_shl(self.value, lang.cast_i64_i32(count))) }
+    public func shiftRight(by count: lang.i64) -> Int32 { Int32(raw: lang.i32_signed_shr(self.value, lang.cast_i64_i32(count))) }
 }

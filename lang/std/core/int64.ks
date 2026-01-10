@@ -73,8 +73,8 @@ public struct Int64:
     public func bitwiseOr(other: Int64) -> Int64 { Int64(raw: lang.i64_or(self.value, other.value)) }
     public func bitwiseXor(other: Int64) -> Int64 { Int64(raw: lang.i64_xor(self.value, other.value)) }
     public func bitwiseNot() -> Int64 { Int64(raw: lang.i64_not(self.value)) }
-    public func shiftLeft(by count: Int) -> Int64 { Int64(raw: lang.i64_shl(self.value, count)) }
-    public func shiftRight(by count: Int) -> Int64 { Int64(raw: lang.i64_signed_shr(self.value, count)) }
+    public func shiftLeft(by count: lang.i64) -> Int64 { Int64(raw: lang.i64_shl(self.value, count)) }
+    public func shiftRight(by count: lang.i64) -> Int64 { Int64(raw: lang.i64_signed_shr(self.value, count)) }
 }
 
 // Int - platform-sized signed integer (alias to Int64 on 64-bit platforms)

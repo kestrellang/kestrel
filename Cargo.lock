@@ -621,6 +621,7 @@ dependencies = [
 name = "kestrel-semantic-tree-builder"
 version = "0.12.0"
 dependencies = [
+ "kestrel-prelude",
  "kestrel-reporting",
  "kestrel-semantic-model",
  "kestrel-semantic-tree",

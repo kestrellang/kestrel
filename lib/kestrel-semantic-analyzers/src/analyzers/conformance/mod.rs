@@ -454,29 +454,51 @@ fn substitute_associated_types(
     sig_type: &SignatureType,
     bindings: &HashMap<String, SignatureType>,
 ) -> SignatureType {
+    substitute_associated_types_recursive(sig_type, bindings, 0)
+}
+
+fn substitute_associated_types_recursive(
+    sig_type: &SignatureType,
+    bindings: &HashMap<String, SignatureType>,
+    depth: usize,
+) -> SignatureType {
+    // Prevent infinite recursion (handles cycles like A -> B -> A)
+    const MAX_DEPTH: usize = 10;
+    if depth >= MAX_DEPTH {
+        return sig_type.clone();
+    }
+
     match sig_type {
-        SignatureType::Named(path) if path.len() == 1 => bindings
-            .get(&path[0])
-            .cloned()
-            .unwrap_or_else(|| sig_type.clone()),
+        SignatureType::Named(path) if path.len() == 1 => {
+            if let Some(replacement) = bindings.get(&path[0]) {
+                // Recursively substitute the replacement to handle chains like Rhs -> Self -> UInt8
+                substitute_associated_types_recursive(replacement, bindings, depth + 1)
+            } else {
+                sig_type.clone()
+            }
+        }
         SignatureType::Tuple(elements) => SignatureType::Tuple(
             elements
                 .iter()
-                .map(|e| substitute_associated_types(e, bindings))
+                .map(|e| substitute_associated_types_recursive(e, bindings, depth))
                 .collect(),
         ),
-        SignatureType::Array(element) => {
-            SignatureType::Array(Box::new(substitute_associated_types(element, bindings)))
-        }
+        SignatureType::Array(element) => SignatureType::Array(Box::new(
+            substitute_associated_types_recursive(element, bindings, depth),
+        )),
         SignatureType::Function {
             params,
             return_type,
         } => SignatureType::Function {
             params: params
                 .iter()
-                .map(|p| substitute_associated_types(p, bindings))
+                .map(|p| substitute_associated_types_recursive(p, bindings, depth))
                 .collect(),
-            return_type: Box::new(substitute_associated_types(return_type, bindings)),
+            return_type: Box::new(substitute_associated_types_recursive(
+                return_type,
+                bindings,
+                depth,
+            )),
         },
         _ => sig_type.clone(),
     }

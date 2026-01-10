@@ -69,8 +69,8 @@ public struct UInt64:
     public func bitwiseOr(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_or(self.value, other.value)) }
     public func bitwiseXor(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_xor(self.value, other.value)) }
     public func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.value)) }
-    public func shiftLeft(by count: Int) -> UInt64 { UInt64(raw: lang.i64_shl(self.value, count)) }
-    public func shiftRight(by count: Int) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.value, count)) }
+    public func shiftLeft(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_shl(self.value, count)) }
+    public func shiftRight(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.value, count)) }
 }
 
 // UInt - platform-sized unsigned integer (alias to UInt64 on 64-bit platforms)

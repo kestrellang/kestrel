@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use kestrel_prelude::lang;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::ty::{Constraint, Ty, WhereClause};
+use kestrel_semantic_tree::ty::{Constraint, FloatBits, IntBits, Ty, WhereClause};
 use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -116,7 +117,24 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
             let segments = extract_path_segments(&path_node);
             if segments.is_empty() {
                 None
+            } else if segments.len() == 1 && segments[0] == "Self" {
+                // Special case: Self type reference
+                Some(Ty::self_type(span))
+            } else if segments.len() == 2 && segments[0] == lang::LANG {
+                // Handle lang.* primitive types that can be resolved at parse time
+                match segments[1].as_str() {
+                    lang::I8 => Some(Ty::int(IntBits::I8, span)),
+                    lang::I16 => Some(Ty::int(IntBits::I16, span)),
+                    lang::I32 => Some(Ty::int(IntBits::I32, span)),
+                    lang::I64 => Some(Ty::int(IntBits::I64, span)),
+                    lang::F32 => Some(Ty::float(FloatBits::F32, span)),
+                    lang::F64 => Some(Ty::float(FloatBits::F64, span)),
+                    lang::I1 => Some(Ty::bool(span)),
+                    lang::STR => Some(Ty::string(span)),
+                    _ => Some(Ty::error(span)),
+                }
             } else {
+                // Other path types can't be fully resolved at parse time
                 Some(Ty::error(span))
             }
         }

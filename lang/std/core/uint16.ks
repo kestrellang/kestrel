@@ -69,6 +69,6 @@ public struct UInt16:
     public func bitwiseOr(other: UInt16) -> UInt16 { UInt16(raw: lang.i16_or(self.value, other.value)) }
     public func bitwiseXor(other: UInt16) -> UInt16 { UInt16(raw: lang.i16_xor(self.value, other.value)) }
     public func bitwiseNot() -> UInt16 { UInt16(raw: lang.i16_not(self.value)) }
-    public func shiftLeft(by count: Int) -> UInt16 { UInt16(raw: lang.i16_shl(self.value, lang.cast_i64_i16(count))) }
-    public func shiftRight(by count: Int) -> UInt16 { UInt16(raw: lang.i16_unsigned_shr(self.value, lang.cast_i64_i16(count))) }
+    public func shiftLeft(by count: lang.i64) -> UInt16 { UInt16(raw: lang.i16_shl(self.value, lang.cast_i64_i16(count))) }
+    public func shiftRight(by count: lang.i64) -> UInt16 { UInt16(raw: lang.i16_unsigned_shr(self.value, lang.cast_i64_i16(count))) }
 }

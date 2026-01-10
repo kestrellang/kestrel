@@ -231,6 +231,34 @@ impl<'a> TypeResolver<'a> {
         }
     }
 
+    /// Apply type arguments if all type parameters have defaults.
+    /// For types with required parameters (no defaults), returns the type as-is.
+    /// This is used for raw type references (no brackets) to apply defaults when possible.
+    fn apply_type_arguments_if_all_have_defaults(&mut self, resolved_ty: &Ty, span: Span) -> Ty {
+        // Get type parameters and check if all have defaults
+        let type_params = match resolved_ty.kind() {
+            TyKind::Struct { symbol, .. } => symbol.type_parameters(),
+            TyKind::Protocol { symbol, .. } => symbol.type_parameters(),
+            TyKind::TypeAlias { symbol, .. } => symbol.type_parameters(),
+            TyKind::Enum { symbol, .. } => symbol.type_parameters(),
+            _ => return resolved_ty.clone(),
+        };
+
+        // If there are no type params, or any param lacks a default, return as-is
+        if type_params.is_empty() {
+            return resolved_ty.clone();
+        }
+
+        let all_have_defaults = type_params.iter().all(|p| p.has_default());
+        if !all_have_defaults {
+            // Some params are required - treat as raw type reference
+            return resolved_ty.clone();
+        }
+
+        // All params have defaults - apply them
+        self.apply_type_arguments(resolved_ty, Vec::new(), span)
+    }
+
     /// Resolve a TyPath node, handling type arguments if present
     fn resolve_ty_path(&mut self, ty_path_node: &SyntaxNode) -> Ty {
         let ty_span = get_node_span(ty_path_node, self.file_id);
@@ -246,7 +274,7 @@ impl<'a> TypeResolver<'a> {
                 if segments.len() == 2 && segments[0] == lang::LANG {
                     // Check for lang.ptr[T] generic pointer type
                     if segments[1] == lang::PTR {
-                        let type_args = self.extract_type_arguments(ty_path_node);
+                        let type_args = self.extract_type_arguments(ty_path_node).unwrap_or_default();
                         if type_args.len() != 1 {
                             self.diagnostics.throw(LangPtrArityError {
                                 span: ty_span.clone(),
@@ -290,11 +318,43 @@ impl<'a> TypeResolver<'a> {
                     }
                 }
 
-                let type_args = self.extract_type_arguments(ty_path_node);
+                let type_args_opt = self.extract_type_arguments(ty_path_node);
                 let resolved = self.resolve_path(&segments, ty_span.clone());
 
-                if !type_args.is_empty() && !resolved.is_error() {
-                    return self.apply_type_arguments(&resolved, type_args, ty_span);
+                if !resolved.is_error() {
+                    // Check if this type could have type parameters (only structs, protocols, type aliases, enums)
+                    let is_potentially_generic = matches!(
+                        resolved.kind(),
+                        TyKind::Struct { .. }
+                            | TyKind::Protocol { .. }
+                            | TyKind::TypeAlias { .. }
+                            | TyKind::Enum { .. }
+                    );
+
+                    match type_args_opt {
+                        // Explicit type arguments provided (e.g., Box[Int] or Box[])
+                        // Always call apply_type_arguments to validate arity and apply defaults
+                        Some(type_args) if is_potentially_generic => {
+                            return self.apply_type_arguments(&resolved, type_args, ty_span);
+                        }
+                        // Type arguments on a non-generic type is an error
+                        Some(type_args) if !type_args.is_empty() => {
+                            let type_name = format!("{:?}", resolved.kind());
+                            self.diagnostics.throw(NotGenericError {
+                                span: ty_span.clone(),
+                                type_name,
+                            });
+                            return Ty::error(ty_span);
+                        }
+                        // No brackets (raw type reference) - for types where all params have defaults,
+                        // apply the defaults (e.g., Addable[Rhs = Self] becomes Addable[Self]).
+                        // For types with required params, return as-is (raw type reference).
+                        None if is_potentially_generic => {
+                            return self
+                                .apply_type_arguments_if_all_have_defaults(&resolved, ty_span);
+                        }
+                        _ => {}
+                    }
                 }
 
                 return resolved;
@@ -341,18 +401,24 @@ impl<'a> TypeResolver<'a> {
     }
 
     /// Extract type arguments from a TyPath node
-    fn extract_type_arguments(&mut self, ty_path_node: &SyntaxNode) -> Vec<Ty> {
+    ///
+    /// Returns:
+    /// - `None` if there are no type argument brackets (raw type reference like `Box`)
+    /// - `Some(vec)` if there are brackets, with the type arguments (may be empty for `Box[]`)
+    fn extract_type_arguments(&mut self, ty_path_node: &SyntaxNode) -> Option<Vec<Ty>> {
         if let Some(arg_list) = ty_path_node
             .children()
             .find(|c| c.kind() == SyntaxKind::TypeArgumentList)
         {
-            arg_list
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::Ty)
-                .map(|ty| self.resolve(&ty))
-                .collect()
+            Some(
+                arg_list
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::Ty)
+                    .map(|ty| self.resolve(&ty))
+                    .collect(),
+            )
         } else {
-            Vec::new()
+            None
         }
     }
 
@@ -372,13 +438,18 @@ impl<'a> TypeResolver<'a> {
         let min_args = type_params.iter().filter(|p| !p.has_default()).count();
         let actual = type_args.len();
 
-        // Non-generic type with type args
+        // Non-generic type with type args is an error
+        // But non-generic type with no type args should just return the original type
         if max_args == 0 {
-            self.diagnostics.throw(NotGenericError {
-                span: span.clone(),
-                type_name: type_name.to_string(),
-            });
-            return Ty::error(span);
+            if !type_args.is_empty() {
+                self.diagnostics.throw(NotGenericError {
+                    span: span.clone(),
+                    type_name: type_name.to_string(),
+                });
+                return Ty::error(span);
+            }
+            // Non-generic type with no args - just create the type with empty substitutions
+            return make_ty(Substitutions::new());
         }
 
         // Check arity with defaults

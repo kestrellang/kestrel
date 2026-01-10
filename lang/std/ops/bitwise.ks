@@ -30,16 +30,20 @@ public protocol BitwiseNot {
     func bitwiseNot() -> Output
 }
 
-// TODO: Add back 
+// TODO: Add back
 //@operator(<<)
-public protocol LeftShift[Rhs = Int] {
+// Note: Default Rhs is lang.i64 (not Int type alias) because type defaults
+// must be resolvable at parse time before type aliases are available.
+public protocol LeftShift[Rhs = lang.i64] {
     type Output
     func shiftLeft(by count: Rhs) -> Output
 }
 
-// TODO: Add back 
+// TODO: Add back
 //@operator(>>)
-public protocol RightShift[Rhs = Int] {
+// Note: Default Rhs is lang.i64 (not Int type alias) because type defaults
+// must be resolvable at parse time before type aliases are available.
+public protocol RightShift[Rhs = lang.i64] {
     type Output
     func shiftRight(by count: Rhs) -> Output
 }
