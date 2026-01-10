@@ -2,7 +2,7 @@
 
 module std.iter
 
-extension Iterator {
+extend Iterator {
     // Transform
     public func map[U](transform: (Item) -> U) -> MapIterator[Self, U] {
         MapIterator(inner: self, transform: transform)
@@ -16,8 +16,8 @@ extension Iterator {
         FilterMapIterator(inner: self, transform: transform)
     }
 
-    public func flatMap[U, I: Iterable](transform: (Item) -> I) -> FlatMapIterator[Self, I]
-        where I.Item == U
+    public func flatMap[U, I](transform: (Item) -> I) -> FlatMapIterator[Self, I]
+        where I: Iterable, I.Item = U
     {
         FlatMapIterator(inner: self, transform: transform, current: .None)
     }
@@ -52,12 +52,11 @@ extension Iterator {
         EnumerateIterator(inner: self, index: 0)
     }
 
-    public func zip[Other: Iterator](with other: Other) -> ZipIterator[Self, Other] {
+    public func zip[Other](with other: Other) -> ZipIterator[Self, Other] where Other: Iterator {
         ZipIterator(first: self, second: other)
     }
 
-    public func chain[Other: Iterator](other: Other) -> ChainIterator[Self, Other]
-        where Other.Item == Item
+    public func chain[Other](other: Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item = Item
     {
         ChainIterator(first: self, second: other, firstDone: false)
     }
@@ -81,7 +80,7 @@ extension Iterator {
 
     // Consuming operations
     public func fold[Acc](initial: Acc, combine: (Acc, Item) -> Acc) -> Acc {
-        var acc = initial
+        var acc = initial;
         while let item = self.next() {
             acc = combine(acc, item)
         }
@@ -89,21 +88,21 @@ extension Iterator {
     }
 
     public func reduce(combine: (Item, Item) -> Item) -> Optional[Item] {
-        var result: Optional[Item] = self.next()
+        var result: Optional[Item] = self.next();
         while let item = self.next() {
-            result = result.map { |acc| combine(acc, item) }
+            result = result.map { (acc) in combine(acc, item) }
         }
         result
     }
 
-    public func collect[C: Collectable]() -> C where C.Item == Item {
+    public func collect[C]() -> C where C: Collectable, C.Item = Item {
         C(from: self)
     }
 
     public func count() -> Int {
-        var n = 0
+        var n = 0;
         while self.next().isSome {
-            n += 1
+            n = n + 1
         }
         n
     }
@@ -142,18 +141,18 @@ extension Iterator {
     }
 
     public func position(predicate: (Item) -> Bool) -> Optional[Int] {
-        var i = 0
+        var i = 0;
         while let item = self.next() {
             if predicate(item) {
                 return .Some(i)
             }
-            i += 1
+            i = i + 1
         }
         .None
     }
 
     public func last() -> Optional[Item] {
-        var result: Optional[Item] = .None
+        var result: Optional[Item] = .None;
         while let item = self.next() {
             result = .Some(item)
         }
@@ -161,12 +160,12 @@ extension Iterator {
     }
 
     public func nth(n: Int) -> Optional[Item] {
-        var remaining = n
+        var remaining = n;
         while let item = self.next() {
             if remaining == 0 {
                 return .Some(item)
             }
-            remaining -= 1
+            remaining = remaining - 1
         }
         .None
     }
@@ -213,8 +212,8 @@ extension Iterator {
         var acc = initial
         while let item = self.next() {
             match combine(acc, item) {
-                .Output(let newAcc) => acc = newAcc,
-                .Early(let e) => return .Early(e)
+                .Output(newAcc) => acc = newAcc,
+                .Early(e) => return .Early(e)
             }
         }
         .Output(acc)
@@ -224,7 +223,7 @@ extension Iterator {
         while let item = self.next() {
             match action(item) {
                 .Output(_) => {},
-                .Early(let e) => return .Early(e)
+                .Early(e) => return .Early(e)
             }
         }
         .Output(())
@@ -247,12 +246,12 @@ extension Iterator {
     }
 
     // Compare iterators
-    public func eq[Other: Iterator](other: Other) -> Bool
-        where Other.Item == Item, Item: Equatable
+    public func eq[Other](other: Other) -> Bool
+        where Other: Iterator, Other.Item = Item, Item: Equatable
     {
         while true {
             match (self.next(), other.next()) {
-                (.Some(let a), .Some(let b)) => {
+                (.Some(a), .Some(b)) => {
                     if a != b { return false }
                 },
                 (.None, .None) => return true,
@@ -261,12 +260,12 @@ extension Iterator {
         }
     }
 
-    public func cmp[Other: Iterator](other: Other) -> Ordering
-        where Other.Item == Item, Item: Comparable
+    public func cmp[Other](other: Other) -> Ordering
+        where Other: Iterator, Other.Item = Item, Item: Comparable
     {
         while true {
             match (self.next(), other.next()) {
-                (.Some(let a), .Some(let b)) => {
+                (.Some(a), .Some(b)) => {
                     let ord = a.compare(b)
                     if ord != .Equal { return ord }
                 },

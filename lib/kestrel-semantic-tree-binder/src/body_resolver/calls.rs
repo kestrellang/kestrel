@@ -455,41 +455,22 @@ pub fn resolve_call(
                 }
             }
 
-            // Validate argument count and types based on intrinsic
-            match intrinsic {
-                LangIntrinsic::PanicUnwind => {
-                    // panic_unwind(message: String) -> Never
-                    if arguments.len() != 1 {
-                        ctx.diagnostics.add_diagnostic(
-                            ClosureArityError {
-                                span: span.clone(),
-                                expected: 1,
-                                provided: arguments.len(),
-                            }
-                            .into_diagnostic(),
-                        );
-                        return Expression::error(span);
+            // Validate argument count based on intrinsic
+            let expected_arity = intrinsic.arity();
+            if arguments.len() != expected_arity {
+                ctx.diagnostics.add_diagnostic(
+                    ClosureArityError {
+                        span: span.clone(),
+                        expected: expected_arity,
+                        provided: arguments.len(),
                     }
-                    // Create the lang intrinsic call expression
-                    Expression::lang_intrinsic(LangIntrinsic::PanicUnwind, arguments, span)
-                }
-                LangIntrinsic::Cast { from, to } => {
-                    // cast_<from>_<to>(value: From) -> To
-                    if arguments.len() != 1 {
-                        ctx.diagnostics.add_diagnostic(
-                            ClosureArityError {
-                                span: span.clone(),
-                                expected: 1,
-                                provided: arguments.len(),
-                            }
-                            .into_diagnostic(),
-                        );
-                        return Expression::error(span);
-                    }
-                    // Create the cast intrinsic call expression
-                    Expression::lang_intrinsic(LangIntrinsic::Cast { from, to }, arguments, span)
-                }
+                    .into_diagnostic(),
+                );
+                return Expression::error(span);
             }
+
+            // Create the lang intrinsic call expression
+            Expression::lang_intrinsic(intrinsic, arguments, span)
         }
 
         // Local variable reference - could be calling a function stored in a variable

@@ -23,43 +23,47 @@ public struct UInt8:
     ExpressibleByIntLiteral,
     FFISafe
 {
-    private var value: lang.u8
+    private var value: lang.i8
 
-    public static var zero: UInt8 { UInt8(value: 0) }
-    public static var one: UInt8 { UInt8(value: 1) }
-    public static var minValue: UInt8 { UInt8(value: 0) }
-    public static var maxValue: UInt8 { UInt8(value: 255) }
+    public static var zero: UInt8 { UInt8(intLiteral: 0) }
+    public static var one: UInt8 { UInt8(intLiteral: 1) }
+    public static var minValue: UInt8 { UInt8(intLiteral: 0) }
+    public static var maxValue: UInt8 { UInt8(intLiteral: 255) }
     public static var bitWidth: Int { 8 }
 
     public init(intLiteral value: lang.i64) {
-        self.value = lang.cast_i64_u8(value)
+        self.value = lang.cast_i64_i8(value)
+    }
+
+    init(raw value: lang.i8) {
+        self.value = value
     }
 
     public func equals(other: UInt8) -> Bool {
-        lang.u8_eq(self.value, other.value)
+        lang.i8_eq(self.value, other.value)
     }
 
     public func compare(other: UInt8) -> Ordering {
-        if lang.u8_lt(self.value, other.value) { .Less }
-        else if lang.u8_gt(self.value, other.value) { .Greater }
+        if lang.i8_unsigned_lt(self.value, other.value) { .Less }
+        else if lang.i8_unsigned_gt(self.value, other.value) { .Greater }
         else { .Equal }
     }
 
-    public func hash[H](into hasher: mutating H) where H: Hasher {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
         hasher.write(bytes: [self.value])
     }
 
     type Output = UInt8
 
-    public func add(other: UInt8) -> UInt8 { UInt8(value: lang.u8_add(self.value, other.value)) }
-    public func subtract(other: UInt8) -> UInt8 { UInt8(value: lang.u8_sub(self.value, other.value)) }
-    public func multiply(other: UInt8) -> UInt8 { UInt8(value: lang.u8_mul(self.value, other.value)) }
-    public func divide(other: UInt8) -> UInt8 { UInt8(value: lang.u8_div(self.value, other.value)) }
-    public func mod(other: UInt8) -> UInt8 { UInt8(value: lang.u8_rem(self.value, other.value)) }
-    public func bitwiseAnd(other: UInt8) -> UInt8 { UInt8(value: lang.u8_and(self.value, other.value)) }
-    public func bitwiseOr(other: UInt8) -> UInt8 { UInt8(value: lang.u8_or(self.value, other.value)) }
-    public func bitwiseXor(other: UInt8) -> UInt8 { UInt8(value: lang.u8_xor(self.value, other.value)) }
-    public func bitwiseNot() -> UInt8 { UInt8(value: lang.u8_not(self.value)) }
-    public func shiftLeft(by count: Int) -> UInt8 { UInt8(value: lang.u8_shl(self.value, lang.cast_i64_u8(count))) }
-    public func shiftRight(by count: Int) -> UInt8 { UInt8(value: lang.u8_shr(self.value, lang.cast_i64_u8(count))) }
+    public func add(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.value, other.value)) }
+    public func subtract(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.value, other.value)) }
+    public func multiply(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.value, other.value)) }
+    public func divide(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_div(self.value, other.value)) }
+    public func mod(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.value, other.value)) }
+    public func bitwiseAnd(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_and(self.value, other.value)) }
+    public func bitwiseOr(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_or(self.value, other.value)) }
+    public func bitwiseXor(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_xor(self.value, other.value)) }
+    public func bitwiseNot() -> UInt8 { UInt8(raw: lang.i8_not(self.value)) }
+    public func shiftLeft(by count: Int) -> UInt8 { UInt8(raw: lang.i8_shl(self.value, lang.cast_i64_i8(count))) }
+    public func shiftRight(by count: Int) -> UInt8 { UInt8(raw: lang.i8_unsigned_shr(self.value, lang.cast_i64_i8(count))) }
 }

@@ -101,18 +101,18 @@ public struct String[A]:
     }
 
     private func ensureCapacity(minCapacity: Int) {
-        self.ensureUnique()
+        self.ensureUnique();
         if self.storage.value.buffer.capacity < minCapacity {
             let newCapacity = if self.storage.value.buffer.capacity == 0 {
                 if minCapacity < 16 { 16 } else { minCapacity }
             } else {
-                var cap = self.storage.value.buffer.capacity
+                var cap = self.storage.value.buffer.capacity;
                 while cap < minCapacity {
                     cap = cap * 2
                 }
                 cap
-            }
-            self.storage.value.buffer.resize(to: newCapacity)
+            };
+            self.storage.value.buffer.resize(to: newCapacity);
         }
     }
 
@@ -126,9 +126,9 @@ public struct String[A]:
     }
 
     public func append(codePoint cp: CodePoint) {
-        var bytes: [UInt8] = []
-        cp.encodeUtf8(into: bytes)
-        self.ensureCapacity(minCapacity: self.byteCount + bytes.count)
+        var bytes: [UInt8] = [];
+        cp.encodeUtf8(into: bytes);
+        self.ensureCapacity(minCapacity: self.byteCount + bytes.count);
         /* for byte in bytes {
             self.storage.value.buffer(unchecked: self.storage.value.length) = byte
             self.storage.value.length += 1
@@ -136,7 +136,7 @@ public struct String[A]:
     }
 
     public func clear() {
-        self.ensureUnique()
+        self.ensureUnique();
         self.storage.value.length = 0
     }
 
@@ -144,8 +144,8 @@ public struct String[A]:
     type Output = String[A]
 
     public func add(other: String[A]) -> String[A] {
-        var result = self.clone()
-        result.append(string: other)
+        var result = self.clone();
+        result.append(string: other);
         result
     }
 
@@ -179,7 +179,7 @@ public struct String[A]:
 
     public func ends(with suffix: String) -> Bool {
         if suffix.byteCount > self.byteCount { return false }
-        let offset = self.byteCount - suffix.byteCount
+        let offset = self.byteCount - suffix.byteCount;
         /* for i in 0..<suffix.byteCount {
             if self.storage.value.buffer(unchecked: offset + i) != suffix.storage.value.buffer(unchecked: i) {
                 return false
@@ -211,11 +211,11 @@ public struct String[A]:
     }
 
     public func trimStart() -> String[A] {
-        var start = 0
+        var start = 0;
         while start < self.byteCount {
-            let byte = self.storage.value.buffer(unchecked: start)
+            let byte = self.storage.value.buffer(unchecked: start);
             if byte == 32 or byte == 9 or byte == 10 or byte == 13 {
-                start += 1
+                start = start + 1
             } else {
                 break
             }
@@ -224,11 +224,11 @@ public struct String[A]:
     }
 
     public func trimEnd() -> String[A] {
-        var end = self.byteCount
+        var end = self.byteCount;
         while end > 0 {
-            let byte = self.storage.value.buffer(unchecked: end - 1)
+            let byte = self.storage.value.buffer(unchecked: end - 1);
             if byte == 32 or byte == 9 or byte == 10 or byte == 13 {
-                end -= 1
+                end = end - 1
             } else {
                 break
             }
@@ -237,7 +237,7 @@ public struct String[A]:
     }
 
     public func lowercase() -> String[A] {
-        var result = String[A](capacity: self.byteCount)
+        var result = String[A](capacity: self.byteCount);
         /* for cp in self.codePoints {
             result.append(codePoint: cp.toLowercase())
         } */
@@ -268,15 +268,15 @@ public struct String[A]:
                     }
                 } */
                 if found {
-                    result.append(string: replacement)
-                    i += pattern.byteCount
+                    result.append(string: replacement);
+                    i = i + pattern.byteCount;
                     continue
                 }
             }
             // Append single byte (careful with UTF-8!)
-            result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i)
-            result.storage.value.length += 1
-            i += 1
+            result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i);
+            result.storage.value.length = result.storage.value.length + 1;
+            i = i + 1
         }
         result
     }
@@ -322,7 +322,7 @@ public struct String[A]:
     }
 
     // Hashable
-    public func hash[H](into hasher: mutating H) where H: Hasher {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
         /* for i in 0..<self.byteCount {
             hasher.write(bytes: [self.storage.value.buffer(unchecked: i)])
         } */
@@ -371,8 +371,8 @@ public struct SplitIterator[A]: Iterator where A: Allocator {
             }
             // Find next code point
             if let (cp, len) = decodeUtf8(bytes: self.string.bytes.asSlice(), at: self.index) {
-                let result = self.string.substringBytes(from: self.index, to: self.index + len)
-                self.index += len
+                let result = self.string.substringBytes(from: self.index, to: self.index + len);
+                self.index = self.index + len;
                 return .Some(result)
             }
             self.done = true;
@@ -389,11 +389,11 @@ public struct SplitIterator[A]: Iterator where A: Allocator {
                 }
             } */
             if found {
-                let result = self.string.substringBytes(from: start, to: self.index)
-                self.index += self.separator.byteCount
+                let result = self.string.substringBytes(from: start, to: self.index);
+                self.index = self.index + self.separator.byteCount;
                 return .Some(result)
             }
-            self.index += 1
+            self.index = self.index + 1
         }
 
         // Remainder

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::Parameter;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -42,6 +43,14 @@ impl DeclarationBinder for InitializerBinder {
             context.diagnostics,
         );
         symbol.metadata().add_behavior(attributes_behavior);
+
+        // Extract type parameters and resolve where clause bounds FIRST
+        // This must happen before resolving parameter/return types so that
+        // T.Item paths can find the protocol bounds for T
+        let generics_behavior = crate::binders::utils::generics::resolve_generics(
+            syntax, &source, file_id, symbol_id, context,
+        );
+        symbol.metadata().add_behavior(generics_behavior);
 
         // Extract and resolve parameters from syntax
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
@@ -165,6 +174,12 @@ fn resolve_initializer_body(
         );
     }
 
+    // Get where clause from GenericsBehavior if present
+    let where_clause = symbol
+        .metadata()
+        .get_behavior::<GenericsBehavior>()
+        .map(|g| g.where_clause().clone());
+
     // Create body resolution context
     let mut body_ctx = BodyResolutionContext::new_with_scope(
         context.model,
@@ -173,7 +188,7 @@ fn resolve_initializer_body(
         file_id,
         symbol.metadata().id(),
         local_scope,
-        None, // Initializer doesn't have its own where clause
+        where_clause,
     );
 
     resolve_body_and_attach_executable(symbol, body_node, &mut body_ctx);

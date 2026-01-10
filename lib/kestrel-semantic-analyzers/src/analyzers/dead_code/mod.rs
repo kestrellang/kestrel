@@ -432,8 +432,8 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             match intrinsic {
                 // panic_unwind never returns
                 kestrel_semantic_tree::expr::LangIntrinsic::PanicUnwind => Divergence::Returns,
-                // Cast intrinsics return a value normally
-                kestrel_semantic_tree::expr::LangIntrinsic::Cast { .. } => Divergence::None,
+                // All other intrinsics return a value normally
+                _ => Divergence::None,
             }
         }
 

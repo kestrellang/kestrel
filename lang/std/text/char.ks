@@ -78,29 +78,29 @@ public struct CodePoint: Equatable, Comparable, Hashable {
         else { 4 }
     }
 
-    public func encodeUtf8(into buffer: mutating [UInt8]) -> Int {
-        let len = self.utf8Length()
+    public func encodeUtf8(mutating into buffer: [UInt8]) -> Int {
+        let len = self.utf8Length();
         match len {
             1 => {
                 buffer.append(UInt8(self.value))
             },
             2 => {
-                buffer.append(UInt8(0xC0 | ((self.value >> 6) & 0x1F)))
+                buffer.append(UInt8(0xC0 | ((self.value >> 6) & 0x1F)));
                 buffer.append(UInt8(0x80 | (self.value & 0x3F)))
             },
             3 => {
-                buffer.append(UInt8(0xE0 | ((self.value >> 12) & 0x0F)))
-                buffer.append(UInt8(0x80 | ((self.value >> 6) & 0x3F)))
+                buffer.append(UInt8(0xE0 | ((self.value >> 12) & 0x0F)));
+                buffer.append(UInt8(0x80 | ((self.value >> 6) & 0x3F)));
                 buffer.append(UInt8(0x80 | (self.value & 0x3F)))
             },
             4 => {
-                buffer.append(UInt8(0xF0 | ((self.value >> 18) & 0x07)))
-                buffer.append(UInt8(0x80 | ((self.value >> 12) & 0x3F)))
-                buffer.append(UInt8(0x80 | ((self.value >> 6) & 0x3F)))
+                buffer.append(UInt8(0xF0 | ((self.value >> 18) & 0x07)));
+                buffer.append(UInt8(0x80 | ((self.value >> 12) & 0x3F)));
+                buffer.append(UInt8(0x80 | ((self.value >> 6) & 0x3F)));
                 buffer.append(UInt8(0x80 | (self.value & 0x3F)))
             }
-        }
-        len
+        };
+        return len;
     }
 
     // Equatable
@@ -114,7 +114,7 @@ public struct CodePoint: Equatable, Comparable, Hashable {
     }
 
     // Hashable
-    public func hash[H](into hasher: mutating H) where H: Hasher {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
         self.value.hash(into: hasher)
     }
 }
@@ -144,7 +144,7 @@ public struct Char: Equatable, Hashable {
 
     // Byte length when encoded as UTF-8
     public func utf8Length() -> Int {
-        var len = 0
+        var len = 0;
         /* for cp in self.codePoints {
             len += cp.utf8Length()
         } */
@@ -157,7 +157,7 @@ public struct Char: Equatable, Hashable {
     }
 
     // Hashable
-    public func hash[H](into hasher: mutating H) where H: Hasher {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
         /* for cp in self.codePoints {
             cp.hash(into: hasher)
         } */
@@ -170,7 +170,7 @@ public func decodeUtf8(bytes: Slice[UInt8], at index: Int) -> Optional[(CodePoin
         return .None
     }
 
-    let first = bytes(unchecked: index)
+    let first = bytes(unchecked: index);
 
     if first < 0x80 {
         // Single byte (ASCII)
@@ -181,33 +181,33 @@ public func decodeUtf8(bytes: Slice[UInt8], at index: Int) -> Optional[(CodePoin
     } else if first < 0xE0 {
         // Two bytes
         if index + 1 >= bytes.count { return .None }
-        let second = bytes(unchecked: index + 1)
+        let second = bytes(unchecked: index + 1);
         if (second & 0xC0) != 0x80 { return .None }
-        let value = (UInt32(first & 0x1F) << 6) | UInt32(second & 0x3F)
+        let value = (UInt32(first & 0x1F) << 6) | UInt32(second & 0x3F);
         return .Some((CodePoint(value: value), 2))
     } else if first < 0xF0 {
         // Three bytes
         if index + 2 >= bytes.count { return .None }
-        let second = bytes(unchecked: index + 1)
-        let third = bytes(unchecked: index + 2)
+        let second = bytes(unchecked: index + 1);
+        let third = bytes(unchecked: index + 2);
         if (second & 0xC0) != 0x80 or (third & 0xC0) != 0x80 { return .None }
         let value = (UInt32(first & 0x0F) << 12) |
                     (UInt32(second & 0x3F) << 6) |
-                    UInt32(third & 0x3F)
+                    UInt32(third & 0x3F);
         return .Some((CodePoint(value: value), 3))
     } else if first < 0xF8 {
         // Four bytes
         if index + 3 >= bytes.count { return .None }
-        let second = bytes(unchecked: index + 1)
-        let third = bytes(unchecked: index + 2)
-        let fourth = bytes(unchecked: index + 3)
+        let second = bytes(unchecked: index + 1);
+        let third = bytes(unchecked: index + 2);
+        let fourth = bytes(unchecked: index + 3);
         if (second & 0xC0) != 0x80 or (third & 0xC0) != 0x80 or (fourth & 0xC0) != 0x80 {
             return .None
         }
         let value = (UInt32(first & 0x07) << 18) |
                     (UInt32(second & 0x3F) << 12) |
                     (UInt32(third & 0x3F) << 6) |
-                    UInt32(fourth & 0x3F)
+                    UInt32(fourth & 0x3F);
         return .Some((CodePoint(value: value), 4))
     } else {
         return .None

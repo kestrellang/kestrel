@@ -21,31 +21,31 @@ public struct BytesView[A]: Iterable where A: Allocator {
         self.string.isEmpty
     }
 
-    public subscript(safe index: Int) -> Optional[Byte] {
-        get {
-            if index >= 0 and index < self.count {
-                .Some(self.string.byteAt(index: index))
-            } else {
-                .None
-            }
-        }
-    }
+    //public subscript(safe index: Int) -> Optional[Byte] {
+    //    get {
+    //        if index >= 0 and index < self.count {
+    //            .Some(self.string.byteAt(index: index))
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //}
 
-    public subscript(unchecked index: Int) -> Byte {
-        get { self.string.byteAt(index: index) }
-    }
+    //public subscript(unchecked index: Int) -> Byte {
+    //    get { self.string.byteAt(index: index) }
+    //}
 
-    public subscript(safe range: Range[Int]) -> Optional[Slice[Byte]] {
-        get {
-            if range.start >= 0 and range.end <= self.count {
-                // Return a view of the bytes
-                .Some(Slice(pointer: self.string.storage.value.buffer.pointer.offset(by: range.start),
-                           count: range.end - range.start))
-            } else {
-                .None
-            }
-        }
-    }
+    //public subscript(safe range: Range[Int]) -> Optional[Slice[Byte]] {
+    //    get {
+    //        if range.start >= 0 and range.end <= self.count {
+    //            // Return a view of the bytes
+    //            .Some(Slice(pointer: self.string.storage.value.buffer.pointer.offset(by: range.start),
+    //                       count: range.end - range.start))
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //}
 
     public func asSlice() -> Slice[Byte] {
         Slice(pointer: self.string.storage.value.buffer.pointer, count: self.count)
@@ -69,8 +69,8 @@ public struct BytesIterator[A]: Iterator where A: Allocator {
 
     public func next() -> Optional[Byte] {
         if self.index < self.string.byteCount {
-            let byte = self.string.byteAt(index: self.index)
-            self.index += 1
+            let byte = self.string.byteAt(index: self.index);
+            self.index = self.index + 1;
             .Some(byte)
         } else {
             .None
@@ -95,7 +95,7 @@ public struct CodePointsView[A]: Iterable where A: Allocator {
 
     // Count is O(n) - must decode all code points
     public func count() -> Int {
-        var n = 0
+        var n = 0;
         /* for _ in self {
             n += 1
         } */
@@ -120,12 +120,12 @@ public struct CodePointsIterator[A]: Iterator where A: Allocator {
         }
 
         if let (cp, len) = decodeUtf8(bytes: self.string.bytes.asSlice(), at: self.byteIndex) {
-            self.byteIndex += len
+            self.byteIndex = self.byteIndex + len;
             return .Some(cp)
         }
 
         // Invalid UTF-8 - skip byte and return replacement character
-        self.byteIndex += 1
+        self.byteIndex = self.byteIndex + 1;
         .Some(CodePoint(value: 0xFFFD))  // Replacement character
     }
 }
@@ -213,21 +213,21 @@ public struct LinesIterator[A]: Iterator where A: Allocator {
 
         // Find next newline
         while self.byteIndex < self.string.byteCount {
-            let byte = self.string.byteAt(index: self.byteIndex)
+            let byte = self.string.byteAt(index: self.byteIndex);
             if byte == 10 {  // \n
-                let line = self.string.substringBytes(from: start, to: self.byteIndex)
-                self.byteIndex += 1
+                let line = self.string.substringBytes(from: start, to: self.byteIndex);
+                self.byteIndex = self.byteIndex + 1;
                 return .Some(line)
             } else if byte == 13 {  // \r
-                let line = self.string.substringBytes(from: start, to: self.byteIndex)
-                self.byteIndex += 1
+                let line = self.string.substringBytes(from: start, to: self.byteIndex);
+                self.byteIndex = self.byteIndex + 1;
                 // Handle \r\n
                 if self.byteIndex < self.string.byteCount and self.string.byteAt(index: self.byteIndex) == 10 {
-                    self.byteIndex += 1
+                    self.byteIndex = self.byteIndex + 1
                 }
                 return .Some(line)
             }
-            self.byteIndex += 1
+            self.byteIndex = self.byteIndex + 1
         }
 
         // Last line (no trailing newline)

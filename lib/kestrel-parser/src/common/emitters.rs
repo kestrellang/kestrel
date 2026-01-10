@@ -441,7 +441,16 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
     emit_attribute_list(sink, &data.attributes);
     emit_visibility(sink, data.visibility);
     sink.add_token(SyntaxKind::Init, data.init_span);
+
+    if let Some((lbracket, params, rbracket)) = data.type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
     emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
 
     if let Some(ref block) = data.body {
         emit_function_body(sink, block);
@@ -624,6 +633,11 @@ pub fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarat
     // Emit bounds if present (for associated types)
     if let Some(ref bounds) = data.bounds {
         emit_associated_type_bounds(sink, bounds);
+    }
+
+    // Emit where clause if present (for associated types with constraints)
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
     }
 
     // Emit aliased type if present (optional for abstract associated types)

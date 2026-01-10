@@ -383,20 +383,22 @@ pub enum LiteralValue {
 
 /// Primitive types available in the `lang` namespace.
 /// These are the low-level types that map directly to machine types.
+/// Signedness is determined by operations, not types (2's complement).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LangPrimitive {
-    /// Signed integers
+    /// 1-bit integer (boolean)
+    I1,
+    /// 8-bit integer
     I8,
+    /// 16-bit integer
     I16,
+    /// 32-bit integer
     I32,
+    /// 64-bit integer
     I64,
-    /// Unsigned integers
-    U8,
-    U16,
-    U32,
-    U64,
-    /// Floating point
+    /// 32-bit floating point
     F32,
+    /// 64-bit floating point
     F64,
 }
 
@@ -404,14 +406,11 @@ impl LangPrimitive {
     /// Parse a primitive type from a string (e.g., "i32", "f64").
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
+            "i1" => Some(LangPrimitive::I1),
             "i8" => Some(LangPrimitive::I8),
             "i16" => Some(LangPrimitive::I16),
             "i32" => Some(LangPrimitive::I32),
             "i64" => Some(LangPrimitive::I64),
-            "u8" => Some(LangPrimitive::U8),
-            "u16" => Some(LangPrimitive::U16),
-            "u32" => Some(LangPrimitive::U32),
-            "u64" => Some(LangPrimitive::U64),
             "f32" => Some(LangPrimitive::F32),
             "f64" => Some(LangPrimitive::F64),
             _ => None,
@@ -421,38 +420,26 @@ impl LangPrimitive {
     /// Get the string representation.
     pub fn as_str(&self) -> &'static str {
         match self {
+            LangPrimitive::I1 => "i1",
             LangPrimitive::I8 => "i8",
             LangPrimitive::I16 => "i16",
             LangPrimitive::I32 => "i32",
             LangPrimitive::I64 => "i64",
-            LangPrimitive::U8 => "u8",
-            LangPrimitive::U16 => "u16",
-            LangPrimitive::U32 => "u32",
-            LangPrimitive::U64 => "u64",
             LangPrimitive::F32 => "f32",
             LangPrimitive::F64 => "f64",
         }
     }
 
-    /// Check if this is a signed integer type.
-    pub fn is_signed_int(&self) -> bool {
-        matches!(
-            self,
-            LangPrimitive::I8 | LangPrimitive::I16 | LangPrimitive::I32 | LangPrimitive::I64
-        )
-    }
-
-    /// Check if this is an unsigned integer type.
-    pub fn is_unsigned_int(&self) -> bool {
-        matches!(
-            self,
-            LangPrimitive::U8 | LangPrimitive::U16 | LangPrimitive::U32 | LangPrimitive::U64
-        )
-    }
-
-    /// Check if this is an integer type (signed or unsigned).
+    /// Check if this is an integer type (includes i1 for booleans).
     pub fn is_int(&self) -> bool {
-        self.is_signed_int() || self.is_unsigned_int()
+        matches!(
+            self,
+            LangPrimitive::I1
+                | LangPrimitive::I8
+                | LangPrimitive::I16
+                | LangPrimitive::I32
+                | LangPrimitive::I64
+        )
     }
 
     /// Check if this is a floating point type.
@@ -463,12 +450,128 @@ impl LangPrimitive {
     /// Get the bit width of this primitive type.
     pub fn bit_width(&self) -> u32 {
         match self {
-            LangPrimitive::I8 | LangPrimitive::U8 => 8,
-            LangPrimitive::I16 | LangPrimitive::U16 => 16,
-            LangPrimitive::I32 | LangPrimitive::U32 | LangPrimitive::F32 => 32,
-            LangPrimitive::I64 | LangPrimitive::U64 | LangPrimitive::F64 => 64,
+            LangPrimitive::I1 => 1,
+            LangPrimitive::I8 => 8,
+            LangPrimitive::I16 => 16,
+            LangPrimitive::I32 | LangPrimitive::F32 => 32,
+            LangPrimitive::I64 | LangPrimitive::F64 => 64,
         }
     }
+
+    /// Convert this primitive to a semantic type.
+    pub fn to_ty(&self, span: Span) -> crate::ty::Ty {
+        use crate::ty::{FloatBits, IntBits, Ty};
+        match self {
+            LangPrimitive::I1 => Ty::bool(span),
+            LangPrimitive::I8 => Ty::int(IntBits::I8, span),
+            LangPrimitive::I16 => Ty::int(IntBits::I16, span),
+            LangPrimitive::I32 => Ty::int(IntBits::I32, span),
+            LangPrimitive::I64 => Ty::int(IntBits::I64, span),
+            LangPrimitive::F32 => Ty::float(FloatBits::F32, span),
+            LangPrimitive::F64 => Ty::float(FloatBits::F64, span),
+        }
+    }
+}
+
+/// Integer binary operations (signedness-agnostic, 2's complement).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntBinaryOp {
+    /// Addition
+    Add,
+    /// Subtraction
+    Sub,
+    /// Multiplication
+    Mul,
+    /// Equality comparison
+    Eq,
+    /// Inequality comparison
+    Ne,
+    /// Bitwise AND
+    And,
+    /// Bitwise OR
+    Or,
+    /// Bitwise XOR
+    Xor,
+    /// Left shift
+    Shl,
+}
+
+/// Signed/unsigned-specific integer operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignedOp {
+    /// Division (signed or unsigned)
+    Div,
+    /// Remainder (signed or unsigned)
+    Rem,
+    /// Right shift (arithmetic for signed, logical for unsigned)
+    Shr,
+    /// Less than
+    Lt,
+    /// Less than or equal
+    Le,
+    /// Greater than
+    Gt,
+    /// Greater than or equal
+    Ge,
+}
+
+/// Integer unary operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntUnaryOp {
+    /// Negation (2's complement)
+    Neg,
+    /// Bitwise NOT
+    Not,
+}
+
+/// Float binary operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+/// Float unary operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatUnaryOp {
+    Neg,
+}
+
+/// Float constants (arity 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatConstant {
+    /// Positive infinity
+    Infinity,
+    /// NaN (Not a Number)
+    Nan,
+}
+
+/// Float predicates (arity 1, returns bool).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatPredicate {
+    /// Check if value is NaN
+    IsNan,
+    /// Check if value is infinite
+    IsInfinite,
+}
+
+/// Float math operations (unary, arity 1).
+/// Only includes operations supported natively by Cranelift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatMathOp {
+    Floor,
+    Ceil,
+    Round,
+    Trunc,
+    Sqrt,
 }
 
 /// Language intrinsics available in the `lang` namespace.
@@ -485,6 +588,218 @@ pub enum LangIntrinsic {
         from: LangPrimitive,
         to: LangPrimitive,
     },
+
+    /// Integer binary operations (signedness-agnostic).
+    /// e.g., `lang.i64_add(a, b)`, `lang.i32_mul(a, b)`
+    IntBinary {
+        primitive: LangPrimitive,
+        op: IntBinaryOp,
+    },
+
+    /// Integer binary operations (signed).
+    /// e.g., `lang.i64_signed_div(a, b)`, `lang.i32_signed_lt(a, b)`
+    IntBinarySigned {
+        primitive: LangPrimitive,
+        op: SignedOp,
+    },
+
+    /// Integer binary operations (unsigned).
+    /// e.g., `lang.i64_unsigned_div(a, b)`, `lang.i32_unsigned_lt(a, b)`
+    IntBinaryUnsigned {
+        primitive: LangPrimitive,
+        op: SignedOp,
+    },
+
+    /// Integer unary operations.
+    /// e.g., `lang.i64_neg(a)`, `lang.i32_not(a)`
+    IntUnary {
+        primitive: LangPrimitive,
+        op: IntUnaryOp,
+    },
+
+    /// Float binary operations.
+    /// e.g., `lang.f64_add(a, b)`, `lang.f32_lt(a, b)`
+    FloatBinary {
+        primitive: LangPrimitive,
+        op: FloatBinaryOp,
+    },
+
+    /// Float unary operations.
+    /// e.g., `lang.f64_neg(a)`
+    FloatUnary {
+        primitive: LangPrimitive,
+        op: FloatUnaryOp,
+    },
+
+    /// Float constants (arity 0).
+    /// e.g., `lang.f64_infinity()`, `lang.f32_nan()`
+    FloatConst {
+        primitive: LangPrimitive,
+        constant: FloatConstant,
+    },
+
+    /// Float predicates (arity 1, returns bool).
+    /// e.g., `lang.f64_is_nan(x)`, `lang.f32_is_infinite(x)`
+    FloatPred {
+        primitive: LangPrimitive,
+        pred: FloatPredicate,
+    },
+
+    /// Float math operations (unary, arity 1).
+    /// e.g., `lang.f64_floor(x)`, `lang.f32_sqrt(x)`
+    FloatMath {
+        primitive: LangPrimitive,
+        op: FloatMathOp,
+    },
+}
+
+impl LangIntrinsic {
+    /// Get the number of arguments this intrinsic expects.
+    pub fn arity(&self) -> usize {
+        match self {
+            LangIntrinsic::PanicUnwind => 1,
+            LangIntrinsic::Cast { .. } => 1,
+            LangIntrinsic::IntBinary { .. } => 2,
+            LangIntrinsic::IntBinarySigned { .. } => 2,
+            LangIntrinsic::IntBinaryUnsigned { .. } => 2,
+            LangIntrinsic::IntUnary { .. } => 1,
+            LangIntrinsic::FloatBinary { .. } => 2,
+            LangIntrinsic::FloatUnary { .. } => 1,
+            LangIntrinsic::FloatConst { .. } => 0,
+            LangIntrinsic::FloatPred { .. } => 1,
+            LangIntrinsic::FloatMath { .. } => 1,
+        }
+    }
+
+    /// Get a display name for error messages.
+    pub fn name(&self) -> String {
+        match self {
+            LangIntrinsic::PanicUnwind => "lang.panic_unwind".to_string(),
+            LangIntrinsic::Cast { from, to } => {
+                format!("lang.cast_{}_{}", from.as_str(), to.as_str())
+            }
+            LangIntrinsic::IntBinary { primitive, op } => {
+                let op_str = match op {
+                    IntBinaryOp::Add => "add",
+                    IntBinaryOp::Sub => "sub",
+                    IntBinaryOp::Mul => "mul",
+                    IntBinaryOp::Eq => "eq",
+                    IntBinaryOp::Ne => "ne",
+                    IntBinaryOp::And => "and",
+                    IntBinaryOp::Or => "or",
+                    IntBinaryOp::Xor => "xor",
+                    IntBinaryOp::Shl => "shl",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+            LangIntrinsic::IntBinarySigned { primitive, op } => {
+                let op_str = match op {
+                    SignedOp::Div => "signed_div",
+                    SignedOp::Rem => "signed_rem",
+                    SignedOp::Shr => "signed_shr",
+                    SignedOp::Lt => "signed_lt",
+                    SignedOp::Le => "signed_le",
+                    SignedOp::Gt => "signed_gt",
+                    SignedOp::Ge => "signed_ge",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+            LangIntrinsic::IntBinaryUnsigned { primitive, op } => {
+                let op_str = match op {
+                    SignedOp::Div => "unsigned_div",
+                    SignedOp::Rem => "unsigned_rem",
+                    SignedOp::Shr => "unsigned_shr",
+                    SignedOp::Lt => "unsigned_lt",
+                    SignedOp::Le => "unsigned_le",
+                    SignedOp::Gt => "unsigned_gt",
+                    SignedOp::Ge => "unsigned_ge",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+            LangIntrinsic::IntUnary { primitive, op } => {
+                let op_str = match op {
+                    IntUnaryOp::Neg => "neg",
+                    IntUnaryOp::Not => "not",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+            LangIntrinsic::FloatBinary { primitive, op } => {
+                let op_str = match op {
+                    FloatBinaryOp::Add => "add",
+                    FloatBinaryOp::Sub => "sub",
+                    FloatBinaryOp::Mul => "mul",
+                    FloatBinaryOp::Div => "div",
+                    FloatBinaryOp::Eq => "eq",
+                    FloatBinaryOp::Ne => "ne",
+                    FloatBinaryOp::Lt => "lt",
+                    FloatBinaryOp::Le => "le",
+                    FloatBinaryOp::Gt => "gt",
+                    FloatBinaryOp::Ge => "ge",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+            LangIntrinsic::FloatUnary { primitive, op } => {
+                let op_str = match op {
+                    FloatUnaryOp::Neg => "neg",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+            LangIntrinsic::FloatConst { primitive, constant } => {
+                let const_str = match constant {
+                    FloatConstant::Infinity => "infinity",
+                    FloatConstant::Nan => "nan",
+                };
+                format!("lang.{}_{}", primitive.as_str(), const_str)
+            }
+            LangIntrinsic::FloatPred { primitive, pred } => {
+                let pred_str = match pred {
+                    FloatPredicate::IsNan => "is_nan",
+                    FloatPredicate::IsInfinite => "is_infinite",
+                };
+                format!("lang.{}_{}", primitive.as_str(), pred_str)
+            }
+            LangIntrinsic::FloatMath { primitive, op } => {
+                let op_str = match op {
+                    FloatMathOp::Floor => "floor",
+                    FloatMathOp::Ceil => "ceil",
+                    FloatMathOp::Round => "round",
+                    FloatMathOp::Trunc => "trunc",
+                    FloatMathOp::Sqrt => "sqrt",
+                };
+                format!("lang.{}_{}", primitive.as_str(), op_str)
+            }
+        }
+    }
+
+    /// Check if this intrinsic returns a boolean (i1).
+    pub fn returns_bool(&self) -> bool {
+        match self {
+            LangIntrinsic::IntBinary { op, .. } => {
+                matches!(op, IntBinaryOp::Eq | IntBinaryOp::Ne)
+            }
+            LangIntrinsic::IntBinarySigned { op, .. }
+            | LangIntrinsic::IntBinaryUnsigned { op, .. } => {
+                matches!(
+                    op,
+                    SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge
+                )
+            }
+            LangIntrinsic::FloatBinary { op, .. } => {
+                matches!(
+                    op,
+                    FloatBinaryOp::Eq
+                        | FloatBinaryOp::Ne
+                        | FloatBinaryOp::Lt
+                        | FloatBinaryOp::Le
+                        | FloatBinaryOp::Gt
+                        | FloatBinaryOp::Ge
+                )
+            }
+            // FloatPred always returns bool (is_nan, is_infinite)
+            LangIntrinsic::FloatPred { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 /// Represents the kind of expression.
@@ -1248,20 +1563,9 @@ impl Expression {
                 arguments,
             } => {
                 let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
-                let name = match intrinsic {
-                    LangIntrinsic::PanicUnwind => "lang.panic_unwind".to_string(),
-                    LangIntrinsic::Cast { from, to } => {
-                        format!("lang.cast_{}_{}", from.as_str(), to.as_str())
-                    }
-                };
-                format!("{}({})", name, args.join(", "))
+                format!("{}({})", intrinsic.name(), args.join(", "))
             }
-            ExprKind::LangIntrinsicRef(intrinsic) => match intrinsic {
-                LangIntrinsic::PanicUnwind => "lang.panic_unwind".to_string(),
-                LangIntrinsic::Cast { from, to } => {
-                    format!("lang.cast_{}_{}", from.as_str(), to.as_str())
-                }
-            }
+            ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name()
         }
     }
 
@@ -2089,26 +2393,50 @@ impl Expression {
     /// Used for `lang.*` intrinsic functions that are handled specially by the compiler.
     /// The return type is `Never` for panic_unwind, or the target type for casts.
     pub fn lang_intrinsic(intrinsic: LangIntrinsic, arguments: Vec<CallArgument>, span: Span) -> Self {
-        use crate::ty::{FloatBits, IntBits};
-        let ty = match intrinsic {
+        let ty = match &intrinsic {
             LangIntrinsic::PanicUnwind => Ty::never(span.clone()),
-            LangIntrinsic::Cast { to, .. } => {
-                // Return the target primitive type
-                match to {
-                    LangPrimitive::I8 => Ty::int(IntBits::I8, span.clone()),
-                    LangPrimitive::I16 => Ty::int(IntBits::I16, span.clone()),
-                    LangPrimitive::I32 => Ty::int(IntBits::I32, span.clone()),
-                    LangPrimitive::I64 => Ty::int(IntBits::I64, span.clone()),
-                    // Unsigned integers use signed type at semantic level,
-                    // MIR lowering handles signedness based on LangPrimitive
-                    LangPrimitive::U8 => Ty::int(IntBits::I8, span.clone()),
-                    LangPrimitive::U16 => Ty::int(IntBits::I16, span.clone()),
-                    LangPrimitive::U32 => Ty::int(IntBits::I32, span.clone()),
-                    LangPrimitive::U64 => Ty::int(IntBits::I64, span.clone()),
-                    LangPrimitive::F32 => Ty::float(FloatBits::F32, span.clone()),
-                    LangPrimitive::F64 => Ty::float(FloatBits::F64, span.clone()),
+            LangIntrinsic::Cast { to, .. } => to.to_ty(span.clone()),
+            LangIntrinsic::IntBinary { primitive, op } => {
+                // Comparison ops return bool (i1), others return the same type
+                if matches!(op, IntBinaryOp::Eq | IntBinaryOp::Ne) {
+                    Ty::bool(span.clone())
+                } else {
+                    primitive.to_ty(span.clone())
                 }
             }
+            LangIntrinsic::IntBinarySigned { primitive, op }
+            | LangIntrinsic::IntBinaryUnsigned { primitive, op } => {
+                // Comparison ops return bool (i1), others return the same type
+                if matches!(op, SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge) {
+                    Ty::bool(span.clone())
+                } else {
+                    primitive.to_ty(span.clone())
+                }
+            }
+            LangIntrinsic::IntUnary { primitive, .. } => primitive.to_ty(span.clone()),
+            LangIntrinsic::FloatBinary { primitive, op } => {
+                // Comparison ops return bool (i1), others return the same type
+                if matches!(
+                    op,
+                    FloatBinaryOp::Eq
+                        | FloatBinaryOp::Ne
+                        | FloatBinaryOp::Lt
+                        | FloatBinaryOp::Le
+                        | FloatBinaryOp::Gt
+                        | FloatBinaryOp::Ge
+                ) {
+                    Ty::bool(span.clone())
+                } else {
+                    primitive.to_ty(span.clone())
+                }
+            }
+            LangIntrinsic::FloatUnary { primitive, .. } => primitive.to_ty(span.clone()),
+            // FloatConst returns the float type
+            LangIntrinsic::FloatConst { primitive, .. } => primitive.to_ty(span.clone()),
+            // FloatPred returns bool
+            LangIntrinsic::FloatPred { .. } => Ty::bool(span.clone()),
+            // FloatMath returns the float type
+            LangIntrinsic::FloatMath { primitive, .. } => primitive.to_ty(span.clone()),
         };
         Expression {
             id: ExprId::new(),
@@ -2127,9 +2455,8 @@ impl Expression {
     /// This is similar to `symbol_ref` but for intrinsics that don't have real symbols.
     /// The type is the function signature of the intrinsic.
     pub fn lang_intrinsic_ref(intrinsic: LangIntrinsic, span: Span) -> Self {
-        use crate::ty::{FloatBits, IntBits};
         // Create a function type for the intrinsic
-        let ty = match intrinsic {
+        let ty = match &intrinsic {
             LangIntrinsic::PanicUnwind => {
                 // (String) -> Never
                 Ty::function(
@@ -2140,31 +2467,76 @@ impl Expression {
             }
             LangIntrinsic::Cast { from, to } => {
                 // (From) -> To
-                let from_ty = match from {
-                    LangPrimitive::I8 => Ty::int(IntBits::I8, span.clone()),
-                    LangPrimitive::I16 => Ty::int(IntBits::I16, span.clone()),
-                    LangPrimitive::I32 => Ty::int(IntBits::I32, span.clone()),
-                    LangPrimitive::I64 => Ty::int(IntBits::I64, span.clone()),
-                    LangPrimitive::U8 => Ty::int(IntBits::I8, span.clone()),
-                    LangPrimitive::U16 => Ty::int(IntBits::I16, span.clone()),
-                    LangPrimitive::U32 => Ty::int(IntBits::I32, span.clone()),
-                    LangPrimitive::U64 => Ty::int(IntBits::I64, span.clone()),
-                    LangPrimitive::F32 => Ty::float(FloatBits::F32, span.clone()),
-                    LangPrimitive::F64 => Ty::float(FloatBits::F64, span.clone()),
+                Ty::function(
+                    vec![from.to_ty(span.clone())],
+                    to.to_ty(span.clone()),
+                    span.clone(),
+                )
+            }
+            LangIntrinsic::IntBinary { primitive, op } => {
+                // (T, T) -> T or (T, T) -> Bool for comparisons
+                let prim_ty = primitive.to_ty(span.clone());
+                let ret_ty = if matches!(op, IntBinaryOp::Eq | IntBinaryOp::Ne) {
+                    Ty::bool(span.clone())
+                } else {
+                    prim_ty.clone()
                 };
-                let to_ty = match to {
-                    LangPrimitive::I8 => Ty::int(IntBits::I8, span.clone()),
-                    LangPrimitive::I16 => Ty::int(IntBits::I16, span.clone()),
-                    LangPrimitive::I32 => Ty::int(IntBits::I32, span.clone()),
-                    LangPrimitive::I64 => Ty::int(IntBits::I64, span.clone()),
-                    LangPrimitive::U8 => Ty::int(IntBits::I8, span.clone()),
-                    LangPrimitive::U16 => Ty::int(IntBits::I16, span.clone()),
-                    LangPrimitive::U32 => Ty::int(IntBits::I32, span.clone()),
-                    LangPrimitive::U64 => Ty::int(IntBits::I64, span.clone()),
-                    LangPrimitive::F32 => Ty::float(FloatBits::F32, span.clone()),
-                    LangPrimitive::F64 => Ty::float(FloatBits::F64, span.clone()),
+                Ty::function(vec![prim_ty.clone(), prim_ty], ret_ty, span.clone())
+            }
+            LangIntrinsic::IntBinarySigned { primitive, op }
+            | LangIntrinsic::IntBinaryUnsigned { primitive, op } => {
+                // (T, T) -> T or (T, T) -> Bool for comparisons
+                let prim_ty = primitive.to_ty(span.clone());
+                let ret_ty =
+                    if matches!(op, SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge) {
+                        Ty::bool(span.clone())
+                    } else {
+                        prim_ty.clone()
+                    };
+                Ty::function(vec![prim_ty.clone(), prim_ty], ret_ty, span.clone())
+            }
+            LangIntrinsic::IntUnary { primitive, .. } => {
+                // (T) -> T
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
+            }
+            LangIntrinsic::FloatBinary { primitive, op } => {
+                // (T, T) -> T or (T, T) -> Bool for comparisons
+                let prim_ty = primitive.to_ty(span.clone());
+                let ret_ty = if matches!(
+                    op,
+                    FloatBinaryOp::Eq
+                        | FloatBinaryOp::Ne
+                        | FloatBinaryOp::Lt
+                        | FloatBinaryOp::Le
+                        | FloatBinaryOp::Gt
+                        | FloatBinaryOp::Ge
+                ) {
+                    Ty::bool(span.clone())
+                } else {
+                    prim_ty.clone()
                 };
-                Ty::function(vec![from_ty], to_ty, span.clone())
+                Ty::function(vec![prim_ty.clone(), prim_ty], ret_ty, span.clone())
+            }
+            LangIntrinsic::FloatUnary { primitive, .. } => {
+                // (T) -> T
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
+            }
+            LangIntrinsic::FloatConst { primitive, .. } => {
+                // () -> T
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(vec![], prim_ty, span.clone())
+            }
+            LangIntrinsic::FloatPred { primitive, .. } => {
+                // (T) -> Bool
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(vec![prim_ty], Ty::bool(span.clone()), span.clone())
+            }
+            LangIntrinsic::FloatMath { primitive, .. } => {
+                // (T) -> T
+                let prim_ty = primitive.to_ty(span.clone());
+                Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
             }
         };
         Expression {

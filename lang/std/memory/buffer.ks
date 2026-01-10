@@ -9,11 +9,11 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
 
     // Allocate buffer with capacity
     public init(capacity: Int) {
-        self.allocator = GlobalAllocator()
-        let layout = Layout.array[T](count: capacity)
+        self.allocator = GlobalAllocator();
+        let layout = Layout.array[T](count: capacity);
         match self.allocator.allocate(layout: layout) {
-            .Some(let rawPtr) => {
-                self.ptr = rawPtr.as[T]()
+            .Some(rawPtr) => {
+                self.ptr = rawPtr.cast[T]();
                 self.cap = capacity;
             },
             .None => panic("Buffer allocation failed")
@@ -22,10 +22,10 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
 
     public init(capacity: Int, allocator: A) {
         self.allocator = allocator;
-        let layout = Layout.array[T](count: capacity)
+        let layout = Layout.array[T](count: capacity);
         match self.allocator.allocate(layout: layout) {
-            .Some(let rawPtr) => {
-                self.ptr = rawPtr.as[T]()
+            .Some(rawPtr) => {
+                self.ptr = rawPtr.cast[T]();
                 self.cap = capacity;
             },
             .None => panic("Buffer allocation failed")
@@ -40,7 +40,7 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     }
 
     deinit {
-        let layout = Layout.array[T](count: self.cap)
+        let layout = Layout.array[T](count: self.cap);
         self.allocator.deallocate(ptr: self.ptr.asRaw(), layout: layout)
     }
 
@@ -49,40 +49,40 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     public var pointer: Pointer[T] { self.ptr }
 
     // Safe access - returns Optional, bounds checked
-    public subscript(safe index: Int) -> Optional[T] {
-        get {
-            if index >= 0 and index < self.cap {
-                .Some(self.ptr.offset(by: index).read())
-            } else {
-                .None
-            }
-        }
-        set {
-            if index >= 0 and index < self.cap {
-                if let value = newValue {
-                    self.ptr.offset(by: index).write(value)
-                }
-            }
-        }
-    }
+    //public subscript(safe index: Int) -> Optional[T] {
+    //    get {
+    //        if index >= 0 and index < self.cap {
+    //            .Some(self.ptr.offset(by: index).read())
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //    set {
+    //        if index >= 0 and index < self.cap {
+    //            if let value = newValue {
+    //                self.ptr.offset(by: index).write(value)
+    //            }
+    //        }
+    //    }
+    //}
 
     // Wrapping access - indices wrap around
-    public subscript(wrapping index: Int) -> T {
-        get {
-            let wrapped = ((index % self.cap) + self.cap) % self.cap
-            self.ptr.offset(by: wrapped).read()
-        }
-        set {
-            let wrapped = ((index % self.cap) + self.cap) % self.cap
-            self.ptr.offset(by: wrapped).write(newValue)
-        }
-    }
+    //public subscript(wrapping index: Int) -> T {
+    //    get {
+    //        let wrapped = ((index % self.cap) + self.cap) % self.cap
+    //        self.ptr.offset(by: wrapped).read()
+    //    }
+    //    set {
+    //        let wrapped = ((index % self.cap) + self.cap) % self.cap
+    //        self.ptr.offset(by: wrapped).write(newValue)
+    //    }
+    //}
 
     // Unchecked access - no bounds check
-    public subscript(unchecked index: Int) -> T {
-        get { self.ptr.offset(by: index).read() }
-        set { self.ptr.offset(by: index).write(newValue) }
-    }
+    //public subscript(unchecked index: Int) -> T {
+    //    get { self.ptr.offset(by: index).read() }
+    //    set { self.ptr.offset(by: index).write(newValue) }
+    //}
 
     // Bulk operations
     public func fill(with value: T) {
@@ -91,15 +91,15 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
         } */
     }
 
-    public func copy(from source: Buffer[T, A>, count: Int) {
-        let copyCount = if count < source.cap { count } else { source.cap }
-        let copyCount = if copyCount < self.cap { copyCount } else { self.cap }
+    public func copy(from source: Buffer[T, A], count: Int) {
+        let copyCount = if count < source.cap { count } else { source.cap };
+        let copyCount = if copyCount < self.cap { copyCount } else { self.cap };
         lang.memcpy(self.ptr.asRaw().raw, source.ptr.asRaw().raw, copyCount * lang.sizeof[T]())
     }
 
     public func move(from source: Buffer[T, A], count: Int) {
-        let moveCount = if count < source.cap { count } else { source.cap }
-        let moveCount = if moveCount < self.cap { moveCount } else { self.cap }
+        let moveCount = if count < source.cap { count } else { source.cap };
+        let moveCount = if moveCount < self.cap { moveCount } else { self.cap };
         lang.memmove(self.ptr.asRaw().raw, source.ptr.asRaw().raw, moveCount * lang.sizeof[T]())
     }
 
@@ -109,12 +109,12 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
 
     // Resizing
     public func resize(to newCapacity: Int) {
-        let oldLayout = Layout.array[T](count: self.cap)
-        let newLayout = Layout.array[T](count: newCapacity)
+        let oldLayout = Layout.array[T](count: self.cap);
+        let newLayout = Layout.array[T](count: newCapacity);
 
         match self.allocator.reallocate(ptr: self.ptr.asRaw(), oldLayout: oldLayout, newLayout: newLayout) {
-            .Some(let newPtr) => {
-                self.ptr = newPtr.as[T]()
+            .Some(newPtr) => {
+                self.ptr = newPtr.cast[T]();
                 self.cap = newCapacity
             },
             .None => panic("Buffer resize failed")
@@ -145,11 +145,11 @@ public struct ArcBox[T] {
     }
 
     public init(value: T) {
-        let layout = Layout.of[ArcBoxStorage[T]]()
-        let allocator = GlobalAllocator()
+        let layout = Layout.of[ArcBoxStorage[T]]();
+        let allocator = GlobalAllocator();
         match allocator.allocate(layout: layout) {
-            .Some(let rawPtr) => {
-                self.ptr = rawPtr.as[ArcBoxStorage[T]]()
+            .Some(rawPtr) => {
+                self.ptr = rawPtr.cast[ArcBoxStorage[T]]();
                 self.ptr.pointee = ArcBoxStorage(refCount: 1, value: value)
             },
             .None => panic("ArcBox allocation failed")

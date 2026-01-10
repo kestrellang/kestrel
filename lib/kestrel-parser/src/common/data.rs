@@ -167,16 +167,18 @@ pub struct FieldDeclarationData {
 
 /// Raw parsed data for initializer declaration internals
 ///
-/// Initializer syntax: `(visibility)? init(params) { body }?`
+/// Initializer syntax: `(visibility)? init[T]?(params) where ...? { body }?`
 /// Body is optional for protocol initializer declarations.
 #[derive(Debug, Clone)]
 pub struct InitializerDeclarationData {
     pub attributes: Vec<AttributeData>,
     pub visibility: Option<(Token, Span)>,
     pub init_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
     pub lparen: Span,
     pub parameters: Vec<ParameterData>,
     pub rparen: Span,
+    pub where_clause: Option<WhereClauseData>,
     pub body: Option<CodeBlockData>,
 }
 
@@ -314,6 +316,8 @@ pub struct TypeAliasDeclarationData {
     pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
     /// Optional bounds for associated types (: Equatable, Hashable)
     pub bounds: Option<AssociatedTypeBoundsData>,
+    /// Optional where clause for associated types (where Iter.Item = Item)
+    pub where_clause: Option<WhereClauseData>,
     /// Optional equals span and aliased type (= Type)
     /// For associated types in protocols, this may be None (abstract associated type)
     pub aliased: Option<(Span, TyVariant)>,

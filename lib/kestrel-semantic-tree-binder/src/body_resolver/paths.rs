@@ -159,6 +159,11 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 }
             }
         }
+
+        // Parse lang intrinsics: i64_add, i64_signed_div, f64_mul, etc.
+        if let Some(intrinsic) = parse_lang_intrinsic(&path[1]) {
+            return Expression::lang_intrinsic_ref(intrinsic, span);
+        }
     }
 
     // Extract type arguments from the path if present
@@ -936,4 +941,221 @@ fn extract_qualified_type_from_path(
 
     // Non-generic type without type args - return None to use original path
     None
+}
+
+/// Parse a lang intrinsic name like "i64_add", "i64_signed_div", "f64_mul", etc.
+fn parse_lang_intrinsic(name: &str) -> Option<kestrel_semantic_tree::expr::LangIntrinsic> {
+    use kestrel_semantic_tree::expr::{
+        FloatBinaryOp, FloatUnaryOp, IntBinaryOp, IntUnaryOp, LangIntrinsic, LangPrimitive,
+        SignedOp,
+    };
+
+    // Try each primitive prefix: i1_, i8_, i16_, i32_, i64_, f32_, f64_
+    let primitives = [
+        ("i1_", LangPrimitive::I1),
+        ("i8_", LangPrimitive::I8),
+        ("i16_", LangPrimitive::I16),
+        ("i32_", LangPrimitive::I32),
+        ("i64_", LangPrimitive::I64),
+        ("f32_", LangPrimitive::F32),
+        ("f64_", LangPrimitive::F64),
+    ];
+
+    for (prefix, primitive) in primitives {
+        if let Some(op_name) = name.strip_prefix(prefix) {
+            if primitive.is_float() {
+                return parse_float_op(primitive, op_name);
+            } else {
+                return parse_int_op(primitive, op_name);
+            }
+        }
+    }
+    None
+}
+
+/// Parse an integer operation like "add", "signed_div", "neg", etc.
+fn parse_int_op(
+    primitive: kestrel_semantic_tree::expr::LangPrimitive,
+    op_name: &str,
+) -> Option<kestrel_semantic_tree::expr::LangIntrinsic> {
+    use kestrel_semantic_tree::expr::{IntBinaryOp, IntUnaryOp, LangIntrinsic, SignedOp};
+
+    // Check for signed_* prefix
+    if let Some(rest) = op_name.strip_prefix("signed_") {
+        let op = match rest {
+            "div" => SignedOp::Div,
+            "rem" => SignedOp::Rem,
+            "shr" => SignedOp::Shr,
+            "lt" => SignedOp::Lt,
+            "le" => SignedOp::Le,
+            "gt" => SignedOp::Gt,
+            "ge" => SignedOp::Ge,
+            _ => return None,
+        };
+        return Some(LangIntrinsic::IntBinarySigned { primitive, op });
+    }
+
+    // Check for unsigned_* prefix
+    if let Some(rest) = op_name.strip_prefix("unsigned_") {
+        let op = match rest {
+            "div" => SignedOp::Div,
+            "rem" => SignedOp::Rem,
+            "shr" => SignedOp::Shr,
+            "lt" => SignedOp::Lt,
+            "le" => SignedOp::Le,
+            "gt" => SignedOp::Gt,
+            "ge" => SignedOp::Ge,
+            _ => return None,
+        };
+        return Some(LangIntrinsic::IntBinaryUnsigned { primitive, op });
+    }
+
+    // Signedness-agnostic binary ops
+    match op_name {
+        "add" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Add,
+        }),
+        "sub" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Sub,
+        }),
+        "mul" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Mul,
+        }),
+        "eq" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Eq,
+        }),
+        "ne" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Ne,
+        }),
+        "and" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::And,
+        }),
+        "or" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Or,
+        }),
+        "xor" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Xor,
+        }),
+        "shl" => Some(LangIntrinsic::IntBinary {
+            primitive,
+            op: IntBinaryOp::Shl,
+        }),
+        // Unary ops
+        "neg" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Neg,
+        }),
+        "not" => Some(LangIntrinsic::IntUnary {
+            primitive,
+            op: IntUnaryOp::Not,
+        }),
+        _ => None,
+    }
+}
+
+/// Parse a float operation like "add", "mul", "neg", etc.
+fn parse_float_op(
+    primitive: kestrel_semantic_tree::expr::LangPrimitive,
+    op_name: &str,
+) -> Option<kestrel_semantic_tree::expr::LangIntrinsic> {
+    use kestrel_semantic_tree::expr::{
+        FloatBinaryOp, FloatConstant, FloatMathOp, FloatPredicate, FloatUnaryOp, LangIntrinsic,
+    };
+
+    match op_name {
+        // Basic binary operations
+        "add" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Add,
+        }),
+        "sub" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Sub,
+        }),
+        "mul" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Mul,
+        }),
+        "div" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Div,
+        }),
+        "eq" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Eq,
+        }),
+        "ne" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Ne,
+        }),
+        "lt" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Lt,
+        }),
+        "le" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Le,
+        }),
+        "gt" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Gt,
+        }),
+        "ge" => Some(LangIntrinsic::FloatBinary {
+            primitive,
+            op: FloatBinaryOp::Ge,
+        }),
+        // Unary operations
+        "neg" => Some(LangIntrinsic::FloatUnary {
+            primitive,
+            op: FloatUnaryOp::Neg,
+        }),
+        // Constants (arity 0)
+        "infinity" => Some(LangIntrinsic::FloatConst {
+            primitive,
+            constant: FloatConstant::Infinity,
+        }),
+        "nan" => Some(LangIntrinsic::FloatConst {
+            primitive,
+            constant: FloatConstant::Nan,
+        }),
+        // Predicates (arity 1, returns bool)
+        "is_nan" => Some(LangIntrinsic::FloatPred {
+            primitive,
+            pred: FloatPredicate::IsNan,
+        }),
+        "is_infinite" => Some(LangIntrinsic::FloatPred {
+            primitive,
+            pred: FloatPredicate::IsInfinite,
+        }),
+        // Math unary operations (arity 1) - only Cranelift-supported ops
+        "floor" => Some(LangIntrinsic::FloatMath {
+            primitive,
+            op: FloatMathOp::Floor,
+        }),
+        "ceil" => Some(LangIntrinsic::FloatMath {
+            primitive,
+            op: FloatMathOp::Ceil,
+        }),
+        "round" => Some(LangIntrinsic::FloatMath {
+            primitive,
+            op: FloatMathOp::Round,
+        }),
+        "trunc" => Some(LangIntrinsic::FloatMath {
+            primitive,
+            op: FloatMathOp::Trunc,
+        }),
+        "sqrt" => Some(LangIntrinsic::FloatMath {
+            primitive,
+            op: FloatMathOp::Sqrt,
+        }),
+        _ => None,
+    }
 }

@@ -952,6 +952,212 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     );
                     Value::Place(Place::local(result))
                 }
+                LangIntrinsic::IntBinary { op, .. } => {
+                    use kestrel_semantic_tree::expr::IntBinaryOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        IntBinaryOp::Add => BinOp::AddSigned,
+                        IntBinaryOp::Sub => BinOp::SubSigned,
+                        IntBinaryOp::Mul => BinOp::MulSigned,
+                        IntBinaryOp::Eq => BinOp::Eq,
+                        IntBinaryOp::Ne => BinOp::Ne,
+                        IntBinaryOp::And => BinOp::And,
+                        IntBinaryOp::Or => BinOp::Or,
+                        IntBinaryOp::Xor => BinOp::Xor,
+                        IntBinaryOp::Shl => BinOp::Shl,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("int_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp { op: bin_op, lhs, rhs },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::IntBinarySigned { op, .. } => {
+                    use kestrel_semantic_tree::expr::SignedOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        SignedOp::Div => BinOp::DivSigned,
+                        SignedOp::Rem => BinOp::RemSigned,
+                        SignedOp::Shr => BinOp::ShrSigned,
+                        SignedOp::Lt => BinOp::LtSigned,
+                        SignedOp::Le => BinOp::LeSigned,
+                        SignedOp::Gt => BinOp::GtSigned,
+                        SignedOp::Ge => BinOp::GeSigned,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("signed_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp { op: bin_op, lhs, rhs },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::IntBinaryUnsigned { op, .. } => {
+                    use kestrel_semantic_tree::expr::SignedOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        SignedOp::Div => BinOp::DivUnsigned,
+                        SignedOp::Rem => BinOp::RemUnsigned,
+                        SignedOp::Shr => BinOp::ShrUnsigned,
+                        SignedOp::Lt => BinOp::LtUnsigned,
+                        SignedOp::Le => BinOp::LeUnsigned,
+                        SignedOp::Gt => BinOp::GtUnsigned,
+                        SignedOp::Ge => BinOp::GeUnsigned,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("unsigned_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp { op: bin_op, lhs, rhs },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::IntUnary { op, .. } => {
+                    use kestrel_semantic_tree::expr::IntUnaryOp;
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let un_op = match op {
+                        IntUnaryOp::Neg => UnOp::Neg,
+                        IntUnaryOp::Not => UnOp::Not,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("int_unary", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::UnaryOp { op: un_op, operand },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::FloatBinary { op, .. } => {
+                    use kestrel_semantic_tree::expr::FloatBinaryOp;
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+
+                    let bin_op = match op {
+                        FloatBinaryOp::Add => BinOp::FAdd,
+                        FloatBinaryOp::Sub => BinOp::FSub,
+                        FloatBinaryOp::Mul => BinOp::FMul,
+                        FloatBinaryOp::Div => BinOp::FDiv,
+                        FloatBinaryOp::Eq => BinOp::FEq,
+                        FloatBinaryOp::Ne => BinOp::FNe,
+                        FloatBinaryOp::Lt => BinOp::FLt,
+                        FloatBinaryOp::Le => BinOp::FLe,
+                        FloatBinaryOp::Gt => BinOp::FGt,
+                        FloatBinaryOp::Ge => BinOp::FGe,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_op", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::BinaryOp { op: bin_op, lhs, rhs },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::FloatUnary { op, .. } => {
+                    use kestrel_semantic_tree::expr::FloatUnaryOp;
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let un_op = match op {
+                        FloatUnaryOp::Neg => UnOp::FNeg,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_unary", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::UnaryOp { op: un_op, operand },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::FloatConst { primitive, constant } => {
+                    use kestrel_execution_graph::function::{FloatBits, FloatConstantKind};
+                    use kestrel_semantic_tree::expr::{FloatConstant, LangPrimitive};
+
+                    let bits = match primitive {
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float constant on non-float primitive"),
+                    };
+
+                    let const_kind = match constant {
+                        FloatConstant::Infinity => FloatConstantKind::Infinity,
+                        FloatConstant::Nan => FloatConstantKind::Nan,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_const", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatConst { bits, constant: const_kind },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::FloatPred { primitive, pred } => {
+                    use kestrel_execution_graph::function::{FloatBits, FloatPredicateKind};
+                    use kestrel_semantic_tree::expr::{FloatPredicate, LangPrimitive};
+
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float predicate on non-float primitive"),
+                    };
+
+                    let pred_kind = match pred {
+                        FloatPredicate::IsNan => FloatPredicateKind::IsNan,
+                        FloatPredicate::IsInfinite => FloatPredicateKind::IsInfinite,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_pred", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatPred { bits, pred: pred_kind, operand },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::FloatMath { primitive, op } => {
+                    use kestrel_execution_graph::function::{FloatBits, FloatMathKind};
+                    use kestrel_semantic_tree::expr::{FloatMathOp, LangPrimitive};
+
+                    let operand = lower_expression(ctx, &arguments[0].value);
+
+                    let bits = match primitive {
+                        LangPrimitive::F32 => FloatBits::F32,
+                        LangPrimitive::F64 => FloatBits::F64,
+                        _ => unreachable!("float math on non-float primitive"),
+                    };
+
+                    let math_kind = match op {
+                        FloatMathOp::Floor => FloatMathKind::Floor,
+                        FloatMathOp::Ceil => FloatMathKind::Ceil,
+                        FloatMathOp::Round => FloatMathKind::Round,
+                        FloatMathOp::Trunc => FloatMathKind::Trunc,
+                        FloatMathOp::Sqrt => FloatMathKind::Sqrt,
+                    };
+
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("float_math", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::FloatMath { bits, op: math_kind, operand },
+                    );
+                    Value::Place(Place::local(result))
+                }
             }
         }
 

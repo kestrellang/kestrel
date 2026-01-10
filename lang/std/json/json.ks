@@ -7,7 +7,7 @@
 // import std.json.(Json, JsonValue)
 //
 // // Parse JSON
-// let value = try Json.parse("{\"name\": \"Alice\", \"age\": 30}")
+// let value = /* try */Json.parse("{\"name\": \"Alice\", \"age\": 30}")
 //
 // // Access values
 // let name = value["name"].asString()  // Optional["Alice"]
@@ -21,10 +21,10 @@
 //
 // // Serialize any Serialize type
 // let point = Point(x: 10, y: 20)
-// let json = try Json.serialize(point)  // "{\"x\":10,\"y\":20}"
+// let json = /* try */Json.serialize(point)  // "{\"x\":10,\"y\":20}"
 //
 // // Deserialize to any Deserialize type
-// let point: Point = try Json.deserialize("{\"x\":10,\"y\":20}")
+// let point: Point = /* try */Json.deserialize("{\"x\":10,\"y\":20}")
 // ```
 
 module std.json
@@ -60,7 +60,7 @@ public struct JsonError: Error {
 
     public var description: String {
         match self.position {
-            .Some(let pos) => "JsonError at position " + pos.toString() + ": " + self.message,
+            .Some(pos) => "JsonError at position " + pos.toString() + ": " + self.message,
             .None => "JsonError: " + self.message
         }
     }
@@ -121,81 +121,81 @@ public enum JsonValue: Equatable {
     // Value extraction
     public func asBool() -> Optional[Bool] {
         match self {
-            .Bool(let v) => .Some(v),
+            .Bool(v) => .Some(v),
             _ => .None
         }
     }
 
     public func asNumber() -> Optional[Float64] {
         match self {
-            .Number(let v) => .Some(v),
+            .Number(v) => .Some(v),
             _ => .None
         }
     }
 
     public func asInt() -> Optional[Int] {
         match self {
-            .Number(let v) => .Some(Int(v)),
+            .Number(v) => .Some(Int(v)),
             _ => .None
         }
     }
 
     public func asString() -> Optional[String] {
         match self {
-            .String(let v) => .Some(v),
+            .String(v) => .Some(v),
             _ => .None
         }
     }
 
     public func asArray() -> Optional[Array[JsonValue]] {
         match self {
-            .Array(let v) => .Some(v),
+            .Array(v) => .Some(v),
             _ => .None
         }
     }
 
     public func asObject() -> Optional[Dictionary[String, JsonValue]] {
         match self {
-            .Object(let v) => .Some(v),
+            .Object(v) => .Some(v),
             _ => .None
         }
     }
 
     // Subscript access for objects
-    public subscript(key: String) -> JsonValue {
-        match self {
-            .Object(let obj) => obj(key).unwrap(or: .Null),
-            _ => .Null
-        }
-    }
+    //public subscript(key: String) -> JsonValue {
+    //    match self {
+    //        .Object(obj) => obj(key).unwrap(or: .Null),
+    //        _ => .Null
+    //    }
+    //}
 
     // Subscript access for arrays
-    public subscript(index: Int) -> JsonValue {
-        match self {
-            .Array(let arr) => arr(safe: index).unwrap(or: .Null),
-            _ => .Null
-        }
-    }
+    //public subscript(index: Int) -> JsonValue {
+    //    match self {
+    //        .Array(arr) => arr(safe: index).unwrap(or: .Null),
+    //        _ => .Null
+    //    }
+    //}
 
     // Equatable
     public func equals(other: JsonValue) -> Bool {
         match (self, other) {
             (.Null, .Null) => true,
-            (.Bool(let a), .Bool(let b)) => a == b,
-            (.Number(let a), .Number(let b)) => a == b,
-            (.String(let a), .String(let b)) => a == b,
-            (.Array(let a), .Array(let b)) => {
+            (.Bool(a), .Bool(b)) => a == b,
+            (.Number(a), .Number(b)) => a == b,
+            (.String(a), .String(b)) => a == b,
+            (.Array(a), .Array(b)) => {
                 if a.count != b.count { return false }
                 /* for i in 0..<a.count {
                     if a(unchecked: i) != b(unchecked: i) { return false }
                 } */
                 true
             },
-            (.Object(let a), .Object(let b)) => {
+            (.Object(a), .Object(b)) => {
                 if a.count != b.count { return false }
                 /* for (key, value) in a {
                     match b(key) {
-                        .Some(let otherValue) => {
+                        .Some(otherValue) => {
                             if value != otherValue { return false }
                         },
                         .None => return false
@@ -209,22 +209,22 @@ public enum JsonValue: Equatable {
 }
 
 // JsonValue implements Serialize
-extension JsonValue: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend JsonValue: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         match self {
             .Null => serializer.serializeNil(),
-            .Bool(let v) => serializer.serializeBool(value: v),
-            .Number(let v) => serializer.serializeFloat64(value: v),
-            .String(let v) => serializer.serializeString(value: v),
-            .Array(let arr) => {
-                let arrSerializer = try serializer.beginArray(length: arr.count)
+            .Bool(v) => serializer.serializeBool(value: v),
+            .Number(v) => serializer.serializeFloat64(value: v),
+            .String(v) => serializer.serializeString(value: v),
+            .Array(arr) => {
+                let arrSerializer = /* try */ serializer.beginArray(length: arr.count);
                 /* for item in arr {
                     try arrSerializer.serializeElement(value: item)
                 } */
                 arrSerializer.end()
             },
-            .Object(let obj) => {
-                let objSerializer = try serializer.beginObject(name: "", fieldCount: obj.count)
+            .Object(obj) => {
+                let objSerializer = /*try*/ serializer.beginObject(name: "", fieldCount: obj.count);
                 /* for (key, value) in obj {
                     try objSerializer.serializeField(name: key, value: value)
                 } */
@@ -238,45 +238,45 @@ extension JsonValue: Serialize {
 public struct Json {
     // Parse JSON string into JsonValue
     public static func parse(input: String) -> Result[JsonValue, JsonError] {
-        var parser = JsonParser(input: input)
+        var parser = JsonParser(input: input);
         parser.parse()
     }
 
     // Stringify JsonValue to JSON string
     public static func stringify(value: JsonValue) -> String {
-        var writer = JsonWriter(pretty: false)
-        writer.write(value: value)
+        var writer = JsonWriter(pretty: false);
+        writer.write(value: value);
         writer.output
     }
 
     // Stringify JsonValue with pretty printing
     public static func stringify(value: JsonValue, pretty: Bool) -> String {
-        var writer = JsonWriter(pretty: pretty)
-        writer.write(value: value)
+        var writer = JsonWriter(pretty: pretty);
+        writer.write(value: value);
         writer.output
     }
 
     // Serialize any Serialize type to JSON string
     public static func serialize[T](value: T) -> Result[String, JsonError] where T: Serialize {
-        var serializer = JsonSerializer()
+        var serializer = JsonSerializer();
         match value.serialize(to: serializer) {
             .Ok(_) => serializer.finish(),
-            .Err(let e) => .Err(e)
+            .Err(e) => .Err(e)
         }
     }
 
     // Serialize with pretty printing
     public static func serialize[T](value: T, pretty: Bool) -> Result[String, JsonError] where T: Serialize {
-        var serializer = JsonSerializer(pretty: pretty)
+        var serializer = JsonSerializer(pretty: pretty);
         match value.serialize(to: serializer) {
             .Ok(_) => serializer.finish(),
-            .Err(let e) => .Err(e)
+            .Err(e) => .Err(e)
         }
     }
 
     // Deserialize JSON string to any Deserialize type
     public static func deserialize[T](input: String) -> Result[T, JsonError] where T: Deserialize {
-        var deserializer = JsonDeserializer(input: input)
+        var deserializer = JsonDeserializer(input: input);
         T.deserialize(from: deserializer)
     }
 }
@@ -292,9 +292,9 @@ struct JsonParser {
     }
 
     public func parse() -> Result[JsonValue, JsonError] {
-        self.skipWhitespace()
-        let value = try self.parseValue()
-        self.skipWhitespace()
+        self.skipWhitespace();
+        let value = /* try */self.parseValue();
+        self.skipWhitespace();
         if self.position < self.input.byteCount {
             return .Err(JsonError(message: "unexpected characters after JSON value", at: self.position))
         }
@@ -367,20 +367,20 @@ struct JsonParser {
         var result = String()
 
         while not self.isAtEnd() {
-            let ch = self.peek()
+            let ch = self.peek();
 
             if ch == 34 { // '"'
-                self.advance()
+                self.advance();
                 return .Ok(result)
             }
 
             if ch == 92 { // '\'
-                self.advance()
+                self.advance();
                 if self.isAtEnd() {
                     return .Err(JsonError(message: "unexpected end of string", at: self.position))
                 }
-                let escaped = self.peek()
-                self.advance()
+                let escaped = self.peek();
+                self.advance();
 
                 match escaped {
                     34 => result.append(codePoint: CodePoint(value: 34)),   // \"
@@ -392,7 +392,7 @@ struct JsonParser {
                     114 => result.append(codePoint: CodePoint(value: 13)),  // \r
                     116 => result.append(codePoint: CodePoint(value: 9)),   // \t
                     117 => { // \uXXXX
-                        let hex = try self.parseHexEscape()
+                        let hex = /* try */self.parseHexEscape();
                         result.append(codePoint: CodePoint(value: hex))
                     },
                     _ => return .Err(JsonError(message: "invalid escape sequence", at: self.position - 1))
@@ -402,8 +402,8 @@ struct JsonParser {
             } else {
                 // Regular character - decode UTF-8
                 if let (cp, len) = decodeUtf8(bytes: self.input.bytes.asSlice(), at: self.position) {
-                    result.append(codePoint: cp)
-                    self.position += len
+                    result.append(codePoint: cp);
+                    self.position = self.position + len
                 } else {
                     return .Err(JsonError(message: "invalid UTF-8", at: self.position))
                 }
@@ -491,7 +491,7 @@ struct JsonParser {
         // Extract the number string and parse
         let numStr = self.input.substringBytes(from: start, to: self.position)
         match Float64.parse(numStr) {
-            .Some(let num) => .Ok(.Number(num)),
+            .Some(num) => .Ok(.Number(num)),
             .None => .Err(JsonError(message: "invalid number", at: start))
         }
     }
@@ -511,7 +511,7 @@ struct JsonParser {
         }
 
         loop {
-            let value = try self.parseValue()
+            let value = /* try */self.parseValue()
             elements.append(value)
 
             self.skipWhitespace()
@@ -554,7 +554,7 @@ struct JsonParser {
                 return .Err(JsonError(message: "expected string key", at: self.position))
             }
 
-            let key = try self.parseString()
+            let key = /* try */self.parseString()
 
             self.skipWhitespace()
 
@@ -562,7 +562,7 @@ struct JsonParser {
                 return .Err(JsonError(message: "expected ':'", at: self.position))
             }
 
-            let value = try self.parseValue()
+            let value = /* try */self.parseValue()
             entries(key) = value
 
             self.skipWhitespace()
@@ -592,7 +592,7 @@ struct JsonParser {
     }
 
     private func advance() {
-        self.position += 1
+        self.position = self.position + 1
     }
 
     private func consume(expected: UInt8) -> Bool {
@@ -613,7 +613,7 @@ struct JsonParser {
                 return false
             }
         } */
-        self.position += keyword.byteCount
+        self.position = self.position + keyword.byteCount;
         true
     }
 
@@ -644,11 +644,11 @@ struct JsonWriter {
     public func write(value: JsonValue) {
         match value {
             .Null => self.output.append(string: "null"),
-            .Bool(let v) => self.output.append(string: if v { "true" } else { "false" }),
-            .Number(let v) => self.output.append(string: v.toString()),
-            .String(let v) => self.writeString(v),
-            .Array(let arr) => self.writeArray(arr),
-            .Object(let obj) => self.writeObject(obj)
+            .Bool(v) => self.output.append(string: if v { "true" } else { "false" }),
+            .Number(v) => self.output.append(string: v.toString()),
+            .String(v) => self.writeString(v),
+            .Array(arr) => self.writeArray(arr),
+            .Object(obj) => self.writeObject(obj)
         }
     }
 
@@ -699,7 +699,7 @@ struct JsonWriter {
         }
 
         if self.pretty {
-            self.indent += 1
+            self.indent = self.indent + 1;
             self.writeNewline()
         }
 
@@ -714,7 +714,7 @@ struct JsonWriter {
         } */
 
         if self.pretty {
-            self.indent -= 1
+            self.indent = self.indent - 1;
             self.writeNewline()
         }
 
@@ -730,7 +730,7 @@ struct JsonWriter {
         }
 
         if self.pretty {
-            self.indent += 1
+            self.indent = self.indent + 1;
             self.writeNewline()
         }
 
@@ -753,7 +753,7 @@ struct JsonWriter {
         } */
 
         if self.pretty {
-            self.indent -= 1
+            self.indent = self.indent - 1;
             self.writeNewline()
         }
 
@@ -870,7 +870,7 @@ public struct JsonSerializer: Serializer {
 
     // Compound types
     public func serializeArray[S](values: Array[S]) -> Result[(), JsonError] where S: Serialize {
-        var arr = try self.beginArray(length: values.count)
+        var arr = /* try */self.beginArray(length: values.count)
         /* for item in values {
             try arr.serializeElement(value: item)
         } */
@@ -878,7 +878,7 @@ public struct JsonSerializer: Serializer {
     }
 
     public func serializeMap[K, V](entries: Array[(K, V)]) -> Result[(), JsonError] where K: Serialize, V: Serialize {
-        var obj = try self.beginObject(name: "", fieldCount: entries.count)
+        var obj = /* try */self.beginObject(name: "", fieldCount: entries.count)
         /* for (key, value) in entries {
             // For JSON, keys should be strings
             // This is a simplification; full impl would serialize key to string
@@ -921,8 +921,8 @@ public struct JsonObjectSerializer: ObjectSerializer {
         }
         self.serializer.writer.write(value: .String(name))
         self.serializer.writer.output.append(codePoint: CodePoint(value: 58)) // ':'
-        value.serialize(to: self.serializer)
-        self.currentField += 1
+        value.serialize(to: self.serializer);
+        self.currentField = self.currentField + 1;
         .Ok(())
     }
 
@@ -951,8 +951,8 @@ public struct JsonArraySerializer: ArraySerializer {
         if self.currentIndex > 0 {
             self.serializer.writer.output.append(codePoint: CodePoint(value: 44)) // ','
         }
-        value.serialize(to: self.serializer)
-        self.currentIndex += 1
+        value.serialize(to: self.serializer);
+        self.currentIndex = self.currentIndex + 1;
         .Ok(())
     }
 
@@ -978,7 +978,7 @@ public struct JsonDeserializer: Deserializer {
         if let value = self.peeked {
             return .Ok(value)
         }
-        let value = try self.parser.parseValue()
+        let value = /* try */self.parser.parseValue()
         self.peeked = .Some(value)
         .Ok(value)
     }
@@ -993,7 +993,7 @@ public struct JsonDeserializer: Deserializer {
 
     // Primitive deserialization
     public func deserializeNil() -> Result[Nil, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
             .Null => .Ok(nil),
             _ => .Err(JsonError(message: "expected null"))
@@ -1001,128 +1001,128 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public func deserializeBool() -> Result[Bool, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Bool(let v) => .Ok(v),
+            .Bool(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected boolean"))
         }
     }
 
     public func deserializeInt() -> Result[Int, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(Int(v)),
+            .Number(v) => .Ok(Int(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
 
     public func deserializeInt8() -> Result[Int8, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(Int8(v)),
+            .Number(v) => .Ok(Int8(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
 
     public func deserializeInt16() -> Result[Int16, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(Int16(v)),
+            .Number(v) => .Ok(Int16(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
 
     public func deserializeInt32() -> Result[Int32, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(Int32(v)),
+            .Number(v) => .Ok(Int32(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
 
     public func deserializeInt64() -> Result[Int64, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(Int64(v)),
+            .Number(v) => .Ok(Int64(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
 
     public func deserializeUInt() -> Result[UInt, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(UInt(v)),
+            .Number(v) => .Ok(UInt(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
 
     public func deserializeUInt8() -> Result[UInt8, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(UInt8(v)),
+            .Number(v) => .Ok(UInt8(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
 
     public func deserializeUInt16() -> Result[UInt16, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(UInt16(v)),
+            .Number(v) => .Ok(UInt16(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
 
     public func deserializeUInt32() -> Result[UInt32, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(UInt32(v)),
+            .Number(v) => .Ok(UInt32(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
 
     public func deserializeUInt64() -> Result[UInt64, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(UInt64(v)),
+            .Number(v) => .Ok(UInt64(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
         }
     }
 
     public func deserializeFloat32() -> Result[Float32, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(Float32(v)),
+            .Number(v) => .Ok(Float32(v)),
             _ => .Err(JsonError(message: "expected float"))
         }
     }
 
     public func deserializeFloat64() -> Result[Float64, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Number(let v) => .Ok(v),
+            .Number(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected float"))
         }
     }
 
     public func deserializeString() -> Result[String, JsonError] {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .String(let v) => .Ok(v),
+            .String(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected string"))
         }
     }
 
     // Compound types
     public func deserializeArray[T]() -> Result[Array[T], JsonError] where T: Deserialize {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Array(let arr) => {
+            .Array(arr) => {
                 var result: Array[T] = []
                 /* for item in arr {
                     // Re-serialize and deserialize each item
                     // This is inefficient but type-safe
                     var itemDeserializer = JsonDeserializer(input: Json.stringify(item))
-                    let deserialized = try T.deserialize(from: itemDeserializer)
+                    let deserialized = /* try */T.deserialize(from: itemDeserializer)
                     result.append(deserialized)
                 } */
                 .Ok(result)
@@ -1132,17 +1132,17 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public func deserializeMap[K, V]() -> Result[Dictionary[K, V], JsonError] where K: Deserialize, K: Hashable, V: Deserialize {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Object(let obj) => {
+            .Object(obj) => {
                 var result: Dictionary[K, V] = [:]
                 /* for (key, val) in obj {
                     // Deserialize key and value
                     var keyDeserializer = JsonDeserializer(input: "\"" + key + "\"")
-                    let deserializedKey = try K.deserialize(from: keyDeserializer)
+                    let deserializedKey = /* try */K.deserialize(from: keyDeserializer)
 
                     var valDeserializer = JsonDeserializer(input: Json.stringify(val))
-                    let deserializedVal = try V.deserialize(from: valDeserializer)
+                    let deserializedVal = /* try */V.deserialize(from: valDeserializer)
 
                     result(deserializedKey) = deserializedVal
                 } */
@@ -1153,9 +1153,9 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public func deserializeObject[V](visitor: V.Visitor) -> Result[V, JsonError] where V: Deserialize {
-        let value = try self.takeValue()
+        let value = /* try */self.takeValue()
         match value {
-            .Object(let obj) => {
+            .Object(obj) => {
                 var access = JsonObjectAccess(object: obj)
                 visitor.visit(access: access)
             },
@@ -1184,17 +1184,17 @@ public struct JsonObjectAccess: ObjectAccess {
         if self.index >= self.keys.count {
             return .Ok(.None)
         }
-        let key = self.keys(unchecked: self.index)
-        self.currentKey = .Some(key)
-        self.index += 1
+        let key = self.keys(unchecked: self.index);
+        self.currentKey = .Some(key);
+        self.index = self.index + 1;
         .Ok(.Some(key))
     }
 
     public func value[V]() -> Result[V, JsonError] where V: Deserialize {
         match self.currentKey {
-            .Some(let key) => {
+            .Some(key) => {
                 match self.object(key) {
-                    .Some(let val) => {
+                    .Some(val) => {
                         var deserializer = JsonDeserializer(input: Json.stringify(val))
                         V.deserialize(from: deserializer)
                     },
@@ -1212,10 +1212,10 @@ public struct JsonObjectAccess: ObjectAccess {
 }
 
 // JsonValue implements Deserialize
-extension JsonValue: Deserialize {
+extend JsonValue: Deserialize {
     type Visitor = JsonValueVisitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[JsonValue, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[JsonValue, D.Error] where D: Deserializer {
         // Special case: JsonDeserializer can directly return JsonValue
         // For other deserializers, we'd need to construct from primitives
         deserializer.deserializeAny()
@@ -1225,10 +1225,10 @@ extension JsonValue: Deserialize {
 public struct JsonValueVisitor: ObjectVisitor {
     type Value = JsonValue
 
-    public func visit[A](access: mutating A) -> Result[JsonValue, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[JsonValue, A.Error] where A: ObjectAccess {
         var entries: Dictionary[String, JsonValue] = [:]
-        while let field = try access.nextField() {
-            let value = try access.value[JsonValue]()
+        while let field = /* try */access.nextField() {
+            let value = /* try */access.value[JsonValue]()
             entries(field) = value
         }
         .Ok(.Object(entries))
@@ -1236,14 +1236,14 @@ public struct JsonValueVisitor: ObjectVisitor {
 }
 
 // Add deserializeAny method to Deserializer for JsonValue support
-extension Deserializer {
+extend Deserializer {
     public func deserializeAny() -> Result[JsonValue, Error] {
         // Default implementation - specific deserializers can override
         .Err(Error(message: "deserializeAny not supported"))
     }
 }
 
-extension JsonDeserializer {
+extend JsonDeserializer {
     public func deserializeAny() -> Result[JsonValue, JsonError] {
         self.takeValue()
     }

@@ -8,7 +8,7 @@ public protocol Equatable {
 }
 
 // Default operator implementations for Equatable
-extension Equatable: Equal[Self], NotEqual[Self] {
+extend Equatable: Equal[Self], NotEqual[Self] {
     type Output = Bool
 
     func eq(other: Self) -> Bool {
@@ -26,7 +26,7 @@ public protocol Comparable: Equatable {
 }
 
 // Default operator implementations for Comparable
-extension Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self] {
+extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self] {
     type Output = Bool
 
     func lt(other: Self) -> Bool {
@@ -48,7 +48,7 @@ extension Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqu
 
 // Hashable - types that can be hashed
 public protocol Hashable: Equatable {
-    func hash[H](into hasher: mutating H) where H: Hasher
+    func hash[H](mutating into hasher: H) where H: Hasher
 }
 
 // Hasher - types that can compute hash values
@@ -95,7 +95,7 @@ public struct DefaultHasher: Hasher {
 
     public func write(bytes: Slice[UInt8]) {
         // Implementation details - writes bytes into hasher state
-        self.length += UInt64(bytes.count)
+        self.length = self.length + UInt64(bytes.count)
         // ... SipHash implementation
     }
 

@@ -1,18 +1,14 @@
 // Template for floating-point types
 // Placeholders:
 //   {{TYPE_NAME}}  - e.g., Float32, Float64
-//   {{LANG_TYPE}}  - e.g., lang.f32, lang.f64
+//   {{LANG_TYPE}}  - e.g., f32, f64
 //   {{BITS}}       - e.g., 32, 64
-//   {{ADD_OP}}     - e.g., lang.f64_add
-//   {{SUB_OP}}     - e.g., lang.f64_sub
-//   {{MUL_OP}}     - e.g., lang.f64_mul
-//   {{DIV_OP}}     - e.g., lang.f64_div
-//   {{NEG_OP}}     - e.g., lang.f64_neg
-//   {{EQ_OP}}      - e.g., lang.f64_eq
-//   {{LT_OP}}      - e.g., lang.f64_lt
-//   {{LE_OP}}      - e.g., lang.f64_le
-//   {{GT_OP}}      - e.g., lang.f64_gt
-//   {{GE_OP}}      - e.g., lang.f64_ge
+//   {{CAST_FROM_F64}} - e.g., lang.cast_f64_f32, lang.cast_f64_f64
+//   {{CAST_FROM_I64}} - e.g., lang.cast_i64_f32, lang.cast_i64_f64
+
+module std.core
+
+import std.ffi.(FFISafe)
 
 public struct {{TYPE_NAME}}:
     FloatingPoint,
@@ -23,30 +19,30 @@ public struct {{TYPE_NAME}}:
     Divisible,
     Negatable,
     ExpressibleByFloatLiteral,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
-    private var value: {{LANG_TYPE}}
+    private var value: lang.{{LANG_TYPE}}
 
-    // Numeric protocol
-    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(value: 0.0) }
-    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(value: 1.0) }
-
-    // FloatingPoint protocol
-    public static var infinity: {{TYPE_NAME}} { {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_infinity()) }
-    public static var nan: {{TYPE_NAME}} { {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_nan()) }
+    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.0) }
+    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.0) }
+    public static var infinity: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_infinity()) }
+    public static var nan: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_nan()) }
     public static var bitWidth: Int { {{BITS}} }
 
-    // ExpressibleByFloatLiteral
-    public init(floatLiteral value: Float64) {
-        self.value = value as {{LANG_TYPE}}
+    public init(floatLiteral value: lang.f64) {
+        self.value = {{CAST_FROM_F64}}(value)
     }
 
-    // ExpressibleByIntLiteral
-    public init(intLiteral value: Int) {
-        self.value = value as {{LANG_TYPE}}
+    public init(intLiteral value: lang.i64) {
+        self.value = {{CAST_FROM_I64}}(value)
     }
 
-    // FloatingPoint methods
+    // Internal init for raw lang type values
+    init(raw value: lang.{{LANG_TYPE}}) {
+        self.value = value
+    }
+
     public func isNaN() -> Bool {
         lang.{{LANG_TYPE}}_is_nan(self.value)
     }
@@ -59,75 +55,34 @@ public struct {{TYPE_NAME}}:
         not self.isNaN() and not self.isInfinite()
     }
 
-    // Equatable
     public func equals(other: {{TYPE_NAME}}) -> Bool {
-        {{EQ_OP}}(self.value, other.value)
+        lang.{{LANG_TYPE}}_eq(self.value, other.value)
     }
 
-    // Comparable
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
-        if {{LT_OP}}(self.value, other.value) {
-            .Less
-        } else if {{GT_OP}}(self.value, other.value) {
-            .Greater
-        } else {
-            .Equal
-        }
+        if lang.{{LANG_TYPE}}_lt(self.value, other.value) { .Less }
+        else if lang.{{LANG_TYPE}}_gt(self.value, other.value) { .Greater }
+        else { .Equal }
     }
 
-    // Addable
     type Output = {{TYPE_NAME}}
 
-    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{ADD_OP}}(self.value, other.value))
-    }
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.value, other.value)) }
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.value, other.value)) }
+    public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.value)) }
 
-    // Subtractable
-    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{SUB_OP}}(self.value, other.value))
-    }
-
-    // Multipliable
-    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{MUL_OP}}(self.value, other.value))
-    }
-
-    // Divisible
-    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{DIV_OP}}(self.value, other.value))
-    }
-
-    // Negatable
-    public func negate() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{NEG_OP}}(self.value))
-    }
-
-    // Math operations
     public func abs() -> {{TYPE_NAME}} {
-        if {{LT_OP}}(self.value, 0.0) {
-            {{TYPE_NAME}}(value: {{NEG_OP}}(self.value))
-        } else {
-            self
-        }
+        if lang.{{LANG_TYPE}}_lt(self.value, 0.0) { self.negate() } else { self }
     }
 
-    public func floor() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_floor(self.value))
-    }
+    public func floor() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_floor(self.value)) }
+    public func ceil() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_ceil(self.value)) }
+    public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.value)) }
+    public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.value)) }
+    public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.value)) }
 
-    public func ceil() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_ceil(self.value))
-    }
-
-    public func round() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_round(self.value))
-    }
-
-    public func sqrt() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_sqrt(self.value))
-    }
-
-    public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: lang.{{LANG_TYPE}}_pow(self.value, exponent.value))
-    }
+    // TODO: These require libm support
+    public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}.zero }
 }

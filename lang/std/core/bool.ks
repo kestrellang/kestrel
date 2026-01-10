@@ -51,7 +51,3 @@ public struct Bool:
         Bool(value: lang.bool_not(self.value))
     }
 }
-
-// Constants
-public let true: Bool = Bool(value: lang.bool_true)
-public let false: Bool = Bool(value: lang.bool_false)

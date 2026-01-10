@@ -9,15 +9,15 @@ public protocol Allocator {
 }
 
 // Default reallocation implementation
-extension Allocator {
+extend Allocator {
     public func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
         // Allocate new block
         if let newPtr = self.allocate(layout: newLayout) {
             // Copy old data
-            let copySize = if oldLayout.size < newLayout.size { oldLayout.size } else { newLayout.size }
-            lang.memcpy(newPtr.raw, ptr.raw, copySize)
+            let copySize = if oldLayout.size < newLayout.size { oldLayout.size } else { newLayout.size };
+            lang.memcpy(newPtr.raw, ptr.raw, copySize);
             // Free old block
-            self.deallocate(ptr: ptr, layout: oldLayout)
+            self.deallocate(ptr: ptr, layout: oldLayout);
             return .Some(newPtr)
         }
         .None
@@ -29,7 +29,7 @@ public struct SystemAllocator: Allocator {
     public init() {}
 
     public func allocate(layout: Layout) -> Optional[RawPointer] {
-        let ptr = lang.alloc(layout.size, layout.alignment)
+        let ptr = lang.alloc(layout.size, layout.alignment);
         if lang.ptr_is_null(ptr) {
             .None
         } else {
@@ -42,7 +42,7 @@ public struct SystemAllocator: Allocator {
     }
 
     public func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
-        let newPtr = lang.realloc(ptr.raw, oldLayout.size, newLayout.size, newLayout.alignment)
+        let newPtr = lang.realloc(ptr.raw, oldLayout.size, newLayout.size, newLayout.alignment);
         if lang.ptr_is_null(newPtr) {
             .None
         } else {
@@ -60,20 +60,20 @@ public struct ArenaAllocator: Allocator {
     private var offset: Int
 
     public init(capacity: Int) {
-        self.buffer = Buffer(capacity: capacity)
+        self.buffer = Buffer(capacity: capacity);
         self.offset = 0
     }
 
     public func allocate(layout: Layout) -> Optional[RawPointer] {
         // Align offset
-        let alignedOffset = (self.offset + layout.alignment - 1).bitwiseAnd((layout.alignment - 1).bitwiseNot())
+        let alignedOffset = (self.offset + layout.alignment - 1).bitwiseAnd((layout.alignment - 1).bitwiseNot());
 
         if alignedOffset + layout.size > self.buffer.capacity {
             return .None
         }
 
-        let ptr = self.buffer.pointer.offset(by: alignedOffset).asRaw()
-        self.offset = alignedOffset + layout.size
+        let ptr = self.buffer.pointer.offset(by: alignedOffset).asRaw();
+        self.offset = alignedOffset + layout.size;
         .Some(ptr)
     }
 
@@ -105,13 +105,13 @@ public struct PoolAllocator[T]: Allocator {
     }
 
     public init(capacity: Int) {
-        self.buffer = Buffer(capacity: capacity)
-        self.freeList = .None
-        self.allocated = 0
+        self.buffer = Buffer(capacity: capacity);
+        self.freeList = .None;
+        self.allocated = 0;
 
         // Initialize free list
         /* for i in (0..<capacity).reversed() {
-            let node = self.buffer.pointer.offset(by: i).as[FreeNode]()
+            let node = self.buffer.pointer.offset(by: i).cast[FreeNode]()
             node.pointee = FreeNode(next: self.freeList)
             self.freeList = .Some(node)
         } */
@@ -124,8 +124,8 @@ public struct PoolAllocator[T]: Allocator {
         }
 
         if let node = self.freeList {
-            self.freeList = node.pointee.next
-            self.allocated += 1
+            self.freeList = node.pointee.next;
+            self.allocated = self.allocated + 1;
             .Some(node.asRaw())
         } else {
             .None
@@ -133,10 +133,10 @@ public struct PoolAllocator[T]: Allocator {
     }
 
     public func deallocate(ptr: RawPointer, layout: Layout) {
-        let node = ptr.as[FreeNode]()
-        node.pointee = FreeNode(next: self.freeList)
-        self.freeList = .Some(node)
-        self.allocated -= 1
+        let node = ptr.cast[FreeNode]();
+        node.pointee = FreeNode(next: self.freeList);
+        self.freeList = .Some(node);
+        self.allocated = self.allocated - 1
     }
 
     public var count: Int {

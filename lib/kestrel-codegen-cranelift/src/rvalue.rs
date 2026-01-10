@@ -108,6 +108,78 @@ pub fn compile_rvalue(
         Rvalue::IntToString(_) => Err(CodegenError::Unsupported(
             "IntToString requires runtime support".into(),
         )),
+
+        // Float intrinsics - to be implemented
+        Rvalue::FloatConst { bits, constant } => {
+            use cranelift_codegen::ir::immediates::Ieee32;
+            use cranelift_codegen::ir::immediates::Ieee64;
+            use kestrel_execution_graph::function::{FloatBits, FloatConstantKind};
+
+            match (bits, constant) {
+                (FloatBits::F32, FloatConstantKind::Infinity) => {
+                    Ok(builder.ins().f32const(Ieee32::with_float(f32::INFINITY)))
+                }
+                (FloatBits::F32, FloatConstantKind::Nan) => {
+                    Ok(builder.ins().f32const(Ieee32::with_float(f32::NAN)))
+                }
+                (FloatBits::F64, FloatConstantKind::Infinity) => {
+                    Ok(builder.ins().f64const(Ieee64::with_float(f64::INFINITY)))
+                }
+                (FloatBits::F64, FloatConstantKind::Nan) => {
+                    Ok(builder.ins().f64const(Ieee64::with_float(f64::NAN)))
+                }
+                (FloatBits::F16, _) => Err(CodegenError::Unsupported("f16 not supported".into())),
+            }
+        }
+
+        Rvalue::FloatPred { bits, pred, operand } => {
+            use kestrel_execution_graph::function::{FloatBits, FloatPredicateKind};
+
+            let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+
+            match (bits, pred) {
+                (FloatBits::F32, FloatPredicateKind::IsNan) => {
+                    // NaN is the only value that is not equal to itself
+                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Unordered, operand_val, operand_val);
+                    Ok(result)
+                }
+                (FloatBits::F64, FloatPredicateKind::IsNan) => {
+                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Unordered, operand_val, operand_val);
+                    Ok(result)
+                }
+                (FloatBits::F32, FloatPredicateKind::IsInfinite) => {
+                    // Check if absolute value equals infinity
+                    let abs = builder.ins().fabs(operand_val);
+                    let inf = builder.ins().f32const(cranelift_codegen::ir::immediates::Ieee32::with_float(f32::INFINITY));
+                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Equal, abs, inf);
+                    Ok(result)
+                }
+                (FloatBits::F64, FloatPredicateKind::IsInfinite) => {
+                    let abs = builder.ins().fabs(operand_val);
+                    let inf = builder.ins().f64const(cranelift_codegen::ir::immediates::Ieee64::with_float(f64::INFINITY));
+                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Equal, abs, inf);
+                    Ok(result)
+                }
+                (FloatBits::F16, _) => Err(CodegenError::Unsupported("f16 not supported".into())),
+            }
+        }
+
+        Rvalue::FloatMath { bits, op, operand } => {
+            use kestrel_execution_graph::function::{FloatBits, FloatMathKind};
+
+            let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+
+            match bits {
+                FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
+                FloatBits::F32 | FloatBits::F64 => match op {
+                    FloatMathKind::Sqrt => Ok(builder.ins().sqrt(operand_val)),
+                    FloatMathKind::Floor => Ok(builder.ins().floor(operand_val)),
+                    FloatMathKind::Ceil => Ok(builder.ins().ceil(operand_val)),
+                    FloatMathKind::Trunc => Ok(builder.ins().trunc(operand_val)),
+                    FloatMathKind::Round => Ok(builder.ins().nearest(operand_val)),
+                },
+            }
+        }
     }
 }
 

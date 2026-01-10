@@ -1,7 +1,7 @@
 //! Statements (operations within basic blocks).
 
 use crate::MirContext;
-use crate::function::{Immediate, Place, Value};
+use crate::function::{FloatBits, Immediate, Place, Value};
 use crate::id::{Id, Local, QualifiedName, Ty};
 use crate::metadata::{Metadata, Prior};
 use std::fmt;
@@ -204,6 +204,25 @@ pub enum Rvalue {
         func: Id<QualifiedName>,
         captures: Vec<Value>,
     },
+
+    // === Float intrinsics ===
+    /// Float constant: infinity or nan
+    FloatConst {
+        bits: FloatBits,
+        constant: FloatConstantKind,
+    },
+    /// Float predicate: is_nan or is_infinite
+    FloatPred {
+        bits: FloatBits,
+        pred: FloatPredicateKind,
+        operand: Value,
+    },
+    /// Float math unary operation
+    FloatMath {
+        bits: FloatBits,
+        op: FloatMathKind,
+        operand: Value,
+    },
 }
 
 /// What's being called.
@@ -319,6 +338,35 @@ pub enum CastKind {
     PtrBitcast,
     /// `ref.to.immut`
     RefToImmut,
+}
+
+/// Float constant kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatConstantKind {
+    /// Positive infinity
+    Infinity,
+    /// NaN (Not a Number)
+    Nan,
+}
+
+/// Float predicate kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatPredicateKind {
+    /// Test if value is NaN
+    IsNan,
+    /// Test if value is infinite
+    IsInfinite,
+}
+
+/// Float math operation kinds (unary).
+/// Only includes operations supported natively by Cranelift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatMathKind {
+    Floor,
+    Ceil,
+    Round,
+    Trunc,
+    Sqrt,
 }
 
 impl Statement {
@@ -534,6 +582,45 @@ impl fmt::Display for RvalueDisplay<'_> {
                     write!(f, ")")?;
                 }
                 Ok(())
+            }
+            Rvalue::FloatConst { bits, constant } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                let const_str = match constant {
+                    FloatConstantKind::Infinity => "infinity",
+                    FloatConstantKind::Nan => "nan",
+                };
+                write!(f, "{}.{}", bits_str, const_str)
+            }
+            Rvalue::FloatPred { bits, pred, operand } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                let pred_str = match pred {
+                    FloatPredicateKind::IsNan => "is_nan",
+                    FloatPredicateKind::IsInfinite => "is_infinite",
+                };
+                write!(f, "{}.{} {}", bits_str, pred_str, operand.display(self.ctx))
+            }
+            Rvalue::FloatMath { bits, op, operand } => {
+                let bits_str = match bits {
+                    FloatBits::F16 => "f16",
+                    FloatBits::F32 => "f32",
+                    FloatBits::F64 => "f64",
+                };
+                let op_str = match op {
+                    FloatMathKind::Floor => "floor",
+                    FloatMathKind::Ceil => "ceil",
+                    FloatMathKind::Round => "round",
+                    FloatMathKind::Trunc => "trunc",
+                    FloatMathKind::Sqrt => "sqrt",
+                };
+                write!(f, "{}.{} {}", bits_str, op_str, operand.display(self.ctx))
             }
         }
     }

@@ -27,7 +27,7 @@ public protocol Functor {
 }
 
 // Iterable automatically gets all Iterator extension methods
-extension Iterable {
+extend Iterable {
     // Transform
     public func map[U](transform: (Item) -> U) -> MapIterator[Iter, U] {
         self.iter().map(transform)
@@ -41,8 +41,8 @@ extension Iterable {
         self.iter().filterMap(transform)
     }
 
-    public func flatMap[U, I: Iterable](transform: (Item) -> I) -> FlatMapIterator[Iter, I]
-        where I.Item == U
+    public func flatMap[U](transform: (Item) -> I) -> FlatMapIterator[Iter, I]
+        where I: Iterable, I.Item = U
     {
         self.iter().flatMap(transform)
     }
@@ -69,12 +69,12 @@ extension Iterable {
         self.iter().enumerate()
     }
 
-    public func zip[Other: Iterator](with other: Other) -> ZipIterator[Iter, Other] {
+    public func zip[Other](with other: Other) -> ZipIterator[Iter, Other] where Other: Iterator {
         self.iter().zip(with: other)
     }
 
-    public func chain[Other: Iterator](other: Other) -> ChainIterator[Iter, Other]
-        where Other.Item == Item
+    public func chain[Other](other: Other) -> ChainIterator[Iter, Other]
+        where Other: Iterator, Other.Item = Item
     {
         self.iter().chain(other)
     }
@@ -93,7 +93,7 @@ extension Iterable {
         self.iter().reduce(combine)
     }
 
-    public func collect[C: Collectable]() -> C where C.Item == Item {
+    public func collect[C]() -> C where C: Collectable, C.Item = Item {
         self.iter().collect()
     }
 
@@ -141,11 +141,11 @@ extension Iterable {
         self.iter().max()
     }
 
-    public func sum() -> Item where Item: Addable[Item] + Numeric {
+    public func sum() -> Item where Item: Addable[Item], Item: Numeric {
         self.iter().sum()
     }
 
-    public func product() -> Item where Item: Multipliable[Item] + Numeric {
+    public func product() -> Item where Item: Multipliable[Item], Item: Numeric {
         self.iter().product()
     }
 }

@@ -39,7 +39,7 @@ public struct Range[T]: Equatable where T: Steppable and Comparable {
     }
 }
 
-extension Range[T]: Iterable where T: Steppable {
+extend Range[T]: Iterable where T: Steppable {
     type Item = T
     type Iter = RangeIterator[T]
 
@@ -93,7 +93,7 @@ public struct ClosedRange[T: Comparable]: Equatable where T: Steppable {
     }
 }
 
-extension ClosedRange[T]: Iterable where T: Steppable {
+extend ClosedRange[T]: Iterable where T: Steppable {
     type Item = T
     type Iter = ClosedRangeIterator[T]
 

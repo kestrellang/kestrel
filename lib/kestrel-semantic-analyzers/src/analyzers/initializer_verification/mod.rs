@@ -578,7 +578,7 @@ fn analyze_expression(
             // Check if this intrinsic diverges
             match intrinsic {
                 LangIntrinsic::PanicUnwind => state.diverged = true,
-                LangIntrinsic::Cast { .. } => {} // Cast returns normally
+                _ => {} // All other intrinsics return normally
             }
         }
         ExprKind::LangIntrinsicRef(_) | ExprKind::Error => {}

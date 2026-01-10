@@ -269,6 +269,17 @@ impl<'a> CollectionContext<'a> {
                     self.scan_value(cap, subst);
                 }
             }
+
+            // Float intrinsics
+            Rvalue::FloatConst { .. } => {}
+
+            Rvalue::FloatPred { operand, .. } => {
+                self.scan_value(operand, subst);
+            }
+
+            Rvalue::FloatMath { operand, .. } => {
+                self.scan_value(operand, subst);
+            }
         }
     }
 

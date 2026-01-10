@@ -37,8 +37,8 @@ public enum Result[T, E]:
     // Tryable - enables `try`
     public func tryExtract() -> Residual[T, E] {
         match self {
-            .Ok(let value) => .Output(value),
-            .Err(let error) => .Early(error)
+            .Ok(value) => .Output(value),
+            .Err(error) => .Early(error)
         }
     }
 
@@ -55,80 +55,80 @@ public enum Result[T, E]:
     // Unwrapping
     public func unwrap() -> T {
         match self {
-            .Ok(let value) => value,
-            .Err(let error) => panic("called unwrap() on Err: " + error.description())
+            .Ok(value) => value,
+            .Err(error) => panic("called unwrap() on Err: " + error.description())
         }
     }
 
-    public func unwrap(or default: T) -> T {
+    public func unwrapOr(default: T) -> T {
         match self {
-            .Ok(let value) => value,
+            .Ok(value) => value,
             .Err(_) => default
         }
     }
 
     public func unwrap(orElse defaultFn: (E) -> T) -> T {
         match self {
-            .Ok(let value) => value,
-            .Err(let error) => defaultFn(error)
+            .Ok(value) => value,
+            .Err(error) => defaultFn(error)
         }
     }
 
     public func unwrapErr() -> E {
         match self {
-            .Ok(let value) => panic("called unwrapErr() on Ok"),
-            .Err(let error) => error
+            .Ok(value) => panic("called unwrapErr() on Ok"),
+            .Err(error) => error
         }
     }
 
     // expect with custom message
     public func expect(message: String) -> T {
         match self {
-            .Ok(let value) => value,
-            .Err(let error) => panic(message + ": " + error.description())
+            .Ok(value) => value,
+            .Err(error) => panic(message + ": " + error.description())
         }
     }
 
     public func expectErr(message: String) -> E {
         match self {
             .Ok(_) => panic(message),
-            .Err(let error) => error
+            .Err(error) => error
         }
     }
 
     // Transformations
     public func map[U](transform: (T) -> U) -> Result[U, E] {
         match self {
-            .Ok(let value) => .Ok(transform(value)),
-            .Err(let error) => .Err(error)
+            .Ok(value) => .Ok(transform(value)),
+            .Err(error) => .Err(error)
         }
     }
 
     public func mapErr[F](transform: (E) -> F) -> Result[T, F] where F: Error {
         match self {
-            .Ok(let value) => .Ok(value),
-            .Err(let error) => .Err(transform(error))
+            .Ok(value) => .Ok(value),
+            .Err(error) => .Err(transform(error))
         }
     }
 
     public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
         match self {
-            .Ok(let value) => transform(value),
-            .Err(let error) => .Err(error)
+            .Ok(value) => transform(value),
+            .Err(error) => .Err(error)
         }
     }
 
     public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F] where F: Error {
         match self {
-            .Ok(let value) => .Ok(value),
-            .Err(let error) => transform(error)
+            .Ok(value) => .Ok(value),
+            .Err(error) => transform(error)
         }
     }
 
     // Convert to Optional
     public func ok() -> Optional[T] {
         match self {
-            .Ok(let value) => .Some(value),
+            .Ok(value) => .Some(value),
             .Err(_) => .None
         }
     }
@@ -136,7 +136,7 @@ public enum Result[T, E]:
     public func err() -> Optional[E] {
         match self {
             .Ok(_) => .None,
-            .Err(let error) => .Some(error)
+            .Err(error) => .Some(error)
         }
     }
 
@@ -145,7 +145,7 @@ public enum Result[T, E]:
     public func andValue[U](other: Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(_) => other,
-            .Err(let error) => .Err(error)
+            .Err(error) => .Err(error)
         }
     }
 
@@ -155,24 +155,24 @@ public enum Result[T, E]:
 
     public func orValue(other: Result[T, E]) -> Result[T, E] {
         match self {
-            .Ok(let value) => .Ok(value),
+            .Ok(value) => .Ok(value),
             .Err(_) => other
         }
     }
 
     public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F] where F: Error {
         match self {
-            .Ok(let value) => .Ok(value),
-            .Err(let error) => alternative(error)
+            .Ok(value) => .Ok(value),
+            .Err(error) => alternative(error)
         }
     }
 
     // Transpose Optional inside Result
     public func transpose() -> Optional[Result[T, E]] where T: Optional {
         match self {
-            .Ok(.Some(let value)) => .Some(.Ok(value)),
+            .Ok(.Some(value)) => .Some(.Ok(value)),
             .Ok(.None) => .None,
-            .Err(let error) => .Some(.Err(error))
+            .Err(error) => .Some(.Err(error))
         }
     }
 
@@ -183,18 +183,18 @@ public enum Result[T, E]:
 }
 
 // Equatable when T and E are Equatable
-extension Result[T, E]: Equatable where T: Equatable, E: Equatable {
+extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
     public func equals(other: Result[T, E]) -> Bool {
         match (self, other) {
-            (.Ok(let a), .Ok(let b)) => a == b,
-            (.Err(let a), .Err(let b)) => a == b,
+            (.Ok(a), .Ok(b)) => a == b,
+            (.Err(a), .Err(b)) => a == b,
             _ => false
         }
     }
 }
 
 // Functor implementation
-extension Result[T, E]: Functor {
+extend Result[T, E]: Functor {
     type Inner = T
 }
 

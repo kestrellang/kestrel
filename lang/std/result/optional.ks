@@ -38,21 +38,21 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     // Unwrapping
     public func unwrap() -> T {
         match self {
-            .Some(let value) => value,
+            .Some(value) => value,
             .None => panic("called unwrap() on None")
         }
     }
 
-    public func unwrap(or default: T) -> T {
+    public func unwrapOr(default: T) -> T {
         match self {
-            .Some(let value) => value,
+            .Some(value) => value,
             .None => default
         }
     }
 
     public func unwrap(orElse defaultFn: () -> T) -> T {
         match self {
-            .Some(let value) => value,
+            .Some(value) => value,
             .None => defaultFn()
         }
     }
@@ -60,7 +60,7 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     // expect with custom message
     public func expect(message: String) -> T {
         match self {
-            .Some(let value) => value,
+            .Some(value) => value,
             .None => panic(message)
         }
     }
@@ -68,21 +68,21 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     // Transformations
     public func map[U](transform: (T) -> U) -> Optional[U] {
         match self {
-            .Some(let value) => .Some(transform(value)),
+            .Some(value) => .Some(transform(value)),
             .None => .None
         }
     }
 
     public func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U] {
         match self {
-            .Some(let value) => transform(value),
+            .Some(value) => transform(value),
             .None => .None
         }
     }
 
     public func filter(predicate: (T) -> Bool) -> Optional[T] {
         match self {
-            .Some(let value) => {
+            .Some(value) => {
                 if predicate(value) {
                     .Some(value)
                 } else {
@@ -94,16 +94,16 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     }
 
     // Convert to Result
-    public func ok[E: Error](or error: E) -> Result[T, E] {
+    public func ok[E](otherwise error: E) -> Result[T, E] where E: Error {
         match self {
-            .Some(let value) => .Ok(value),
+            .Some(value) => .Ok(value),
             .None => .Err(error)
         }
     }
 
-    public func okOrElse[E: Error](errorFn: () -> E) -> Result[T, E] {
+    public func okOrElse[E](errorFn: () -> E) -> Result[T, E] where E: Error {
         match self {
-            .Some(let value) => .Ok(value),
+            .Some(value) => .Ok(value),
             .None => .Err(errorFn())
         }
     }
@@ -123,36 +123,36 @@ public enum Optional[T]: ExpressibleByNilLiteral {
 
     public func orValue(other: Optional[T]) -> Optional[T] {
         match self {
-            .Some(let value) => .Some(value),
+            .Some(value) => .Some(value),
             .None => other
         }
     }
 
     public func orElse(alternative: () -> Optional[T]) -> Optional[T] {
         match self {
-            .Some(let value) => .Some(value),
+            .Some(value) => .Some(value),
             .None => alternative()
         }
     }
 
     public func xor(other: Optional[T]) -> Optional[T] {
         match (self, other) {
-            (.Some(let value), .None) => .Some(value),
-            (.None, .Some(let value)) => .Some(value),
+            (.Some(value), .None) => .Some(value),
+            (.None, .Some(value)) => .Some(value),
             _ => .None
         }
     }
 
     // Take and replace
     public func take() -> Optional[T] {
-        let result = self
-        self = .None
+        let result = self;
+        self = .None;
         result
     }
 
     public func replace(value: T) -> Optional[T] {
-        let old = self
-        self = .Some(value)
+        let old = self;
+        self = .Some(value);
         old
     }
 
@@ -163,10 +163,10 @@ public enum Optional[T]: ExpressibleByNilLiteral {
 }
 
 // Equatable when T is Equatable
-extension Optional[T]: Equatable where T: Equatable {
+extend Optional[T]: Equatable where T: Equatable {
     public func equals(other: Optional[T]) -> Bool {
         match (self, other) {
-            (.Some(let a), .Some(let b)) => a == b,
+            (.Some(a), .Some(b)) => a == b,
             (.None, .None) => true,
             _ => false
         }
@@ -174,15 +174,15 @@ extension Optional[T]: Equatable where T: Equatable {
 }
 
 // Functor implementation
-extension Optional[T]: Functor {
+extend Optional[T]: Functor {
     type Inner = T
 }
 
 // Tryable for Optional (try? semantics)
-extension Optional[T]: Tryable[T, Nil] {
+extend Optional[T]: Tryable[T, Nil] {
     public func tryExtract() -> Residual[T, Nil] {
         match self {
-            .Some(let value) => .Output(value),
+            .Some(value) => .Output(value),
             .None => .Early(nil)
         }
     }

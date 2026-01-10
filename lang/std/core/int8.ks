@@ -26,134 +26,47 @@ public struct Int8:
 {
     private var value: lang.i8
 
-    // Numeric protocol
-    public static var zero: Int8 { Int8(value: 0) }
-    public static var one: Int8 { Int8(value: 1) }
-
-    // Integer protocol
-    public static var minValue: Int8 { Int8(value: -128) }
-    public static var maxValue: Int8 { Int8(value: 127) }
+    public static var zero: Int8 { Int8(intLiteral: 0) }
+    public static var one: Int8 { Int8(intLiteral: 1) }
+    public static var minValue: Int8 { Int8(intLiteral: -128) }
+    public static var maxValue: Int8 { Int8(intLiteral: 127) }
     public static var bitWidth: Int { 8 }
 
-    // ExpressibleByIntLiteral
     public init(intLiteral value: lang.i64) {
         self.value = lang.cast_i64_i8(value)
     }
 
-    // Equatable
+    init(raw value: lang.i8) {
+        self.value = value
+    }
+
     public func equals(other: Int8) -> Bool {
         lang.i8_eq(self.value, other.value)
     }
 
-    // Comparable
     public func compare(other: Int8) -> Ordering {
-        if lang.i8_lt(self.value, other.value) {
-            .Less
-        } else if lang.i8_gt(self.value, other.value) {
-            .Greater
-        } else {
-            .Equal
-        }
+        if lang.i8_signed_lt(self.value, other.value) { .Less }
+        else if lang.i8_signed_gt(self.value, other.value) { .Greater }
+        else { .Equal }
     }
 
-    // Hashable
-    public func hash[H](into hasher: mutating H) where H: Hasher {
-        hasher.write(bytes: [UInt8(self.value)])
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        hasher.write(bytes: [self.value])
     }
 
-    // Addable
     type Output = Int8
 
-    public func add(other: Int8) -> Int8 {
-        Int8(value: lang.i8_add(self.value, other.value))
-    }
-
-    // Subtractable
-    public func subtract(other: Int8) -> Int8 {
-        Int8(value: lang.i8_sub(self.value, other.value))
-    }
-
-    // Multipliable
-    public func multiply(other: Int8) -> Int8 {
-        Int8(value: lang.i8_mul(self.value, other.value))
-    }
-
-    // Divisible
-    public func divide(other: Int8) -> Int8 {
-        Int8(value: lang.i8_div(self.value, other.value))
-    }
-
-    // Modulo
-    public func mod(other: Int8) -> Int8 {
-        Int8(value: lang.i8_rem(self.value, other.value))
-    }
-
-    // Negatable
-    public func negate() -> Int8 {
-        Int8(value: lang.i8_neg(self.value))
-    }
-
-    // SignedInteger
-    public func abs() -> Int8 {
-        if lang.i8_lt(self.value, 0) {
-            Int8(value: lang.i8_neg(self.value))
-        } else {
-            self
-        }
-    }
-
-    // BitwiseAnd
-    public func bitwiseAnd(other: Int8) -> Int8 {
-        Int8(value: lang.i8_and(self.value, other.value))
-    }
-
-    // BitwiseOr
-    public func bitwiseOr(other: Int8) -> Int8 {
-        Int8(value: lang.i8_or(self.value, other.value))
-    }
-
-    // BitwiseXor
-    public func bitwiseXor(other: Int8) -> Int8 {
-        Int8(value: lang.i8_xor(self.value, other.value))
-    }
-
-    // BitwiseNot
-    public func bitwiseNot() -> Int8 {
-        Int8(value: lang.i8_not(self.value))
-    }
-
-    // LeftShift
-    public func shiftLeft(by count: Int) -> Int8 {
-        Int8(value: lang.i8_shl(self.value, lang.cast_i64_i8(count)))
-    }
-
-    // RightShift (arithmetic)
-    public func shiftRight(by count: Int) -> Int8 {
-        Int8(value: lang.i8_shr(self.value, lang.cast_i64_i8(count)))
-    }
-
-    // Type conversions
-    public func toInt() -> Int {
-        Int64(value: lang.cast_i8_i64(self.value))
-    }
-
-    public func toInt16() -> Int16 {
-        Int16(value: lang.cast_i8_i16(self.value))
-    }
-
-    public func toInt32() -> Int32 {
-        Int32(value: lang.cast_i8_i32(self.value))
-    }
-
-    public func toInt64() -> Int64 {
-        Int64(value: lang.cast_i8_i64(self.value))
-    }
-
-    public func toFloat32() -> Float32 {
-        Float32(value: lang.cast_i8_f32(self.value))
-    }
-
-    public func toFloat64() -> Float64 {
-        Float64(value: lang.cast_i8_f64(self.value))
-    }
+    public func add(other: Int8) -> Int8 { Int8(raw: lang.i8_add(self.value, other.value)) }
+    public func subtract(other: Int8) -> Int8 { Int8(raw: lang.i8_sub(self.value, other.value)) }
+    public func multiply(other: Int8) -> Int8 { Int8(raw: lang.i8_mul(self.value, other.value)) }
+    public func divide(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_div(self.value, other.value)) }
+    public func mod(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.value, other.value)) }
+    public func negate() -> Int8 { Int8(raw: lang.i8_neg(self.value)) }
+    public func abs() -> Int8 { if lang.i8_signed_lt(self.value, 0) { self.negate() } else { self } }
+    public func bitwiseAnd(other: Int8) -> Int8 { Int8(raw: lang.i8_and(self.value, other.value)) }
+    public func bitwiseOr(other: Int8) -> Int8 { Int8(raw: lang.i8_or(self.value, other.value)) }
+    public func bitwiseXor(other: Int8) -> Int8 { Int8(raw: lang.i8_xor(self.value, other.value)) }
+    public func bitwiseNot() -> Int8 { Int8(raw: lang.i8_not(self.value)) }
+    public func shiftLeft(by count: Int) -> Int8 { Int8(raw: lang.i8_shl(self.value, lang.cast_i64_i8(count))) }
+    public func shiftRight(by count: Int) -> Int8 { Int8(raw: lang.i8_signed_shr(self.value, lang.cast_i64_i8(count))) }
 }

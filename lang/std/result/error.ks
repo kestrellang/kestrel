@@ -12,13 +12,13 @@ public enum Residual[Output, Early] {
     case Early(Early)    // break/return early with value
 }
 
-extension Residual[Output, Early]: Equatable
+extend Residual[Output, Early]: Equatable
     where Output: Equatable, Early: Equatable
 {
     public func equals(other: Residual[Output, Early]) -> Bool {
         match (self, other) {
-            (.Output(let a), .Output(let b)) => a == b,
-            (.Early(let a), .Early(let b)) => a == b,
+            (.Output(a), .Output(b)) => a == b,
+            (.Early(a), .Early(b)) => a == b,
             _ => false
         }
     }
@@ -45,7 +45,7 @@ public protocol Convertible[From] {
 }
 
 // Residual is also Tryable (identity)
-extension Residual[Output, Early]: Tryable[Output, Early] {
+extend Residual[Output, Early]: Tryable[Output, Early] {
     public func tryExtract() -> Residual[Output, Early] {
         self
     }

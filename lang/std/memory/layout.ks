@@ -16,7 +16,7 @@ public struct Layout: Equatable {
     }
 
     public static func array[T](count: Int) -> Layout {
-        let elementLayout = Layout.of[T]()
+        let elementLayout = Layout.of[T]();
         Layout(
             size: elementLayout.size * count,
             alignment: elementLayout.alignment
@@ -29,20 +29,20 @@ public struct Layout: Equatable {
 
     // Pad size to alignment
     public func padToAlign() -> Layout {
-        let padding = (self.alignment - (self.size % self.alignment)) % self.alignment
+        let padding = (self.alignment - (self.size % self.alignment)) % self.alignment;
         Layout(size: self.size + padding, alignment: self.alignment)
     }
 
     // Extend layout to include another layout (for struct field layout)
-    public func extend(with other: Layout) -> (Layout, Int) {
+    public func merge(with other: Layout) -> (Layout, Int) {
         let newAlign = if self.alignment > other.alignment {
             self.alignment
         } else {
             other.alignment
-        }
-        let padding = (other.alignment - (self.size % other.alignment)) % other.alignment
-        let offset = self.size + padding
-        let newSize = offset + other.size
+        };
+        let padding = (other.alignment - (self.size % other.alignment)) % other.alignment;
+        let offset = self.size + padding;
+        let newSize = offset + other.size;
         (Layout(size: newSize, alignment: newAlign), offset)
     }
 
@@ -52,7 +52,7 @@ public struct Layout: Equatable {
             return .Some(Layout(size: 0, alignment: self.alignment))
         }
 
-        let padded = self.padToAlign()
+        let padded = self.padToAlign();
         .Some(Layout(
             size: padded.size * count,
             alignment: self.alignment

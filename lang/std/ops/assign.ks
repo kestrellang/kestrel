@@ -63,61 +63,61 @@ public protocol RightShiftAssign[Rhs = Int] {
 }
 
 // Default implementations from base operators
-extension Addable[Rhs]: AddAssign[Rhs] where Output = Self {
+extend Addable[Rhs]: AddAssign[Rhs] where Output = Self {
     func addAssign(other: Rhs) {
         self = self.add(other)
     }
 }
 
-extension Subtractable[Rhs]: SubtractAssign[Rhs] where Output = Self {
+extend Subtractable[Rhs]: SubtractAssign[Rhs] where Output = Self {
     func subtractAssign(other: Rhs) {
         self = self.subtract(other)
     }
 }
 
-extension Multipliable[Rhs]: MultiplyAssign[Rhs] where Output = Self {
+extend Multipliable[Rhs]: MultiplyAssign[Rhs] where Output = Self {
     func multiplyAssign(other: Rhs) {
         self = self.multiply(other)
     }
 }
 
-extension Divisible[Rhs]: DivideAssign[Rhs] where Output = Self {
+extend Divisible[Rhs]: DivideAssign[Rhs] where Output = Self {
     func divideAssign(other: Rhs) {
         self = self.divide(other)
     }
 }
 
-extension Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
+extend Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
     func modAssign(other: Rhs) {
         self = self.mod(other)
     }
 }
 
-extension BitwiseAnd[Rhs]: BitwiseAndAssign[Rhs] where Output = Self {
+extend BitwiseAnd[Rhs]: BitwiseAndAssign[Rhs] where Output = Self {
     func bitwiseAndAssign(other: Rhs) {
         self = self.bitwiseAnd(other)
     }
 }
 
-extension BitwiseOr[Rhs]: BitwiseOrAssign[Rhs] where Output = Self {
+extend BitwiseOr[Rhs]: BitwiseOrAssign[Rhs] where Output = Self {
     func bitwiseOrAssign(other: Rhs) {
         self = self.bitwiseOr(other)
     }
 }
 
-extension BitwiseXor[Rhs]: BitwiseXorAssign[Rhs] where Output = Self {
+extend BitwiseXor[Rhs]: BitwiseXorAssign[Rhs] where Output = Self {
     func bitwiseXorAssign(other: Rhs) {
         self = self.bitwiseXor(other)
     }
 }
 
-extension LeftShift[Rhs]: LeftShiftAssign[Rhs] where Output = Self {
+extend LeftShift[Rhs]: LeftShiftAssign[Rhs] where Output = Self {
     func shiftLeftAssign(by count: Rhs) {
         self = self.shiftLeft(by: count)
     }
 }
 
-extension RightShift[Rhs]: RightShiftAssign[Rhs] where Output = Self {
+extend RightShift[Rhs]: RightShiftAssign[Rhs] where Output = Self {
     func shiftRightAssign(by count: Rhs) {
         self = self.shiftRight(by: count)
     }

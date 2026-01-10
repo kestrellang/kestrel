@@ -581,19 +581,23 @@ pub fn initializer_declaration_parser_internal<'tokens>()
     attribute_list_parser()
         .then(visibility_parser_internal())
         .then(token(Token::Init))
+        .then(type_parameter_list_parser().or_not())
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
+        .then(where_clause_parser().or_not())
         .then(function_body_parser())
         .map(
-            |((((((attributes, visibility), init_span), lparen), parameters), rparen), body)| {
+            |((((((((attributes, visibility), init_span), type_params), lparen), parameters), rparen), where_clause), body)| {
                 InitializerDeclarationData {
                     attributes,
                     visibility,
                     init_span,
+                    type_params,
                     lparen,
                     parameters,
                     rparen,
+                    where_clause,
                     body,
                 }
             },

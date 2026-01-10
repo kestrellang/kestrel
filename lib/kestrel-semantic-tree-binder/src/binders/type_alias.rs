@@ -210,6 +210,13 @@ fn bind_associated_type(
         symbol.metadata().add_behavior(bounds_behavior);
     }
 
+    // Resolve where clause if present (where Iter.Item = Item)
+    let generics =
+        crate::binders::utils::generics::resolve_generics(syntax, source, file_id, symbol_id, context);
+    if !generics.where_clause().constraints.is_empty() {
+        symbol.metadata().add_behavior(generics);
+    }
+
     // Resolve default type if present (= Int)
     // Note: Validation of defaults against bounds happens in a separate validation pass
     // after all conformances have been resolved (see ConformanceValidator)

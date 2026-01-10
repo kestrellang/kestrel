@@ -29,7 +29,7 @@ public struct RawPointer: Equatable, FFISafe {
         lang.ptr_is_null(self.raw)
     }
 
-    public func as[T]() -> Pointer[T] {
+    public func cast[T]() -> Pointer[T] {
         Pointer(raw: lang.cast_ptr[T](self.raw))
     }
 
@@ -50,7 +50,7 @@ public struct Pointer[T]: Equatable {
         self.raw = raw;
     }
 
-    public init(to value: ref T) {
+    public init(to value: T) {
         self.raw = lang.ptr_to(value)
     }
 
@@ -93,7 +93,7 @@ public struct Pointer[T]: Equatable {
 }
 
 // Pointer[T] is FFI-safe when T is FFI-safe
-extension Pointer: FFISafe where T: FFISafe {}
+extend Pointer: FFISafe where T: FFISafe {}
 
 // Slice[T] - view into contiguous memory
 public struct Slice[T]: Iterable, Equatable {
@@ -115,21 +115,21 @@ public struct Slice[T]: Iterable, Equatable {
     public var pointer: Pointer[T] { self.ptr }
 
     // Safe access
-    public subscript(safe index: Int) -> Optional[T] {
-        get {
-            if index >= 0 and index < self.len {
-                .Some(self.ptr.offset(by: index).read())
-            } else {
-                .None
-            }
-        }
-    }
+    //public subscript(safe index: Int) -> Optional[T] {
+    //    get {
+    //        if index >= 0 and index < self.len {
+    //            .Some(self.ptr.offset(by: index).read())
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //}
 
     // Unchecked access
-    public subscript(unchecked index: Int) -> T {
-        get { self.ptr.offset(by: index).read() }
-        set { self.ptr.offset(by: index).write(newValue) }
-    }
+    //public subscript(unchecked index: Int) -> T {
+    //    get { self.ptr.offset(by: index).read() }
+    //    set { self.ptr.offset(by: index).write(newValue) }
+    //}
 
     // Slicing
     public func slice(from start: Int, to end: Int) -> Optional[Slice[T]] {
@@ -188,9 +188,9 @@ public struct SliceIterator[T]: Iterator {
 
     public func next() -> Optional[T] {
         if self.remaining > 0 {
-            let value = self.ptr.read()
-            self.ptr = self.ptr.offset(by: 1)
-            self.remaining -= 1
+            let value = self.ptr.read();
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
             .Some(value)
         } else {
             .None

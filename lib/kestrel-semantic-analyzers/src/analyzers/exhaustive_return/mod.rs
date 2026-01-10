@@ -364,8 +364,8 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             match intrinsic {
                 // panic_unwind never returns
                 LangIntrinsic::PanicUnwind => ReturnState::Returns,
-                // Cast intrinsics return a value normally
-                LangIntrinsic::Cast { .. } => ReturnState::MayFallThrough,
+                // All other intrinsics return a value normally
+                _ => ReturnState::MayFallThrough,
             }
         }
 

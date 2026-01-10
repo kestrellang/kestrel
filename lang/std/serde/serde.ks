@@ -35,7 +35,7 @@ public struct DeserializeError: Error {
 
     public var description: String {
         match self.position {
-            .Some(let pos) => "DeserializeError at position " + pos.toString() + ": " + self.message,
+            .Some(pos) => "DeserializeError at position " + pos.toString() + ": " + self.message,
             .None => "DeserializeError: " + self.message
         }
     }
@@ -103,7 +103,7 @@ public protocol ArraySerializer {
 //     var x: Int
 //     var y: Int
 //
-//     public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+//     public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
 //         let obj = try serializer.beginObject(name: "Point", fieldCount: 2)
 //         try obj.serializeField(name: "x", value: self.x)
 //         try obj.serializeField(name: "y", value: self.y)
@@ -112,7 +112,7 @@ public protocol ArraySerializer {
 // }
 // ```
 public protocol Serialize {
-    func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer
+    func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer
 }
 
 // Deserializer - a format-specific deserializer that produces values
@@ -155,7 +155,7 @@ public protocol Deserializer {
 // public struct Point: Deserialize {
 //     type Visitor = PointVisitor
 //
-//     public static func deserialize[D](from deserializer: mutating D) -> Result[Point, D.Error] {
+//     public static func deserialize[D](from mutating deserializer: D) -> Result[Point, D.Error] {
 //         deserializer.deserializeObject(visitor: PointVisitor())
 //     }
 // }
@@ -163,7 +163,7 @@ public protocol Deserializer {
 // public struct PointVisitor: ObjectVisitor {
 //     type Value = Point
 //
-//     public func visit[A](access: mutating A) where A: ObjectAccess -> Result[Point, A.Error] {
+//     public func visit[A](mutating access: A) where A: ObjectAccess -> Result[Point, A.Error] {
 //         var x: Optional[Int] = .None
 //         var y: Optional[Int] = .None
 //         while let field = try access.nextField() {
@@ -179,14 +179,14 @@ public protocol Deserializer {
 // ```
 public protocol Deserialize {
     type Visitor: ObjectVisitor where Visitor.Value = Self
-    static func deserialize[D](from deserializer: mutating D) -> Result[Self, D.Error] where D: Deserializer
+    static func deserialize[D](mutating from deserializer: D) -> Result[Self, D.Error] where D: Deserializer
 }
 
 // ObjectVisitor - visits object fields during deserialization
 public protocol ObjectVisitor {
     type Value
 
-    func visit[A](access: mutating A) -> Result[Value, A.Error] where A: ObjectAccess
+    func visit[A](mutating access: A) -> Result[Value, A.Error] where A: ObjectAccess
 }
 
 // ObjectAccess - provides access to object fields
@@ -208,102 +208,102 @@ public protocol ArrayAccess {
 
 // Default implementations for primitives
 
-extension Bool: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Bool: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeBool(value: self)
     }
 }
 
-extension Int: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Int: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeInt(value: self)
     }
 }
 
-extension Int8: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Int8: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeInt8(value: self)
     }
 }
 
-extension Int16: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Int16: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeInt16(value: self)
     }
 }
 
-extension Int32: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Int32: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeInt32(value: self)
     }
 }
 
-extension Int64: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Int64: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeInt64(value: self)
     }
 }
 
-extension UInt: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend UInt: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeUInt(value: self)
     }
 }
 
-extension UInt8: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend UInt8: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeUInt8(value: self)
     }
 }
 
-extension UInt16: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend UInt16: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeUInt16(value: self)
     }
 }
 
-extension UInt32: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend UInt32: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeUInt32(value: self)
     }
 }
 
-extension UInt64: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend UInt64: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeUInt64(value: self)
     }
 }
 
-extension Float32: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Float32: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeFloat32(value: self)
     }
 }
 
-extension Float64: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Float64: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeFloat64(value: self)
     }
 }
 
-extension String: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend String: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         serializer.serializeString(value: self)
     }
 }
 
-extension Optional[T]: Serialize where T: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Optional[T]: Serialize where T: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         match self {
-            .Some(let value) => value.serialize(to: serializer),
+            .Some(value) => value.serialize(to: serializer),
             .None => serializer.serializeNil()
         }
     }
 }
 
-extension Array[T]: Serialize where T: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
-        let arr = try serializer.beginArray(length: self.count)
+extend Array[T]: Serialize where T: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
+        let arr = /* try */ serializer.beginArray(length: self.count);
         /* for item in self {
             try arr.serializeElement(value: item)
         } */
@@ -311,8 +311,8 @@ extension Array[T]: Serialize where T: Serialize {
     }
 }
 
-extension Dictionary[K, V]: Serialize where K: Serialize, V: Serialize {
-    public func serialize[S](to serializer: mutating S) -> Result[(), S.Error] where S: Serializer {
+extend Dictionary[K, V]: Serialize where K: Serialize, V: Serialize {
+    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         var entries: Array[(K, V)] = []
         /* for (key, value) in self {
             entries.append((key, value))
@@ -323,10 +323,10 @@ extension Dictionary[K, V]: Serialize where K: Serialize, V: Serialize {
 
 // Default Deserialize implementations for primitives
 
-extension Bool: Deserialize {
+extend Bool: Deserialize {
     type Visitor = BoolVisitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Bool, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Bool, D.Error] where D: Deserializer {
         deserializer.deserializeBool()
     }
 }
@@ -334,15 +334,15 @@ extension Bool: Deserialize {
 public struct BoolVisitor: ObjectVisitor {
     type Value = Bool
 
-    public func visit[A](access: mutating A) -> Result[Bool, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Bool, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Bool cannot be deserialized from object"))
     }
 }
 
-extension Int: Deserialize {
+extend Int: Deserialize {
     type Visitor = IntVisitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Int, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Int, D.Error] where D: Deserializer {
         deserializer.deserializeInt()
     }
 }
@@ -350,15 +350,15 @@ extension Int: Deserialize {
 public struct IntVisitor: ObjectVisitor {
     type Value = Int
 
-    public func visit[A](access: mutating A) -> Result[Int, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Int, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Int cannot be deserialized from object"))
     }
 }
 
-extension Int8: Deserialize {
+extend Int8: Deserialize {
     type Visitor = Int8Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Int8, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Int8, D.Error] where D: Deserializer {
         deserializer.deserializeInt8()
     }
 }
@@ -366,15 +366,15 @@ extension Int8: Deserialize {
 public struct Int8Visitor: ObjectVisitor {
     type Value = Int8
 
-    public func visit[A](access: mutating A) -> Result[Int8, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Int8, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Int8 cannot be deserialized from object"))
     }
 }
 
-extension Int16: Deserialize {
+extend Int16: Deserialize {
     type Visitor = Int16Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Int16, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Int16, D.Error] where D: Deserializer {
         deserializer.deserializeInt16()
     }
 }
@@ -382,15 +382,15 @@ extension Int16: Deserialize {
 public struct Int16Visitor: ObjectVisitor {
     type Value = Int16
 
-    public func visit[A](access: mutating A) -> Result[Int16, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Int16, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Int16 cannot be deserialized from object"))
     }
 }
 
-extension Int32: Deserialize {
+extend Int32: Deserialize {
     type Visitor = Int32Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Int32, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Int32, D.Error] where D: Deserializer {
         deserializer.deserializeInt32()
     }
 }
@@ -398,15 +398,15 @@ extension Int32: Deserialize {
 public struct Int32Visitor: ObjectVisitor {
     type Value = Int32
 
-    public func visit[A](access: mutating A) -> Result[Int32, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Int32, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Int32 cannot be deserialized from object"))
     }
 }
 
-extension Int64: Deserialize {
+extend Int64: Deserialize {
     type Visitor = Int64Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Int64, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Int64, D.Error] where D: Deserializer {
         deserializer.deserializeInt64()
     }
 }
@@ -414,15 +414,15 @@ extension Int64: Deserialize {
 public struct Int64Visitor: ObjectVisitor {
     type Value = Int64
 
-    public func visit[A](access: mutating A) -> Result[Int64, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Int64, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Int64 cannot be deserialized from object"))
     }
 }
 
-extension UInt: Deserialize {
+extend UInt: Deserialize {
     type Visitor = UIntVisitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[UInt, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt, D.Error] where D: Deserializer {
         deserializer.deserializeUInt()
     }
 }
@@ -430,15 +430,15 @@ extension UInt: Deserialize {
 public struct UIntVisitor: ObjectVisitor {
     type Value = UInt
 
-    public func visit[A](access: mutating A) -> Result[UInt, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[UInt, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "UInt cannot be deserialized from object"))
     }
 }
 
-extension UInt8: Deserialize {
+extend UInt8: Deserialize {
     type Visitor = UInt8Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[UInt8, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt8, D.Error] where D: Deserializer {
         deserializer.deserializeUInt8()
     }
 }
@@ -446,15 +446,15 @@ extension UInt8: Deserialize {
 public struct UInt8Visitor: ObjectVisitor {
     type Value = UInt8
 
-    public func visit[A](access: mutating A) -> Result[UInt8, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[UInt8, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "UInt8 cannot be deserialized from object"))
     }
 }
 
-extension UInt16: Deserialize {
+extend UInt16: Deserialize {
     type Visitor = UInt16Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[UInt16, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt16, D.Error] where D: Deserializer {
         deserializer.deserializeUInt16()
     }
 }
@@ -462,15 +462,15 @@ extension UInt16: Deserialize {
 public struct UInt16Visitor: ObjectVisitor {
     type Value = UInt16
 
-    public func visit[A](access: mutating A) -> Result[UInt16, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[UInt16, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "UInt16 cannot be deserialized from object"))
     }
 }
 
-extension UInt32: Deserialize {
+extend UInt32: Deserialize {
     type Visitor = UInt32Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[UInt32, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt32, D.Error] where D: Deserializer {
         deserializer.deserializeUInt32()
     }
 }
@@ -478,15 +478,15 @@ extension UInt32: Deserialize {
 public struct UInt32Visitor: ObjectVisitor {
     type Value = UInt32
 
-    public func visit[A](access: mutating A) -> Result[UInt32, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[UInt32, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "UInt32 cannot be deserialized from object"))
     }
 }
 
-extension UInt64: Deserialize {
+extend UInt64: Deserialize {
     type Visitor = UInt64Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[UInt64, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt64, D.Error] where D: Deserializer {
         deserializer.deserializeUInt64()
     }
 }
@@ -494,15 +494,15 @@ extension UInt64: Deserialize {
 public struct UInt64Visitor: ObjectVisitor {
     type Value = UInt64
 
-    public func visit[A](access: mutating A) -> Result[UInt64, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[UInt64, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "UInt64 cannot be deserialized from object"))
     }
 }
 
-extension Float32: Deserialize {
+extend Float32: Deserialize {
     type Visitor = Float32Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Float32, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Float32, D.Error] where D: Deserializer {
         deserializer.deserializeFloat32()
     }
 }
@@ -510,15 +510,15 @@ extension Float32: Deserialize {
 public struct Float32Visitor: ObjectVisitor {
     type Value = Float32
 
-    public func visit[A](access: mutating A) -> Result[Float32, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Float32, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Float32 cannot be deserialized from object"))
     }
 }
 
-extension Float64: Deserialize {
+extend Float64: Deserialize {
     type Visitor = Float64Visitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Float64, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Float64, D.Error] where D: Deserializer {
         deserializer.deserializeFloat64()
     }
 }
@@ -526,15 +526,15 @@ extension Float64: Deserialize {
 public struct Float64Visitor: ObjectVisitor {
     type Value = Float64
 
-    public func visit[A](access: mutating A) -> Result[Float64, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Float64, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Float64 cannot be deserialized from object"))
     }
 }
 
-extension String: Deserialize {
+extend String: Deserialize {
     type Visitor = StringVisitor
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[String, D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[String, D.Error] where D: Deserializer {
         deserializer.deserializeString()
     }
 }
@@ -542,19 +542,19 @@ extension String: Deserialize {
 public struct StringVisitor: ObjectVisitor {
     type Value = String
 
-    public func visit[A](access: mutating A) -> Result[String, A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[String, A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "String cannot be deserialized from object"))
     }
 }
 
-extension Optional[T]: Deserialize where T: Deserialize {
+extend Optional[T]: Deserialize where T: Deserialize {
     type Visitor = OptionalVisitor[T]
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Optional[T], D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Optional[T], D.Error] where D: Deserializer {
         // Deserializers should handle null -> None, otherwise deserialize T
         // This is a simplified version; full impl would peek at next token
         match T.deserialize(from: deserializer) {
-            .Ok(let value) => .Ok(.Some(value)),
+            .Ok(value) => .Ok(.Some(value)),
             .Err(_) => .Ok(.None)
         }
     }
@@ -563,15 +563,15 @@ extension Optional[T]: Deserialize where T: Deserialize {
 public struct OptionalVisitor[T]: ObjectVisitor where T: Deserialize {
     type Value = Optional[T]
 
-    public func visit[A](access: mutating A) -> Result[Optional[T], A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Optional[T], A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Optional cannot be deserialized from object"))
     }
 }
 
-extension Array[T]: Deserialize where T: Deserialize {
+extend Array[T]: Deserialize where T: Deserialize {
     type Visitor = ArrayVisitor[T]
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Array[T], D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Array[T], D.Error] where D: Deserializer {
         deserializer.deserializeArray[T]()
     }
 }
@@ -579,15 +579,15 @@ extension Array[T]: Deserialize where T: Deserialize {
 public struct ArrayVisitor[T]: ObjectVisitor where T: Deserialize {
     type Value = Array[T]
 
-    public func visit[A](access: mutating A) -> Result[Array[T], A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Array[T], A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Array cannot be deserialized from object"))
     }
 }
 
-extension Dictionary[K, V]: Deserialize where K: Deserialize, K: Hashable, V: Deserialize {
+extend Dictionary[K, V]: Deserialize where K: Deserialize, K: Hashable, V: Deserialize {
     type Visitor = DictionaryVisitor[K, V]
 
-    public static func deserialize[D](from deserializer: mutating D) -> Result[Dictionary[K, V], D.Error] where D: Deserializer {
+    public static func deserialize[D](from mutating deserializer: D) -> Result[Dictionary[K, V], D.Error] where D: Deserializer {
         deserializer.deserializeMap[K, V]()
     }
 }
@@ -595,7 +595,7 @@ extension Dictionary[K, V]: Deserialize where K: Deserialize, K: Hashable, V: De
 public struct DictionaryVisitor[K, V]: ObjectVisitor where K: Deserialize, K: Hashable, V: Deserialize {
     type Value = Dictionary[K, V]
 
-    public func visit[A](access: mutating A) -> Result[Dictionary[K, V], A.Error] where A: ObjectAccess {
+    public func visit[A](mutating access: A) -> Result[Dictionary[K, V], A.Error] where A: ObjectAccess {
         .Err(A.Error(message: "Dictionary cannot be deserialized from object"))
     }
 }

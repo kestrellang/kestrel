@@ -29,7 +29,7 @@ public struct Set[T, A]:
 
     // Collectable
     public init[I](from iter: I) where I: Iterator, I.Item = T {
-        self.init()
+        self.init();
         while let item = iter.next() {
             self.insert(element: item)
         }
@@ -49,7 +49,7 @@ public struct Set[T, A]:
         if self.dict.contains(key: element) {
             false
         } else {
-            self.dict.insert(value: (), for: element)
+            self.dict.insert(value: (), for: element);
             true
         }
     }
@@ -68,7 +68,7 @@ public struct Set[T, A]:
 
     // Set operations
     public func union(with other: Set[T, A]) -> Set[T, A] {
-        var result = Set[T, A](minimumCapacity: self.count + other.count)
+        var result = Set[T, A](minimumCapacity: self.count + other.count);
         /* for element in self {
             result.insert(element: element)
         } */
@@ -79,7 +79,7 @@ public struct Set[T, A]:
     }
 
     public func intersection(with other: Set[T, A]) -> Set[T, A] {
-        var result = Set[T, A]()
+        var result = Set[T, A]();
         /* for element in self {
             if other.contains(element: element) {
                 result.insert(element: element)
@@ -89,7 +89,7 @@ public struct Set[T, A]:
     }
 
     public func difference(from other: Set[T, A]) -> Set[T, A] {
-        var result = Set[T, A]()
+        var result = Set[T, A]();
         /* for element in self {
             if not other.contains(element: element) {
                 result.insert(element: element)
@@ -99,7 +99,7 @@ public struct Set[T, A]:
     }
 
     public func symmetricDifference(with other: Set[T, A]) -> Set[T, A] {
-        var result = Set[T, A]()
+        var result = Set[T, A]();
         /* for element in self {
             if not other.contains(element: element) {
                 result.insert(element: element)
@@ -151,7 +151,7 @@ public struct Set[T, A]:
     }
 
     public func formIntersection(with other: Set[T, A]) {
-        var toRemove: [T] = []
+        var toRemove: [T] = [];
         /* for element in self {
             if not other.contains(element: element) {
                 toRemove.append(element)
@@ -185,7 +185,7 @@ public struct Set[T, A]:
 
     // Cloneable
     public func clone() -> Set[T, A] where T: Cloneable {
-        var result = Set[T, A](minimumCapacity: self.count)
+        var result = Set[T, A](minimumCapacity: self.count);
         /* for element in self {
             result.insert(element: element.clone())
         } */
@@ -194,7 +194,7 @@ public struct Set[T, A]:
 }
 
 // Equatable
-extension Set[T, A]: Equatable {
+extend Set[T, A]: Equatable {
     public func equals(other: Set[T, A]) -> Bool {
         if self.count != other.count {
             return false
@@ -209,10 +209,10 @@ extension Set[T, A]: Equatable {
 }
 
 // Hashable
-extension Set[T, A]: Hashable {
-    public func hash[H](into hasher: mutating H) where H: Hasher {
+extend Set[T, A]: Hashable {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
         // XOR all element hashes (order-independent)
-        var combinedHash: UInt64 = 0
+        var combinedHash: UInt64 = 0;
         /* for element in self {
             var elementHasher = DefaultHasher()
             element.hash(into: elementHasher)

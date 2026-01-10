@@ -46,12 +46,12 @@ public struct Dictionary[K, V, A]:
     }
 
     public init(minimumCapacity: Int) {
-        let capacity = Self.nextPowerOfTwo(minimumCapacity)
+        let capacity = Self.nextPowerOfTwo(minimumCapacity);
         self.storage = ArcBox(value: DictionaryStorage(
             entries: Buffer(capacity: capacity),
             count: 0,
             capacity: capacity
-        ))
+        ));
         self.initializeEntries()
     }
 
@@ -64,7 +64,7 @@ public struct Dictionary[K, V, A]:
     }
 
     private static func nextPowerOfTwo(n: Int) -> Int {
-        var p = 1
+        var p = 1;
         while p < n {
             p = p * 2
         }
@@ -114,14 +114,14 @@ public struct Dictionary[K, V, A]:
     }
 
     private func resize() {
-        let newCapacity = if self.storage.value.capacity == 0 { 8 } else { self.storage.value.capacity * 2 }
-        let oldEntries = self.storage.value.entries
-        let oldCapacity = self.storage.value.capacity
+        let newCapacity = if self.storage.value.capacity == 0 { 8 } else { self.storage.value.capacity * 2 };
+        let oldEntries = self.storage.value.entries;
+        let oldCapacity = self.storage.value.capacity;
 
-        self.storage.value.entries = Buffer(capacity: newCapacity)
-        self.storage.value.capacity = newCapacity
-        self.storage.value.count = 0
-        self.initializeEntries()
+        self.storage.value.entries = Buffer(capacity: newCapacity);
+        self.storage.value.capacity = newCapacity;
+        self.storage.value.count = 0;
+        self.initializeEntries();
 
         // Rehash all entries
         /* for i in 0..<oldCapacity {
@@ -133,14 +133,14 @@ public struct Dictionary[K, V, A]:
     }
 
     private func hash(key: K) -> UInt64 {
-        var hasher = DefaultHasher()
-        key.hash(into: hasher)
+        var hasher = DefaultHasher();
+        key.hash(into: hasher);
         hasher.finish()
     }
 
     private func findSlot(hash: UInt64) -> Int {
-        let mask = self.storage.value.capacity - 1
-        var index = Int(hash) & mask
+        let mask = self.storage.value.capacity - 1;
+        var index = Int(hash) & mask;
 
         while self.storage.value.entries(unchecked: index).occupied {
             if self.storage.value.entries(unchecked: index).hash == hash {
@@ -156,27 +156,27 @@ public struct Dictionary[K, V, A]:
             return .None
         }
 
-        let mask = self.storage.value.capacity - 1
-        var index = Int(hash) & mask
-        var checked = 0
+        let mask = self.storage.value.capacity - 1;
+        var index = Int(hash) & mask;
+        var checked = 0;
 
         while checked < self.storage.value.capacity {
-            let entry = self.storage.value.entries(unchecked: index)
+            let entry = self.storage.value.entries(unchecked: index);
             if not entry.occupied {
                 return .None
             }
             if entry.hash == hash and entry.key == key {
                 return .Some(index)
             }
-            index = (index + 1) & mask
-            checked += 1
+            index = (index + 1) & mask;
+            checked = checked + 1
         }
         .None
     }
 
     private func insertEntry(key: K, value: V, hash: UInt64) {
-        let mask = self.storage.value.capacity - 1
-        var index = Int(hash) & mask
+        let mask = self.storage.value.capacity - 1;
+        var index = Int(hash) & mask;
 
         while self.storage.value.entries(unchecked: index).occupied {
             index = (index + 1) & mask
@@ -187,39 +187,39 @@ public struct Dictionary[K, V, A]:
             value: value,
             hash: hash,
             occupied: true
-        )
-        self.storage.value.count += 1
+        );
+        self.storage.value.count = self.storage.value.count + 1
     }
 
     // Subscript access
-    public subscript(key: K) -> Optional[V] {
-        get {
-            let hash = self.hash(key: key)
-            if let index = self.findEntry(key: key, hash: hash) {
-                .Some(self.storage.value.entries(unchecked: index).value)
-            } else {
-                .None
-            }
-        }
-        set {
-            self.ensureUnique()
-            if let value = newValue {
-                self.insert(value: value, for: key)
-            } else {
-                self.remove(for: key)
-            }
-        }
-    }
+    //public subscript(key: K) -> Optional[V] {
+    //    get {
+    //        let hash = self.hash(key: key)
+    //        if let index = self.findEntry(key: key, hash: hash) {
+    //            .Some(self.storage.value.entries(unchecked: index).value)
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //    set {
+    //        self.ensureUnique()
+    //        if let value = newValue {
+    //            self.insert(value: value, for: key)
+    //        } else {
+    //            self.remove(for: key)
+    //        }
+    //    }
+    //}
 
     // Mutation
     public func insert(value: V, for key: K) -> Optional[V] {
-        self.ensureUnique()
-        let hash = self.hash(key: key)
+        self.ensureUnique();
+        let hash = self.hash(key: key);
 
         // Check if key exists
         if let index = self.findEntry(key: key, hash: hash) {
-            let oldValue = self.storage.value.entries(unchecked: index).value
-            self.storage.value.entries(unchecked: index).value = value
+            let oldValue = self.storage.value.entries(unchecked: index).value;
+            self.storage.value.entries(unchecked: index).value = value;
             return .Some(oldValue)
         }
 
@@ -234,18 +234,18 @@ public struct Dictionary[K, V, A]:
         let hash = self.hash(key: key)
 
         if let index = self.findEntry(key: key, hash: hash) {
-            let value = self.storage.value.entries(unchecked: index).value
-            self.storage.value.entries(unchecked: index).occupied = false
-            self.storage.value.count -= 1
+            let value = self.storage.value.entries(unchecked: index).value;
+            self.storage.value.entries(unchecked: index).occupied = false;
+            self.storage.value.count = self.storage.value.count - 1;
 
             // Rehash following entries (linear probing requires this)
-            let mask = self.storage.value.capacity - 1
-            var i = (index + 1) & mask
+            let mask = self.storage.value.capacity - 1;
+            var i = (index + 1) & mask;
             while self.storage.value.entries(unchecked: i).occupied {
-                let entry = self.storage.value.entries(unchecked: i)
-                self.storage.value.entries(unchecked: i).occupied = false
-                self.storage.value.count -= 1
-                self.insertEntry(key: entry.key, value: entry.value, hash: entry.hash)
+                let entry = self.storage.value.entries(unchecked: i);
+                self.storage.value.entries(unchecked: i).occupied = false;
+                self.storage.value.count = self.storage.value.count - 1;
+                self.insertEntry(key: entry.key, value: entry.value, hash: entry.hash);
                 i = (i + 1) & mask
             }
 
@@ -301,14 +301,14 @@ public struct Dictionary[K, V, A]:
 }
 
 // Equatable when K and V are Equatable
-extension Dictionary[K, V, A]: Equatable where K: Equatable, V: Equatable {
+extend Dictionary[K, V, A]: Equatable where K: Equatable, V: Equatable {
     public func equals(other: Dictionary[K, V, A]) -> Bool {
         if self.count != other.count {
             return false
         }
         /* for (key, value) in self {
             match other[key] {
-                .Some(let otherValue) => {
+                .Some(otherValue) => {
                     if value != otherValue {
                         return false
                     }
@@ -334,8 +334,8 @@ public struct DictionaryIterator[K, V]: Iterator {
 
     public func next() -> Optional[(K, V)] {
         while self.index < self.dict.storage.value.capacity {
-            let entry = self.dict.storage.value.entries(unchecked: self.index)
-            self.index += 1
+            let entry = self.dict.storage.value.entries(unchecked: self.index);
+            self.index = self.index + 1;
             if entry.occupied {
                 return .Some((entry.key, entry.value))
             }

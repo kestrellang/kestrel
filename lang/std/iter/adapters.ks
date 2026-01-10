@@ -109,7 +109,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 
     public func next() -> Optional[I.Item] {
         self.inner.next().map { (item) in
-            self.action(item)
+            self.action(item);
             item
         }
     }
@@ -129,7 +129,7 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
 
     public func next() -> Optional[I.Item] {
         if self.remaining > 0 {
-            self.remaining -= 1
+            self.remaining = self.remaining - 1;
             self.inner.next()
         } else {
             .None
@@ -183,7 +183,7 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
             if self.inner.next().isNone {
                 return .None
             }
-            self.remaining -= 1
+            self.remaining = self.remaining - 1
         }
         self.inner.next()
     }
@@ -260,9 +260,9 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
     }
 
     public func next() -> Optional[(Int, I.Item)] {
-        self.inner.next().map { item in
-            let i = self.index
-            self.index += 1
+        self.inner.next().map { (item) in
+            let i = self.index;
+            self.index = self.index + 1;
             (i, item)
         }
     }
@@ -292,7 +292,7 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
 
 // ChainIterator
 public struct ChainIterator[A, B]: Iterator
-    where A: Iterator, B: Iterator, B.Item == A.Item
+    where A: Iterator, B: Iterator, B.Item = A.Item
 {
     type Item = A.Item
 
@@ -333,7 +333,7 @@ public struct CycleIterator[I]: Iterator where I: Iterator, I: Cloneable {
         if let item = self.current.next() {
             return .Some(item)
         }
-        self.current = self.original.clone()
+        self.current = self.original.clone();
         self.current.next()
     }
 }
@@ -354,7 +354,7 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator, I.Item: Clonea
 
     public func next() -> Optional[I.Item] {
         if self.needsSeparator {
-            self.needsSeparator = false
+            self.needsSeparator = false;
             return .Some(self.separator.clone())
         }
 
@@ -420,7 +420,7 @@ public struct FuseIterator[I]: Iterator where I: Iterator {
         }
 
         match self.inner.next() {
-            .Some(let item) => .Some(item),
+            .Some(item) => .Some(item),
             .None => {
                 self.done = true;
                 .None
@@ -486,7 +486,7 @@ public struct RepeatNIterator[T]: Iterator where T: Cloneable {
 
     public func next() -> Optional[T] {
         if self.remaining > 0 {
-            self.remaining -= 1
+            self.remaining = self.remaining - 1;
             .Some(self.value.clone())
         } else {
             .None

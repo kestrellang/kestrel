@@ -40,7 +40,7 @@ use crate::common::{
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::ty::{TyVariant, ty_parser};
-use crate::type_param::type_parameter_list_parser;
+use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 
 /// Represents a type alias declaration: (visibility)? type Name[T]? = Type;
 ///
@@ -231,11 +231,12 @@ pub fn type_alias_declaration_parser_internal<'tokens>()
         .then(associated_type_target_parser())
         .then(type_parameter_list_parser().or_not())
         .then(associated_type_bounds_parser().or_not())
+        .then(where_clause_parser().or_not())
         .then(token(Token::Equals).then(ty_parser()).or_not())
         .then(token(Token::Semicolon).or_not())
         .map(
             |(
-                ((((((attributes, visibility), type_span), target), type_params), bounds), aliased),
+                (((((((attributes, visibility), type_span), target), type_params), bounds), where_clause), aliased),
                 semicolon_span,
             )| {
                 TypeAliasDeclarationData {
@@ -245,6 +246,7 @@ pub fn type_alias_declaration_parser_internal<'tokens>()
                     target,
                     type_params,
                     bounds,
+                    where_clause,
                     aliased,
                     semicolon_span,
                 }

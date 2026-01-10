@@ -1,29 +1,23 @@
 // Template for integer types
 // Placeholders:
-//   {{TYPE_NAME}}  - e.g., Int32, UInt64
-//   {{LANG_TYPE}}  - e.g., lang.i32, lang.u64
-//   {{SIGNED}}     - true or false
-//   {{BITS}}       - e.g., 32, 64
-//   {{MIN_VALUE}}  - minimum value for the type
-//   {{MAX_VALUE}}  - maximum value for the type
-//   {{ADD_OP}}     - e.g., lang.i32_add, lang.u64_add
-//   {{SUB_OP}}     - e.g., lang.i32_sub
-//   {{MUL_OP}}     - e.g., lang.i32_mul
-//   {{DIV_OP}}     - e.g., lang.i32_div
-//   {{REM_OP}}     - e.g., lang.i32_rem
-//   {{NEG_OP}}     - e.g., lang.i32_neg (only for signed)
-//   {{EQ_OP}}      - e.g., lang.i32_eq
-//   {{NE_OP}}      - e.g., lang.i32_ne
-//   {{LT_OP}}      - e.g., lang.i32_lt
-//   {{LE_OP}}      - e.g., lang.i32_le
-//   {{GT_OP}}      - e.g., lang.i32_gt
-//   {{GE_OP}}      - e.g., lang.i32_ge
-//   {{AND_OP}}     - e.g., lang.i32_and
-//   {{OR_OP}}      - e.g., lang.i32_or
-//   {{XOR_OP}}     - e.g., lang.i32_xor
-//   {{NOT_OP}}     - e.g., lang.i32_not
-//   {{SHL_OP}}     - e.g., lang.i32_shl
-//   {{SHR_OP}}     - e.g., lang.i32_shr or lang.u32_shr
+//   {{TYPE_NAME}}      - e.g., Int32, UInt64
+//   {{LANG_TYPE}}      - e.g., i32, i64 (note: unsigned uses same underlying type)
+//   {{BITS}}           - e.g., 32, 64
+//   {{MIN_VALUE}}      - minimum value for the type
+//   {{MAX_VALUE}}      - maximum value for the type
+//   {{SIGNED_PROTOCOL}} - SignedInteger or UnsignedInteger
+//   {{NEGATABLE_LINE}} - "Negatable," for signed, empty for unsigned
+//   {{CAST_FROM_I64}}  - e.g., lang.cast_i64_i32
+//   {{DIV_OP}}         - e.g., lang.i32_signed_div or lang.i32_unsigned_div
+//   {{REM_OP}}         - e.g., lang.i32_signed_rem or lang.i32_unsigned_rem
+//   {{LT_OP}}          - e.g., lang.i32_signed_lt or lang.i32_unsigned_lt
+//   {{GT_OP}}          - e.g., lang.i32_signed_gt or lang.i32_unsigned_gt
+//   {{SHR_OP}}         - e.g., lang.i32_signed_shr or lang.i32_unsigned_shr
+//   {{NEGATABLE_IMPL}} - negate/abs implementations for signed types
+
+module std.core
+
+import std.ffi.(FFISafe)
 
 public struct {{TYPE_NAME}}:
     {{SIGNED_PROTOCOL}},
@@ -34,110 +28,59 @@ public struct {{TYPE_NAME}}:
     Multipliable,
     Divisible,
     Modulo,
-    {{NEGATABLE_IMPL}}
+    {{NEGATABLE_LINE}}
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
-    private var value: {{LANG_TYPE}}
+    private var value: lang.{{LANG_TYPE}}
 
-    // Numeric protocol
-    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(value: 0) }
-    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(value: 1) }
-
-    // Integer protocol
-    public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(value: {{MIN_VALUE}}) }
-    public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(value: {{MAX_VALUE}}) }
+    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 0) }
+    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 1) }
+    public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MIN_VALUE}}) }
+    public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MAX_VALUE}}) }
     public static var bitWidth: Int { {{BITS}} }
 
-    // ExpressibleByIntLiteral
-    public init(intLiteral value: Int) {
-        self.value = value as {{LANG_TYPE}}
+    public init(intLiteral value: lang.i64) {
+        self.value = {{CAST_FROM_I64}}(value)
     }
 
-    // Equatable
+    // Internal init for raw lang type values
+    init(raw value: lang.{{LANG_TYPE}}) {
+        self.value = value
+    }
+
     public func equals(other: {{TYPE_NAME}}) -> Bool {
-        {{EQ_OP}}(self.value, other.value)
+        lang.{{LANG_TYPE}}_eq(self.value, other.value)
     }
 
-    // Comparable
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
-        if {{LT_OP}}(self.value, other.value) {
-            .Less
-        } else if {{GT_OP}}(self.value, other.value) {
-            .Greater
-        } else {
-            .Equal
-        }
+        if {{LT_OP}}(self.value, other.value) { .Less }
+        else if {{GT_OP}}(self.value, other.value) { .Greater }
+        else { .Equal }
     }
 
-    // Hashable
-    public func hash[H: Hasher](into hasher: ref H) {
-        hasher.write(bytes: self.value as Slice[UInt8])
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        hasher.write(bytes: self.value.toBytes())
     }
 
-    // Addable
     type Output = {{TYPE_NAME}}
 
-    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{ADD_OP}}(self.value, other.value))
-    }
-
-    // Subtractable
-    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{SUB_OP}}(self.value, other.value))
-    }
-
-    // Multipliable
-    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{MUL_OP}}(self.value, other.value))
-    }
-
-    // Divisible
-    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{DIV_OP}}(self.value, other.value))
-    }
-
-    // Modulo
-    public func mod(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{REM_OP}}(self.value, other.value))
-    }
-
-{{NEGATABLE_BODY}}
-
-    // BitwiseAnd
-    public func bitwiseAnd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{AND_OP}}(self.value, other.value))
-    }
-
-    // BitwiseOr
-    public func bitwiseOr(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{OR_OP}}(self.value, other.value))
-    }
-
-    // BitwiseXor
-    public func bitwiseXor(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{XOR_OP}}(self.value, other.value))
-    }
-
-    // BitwiseNot
-    public func bitwiseNot() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{NOT_OP}}(self.value))
-    }
-
-    // LeftShift
-    public func shiftLeft(by count: Int) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{SHL_OP}}(self.value, count as {{LANG_TYPE}}))
-    }
-
-    // RightShift
-    public func shiftRight(by count: Int) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(value: {{SHR_OP}}(self.value, count as {{LANG_TYPE}}))
-    }
-
-{{SIGNED_METHODS}}
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.value, other.value)) }
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: {{DIV_OP}}(self.value, other.value)) }
+    public func mod(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: {{REM_OP}}(self.value, other.value)) }
+{{NEGATABLE_IMPL}}
+    public func bitwiseAnd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_and(self.value, other.value)) }
+    public func bitwiseOr(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_or(self.value, other.value)) }
+    public func bitwiseXor(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_xor(self.value, other.value)) }
+    public func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.value)) }
+    public func shiftLeft(by count: Int) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.value, {{CAST_FROM_I64}}(count))) }
+    public func shiftRight(by count: Int) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: {{SHR_OP}}(self.value, {{CAST_FROM_I64}}(count))) }
 }

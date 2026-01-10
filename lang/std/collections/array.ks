@@ -60,8 +60,8 @@ public struct Array[T, A]:
     }
 
     // Collectable
-    public init[I](from iter: I) where I: Iterator, I.Item == T {
-        self.init()
+    public init[I](from iter: I) where I: Iterator, I.Item = T {
+        self.init();
         while let item = iter.next() {
             self.append(item)
         }
@@ -88,81 +88,81 @@ public struct Array[T, A]:
     }
 
     private func ensureCapacity(minCapacity: Int) {
-        self.ensureUnique()
+        self.ensureUnique();
         if self.storage.value.buffer.capacity < minCapacity {
             let newCapacity = if self.storage.value.buffer.capacity == 0 {
                 if minCapacity < 4 { 4 } else { minCapacity }
             } else {
-                var cap = self.storage.value.buffer.capacity
+                var cap = self.storage.value.buffer.capacity;
                 while cap < minCapacity {
                     cap = cap * 2
                 }
                 cap
-            }
+            };
             self.storage.value.buffer.resize(to: newCapacity)
         }
     }
 
-    // Subscript variants
-    public subscript(safe index: Int) -> Optional[T] {
-        get {
-            if index >= 0 and index < self.count {
-                .Some(self.storage.value.buffer(unchecked: index))
-            } else {
-                .None
-            }
-        }
-        set {
-            if index >= 0 and index < self.count {
-                if let value = newValue {
-                    self.ensureUnique()
-                    self.storage.value.buffer(unchecked: index) = value
-                }
-            }
-        }
-    }
+    //// Subscript variants
+    //public subscript(safe index: Int) -> Optional[T] {
+    //    get {
+    //        if index >= 0 and index < self.count {
+    //            .Some(self.storage.value.buffer(unchecked: index))
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //    set {
+    //        if index >= 0 and index < self.count {
+    //            if let value = newValue {
+    //                self.ensureUnique()
+    //                self.storage.value.buffer(unchecked: index) = value
+    //            }
+    //        }
+    //    }
+    //}
 
-    public subscript(wrapping index: Int) -> T {
-        get {
-            let n = self.count
-            let wrapped = ((index % n) + n) % n
-            self.storage.value.buffer(unchecked: wrapped)
-        }
-        set {
-            let n = self.count
-            let wrapped = ((index % n) + n) % n
-            self.ensureUnique()
-            self.storage.value.buffer(unchecked: wrapped) = newValue
-        }
-    }
+    //public subscript(wrapping index: Int) -> T {
+    //    get {
+    //        let n = self.count
+    //        let wrapped = ((index % n) + n) % n
+    //        self.storage.value.buffer(unchecked: wrapped)
+    //    }
+    //    set {
+    //        let n = self.count
+    //        let wrapped = ((index % n) + n) % n
+    //        self.ensureUnique()
+    //        self.storage.value.buffer(unchecked: wrapped) = newValue
+    //    }
+    //}
 
-    public subscript(unchecked index: Int) -> T {
-        get { self.storage.value.buffer(unchecked: index) }
-        set {
-            self.ensureUnique()
-            self.storage.value.buffer(unchecked: index) = newValue
-        }
-    }
+    //public subscript(unchecked index: Int) -> T {
+    //    get { self.storage.value.buffer(unchecked: index) }
+    //    set {
+    //        self.ensureUnique()
+    //        self.storage.value.buffer(unchecked: index) = newValue
+    //    }
+    //}
 
-    public subscript(safe range: Range[Int]) -> Optional[Slice[T]] {
-        get {
-            if range.start >= 0 and range.end <= self.count {
-                self.storage.value.buffer.slice(from: range.start, to: range.end)
-            } else {
-                .None
-            }
-        }
-    }
+    //public subscript(safe range: Range[Int]) -> Optional[Slice[T]] {
+    //    get {
+    //        if range.start >= 0 and range.end <= self.count {
+    //            self.storage.value.buffer.slice(from: range.start, to: range.end)
+    //        } else {
+    //            .None
+    //        }
+    //    }
+    //}
 
     // Mutation
     public func append(element: T) {
-        self.ensureCapacity(minCapacity: self.count + 1)
-        self.storage.value.buffer(unchecked: self.storage.value.count) = element
-        self.storage.value.count += 1
+        self.ensureCapacity(minCapacity: self.count + 1);
+        self.storage.value.buffer(unchecked: self.storage.value.count) = element;
+        self.storage.value.count = self.storage.value.count + 1
     }
 
     public func append(contentsOf other: Array[T, A]) {
-        self.ensureCapacity(minCapacity: self.count + other.count)
+        self.ensureCapacity(minCapacity: self.count + other.count);
         /* for i in 0..<other.count {
             self.storage.value.buffer(unchecked: self.storage.value.count) = other(unchecked: i)
             self.storage.value.count += 1
@@ -174,17 +174,17 @@ public struct Array[T, A]:
             panic("Array.insert: index out of bounds")
         }
 
-        self.ensureCapacity(minCapacity: self.count + 1)
+        self.ensureCapacity(minCapacity: self.count + 1);
 
         // Shift elements right
-        var i = self.storage.value.count
+        var i = self.storage.value.count;
         while i > index {
-            self.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i - 1)
-            i -= 1
+            self.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i - 1);
+            i = i - 1
         }
 
-        self.storage.value.buffer(unchecked: index) = element
-        self.storage.value.count += 1
+        self.storage.value.buffer(unchecked: index) = element;
+        self.storage.value.count = self.storage.value.count + 1
     }
 
     public func remove(at index: Int) -> T {
@@ -192,15 +192,15 @@ public struct Array[T, A]:
             panic("Array.remove: index out of bounds")
         }
 
-        self.ensureUnique()
-        let removed = self.storage.value.buffer(unchecked: index)
+        self.ensureUnique();
+        let removed = self.storage.value.buffer(unchecked: index);
 
         // Shift elements left
         /* for i in index..<(self.storage.value.count - 1) {
             self.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i + 1)
         } */
 
-        self.storage.value.count -= 1
+        self.storage.value.count = self.storage.value.count - 1;
         removed
     }
 
@@ -209,13 +209,13 @@ public struct Array[T, A]:
             return .None
         }
 
-        self.ensureUnique()
-        self.storage.value.count -= 1
+        self.ensureUnique();
+        self.storage.value.count = self.storage.value.count - 1;
         .Some(self.storage.value.buffer(unchecked: self.storage.value.count))
     }
 
     public func clear() {
-        self.ensureUnique()
+        self.ensureUnique();
         self.storage.value.count = 0
     }
 
@@ -292,8 +292,8 @@ public struct Array[T, A]:
             let temp = self.storage.value.buffer(unchecked: left)
             self.storage.value.buffer(unchecked: left) = self.storage.value.buffer(unchecked: right)
             self.storage.value.buffer(unchecked: right) = temp
-            left += 1
-            right -= 1
+            left = left + 1;
+            right = right - 1
         }
     }
 
@@ -324,7 +324,7 @@ public struct Array[T, A]:
 }
 
 // Equatable when T is Equatable
-extension Array[T, A]: Equatable where T: Equatable {
+extend Array[T, A]: Equatable where T: Equatable {
     public func equals(other: Array[T, A]) -> Bool {
         if self.count != other.count {
             return false
@@ -339,8 +339,8 @@ extension Array[T, A]: Equatable where T: Equatable {
 }
 
 // Hashable when T is Hashable
-extension Array[T, A]: Hashable where T: Hashable {
-    public func hash[H](into hasher: mutating H) where H: Hasher {
+extend Array[T, A]: Hashable where T: Hashable {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
         /* for i in 0..<self.count {
             self(unchecked: i).hash(into: hasher)
         } */
@@ -361,8 +361,8 @@ public struct ArrayIterator[T]: Iterator {
 
     public func next() -> Optional[T] {
         if self.index < self.array.count {
-            let value = self.array(unchecked: self.index)
-            self.index += 1
+            let value = self.array(unchecked: self.index);
+            self.index = self.index + 1;
             .Some(value)
         } else {
             .None
