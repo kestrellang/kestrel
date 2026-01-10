@@ -3,6 +3,7 @@
 module std.core
 
 import std.ffi.(FFISafe)
+import std.ops.(And, Or, Not, ExpressibleByBoolLiteral)
 
 public struct Bool:
     Equatable,

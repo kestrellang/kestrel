@@ -4,6 +4,10 @@
 module std.core
 
 import std.ffi.(FFISafe)
+import std.ops.(
+    Addable, Subtractable, Multipliable, Divisible, Negatable,
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral
+)
 
 public struct Float64:
     FloatingPoint,

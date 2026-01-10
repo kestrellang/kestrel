@@ -4,6 +4,11 @@
 module std.core
 
 import std.ffi.(FFISafe)
+import std.ops.(
+    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
+    ExpressibleByIntLiteral
+)
 
 public struct Int16:
     SignedInteger,

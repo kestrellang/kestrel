@@ -4,6 +4,11 @@
 module std.core
 
 import std.ffi.(FFISafe)
+import std.ops.(
+    Addable, Subtractable, Multipliable, Divisible, Modulo,
+    BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
+    ExpressibleByIntLiteral
+)
 
 public struct UInt16:
     UnsignedInteger,
