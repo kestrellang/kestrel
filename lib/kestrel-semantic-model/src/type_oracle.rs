@@ -10,7 +10,7 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
-use kestrel_semantic_tree::builtins::BuiltinKind;
+use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -180,6 +180,65 @@ impl TypeOracle for SemanticModel {
             }
             // Protocol doesn't have the flag or isn't a builtin, tuples don't conform
             return false;
+        }
+
+        // Handle primitive types - they implicitly conform to their literal protocols
+        match ty.kind() {
+            TyKind::Int(_) => {
+                // Primitive ints implicitly conform to ExpressibleByIntLiteral
+                if let Some(lit_protocol_id) =
+                    self.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
+                {
+                    if protocol_id == lit_protocol_id {
+                        return true;
+                    }
+                }
+                // Primitives don't conform to any other protocols
+                return false;
+            }
+            TyKind::Float(_) => {
+                // Primitive floats implicitly conform to ExpressibleByFloatLiteral
+                if let Some(lit_protocol_id) =
+                    self.builtin_protocol(LanguageFeature::ExpressibleByFloatLiteral)
+                {
+                    if protocol_id == lit_protocol_id {
+                        return true;
+                    }
+                }
+                // Also ExpressibleByIntLiteral since floats can be created from int literals
+                if let Some(lit_protocol_id) =
+                    self.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
+                {
+                    if protocol_id == lit_protocol_id {
+                        return true;
+                    }
+                }
+                // Primitives don't conform to any other protocols
+                return false;
+            }
+            TyKind::Bool => {
+                // Primitive bool implicitly conforms to ExpressibleByBoolLiteral
+                if let Some(lit_protocol_id) =
+                    self.builtin_protocol(LanguageFeature::ExpressibleByBoolLiteral)
+                {
+                    if protocol_id == lit_protocol_id {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            TyKind::String => {
+                // Primitive string implicitly conforms to ExpressibleByStringLiteral
+                if let Some(lit_protocol_id) =
+                    self.builtin_protocol(LanguageFeature::ExpressibleByStringLiteral)
+                {
+                    if protocol_id == lit_protocol_id {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            _ => {}
         }
 
         // Get the type's symbol ID to check conformances

@@ -694,6 +694,7 @@ fn emit_extension_body_item(sink: &mut EventSink, item: ExtensionBodyItem) {
     match item {
         ExtensionBodyItem::Function(data) => emit_function_declaration(sink, data),
         ExtensionBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
+        ExtensionBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
     }
 }
 

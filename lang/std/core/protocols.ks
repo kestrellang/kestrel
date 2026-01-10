@@ -70,32 +70,32 @@ public struct DefaultHasher: Hasher {
     private var tailLen: Int
 
     public init() {
-        self.k0 = 0
-        self.k1 = 0
-        self.length = 0
-        self.v0 = 0x736f6d6570736575
-        self.v1 = 0x646f72616e646f6d
-        self.v2 = 0x6c7967656e657261
-        self.v3 = 0x7465646279746573
-        self.tail = 0
-        self.tailLen = 0
+        self.k0 = 0;
+        self.k1 = 0;
+        self.length = 0;
+        self.v0 = 0x736f6d6570736575;
+        self.v1 = 0x646f72616e646f6d;
+        self.v2 = 0x6c7967656e657261;
+        self.v3 = 0x7465646279746573;
+        self.tail = 0;
+        self.tailLen = 0;
     }
 
     public init(seed: (UInt64, UInt64)) {
-        self.k0 = seed.0
-        self.k1 = seed.1
-        self.length = 0
-        self.v0 = self.k0 ^ 0x736f6d6570736575
-        self.v1 = self.k1 ^ 0x646f72616e646f6d
-        self.v2 = self.k0 ^ 0x6c7967656e657261
-        self.v3 = self.k1 ^ 0x7465646279746573
-        self.tail = 0
-        self.tailLen = 0
+        self.k0 = seed.0;
+        self.k1 = seed.1;
+        self.length = 0;
+        self.v0 = self.k0 ^ 0x736f6d6570736575;
+        self.v1 = self.k1 ^ 0x646f72616e646f6d;
+        self.v2 = self.k0 ^ 0x6c7967656e657261;
+        self.v3 = self.k1 ^ 0x7465646279746573;
+        self.tail = 0;
+        self.tailLen = 0;
     }
 
     public func write(bytes: Slice[UInt8]) {
         // Implementation details - writes bytes into hasher state
-        self.length = self.length + UInt64(bytes.count)
+        self.length = self.length + UInt64(bytes.count);
         // ... SipHash implementation
     }
 

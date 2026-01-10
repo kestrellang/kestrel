@@ -17,6 +17,7 @@ use crate::common::{
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::ty::ty_parser;
+use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, where_clause_parser};
 
 /// Represents an extension declaration: extend Type: Protocol { ... }
@@ -60,7 +61,7 @@ impl ExtensionDeclaration {
             .map(|tok| tok.text().to_string())
     }
 
-    /// Get child declaration items (functions, initializers)
+    /// Get child declaration items (functions, initializers, type aliases)
     pub fn children(&self) -> Vec<SyntaxNode> {
         self.syntax
             .children()
@@ -70,7 +71,9 @@ impl ExtensionDeclaration {
                     .filter(|child| {
                         matches!(
                             child.kind(),
-                            SyntaxKind::FunctionDeclaration | SyntaxKind::InitializerDeclaration
+                            SyntaxKind::FunctionDeclaration
+                                | SyntaxKind::InitializerDeclaration
+                                | SyntaxKind::TypeAliasDeclaration
                         )
                     })
                     .collect()
@@ -81,7 +84,7 @@ impl ExtensionDeclaration {
 
 /// Internal parser for extension body items
 ///
-/// Extension bodies can contain: functions and initializers
+/// Extension bodies can contain: functions, initializers, and associated types
 fn extension_body_item_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
@@ -89,7 +92,10 @@ fn extension_body_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(ExtensionBodyItem::Function);
 
-    initializer_parser.or(function_parser)
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(ExtensionBodyItem::TypeAlias);
+
+    type_alias_parser.or(initializer_parser).or(function_parser)
 }
 
 /// Internal Chumsky parser for extension declaration

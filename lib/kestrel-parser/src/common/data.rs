@@ -381,4 +381,5 @@ pub struct ExtensionDeclarationData {
 pub enum ExtensionBodyItem {
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
+    TypeAlias(TypeAliasDeclarationData),
 }
