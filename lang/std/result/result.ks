@@ -2,6 +2,9 @@
 
 module std.result
 
+import std.core.(Equatable)
+import std.iter.(Iterator, Functor)
+
 public enum Result[T, E]:
     Tryable[T, E],
     Throwable[E],
@@ -209,8 +212,8 @@ public struct ResultIterator[T, E]: Iterator {
     }
 
     public func next() -> Optional[T] {
-        let result = self.value
-        self.value = .None
+        let result = self.value;
+        self.value = .None;
         result
     }
 }

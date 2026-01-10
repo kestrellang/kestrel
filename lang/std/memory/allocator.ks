@@ -2,27 +2,30 @@
 
 module std.memory
 
+import std.result.(Optional)
+
 public protocol Allocator {
     func allocate(layout: Layout) -> Optional[RawPointer]
     func deallocate(ptr: RawPointer, layout: Layout)
     func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer]
 }
 
+// TODO: Protocol extensions not yet supported
 // Default reallocation implementation
-extend Allocator {
-    public func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
-        // Allocate new block
-        if let newPtr = self.allocate(layout: newLayout) {
-            // Copy old data
-            let copySize = if oldLayout.size < newLayout.size { oldLayout.size } else { newLayout.size };
-            lang.memcpy(newPtr.raw, ptr.raw, copySize);
-            // Free old block
-            self.deallocate(ptr: ptr, layout: oldLayout);
-            return .Some(newPtr)
-        }
-        .None
-    }
-}
+// extend Allocator {
+//     public func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
+//         // Allocate new block
+//         if let newPtr = self.allocate(layout: newLayout) {
+//             // Copy old data
+//             let copySize = if oldLayout.size < newLayout.size { oldLayout.size } else { newLayout.size };
+//             lang.memcpy(newPtr.raw, ptr.raw, copySize);
+//             // Free old block
+//             self.deallocate(ptr: ptr, layout: oldLayout);
+//             return .Some(newPtr)
+//         }
+//         .None
+//     }
+// }
 
 // SystemAllocator - wrapper around system malloc/free
 public struct SystemAllocator: Allocator {

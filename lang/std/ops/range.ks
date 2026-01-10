@@ -2,6 +2,10 @@
 
 module std.ops
 
+import std.core.(Equatable, Comparable, Steppable)
+import std.result.(Optional)
+import std.iter.(Iterator, Iterable)
+
 // TODO: Add back 
 //@operator(..)
 public protocol RangeConstructible[Rhs = Self] {
@@ -61,8 +65,8 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
 
     public func next() -> Optional[T] {
         if self.current < self.end {
-            let value = self.current
-            self.current = self.current.successor()
+            let value = self.current;
+            self.current = self.current.successor();
             .Some(value)
         } else {
             .None
@@ -71,7 +75,7 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
 }
 
 // ClosedRange type (inclusive end)
-public struct ClosedRange[T: Comparable]: Equatable where T: Steppable {
+public struct ClosedRange[T]: Equatable where T: Steppable, T: Comparable {
     public var start: T
     public var end: T
 
@@ -122,8 +126,8 @@ public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable
             self.finished = true;
             .Some(self.current)
         } else if self.current < self.end {
-            let value = self.current
-            self.current = self.current.successor()
+            let value = self.current;
+            self.current = self.current.successor();
             .Some(value)
         } else {
             .None

@@ -2,6 +2,10 @@
 
 module std.result
 
+import std.core.(Equatable)
+import std.ops.(ExpressibleByNilLiteral, Nil)
+import std.iter.(Iterator, Functor)
+
 public enum Optional[T]: ExpressibleByNilLiteral {
     case Some(T)
     case None
@@ -199,8 +203,8 @@ public struct OptionalIterator[T]: Iterator {
     }
 
     public func next() -> Optional[T] {
-        let result = self.value
-        self.value = .None
+        let result = self.value;
+        self.value = .None;
         result
     }
 }

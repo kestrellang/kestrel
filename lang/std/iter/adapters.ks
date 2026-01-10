@@ -2,6 +2,9 @@
 
 module std.iter
 
+import std.result.(Optional)
+import std.core.(Cloneable)
+
 // MapIterator
 public struct MapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
@@ -100,9 +103,9 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     private var inner: I
-    private var action: (I.Item) -> Void
+    private var action: (I.Item) -> ()
 
-    public init(inner: I, action: (I.Item) -> Void) {
+    public init(inner: I, action: (I.Item) -> ()) {
         self.inner = inner;
         self.action = action;
     }
@@ -358,8 +361,8 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator, I.Item: Clonea
             return .Some(self.separator.clone())
         }
 
-        self.inner.next().map { item in
-            self.needsSeparator = true
+        self.inner.next().map { (item) in
+            self.needsSeparator = true;
             item
         }
     }
@@ -386,7 +389,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
 
     public func next() -> Optional[I.Item] {
         if let p = self.peeked {
-            self.peeked = .None
+            self.peeked = .None;
             return p
         }
         self.inner.next()
@@ -451,8 +454,8 @@ public struct OnceIterator[T]: Iterator {
     }
 
     public func next() -> Optional[T] {
-        let result = self.value
-        self.value = .None
+        let result = self.value;
+        self.value = .None;
         result
     }
 }

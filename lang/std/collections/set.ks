@@ -2,6 +2,11 @@
 
 module std.collections
 
+import std.core.(Equatable, Hashable, Cloneable, Hasher)
+import std.result.(Optional)
+import std.memory.(Allocator)
+import std.iter.(Iterator, Iterable, Collectable)
+
 public struct Set[T, A]:
     Iterable,
     Collectable,
@@ -233,6 +238,6 @@ public struct SetIterator[T]: Iterator {
     }
 
     public func next() -> Optional[T] {
-        self.dictIter.next().map { (element, _) in element }
+        self.dictIter.next().map { (element, x) in element }
     }
 }

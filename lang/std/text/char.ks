@@ -2,6 +2,10 @@
 
 module std.text
 
+import std.core.(Equatable, Comparable, Hashable, Hasher, Ordering, UInt8, UInt32)
+import std.result.(Optional)
+import std.collections.(Array)
+
 // Byte - single UTF-8 byte
 public type Byte = UInt8
 

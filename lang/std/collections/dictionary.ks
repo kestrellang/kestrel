@@ -2,6 +2,12 @@
 
 module std.collections
 
+import std.core.(Equatable, Hashable, Cloneable, UInt64)
+import std.result.(Optional)
+import std.memory.(Allocator, ArcBox)
+import std.iter.(Iterator, Iterable)
+import std.ops.(ExpressibleByDictionaryLiteral)
+
 public struct Dictionary[K, V, A]:
     Iterable,
     ExpressibleByDictionaryLiteral,
@@ -224,14 +230,14 @@ public struct Dictionary[K, V, A]:
         }
 
         // Insert new entry
-        self.ensureCapacity()
-        self.insertEntry(key: key, value: value, hash: hash)
+        self.ensureCapacity();
+        self.insertEntry(key: key, value: value, hash: hash);
         .None
     }
 
     public func remove(for key: K) -> Optional[V] {
-        self.ensureUnique()
-        let hash = self.hash(key: key)
+        self.ensureUnique();
+        let hash = self.hash(key: key);
 
         if let index = self.findEntry(key: key, hash: hash) {
             let value = self.storage.value.entries(unchecked: index).value;
@@ -255,12 +261,12 @@ public struct Dictionary[K, V, A]:
     }
 
     public func contains(key: K) -> Bool {
-        let hash = self.hash(key: key)
+        let hash = self.hash(key: key);
         self.findEntry(key: key, hash: hash).isSome
     }
 
     public func clear() {
-        self.ensureUnique()
+        self.ensureUnique();
         /* for i in 0..<self.storage.value.capacity {
             self.storage.value.entries(unchecked: i).occupied = false
         } */
@@ -274,7 +280,7 @@ public struct Dictionary[K, V, A]:
 
     // Cloneable
     public func clone() -> Dictionary[K, V, A] where K: Cloneable, V: Cloneable {
-        var result = Dictionary[K, V, A](minimumCapacity: self.count)
+        var result = Dictionary[K, V, A](minimumCapacity: self.count);
         /* for (key, value) in self {
             result.insert(value: value.clone(), for: key.clone())
         } */
@@ -286,7 +292,7 @@ public struct Dictionary[K, V, A]:
         if let value = self[key] {
             return value
         }
-        self.insert(value: defaultValue, for: key)
+        self.insert(value: defaultValue, for: key);
         defaultValue
     }
 
@@ -294,8 +300,8 @@ public struct Dictionary[K, V, A]:
         if let value = self[key] {
             return value
         }
-        let value = defaultFn()
-        self.insert(value: value, for: key)
+        let value = defaultFn();
+        self.insert(value: value, for: key);
         value
     }
 }
@@ -370,7 +376,7 @@ public struct KeysIterator[K, V]: Iterator {
     }
 
     public func next() -> Optional[K] {
-        self.dictIter.next().map { (key, _) in key }
+        self.dictIter.next().map { (key, x) in key }
     }
 }
 
@@ -400,6 +406,6 @@ public struct ValuesIterator[K, V]: Iterator {
     }
 
     public func next() -> Optional[V] {
-        self.dictIter.next().map { (_, value) in value }
+        self.dictIter.next().map { (x, value) in value }
     }
 }

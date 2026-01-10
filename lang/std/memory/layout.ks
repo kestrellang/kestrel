@@ -2,6 +2,9 @@
 
 module std.memory
 
+import std.core.(Equatable)
+import std.result.(Optional)
+
 public struct Layout: Equatable {
     public var size: Int
     public var alignment: Int

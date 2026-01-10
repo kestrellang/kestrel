@@ -2,6 +2,9 @@
 
 module std.memory
 
+import std.result.(Optional)
+import std.core.(Cloneable)
+
 public struct Buffer[T, A]: NonCopyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int
@@ -156,7 +159,7 @@ public struct ArcBox[T] {
         }
     }
 
-    public var value: ref T {
+    public var value: /*ref*/ T {
         self.ptr.pointee.value
     }
 
@@ -165,7 +168,7 @@ public struct ArcBox[T] {
     }
 
     public func clone() -> ArcBox[T] {
-        lang.atomic_add(self.ptr.pointee.refCount, 1)
+        lang.atomic_add(self.ptr.pointee.refCount, 1);
         ArcBox(ptr: self.ptr)
     }
 
@@ -176,7 +179,7 @@ public struct ArcBox[T] {
     private func release() {
         if lang.atomic_sub(self.ptr.pointee.refCount, 1) == 1 {
             // Last reference, deallocate
-            let layout = Layout.of[ArcBoxStorage[T]]()
+            let layout = Layout.of[ArcBoxStorage[T]]();
             GlobalAllocator().deallocate(ptr: self.ptr.asRaw(), layout: layout)
         }
     }

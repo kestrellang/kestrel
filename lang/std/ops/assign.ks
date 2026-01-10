@@ -62,63 +62,64 @@ public protocol RightShiftAssign[Rhs = Int] {
     func shiftRightAssign(by count: Rhs)
 }
 
+// TODO: Protocol extensions not yet supported
 // Default implementations from base operators
-extend Addable[Rhs]: AddAssign[Rhs] where Output = Self {
-    func addAssign(other: Rhs) {
-        self = self.add(other)
-    }
-}
-
-extend Subtractable[Rhs]: SubtractAssign[Rhs] where Output = Self {
-    func subtractAssign(other: Rhs) {
-        self = self.subtract(other)
-    }
-}
-
-extend Multipliable[Rhs]: MultiplyAssign[Rhs] where Output = Self {
-    func multiplyAssign(other: Rhs) {
-        self = self.multiply(other)
-    }
-}
-
-extend Divisible[Rhs]: DivideAssign[Rhs] where Output = Self {
-    func divideAssign(other: Rhs) {
-        self = self.divide(other)
-    }
-}
-
-extend Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
-    func modAssign(other: Rhs) {
-        self = self.mod(other)
-    }
-}
-
-extend BitwiseAnd[Rhs]: BitwiseAndAssign[Rhs] where Output = Self {
-    func bitwiseAndAssign(other: Rhs) {
-        self = self.bitwiseAnd(other)
-    }
-}
-
-extend BitwiseOr[Rhs]: BitwiseOrAssign[Rhs] where Output = Self {
-    func bitwiseOrAssign(other: Rhs) {
-        self = self.bitwiseOr(other)
-    }
-}
-
-extend BitwiseXor[Rhs]: BitwiseXorAssign[Rhs] where Output = Self {
-    func bitwiseXorAssign(other: Rhs) {
-        self = self.bitwiseXor(other)
-    }
-}
-
-extend LeftShift[Rhs]: LeftShiftAssign[Rhs] where Output = Self {
-    func shiftLeftAssign(by count: Rhs) {
-        self = self.shiftLeft(by: count)
-    }
-}
-
-extend RightShift[Rhs]: RightShiftAssign[Rhs] where Output = Self {
-    func shiftRightAssign(by count: Rhs) {
-        self = self.shiftRight(by: count)
-    }
-}
+// extend Addable[Rhs]: AddAssign[Rhs] where Output = Self {
+//     func addAssign(other: Rhs) {
+//         self = self.add(other)
+//     }
+// }
+//
+// extend Subtractable[Rhs]: SubtractAssign[Rhs] where Output = Self {
+//     func subtractAssign(other: Rhs) {
+//         self = self.subtract(other)
+//     }
+// }
+//
+// extend Multipliable[Rhs]: MultiplyAssign[Rhs] where Output = Self {
+//     func multiplyAssign(other: Rhs) {
+//         self = self.multiply(other)
+//     }
+// }
+//
+// extend Divisible[Rhs]: DivideAssign[Rhs] where Output = Self {
+//     func divideAssign(other: Rhs) {
+//         self = self.divide(other)
+//     }
+// }
+//
+// extend Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
+//     func modAssign(other: Rhs) {
+//         self = self.mod(other)
+//     }
+// }
+//
+// extend BitwiseAnd[Rhs]: BitwiseAndAssign[Rhs] where Output = Self {
+//     func bitwiseAndAssign(other: Rhs) {
+//         self = self.bitwiseAnd(other)
+//     }
+// }
+//
+// extend BitwiseOr[Rhs]: BitwiseOrAssign[Rhs] where Output = Self {
+//     func bitwiseOrAssign(other: Rhs) {
+//         self = self.bitwiseOr(other)
+//     }
+// }
+//
+// extend BitwiseXor[Rhs]: BitwiseXorAssign[Rhs] where Output = Self {
+//     func bitwiseXorAssign(other: Rhs) {
+//         self = self.bitwiseXor(other)
+//     }
+// }
+//
+// extend LeftShift[Rhs]: LeftShiftAssign[Rhs] where Output = Self {
+//     func shiftLeftAssign(by count: Rhs) {
+//         self = self.shiftLeft(by: count)
+//     }
+// }
+//
+// extend RightShift[Rhs]: RightShiftAssign[Rhs] where Output = Self {
+//     func shiftRightAssign(by count: Rhs) {
+//         self = self.shiftRight(by: count)
+//     }
+// }

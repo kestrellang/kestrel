@@ -2,6 +2,8 @@
 
 module std.result
 
+import std.core.(Equatable)
+
 public protocol Error {
     func description() -> String
 }

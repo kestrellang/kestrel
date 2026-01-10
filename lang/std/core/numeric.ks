@@ -40,13 +40,14 @@ public protocol Steppable {
     func predecessor() -> Self
 }
 
+// TODO: Protocol extensions not yet supported
 // Default implementations for integers
-extend Integer: Steppable where Self: Addable[Self], Self: Subtractable[Self] {
-    func successor() -> Self {
-        self + Self.one
-    }
-
-    func predecessor() -> Self {
-        self - Self.one
-    }
-}
+// extend Integer: Steppable where Self: Addable[Self], Self: Subtractable[Self] {
+//     func successor() -> Self {
+//         self + Self.one
+//     }
+//
+//     func predecessor() -> Self {
+//         self - Self.one
+//     }
+// }

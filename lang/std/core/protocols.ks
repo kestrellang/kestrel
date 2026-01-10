@@ -2,49 +2,54 @@
 
 module std.core
 
+import std.ops.(Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual)
+import std.memory.(Slice)
+
 // Equatable - types that can be compared for equality
 public protocol Equatable {
     func equals(other: Self) -> Bool
 }
 
+// TODO: Protocol extensions not yet supported
 // Default operator implementations for Equatable
-extend Equatable: Equal[Self], NotEqual[Self] {
-    type Output = Bool
-
-    func eq(other: Self) -> Bool {
-        self.equals(other)
-    }
-
-    func ne(other: Self) -> Bool {
-        not self.equals(other)
-    }
-}
+// extend Equatable: Equal[Self], NotEqual[Self] {
+//     type Output = Bool
+//
+//     func eq(other: Self) -> Bool {
+//         self.equals(other)
+//     }
+//
+//     func ne(other: Self) -> Bool {
+//         not self.equals(other)
+//     }
+// }
 
 // Comparable - types that have a total ordering
 public protocol Comparable: Equatable {
     func compare(other: Self) -> Ordering
 }
 
+// TODO: Protocol extensions not yet supported
 // Default operator implementations for Comparable
-extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self] {
-    type Output = Bool
-
-    func lt(other: Self) -> Bool {
-        self.compare(other) == .Less
-    }
-
-    func le(other: Self) -> Bool {
-        self.compare(other) != .Greater
-    }
-
-    func gt(other: Self) -> Bool {
-        self.compare(other) == .Greater
-    }
-
-    func ge(other: Self) -> Bool {
-        self.compare(other) != .Less
-    }
-}
+// extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self] {
+//     type Output = Bool
+//
+//     func lt(other: Self) -> Bool {
+//         self.compare(other) == .Less
+//     }
+//
+//     func le(other: Self) -> Bool {
+//         self.compare(other) != .Greater
+//     }
+//
+//     func gt(other: Self) -> Bool {
+//         self.compare(other) == .Greater
+//     }
+//
+//     func ge(other: Self) -> Bool {
+//         self.compare(other) != .Less
+//     }
+// }
 
 // Hashable - types that can be hashed
 public protocol Hashable: Equatable {

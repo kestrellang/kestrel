@@ -3,6 +3,9 @@
 module std.memory
 
 import std.ffi.(FFISafe)
+import std.core.(Equatable, UInt)
+import std.result.(Optional)
+import std.iter.(Iterator, Iterable)
 
 // RawPointer - untyped pointer
 // RawPointer is always FFI-safe as it's just an opaque pointer

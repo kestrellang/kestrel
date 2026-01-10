@@ -2,6 +2,12 @@
 
 module std.text
 
+import std.core.(Equatable, Comparable, Hashable, Hasher, Cloneable, Ordering, UInt8, UInt64)
+import std.result.(Optional)
+import std.memory.(Allocator, ArcBox, Buffer, Slice)
+import std.collections.(Array)
+import std.ops.(ExpressibleByStringLiteral, Addable)
+
 public struct String[A]:
     ExpressibleByStringLiteral,
     Addable,
@@ -245,7 +251,7 @@ public struct String[A]:
     }
 
     public func uppercase() -> String[A] {
-        var result = String[A](capacity: self.byteCount)
+        var result = String[A](capacity: self.byteCount);
         /* for cp in self.codePoints {
             result.append(codePoint: cp.toUppercase())
         } */
@@ -255,15 +261,15 @@ public struct String[A]:
     public func replace(pattern: String, with replacement: String) -> String[A] {
         if pattern.isEmpty { return self.clone() }
 
-        var result = String[A]()
-        var i = 0
+        var result = String[A]();
+        var i = 0;
 
         while i < self.byteCount {
             if i + pattern.byteCount <= self.byteCount {
-                var found = true
+                var found = true;
                 /* for j in 0..<pattern.byteCount {
                     if self.storage.value.buffer(unchecked: i + j) != pattern.storage.value.buffer(unchecked: j) {
-                        found = false
+                        found = false;
                         break
                     }
                 } */
@@ -288,7 +294,7 @@ public struct String[A]:
 
     // Substring by byte indices (internal)
     private func substringBytes(from start: Int, to end: Int) -> String[A] {
-        var result = String[A](capacity: end - start)
+        var result = String[A](capacity: end - start);
         /* for i in start..<end {
             result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i)
             result.storage.value.length += 1
@@ -309,7 +315,7 @@ public struct String[A]:
 
     // Comparable
     public func compare(other: String[A]) -> Ordering {
-        let minLen = if self.byteCount < other.byteCount { self.byteCount } else { other.byteCount }
+        let minLen = if self.byteCount < other.byteCount { self.byteCount } else { other.byteCount };
         /* for i in 0..<minLen {
             let a = self.storage.value.buffer(unchecked: i)
             let b = other.storage.value.buffer(unchecked: i)
@@ -330,11 +336,11 @@ public struct String[A]:
 
     // Cloneable
     public func clone() -> String[A] {
-        var result = String[A](capacity: self.byteCount)
+        var result = String[A](capacity: self.byteCount);
         /* for i in 0..<self.byteCount {
             result.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i)
         } */
-        result.storage.value.length = self.byteCount
+        result.storage.value.length = self.byteCount;
         result
     }
 
@@ -379,9 +385,9 @@ public struct SplitIterator[A]: Iterator where A: Allocator {
             return .None
         }
 
-        var start = self.index
+        var start = self.index;
         while self.index + self.separator.byteCount <= self.string.byteCount {
-            var found = true
+            var found = true;
             /* for j in 0..<self.separator.byteCount {
                 if self.string.byteAt(index: self.index + j) != self.separator.byteAt(index: j) {
                     found = false

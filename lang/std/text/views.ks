@@ -2,6 +2,11 @@
 
 module std.text
 
+import std.core.(Equatable, Comparable)
+import std.result.(Optional)
+import std.memory.(Allocator, Slice)
+import std.iter.(Iterator, Iterable)
+
 // BytesView - raw UTF-8 bytes (O(1) indexing)
 public struct BytesView[A]: Iterable where A: Allocator {
     type Item = Byte
@@ -149,7 +154,7 @@ public struct CharsView[A]: Iterable where A: Allocator {
 
     // Count is O(n) - must process all grapheme clusters
     public var count: Int {
-        var n = 0
+        var n = 0;
         /* for _ in self {
             n += 1
         } */
@@ -169,7 +174,7 @@ public struct CharsIterator[A]: Iterator where A: Allocator {
     public func next() -> Optional[Char] {
         // Simplified: treat each code point as a character
         // Full implementation would need grapheme cluster segmentation
-        self.codePointsIter.next().map { cp in
+        self.codePointsIter.next().map { (cp) in
             Char(codePoint: cp)
         }
     }
@@ -200,7 +205,7 @@ public struct LinesIterator[A]: Iterator where A: Allocator {
 
     public init(string: String[A], byteIndex: Int, done: Bool) {
         self.string = string;
-        self.byteIndex = byteIndex
+        self.byteIndex = byteIndex;
         self.done = done;
     }
 
@@ -209,7 +214,7 @@ public struct LinesIterator[A]: Iterator where A: Allocator {
             return .None
         }
 
-        let start = self.byteIndex
+        let start = self.byteIndex;
 
         // Find next newline
         while self.byteIndex < self.string.byteCount {

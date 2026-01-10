@@ -5,6 +5,10 @@
 
 module std.serde
 
+import std.result.(Result, Optional, Error)
+import std.core.(Equatable, Hashable, UInt, UInt8, UInt16, UInt32, UInt64, Int8, Int16, Int32, Int64, Float32, Float64)
+import std.collections.(Array, Dictionary)
+
 // SerializeError - error during serialization
 public struct SerializeError: Error {
     public var message: String
@@ -155,7 +159,7 @@ public protocol Deserializer {
 // public struct Point: Deserialize {
 //     type Visitor = PointVisitor
 //
-//     public static func deserialize[D](from mutating deserializer: D) -> Result[Point, D.Error] {
+//     public static func deserialize[D](mutating from deserializer: D) -> Result[Point, D.Error] {
 //         deserializer.deserializeObject(visitor: PointVisitor())
 //     }
 // }
@@ -313,7 +317,7 @@ extend Array[T]: Serialize where T: Serialize {
 
 extend Dictionary[K, V]: Serialize where K: Serialize, V: Serialize {
     public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
-        var entries: Array[(K, V)] = []
+        var entries: Array[(K, V)] = [];
         /* for (key, value) in self {
             entries.append((key, value))
         } */
@@ -326,7 +330,7 @@ extend Dictionary[K, V]: Serialize where K: Serialize, V: Serialize {
 extend Bool: Deserialize {
     type Visitor = BoolVisitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Bool, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Bool, D.Error] where D: Deserializer {
         deserializer.deserializeBool()
     }
 }
@@ -342,7 +346,7 @@ public struct BoolVisitor: ObjectVisitor {
 extend Int: Deserialize {
     type Visitor = IntVisitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Int, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Int, D.Error] where D: Deserializer {
         deserializer.deserializeInt()
     }
 }
@@ -358,7 +362,7 @@ public struct IntVisitor: ObjectVisitor {
 extend Int8: Deserialize {
     type Visitor = Int8Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Int8, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Int8, D.Error] where D: Deserializer {
         deserializer.deserializeInt8()
     }
 }
@@ -374,7 +378,7 @@ public struct Int8Visitor: ObjectVisitor {
 extend Int16: Deserialize {
     type Visitor = Int16Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Int16, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Int16, D.Error] where D: Deserializer {
         deserializer.deserializeInt16()
     }
 }
@@ -390,7 +394,7 @@ public struct Int16Visitor: ObjectVisitor {
 extend Int32: Deserialize {
     type Visitor = Int32Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Int32, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Int32, D.Error] where D: Deserializer {
         deserializer.deserializeInt32()
     }
 }
@@ -406,7 +410,7 @@ public struct Int32Visitor: ObjectVisitor {
 extend Int64: Deserialize {
     type Visitor = Int64Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Int64, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Int64, D.Error] where D: Deserializer {
         deserializer.deserializeInt64()
     }
 }
@@ -422,7 +426,7 @@ public struct Int64Visitor: ObjectVisitor {
 extend UInt: Deserialize {
     type Visitor = UIntVisitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[UInt, D.Error] where D: Deserializer {
         deserializer.deserializeUInt()
     }
 }
@@ -438,7 +442,7 @@ public struct UIntVisitor: ObjectVisitor {
 extend UInt8: Deserialize {
     type Visitor = UInt8Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt8, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[UInt8, D.Error] where D: Deserializer {
         deserializer.deserializeUInt8()
     }
 }
@@ -454,7 +458,7 @@ public struct UInt8Visitor: ObjectVisitor {
 extend UInt16: Deserialize {
     type Visitor = UInt16Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt16, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[UInt16, D.Error] where D: Deserializer {
         deserializer.deserializeUInt16()
     }
 }
@@ -470,7 +474,7 @@ public struct UInt16Visitor: ObjectVisitor {
 extend UInt32: Deserialize {
     type Visitor = UInt32Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt32, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[UInt32, D.Error] where D: Deserializer {
         deserializer.deserializeUInt32()
     }
 }
@@ -486,7 +490,7 @@ public struct UInt32Visitor: ObjectVisitor {
 extend UInt64: Deserialize {
     type Visitor = UInt64Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[UInt64, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[UInt64, D.Error] where D: Deserializer {
         deserializer.deserializeUInt64()
     }
 }
@@ -502,7 +506,7 @@ public struct UInt64Visitor: ObjectVisitor {
 extend Float32: Deserialize {
     type Visitor = Float32Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Float32, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Float32, D.Error] where D: Deserializer {
         deserializer.deserializeFloat32()
     }
 }
@@ -518,7 +522,7 @@ public struct Float32Visitor: ObjectVisitor {
 extend Float64: Deserialize {
     type Visitor = Float64Visitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Float64, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Float64, D.Error] where D: Deserializer {
         deserializer.deserializeFloat64()
     }
 }
@@ -534,7 +538,7 @@ public struct Float64Visitor: ObjectVisitor {
 extend String: Deserialize {
     type Visitor = StringVisitor
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[String, D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[String, D.Error] where D: Deserializer {
         deserializer.deserializeString()
     }
 }
@@ -550,7 +554,7 @@ public struct StringVisitor: ObjectVisitor {
 extend Optional[T]: Deserialize where T: Deserialize {
     type Visitor = OptionalVisitor[T]
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Optional[T], D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Optional[T], D.Error] where D: Deserializer {
         // Deserializers should handle null -> None, otherwise deserialize T
         // This is a simplified version; full impl would peek at next token
         match T.deserialize(from: deserializer) {
@@ -571,7 +575,7 @@ public struct OptionalVisitor[T]: ObjectVisitor where T: Deserialize {
 extend Array[T]: Deserialize where T: Deserialize {
     type Visitor = ArrayVisitor[T]
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Array[T], D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Array[T], D.Error] where D: Deserializer {
         deserializer.deserializeArray[T]()
     }
 }
@@ -587,7 +591,7 @@ public struct ArrayVisitor[T]: ObjectVisitor where T: Deserialize {
 extend Dictionary[K, V]: Deserialize where K: Deserialize, K: Hashable, V: Deserialize {
     type Visitor = DictionaryVisitor[K, V]
 
-    public static func deserialize[D](from mutating deserializer: D) -> Result[Dictionary[K, V], D.Error] where D: Deserializer {
+    public static func deserialize[D](mutating from deserializer: D) -> Result[Dictionary[K, V], D.Error] where D: Deserializer {
         deserializer.deserializeMap[K, V]()
     }
 }

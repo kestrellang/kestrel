@@ -2,6 +2,12 @@
 
 module std.collections
 
+import std.core.(UInt8, UInt32, UInt64, Equatable, Comparable, Cloneable, Hashable, Hasher)
+import std.result.(Optional)
+import std.memory.(Allocator, ArcBox, Buffer)
+import std.iter.(Iterator, Iterable, Collectable, Functor)
+import std.ops.(ExpressibleByArrayLiteral)
+
 public struct Array[T, A]:
     Iterable,
     Collectable,
@@ -247,7 +253,7 @@ public struct Array[T, A]:
 
     // Functor
     public func map[U](transform: (T) -> U) -> Array[U, A] {
-        var result = Array[U, A](capacity: self.count)
+        var result = Array[U, A](capacity: self.count);
         /* for i in 0..<self.count {
             result.append(transform(self.storage.value.buffer(unchecked: i)))
         } */
@@ -256,7 +262,7 @@ public struct Array[T, A]:
 
     // Cloneable
     public func clone() -> Array[T, A] where T: Cloneable {
-        var result = Array[T, A](capacity: self.count)
+        var result = Array[T, A](capacity: self.count);
         /* for i in 0..<self.count {
             result.append(self.storage.value.buffer(unchecked: i).clone())
         } */
@@ -279,27 +285,27 @@ public struct Array[T, A]:
     }
 
     public func sorted() -> Array[T, A] where T: Comparable, T: Cloneable {
-        var result = self.clone()
-        result.sort()
+        var result = self.clone();
+        result.sort();
         result
     }
 
     public func reverse() {
-        self.ensureUnique()
-        var left = 0
-        var right = self.count - 1
+        self.ensureUnique();
+        var left = 0;
+        var right = self.count - 1;
         while left < right {
-            let temp = self.storage.value.buffer(unchecked: left)
-            self.storage.value.buffer(unchecked: left) = self.storage.value.buffer(unchecked: right)
-            self.storage.value.buffer(unchecked: right) = temp
+            let temp = self.storage.value.buffer(unchecked: left);
+            self.storage.value.buffer(unchecked: left) = self.storage.value.buffer(unchecked: right);
+            self.storage.value.buffer(unchecked: right) = temp;
             left = left + 1;
             right = right - 1
         }
     }
 
     public func reversed() -> Array[T, A] where T: Cloneable {
-        var result = self.clone()
-        result.reverse()
+        var result = self.clone();
+        result.reverse();
         result
     }
 
