@@ -151,6 +151,7 @@ fn associated_type_bounds_parser<'tokens>()
                 .collect(),
         )
         .map(|(colon_span, bounds)| AssociatedTypeBoundsData { colon_span, bounds })
+        .boxed()
 }
 
 /// Parser for associated type target (simple name or qualified path)
@@ -213,6 +214,7 @@ fn associated_type_target_parser<'tokens>()
                 }
             }
         })
+        .boxed()
 }
 
 /// Internal Chumsky parser for type alias declaration
@@ -252,6 +254,7 @@ pub fn type_alias_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parse a type alias declaration and emit events

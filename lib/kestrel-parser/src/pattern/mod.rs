@@ -568,6 +568,7 @@ pub fn pattern_parser<'tokens>()
                     }
                 }
             })
+            .boxed()
     })
 }
 

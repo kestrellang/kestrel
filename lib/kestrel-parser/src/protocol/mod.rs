@@ -121,6 +121,7 @@ fn protocol_body_item_parser<'tokens>()
         .or(associated_type)
         .or(initializer)
         .or(field)
+        .boxed()
 }
 
 /// Internal Chumsky parser for protocol declaration
@@ -176,6 +177,7 @@ pub fn protocol_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parse a protocol declaration and emit events

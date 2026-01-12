@@ -221,6 +221,7 @@ fn declaration_item_parser_internal<'tokens>()
         .or(subscript_parser)
         .or(field_parser)
         .or(type_alias_parser)
+        .boxed()
 }
 
 /// Internal Chumsky parser for multiple declaration items
@@ -232,6 +233,7 @@ fn declaration_items_parser_internal<'tokens>()
         .at_least(0)
         .collect()
         .then_ignore(skip_trivia())
+        .boxed()
 }
 
 /// Emit a declaration item to the event sink

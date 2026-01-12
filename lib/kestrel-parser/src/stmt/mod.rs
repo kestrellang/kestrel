@@ -152,6 +152,7 @@ fn variable_declaration_parser<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parser for expression statement
@@ -163,6 +164,7 @@ fn expression_statement_parser<'tokens>()
         skip_trivia()
             .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
     )
+    .boxed()
 }
 
 /// Parser for deinit statement
@@ -187,6 +189,7 @@ fn deinit_statement_parser<'tokens>()
                 semicolon,
             },
         )
+        .boxed()
 }
 
 /// Parser for statements
@@ -208,7 +211,7 @@ pub fn stmt_parser<'tokens>()
         expression_statement_parser().map(|(expr, semi)| StmtVariant::Expression(expr, semi));
 
     // Try variable declaration first, then deinit statement, then expression statement
-    var_decl.or(deinit_stmt).or(expr_stmt)
+    var_decl.or(deinit_stmt).or(expr_stmt).boxed()
 }
 
 /// Emit events for any statement variant

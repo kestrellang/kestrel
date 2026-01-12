@@ -60,7 +60,7 @@ fn enum_case_parameter_parser<'tokens>()
     });
 
     // Try named first, fall back to unnamed
-    named.or(unnamed)
+    named.or(unnamed).boxed()
 }
 
 /// Parser for enum case declaration: `(@attr)* case Name` or `(@attr)* case Name(label: Type, ...)`
@@ -91,6 +91,7 @@ fn enum_case_parser<'tokens>()
                 parameters,
             },
         )
+        .boxed()
 }
 
 /// Parser that skips trivia tokens

@@ -103,6 +103,7 @@ fn extension_body_item_parser_internal<'tokens>()
         .or(initializer_parser)
         .or(function_parser)
         .or(subscript_parser)
+        .boxed()
 }
 
 /// Internal Chumsky parser for extension declaration
@@ -138,6 +139,7 @@ pub fn extension_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parse an extension declaration and emit events

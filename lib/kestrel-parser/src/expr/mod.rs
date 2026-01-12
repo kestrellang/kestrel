@@ -165,6 +165,7 @@ fn full_type_args_parser<'tokens>()
             args,
             rbracket,
         })
+        .boxed()
 }
 
 /// A path segment with optional type arguments

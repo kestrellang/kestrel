@@ -143,6 +143,7 @@ pub fn code_block_parser<'tokens>()
             items,
             rbrace,
         })
+        .boxed()
 }
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon)
@@ -239,6 +240,7 @@ fn guard_let_else_items_parser<'tokens>()
             }
             items
         })
+        .boxed()
 }
 
 /// Parser for the items inside a code block
@@ -431,6 +433,7 @@ fn code_block_items_parser<'tokens>()
             }
             items
         })
+        .boxed()
 }
 
 /// Emit events for a code block

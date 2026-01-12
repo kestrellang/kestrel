@@ -196,6 +196,7 @@ pub(crate) fn ty_parser<'tokens>()
                         TyVariant::Tuple(lparen, types, rparen)
                     }
                 })
+                .boxed()
         };
 
         // Path type with optional type arguments: Foo or Foo[Int, String]
@@ -214,7 +215,8 @@ pub(crate) fn ty_parser<'tokens>()
                     .then_ignore(just(Token::RBracket))
                     .or_not(),
             )
-            .map(|(segments, args)| TyVariant::Path { segments, args });
+            .map(|(segments, args)| TyVariant::Path { segments, args })
+            .boxed();
 
         // Array type: [T]
         let array = skip_trivia()
@@ -226,10 +228,16 @@ pub(crate) fn ty_parser<'tokens>()
             )
             .map(|((lbracket, element_ty), rbracket)| {
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
-            });
+            })
+            .boxed();
 
         // Try never first, then inferred, then paren types, then array, then path
-        let base_ty = never.or(inferred).or(paren_types).or(array).or(path);
+        let base_ty = never
+            .or(inferred)
+            .or(paren_types)
+            .or(array)
+            .or(path)
+            .boxed();
 
         // Optional modifier: T?
         base_ty
@@ -245,6 +253,7 @@ pub(crate) fn ty_parser<'tokens>()
                     base
                 }
             })
+            .boxed()
     })
 }
 

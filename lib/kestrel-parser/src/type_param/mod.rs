@@ -102,6 +102,7 @@ fn path_parser<'tokens>()
         .at_least(1)
         .collect(),
     )
+    .boxed()
 }
 
 /// Parser for a single type argument (recursive to handle nested generics)
@@ -125,6 +126,7 @@ fn type_argument_parser<'tokens>()
                     .or_not(),
             )
             .map(|(path, args)| TypeArgumentData { path, args })
+            .boxed()
     })
 }
 
@@ -142,6 +144,7 @@ pub fn type_argument_list_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBracket))
+        .boxed()
 }
 
 /// Parser for type arguments with bracket spans: [Type, Type, ...]
@@ -160,6 +163,7 @@ pub fn type_argument_list_with_spans_parser<'tokens>()
         .then_ignore(skip_trivia())
         .then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|((lbracket, args), rbracket)| (lbracket, args, rbracket))
+        .boxed()
 }
 
 /// Parser for optional type arguments after a path
@@ -169,6 +173,7 @@ pub fn path_with_optional_args_parser<'tokens>()
     path_parser()
         .then(type_argument_list_parser().or_not())
         .map(|(path, args)| TypeArgumentData { path, args })
+        .boxed()
 }
 
 /// Parser for a single type parameter: T or T = Default
@@ -186,6 +191,7 @@ fn type_parameter_parser<'tokens>()
                 .or_not(),
         )
         .map(|(name, default)| TypeParameterData { name, default })
+        .boxed()
 }
 
 /// Parser for type parameter list: [T, U, V] or [T, U = String]
@@ -205,6 +211,7 @@ pub fn type_parameter_list_parser<'tokens>()
                 .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
+        .boxed()
 }
 
 /// Parser for a single positive type bound: T: Proto and Proto2 or T.Item: Proto
@@ -228,6 +235,7 @@ fn positive_type_bound_parser<'tokens>()
                 .collect(),
         )
         .map(|(path, bounds)| TypeBoundData { path, bounds })
+        .boxed()
 }
 
 /// Parser for a negative type bound: T: not Copyable
@@ -246,6 +254,7 @@ fn negative_type_bound_parser<'tokens>()
             not_span,
             bound,
         })
+        .boxed()
 }
 
 /// Parser for a type equality constraint: T.Item = Type
@@ -262,6 +271,7 @@ fn type_equality_parser<'tokens>()
             equals_span,
             right,
         })
+        .boxed()
 }
 
 /// Parser for a single where clause constraint (bound, negative bound, or equality)
@@ -275,6 +285,7 @@ fn where_constraint_parser<'tokens>()
         .map(WhereConstraintData::Equality)
         .or(negative_type_bound_parser().map(WhereConstraintData::NegativeBound))
         .or(positive_type_bound_parser().map(WhereConstraintData::Bound))
+        .boxed()
 }
 
 /// Parser for where clause: where T: Proto, U: Other, T.Item = Int
@@ -292,6 +303,7 @@ pub fn where_clause_parser<'tokens>()
             where_span,
             constraints,
         })
+        .boxed()
 }
 
 /// Parser for a single conformance item: Proto or not Proto
@@ -306,6 +318,7 @@ fn conformance_item_parser<'tokens>()
         )
         .then(crate::ty::ty_parser())
         .map(|(not_span, ty)| crate::common::ConformanceItemData { not_span, ty })
+        .boxed()
 }
 
 /// Parser for conformance list: : Proto1, Proto2[T], not Copyable
@@ -325,6 +338,7 @@ pub fn conformance_list_parser<'tokens>() -> impl Parser<
                 .collect(),
         )
         .map(|(colon_span, conformances)| (colon_span, conformances))
+        .boxed()
 }
 
 /// Emit events for a type parameter list

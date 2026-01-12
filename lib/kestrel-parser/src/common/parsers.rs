@@ -82,6 +82,7 @@ pub fn module_path_parser_internal<'tokens>()
         .separated_by(token(Token::Dot))
         .at_least(1)
         .collect()
+        .boxed()
 }
 
 /// Internal Chumsky parser for optional visibility modifier
@@ -113,7 +114,9 @@ pub fn visibility_parser_internal<'tokens>()
 /// - `module A.B.C` → `(span(module), [span(A), span(B), span(C)])`
 pub fn module_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<Span>), ParserExtra<'tokens>> + Clone {
-    token(Token::Module).then(module_path_parser_internal())
+    token(Token::Module)
+        .then(module_path_parser_internal())
+        .boxed()
 }
 
 /// Internal parser for import item (identifier or identifier as alias)
@@ -127,7 +130,9 @@ pub fn module_declaration_parser_internal<'tokens>()
 /// - `Foo as Bar` → `(span(Foo), Some(span(Bar)))`
 pub fn import_item_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Option<Span>), ParserExtra<'tokens>> + Clone {
-    identifier().then(token(Token::As).ignore_then(identifier()).or_not())
+    identifier()
+        .then(token(Token::As).ignore_then(identifier()).or_not())
+        .boxed()
 }
 
 /// Internal parser for import items list
@@ -149,6 +154,7 @@ pub fn import_items_parser_internal<'tokens>()
                 .collect(),
         )
         .then_ignore(token(Token::RParen))
+        .boxed()
 }
 
 /// Internal parser for import declaration
@@ -195,6 +201,7 @@ pub fn import_declaration_parser_internal<'tokens>() -> impl Parser<
             };
             (import_span, path_segments, alias, items)
         })
+        .boxed()
 }
 
 // =============================================================================
@@ -327,7 +334,7 @@ pub(crate) fn parameter_parser<'tokens>()
         });
 
     // Try labeled first (more specific), then unlabeled
-    labeled.or(unlabeled)
+    labeled.or(unlabeled).boxed()
 }
 
 /// Parser for parameter list (zero or more parameters separated by commas)
@@ -339,6 +346,7 @@ pub(crate) fn parameter_list_parser<'tokens>()
             .allow_trailing()
             .collect(),
     )
+    .boxed()
 }
 
 /// Parser for optional return type: `-> Type`
@@ -354,6 +362,7 @@ pub(crate) fn return_type_parser<'tokens>()
         .then(ty_parser())
         .map(|(arrow, ty)| (arrow, ty))
         .or_not()
+        .boxed()
 }
 
 /// Parser for optional function body (code block)
@@ -363,7 +372,7 @@ pub(crate) fn return_type_parser<'tokens>()
 /// - `None` if no body (e.g., protocol method declarations)
 pub fn function_body_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<CodeBlockData>, ParserExtra<'tokens>> + Clone {
-    code_block_parser().map(Some).or(empty().to(None))
+    code_block_parser().map(Some).or(empty().to(None)).boxed()
 }
 
 // =============================================================================
@@ -440,6 +449,7 @@ pub fn function_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 // =============================================================================
@@ -513,6 +523,7 @@ fn computed_body_parser<'tokens>()
         .or(shorthand)
         .map(Some)
         .or(empty().to(None))
+        .boxed()
 }
 
 /// Parser for a field declaration
@@ -568,6 +579,7 @@ pub fn field_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parser for an initializer declaration
@@ -603,6 +615,7 @@ pub fn initializer_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
 
 /// Parser for a deinitializer declaration
@@ -617,6 +630,7 @@ pub fn deinit_declaration_parser_internal<'tokens>()
     token(Token::Deinit)
         .then(code_block_parser())
         .map(|(deinit_span, body)| DeinitDeclarationData { deinit_span, body })
+        .boxed()
 }
 
 // =============================================================================
@@ -684,6 +698,7 @@ fn subscript_body_parser<'tokens>()
     protocol_requirement
         .or(explicit_accessors)
         .or(shorthand)
+        .boxed()
 }
 
 /// Parser for required return type: `-> Type`
@@ -695,6 +710,7 @@ fn required_return_type_parser<'tokens>()
     skip_trivia()
         .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
         .then(ty_parser())
+        .boxed()
 }
 
 /// Parser for a subscript declaration
@@ -733,4 +749,5 @@ pub fn subscript_declaration_parser_internal<'tokens>()
                 }
             },
         )
+        .boxed()
 }
