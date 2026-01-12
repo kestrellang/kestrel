@@ -215,6 +215,9 @@ pub enum Token {
     #[token("set")]
     Set,
 
+    #[token("subscript")]
+    Subscript,
+
     // ===== Braces =====
     #[token("(")]
     LParen,

@@ -142,13 +142,13 @@ public struct Array[T, A]:
     //    }
     //}
 
-    //public subscript(unchecked index: Int) -> T {
-    //    get { self.storage.value.buffer(unchecked: index) }
-    //    set {
-    //        self.ensureUnique()
-    //        self.storage.value.buffer(unchecked: index) = newValue
-    //    }
-    //}
+    public subscript(unchecked index: Int) -> T {
+        get { self.storage.value.buffer(unchecked: index) }
+        set {
+            self.ensureUnique()
+            self.storage.value.buffer(unchecked: index) = newValue
+        }
+    }
 
     //public subscript(safe range: Range[Int]) -> Optional[Slice[T]] {
     //    get {

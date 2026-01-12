@@ -20,7 +20,8 @@ use crate::common::{
     StructDeclarationData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
     field_declaration_parser_internal, function_declaration_parser_internal, identifier,
     import_declaration_parser_internal, initializer_declaration_parser_internal,
-    module_declaration_parser_internal, token, visibility_parser_internal,
+    module_declaration_parser_internal, subscript_declaration_parser_internal, token,
+    visibility_parser_internal,
 };
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::ty_parser;
@@ -147,6 +148,9 @@ fn type_body_item_parser_internal<'tokens>(
     let function_parser =
         function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
 
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(TypeDeclarationBodyItem::Subscript);
+
     let type_alias_parser =
         type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
 
@@ -164,6 +168,7 @@ fn type_body_item_parser_internal<'tokens>(
             .or(initializer_parser)
             .or(type_alias_parser)
             .or(function_parser)
+            .or(subscript_parser)
             .or(field_parser)
             .boxed()
     } else {
@@ -175,6 +180,7 @@ fn type_body_item_parser_internal<'tokens>(
             .or(deinit_parser)
             .or(type_alias_parser)
             .or(function_parser)
+            .or(subscript_parser)
             .or(field_parser)
             .boxed()
     }

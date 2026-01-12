@@ -12,7 +12,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
     ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
-    function_declaration_parser_internal, initializer_declaration_parser_internal, token,
+    function_declaration_parser_internal, initializer_declaration_parser_internal,
+    subscript_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
@@ -72,6 +73,7 @@ impl ExtensionDeclaration {
                         matches!(
                             child.kind(),
                             SyntaxKind::FunctionDeclaration
+                                | SyntaxKind::SubscriptDeclaration
                                 | SyntaxKind::InitializerDeclaration
                                 | SyntaxKind::TypeAliasDeclaration
                         )
@@ -84,7 +86,7 @@ impl ExtensionDeclaration {
 
 /// Internal parser for extension body items
 ///
-/// Extension bodies can contain: functions, initializers, and associated types
+/// Extension bodies can contain: functions, subscripts, initializers, and associated types
 fn extension_body_item_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
@@ -92,10 +94,15 @@ fn extension_body_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(ExtensionBodyItem::Function);
 
+    let subscript_parser = subscript_declaration_parser_internal().map(ExtensionBodyItem::Subscript);
+
     let type_alias_parser =
         type_alias_declaration_parser_internal().map(ExtensionBodyItem::TypeAlias);
 
-    type_alias_parser.or(initializer_parser).or(function_parser)
+    type_alias_parser
+        .or(initializer_parser)
+        .or(function_parser)
+        .or(subscript_parser)
 }
 
 /// Internal Chumsky parser for extension declaration

@@ -379,6 +379,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
         | ExprKind::EnumCase { .. }
         | ExprKind::Closure { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::SubscriptCall { .. }
         | ExprKind::Error => ReturnState::MayFallThrough,
 
         // Match expression - all arms must return for the match to be exhaustive

@@ -9,6 +9,7 @@ use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
@@ -17,6 +18,7 @@ use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
@@ -43,9 +45,9 @@ use super::expressions::resolve_expression;
 use super::members::{resolve_delegating_init, resolve_member_call, substitute_callable_self};
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    get_callable_behavior, get_type_parameter_bounds_by_id, infer_type_arguments,
-    is_expression_kind, matches_signature, substitute_type, validate_not_standalone_type_param,
-    verify_type_argument_constraints,
+    get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
+    infer_type_arguments, is_expression_kind, matches_signature, substitute_self,
+    substitute_type, validate_not_standalone_type_param, verify_type_argument_constraints,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -514,6 +516,13 @@ pub fn resolve_call(
                     Expression::call(callee, arguments, (**return_type).clone(), span)
                 }
                 _ => {
+                    // Try subscript resolution: the variable's type might have subscripts
+                    if let Some(subscript_expr) =
+                        try_resolve_subscript_call(&callee, &arguments, &arg_labels, &span, ctx)
+                    {
+                        return subscript_expr;
+                    }
+
                     ctx.diagnostics.add_diagnostic(
                         NonCallableError {
                             span: span.clone(),
@@ -566,6 +575,13 @@ pub fn resolve_call(
                     Expression::call(callee, arguments, (**return_type).clone(), span)
                 }
                 _ => {
+                    // Try subscript resolution: the expression's type might have subscripts
+                    if let Some(subscript_expr) =
+                        try_resolve_subscript_call(&callee, &arguments, &arg_labels, &span, ctx)
+                    {
+                        return subscript_expr;
+                    }
+
                     ctx.diagnostics.add_diagnostic(
                         NonCallableError {
                             span: span.clone(),
@@ -577,6 +593,154 @@ pub fn resolve_call(
                 }
             }
         }
+    }
+}
+
+// ============================================================================
+// Subscript call resolution
+// ============================================================================
+
+/// Try to resolve a call as a subscript call.
+///
+/// When a call is made on a value (not a function), we check if the type has subscripts.
+/// For example: `array(0)` where `array` is a value with subscripts.
+///
+/// Returns `Some(Expression)` if a matching subscript was found, `None` otherwise.
+fn try_resolve_subscript_call(
+    receiver: &Expression,
+    arguments: &[CallArgument],
+    arg_labels: &[Option<String>],
+    span: &Span,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Expression> {
+    let receiver_ty = &receiver.ty;
+
+    // Get the container (struct/enum/protocol) from the type
+    let container = get_type_container(receiver_ty, ctx)?;
+
+    // Find subscripts on the container
+    let subscripts = find_subscripts_on_type(&container, ctx);
+    if subscripts.is_empty() {
+        return None;
+    }
+
+    // Try to find a matching subscript based on argument labels
+    let matching = find_matching_subscript(&subscripts, arguments, arg_labels)?;
+
+    // Get the subscript behavior for parameter/return type info
+    let behavior = matching.metadata().get_behavior::<SubscriptBehavior>()?;
+
+    // Get the subscript's getter ID
+    let getter_id = matching.getter_id()?;
+
+    // Get return type and substitute Self with the receiver type
+    let return_type = behavior.return_type().clone();
+    let return_type = substitute_self(&return_type, receiver_ty);
+
+    // Substitute type arguments from the receiver type
+    let return_type = substitute_receiver_type_args(&return_type, receiver_ty);
+
+    // Create a call to the getter with the receiver as the first implicit argument
+    // The getter signature is: get(self, <params>) -> T
+    Some(Expression::subscript_call(
+        receiver.clone(),
+        getter_id,
+        arguments.to_vec(),
+        return_type,
+        span.clone(),
+    ))
+}
+
+/// Find all subscripts on a type container.
+fn find_subscripts_on_type(
+    container: &Arc<dyn Symbol<KestrelLanguage>>,
+    ctx: &BodyResolutionContext,
+) -> Vec<Arc<SubscriptSymbol>> {
+    let mut subscripts = Vec::new();
+
+    // Get direct children that are subscripts
+    for child in container.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Subscript {
+            if let Ok(subscript) = child.downcast_arc::<SubscriptSymbol>() {
+                subscripts.push(subscript);
+            }
+        }
+    }
+
+    // Check protocol conformances for subscripts
+    if let Some(conformances) = container
+        .metadata()
+        .get_behavior::<ConformancesBehavior>()
+    {
+        for conformance_ty in conformances.conformances() {
+            // Extract the protocol symbol from the conformance type
+            if let TyKind::Protocol { symbol, .. } = conformance_ty.kind() {
+                for child in symbol.metadata().children() {
+                    if child.metadata().kind() == KestrelSymbolKind::Subscript {
+                        if let Ok(subscript) = child.downcast_arc::<SubscriptSymbol>() {
+                            subscripts.push(subscript);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    subscripts
+}
+
+/// Find a matching subscript based on argument labels and count.
+fn find_matching_subscript(
+    subscripts: &[Arc<SubscriptSymbol>],
+    arguments: &[CallArgument],
+    arg_labels: &[Option<String>],
+) -> Option<Arc<SubscriptSymbol>> {
+    for subscript in subscripts {
+        if matches_subscript_signature(subscript, arguments, arg_labels) {
+            return Some(subscript.clone());
+        }
+    }
+    None
+}
+
+/// Check if a subscript's parameter signature matches the given arguments.
+fn matches_subscript_signature(
+    subscript: &SubscriptSymbol,
+    arguments: &[CallArgument],
+    arg_labels: &[Option<String>],
+) -> bool {
+    // Get the subscript behavior which has the parameters
+    let Some(behavior) = subscript.metadata().get_behavior::<SubscriptBehavior>() else {
+        return false;
+    };
+
+    let params = behavior.parameters();
+
+    // Check argument count
+    if arguments.len() != params.len() {
+        return false;
+    }
+
+    // Check argument labels match using the behavior's built-in method
+    let labels_as_str: Vec<Option<&str>> = arg_labels
+        .iter()
+        .map(|l| l.as_ref().map(|s| s.as_str()))
+        .collect();
+    behavior.matches_labels(&labels_as_str)
+}
+
+/// Substitute type arguments from the receiver type into a type.
+fn substitute_receiver_type_args(ty: &Ty, receiver_ty: &Ty) -> Ty {
+    match receiver_ty.kind() {
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+            if substitutions.is_empty() {
+                ty.clone()
+            } else {
+                // Substitute the type arguments
+                substitute_type(ty, substitutions)
+            }
+        }
+        _ => ty.clone(),
     }
 }
 

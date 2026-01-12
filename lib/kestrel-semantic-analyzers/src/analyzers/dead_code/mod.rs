@@ -437,6 +437,25 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
             }
         }
 
+        // Subscript call - analyze receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let d = analyze_expression(receiver, errors);
+            if d.diverges() {
+                return d;
+            }
+            for arg in arguments {
+                let d = analyze_expression(&arg.value, errors);
+                if d.diverges() {
+                    return d;
+                }
+            }
+            Divergence::None
+        }
+
         // Leaf expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)

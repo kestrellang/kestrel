@@ -130,7 +130,10 @@ fn validate_assignment_target(
         | ExprKind::Block { .. }
         | ExprKind::LangIntrinsic { .. }
         | ExprKind::LangIntrinsicRef(_)
+        | ExprKind::SubscriptCall { .. }
         | ExprKind::Error => {
+            // Note: SubscriptCall could be a valid assignment target if the subscript
+            // has a setter, but that validation is deferred to call resolution.
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {
                     span: target.span.clone(),

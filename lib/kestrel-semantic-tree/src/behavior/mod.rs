@@ -12,11 +12,13 @@ pub mod function_data;
 pub mod generics;
 pub mod implements;
 pub mod member_access;
+pub mod subscript;
 pub mod typed;
 pub mod valued;
 pub mod visibility;
 
 pub use computed_member_access::ComputedMemberAccessBehavior;
+pub use subscript::SubscriptBehavior;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KestrelBehaviorKind {
@@ -38,6 +40,7 @@ pub enum KestrelBehaviorKind {
     ImportData,
     MemberAccess,
     ResolvedExecutable,
+    Subscript,
     Typed,
     TypeAliasTyped,
     Valued,

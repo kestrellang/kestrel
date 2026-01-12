@@ -577,6 +577,7 @@ pub fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
         KestrelSymbolKind::TypeParameter => "type parameter".to_string(),
         KestrelSymbolKind::Getter => "getter".to_string(),
         KestrelSymbolKind::Setter => "setter".to_string(),
+        KestrelSymbolKind::Subscript => "subscript".to_string(),
     }
 }
 

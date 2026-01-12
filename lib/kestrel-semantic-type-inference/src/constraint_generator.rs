@@ -862,6 +862,18 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
         // Language intrinsic reference - no constraints needed
         ExprKind::LangIntrinsicRef(_) => {}
 
+        // Subscript call - process receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            generate_expression_constraints(ctx, receiver);
+            for arg in arguments {
+                generate_expression_constraints(ctx, &arg.value);
+            }
+        }
+
         ExprKind::Error => {}
     }
 }

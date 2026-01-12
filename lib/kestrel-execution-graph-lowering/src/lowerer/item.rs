@@ -149,6 +149,13 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             // Getters and setters are lowered on-demand when accessing computed properties
             // They're children of Field symbols and will be called during field access lowering
         }
+
+        KestrelSymbolKind::Subscript => {
+            // Subscripts are lowered on-demand when accessing via subscript syntax.
+            // They're children of struct/enum symbols and will be called during
+            // subscript call lowering. The getter and setter children are handled
+            // similarly to computed property accessors.
+        }
     }
 }
 

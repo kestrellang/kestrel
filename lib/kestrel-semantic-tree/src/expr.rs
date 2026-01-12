@@ -878,6 +878,17 @@ pub enum ExprKind {
         substitutions: Substitutions,
     },
 
+    /// Subscript call: `array(0)`, `dict(key: "foo")`, `buffer(unchecked: 5)`
+    /// Calls a subscript getter on a value. The receiver is the value being subscripted.
+    SubscriptCall {
+        /// The receiver expression (the value being subscripted)
+        receiver: Box<Expression>,
+        /// The subscript getter function to call
+        getter: SymbolId,
+        /// Arguments to the subscript (e.g., index, key)
+        arguments: Vec<CallArgument>,
+    },
+
     /// Primitive method call: `5.toString()`, `"hello".length()`
     /// No symbol exists - compiler has built-in knowledge.
     PrimitiveMethodCall {
@@ -1565,7 +1576,24 @@ impl Expression {
                 let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
                 format!("{}({})", intrinsic.name(), args.join(", "))
             }
-            ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name()
+            ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
+            ExprKind::SubscriptCall {
+                receiver,
+                getter: _,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments
+                    .iter()
+                    .map(|a| {
+                        if let Some(ref label) = a.label {
+                            format!("{}: {}", label, a.value.debug_compact())
+                        } else {
+                            a.value.debug_compact()
+                        }
+                    })
+                    .collect();
+                format!("{}({})", receiver.debug_compact(), args.join(", "))
+            }
         }
     }
 
@@ -1903,6 +1931,29 @@ impl Expression {
                 callee: Box::new(callee),
                 arguments,
                 substitutions,
+            },
+            ty: return_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a subscript call expression.
+    /// Used for `array(0)`, `dict(key: "foo")`, etc.
+    /// Return values are not mutable lvalues.
+    pub fn subscript_call(
+        receiver: Expression,
+        getter: SymbolId,
+        arguments: Vec<CallArgument>,
+        return_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::SubscriptCall {
+                receiver: Box::new(receiver),
+                getter,
+                arguments,
             },
             ty: return_ty,
             span,

@@ -391,6 +391,18 @@ fn find_assignments_to_locals(
             }
         }
 
+        // Subscript call - walk receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            find_assignments_to_locals(receiver, target_locals, container_id, ctx);
+            for arg in arguments {
+                find_assignments_to_locals(&arg.value, target_locals, container_id, ctx);
+            }
+        }
+
         // Leaf expressions - no sub-expressions to check
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)

@@ -456,6 +456,20 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
 
         // Language intrinsic reference - no changes needed
         ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(*intrinsic),
+
+        // Subscript call - apply solution to receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            getter,
+            arguments,
+        } => ExprKind::SubscriptCall {
+            receiver: Box::new(apply_to_expression(receiver, solution)),
+            getter: *getter,
+            arguments: arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect(),
+        },
     };
 
     Expression::new(kind, resolved_ty, expr.span.clone(), expr.mutable)

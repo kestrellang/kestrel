@@ -147,6 +147,11 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             let name = symbol.metadata().name();
             segments.push(name.value.clone());
         }
+
+        KestrelSymbolKind::Subscript => {
+            // Subscripts use the synthetic name "subscript" since they're identified by signature
+            segments.push("subscript".to_string());
+        }
     }
 }
 

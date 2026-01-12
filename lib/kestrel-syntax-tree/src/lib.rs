@@ -72,6 +72,8 @@ pub enum SyntaxKind {
     FunctionDeclaration,
     InitializerDeclaration,
     DeinitDeclaration,
+    SubscriptDeclaration,
+    SubscriptBody,
     FunctionBody,
     ParameterList,
     Parameter,
@@ -228,6 +230,7 @@ pub enum SyntaxKind {
     Guard,
     Get,
     Set,
+    Subscript,
 
     // Logical keywords
     And,
@@ -344,6 +347,7 @@ impl From<Token> for SyntaxKind {
             Token::Guard => SyntaxKind::Guard,
             Token::Get => SyntaxKind::Get,
             Token::Set => SyntaxKind::Set,
+            Token::Subscript => SyntaxKind::Subscript,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -434,6 +438,8 @@ impl Language for KestrelLanguage {
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
         const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
         const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
+        const SUBSCRIPT_DECLARATION: u16 = SyntaxKind::SubscriptDeclaration as u16;
+        const SUBSCRIPT_BODY: u16 = SyntaxKind::SubscriptBody as u16;
         const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
         const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
         const PARAMETER: u16 = SyntaxKind::Parameter as u16;
@@ -567,6 +573,7 @@ impl Language for KestrelLanguage {
         const GUARD: u16 = SyntaxKind::Guard as u16;
         const GET: u16 = SyntaxKind::Get as u16;
         const SET: u16 = SyntaxKind::Set as u16;
+        const SUBSCRIPT: u16 = SyntaxKind::Subscript as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -650,6 +657,8 @@ impl Language for KestrelLanguage {
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
             INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
             DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
+            SUBSCRIPT_DECLARATION => SyntaxKind::SubscriptDeclaration,
+            SUBSCRIPT_BODY => SyntaxKind::SubscriptBody,
             FUNCTION_BODY => SyntaxKind::FunctionBody,
             PARAMETER_LIST => SyntaxKind::ParameterList,
             PARAMETER => SyntaxKind::Parameter,
@@ -784,6 +793,7 @@ impl Language for KestrelLanguage {
             GUARD => SyntaxKind::Guard,
             GET => SyntaxKind::Get,
             SET => SyntaxKind::Set,
+            SUBSCRIPT => SyntaxKind::Subscript,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,

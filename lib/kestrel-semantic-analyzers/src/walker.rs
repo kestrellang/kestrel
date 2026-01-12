@@ -423,6 +423,21 @@ fn walk_expression(
             }
             // Lang intrinsic ref - leaf node
             ExprKind::LangIntrinsicRef(_) => {}
+
+            // Subscript call - walk receiver and arguments
+            ExprKind::SubscriptCall {
+                receiver,
+                arguments,
+                ..
+            } => {
+                walk_expression(receiver, analyzers, model, ctx);
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            }
         }
     }
 

@@ -114,6 +114,12 @@ impl SemanticModelBuilder {
                         self.add_computed_property_syntax_mappings(&symbol, &current_syntax, file_id);
                     }
 
+                    // For subscript declarations, add getter/setter syntax mappings
+                    // for the child symbols created by the subscript builder
+                    if current_syntax.kind() == kestrel_syntax_tree::SyntaxKind::SubscriptDeclaration {
+                        self.add_subscript_syntax_mappings(&symbol, &current_syntax, file_id);
+                    }
+
                     if !builder.is_terminal() {
                         // Add children in reverse order so they're processed left-to-right
                         let children: Vec<_> = current_syntax.children().collect();
@@ -208,6 +214,76 @@ impl SemanticModelBuilder {
             }
         }
     }
+
+    /// Add syntax mappings for getter/setter symbols that are children of a subscript.
+    ///
+    /// The subscript builder creates getter/setter symbols as children of the subscript,
+    /// but those symbols need their syntax nodes added to the syntax_map so the binder
+    /// can access them.
+    fn add_subscript_syntax_mappings(
+        &mut self,
+        subscript_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        subscript_syntax: &SyntaxNode,
+        _file_id: usize,
+    ) {
+        use kestrel_syntax_tree::SyntaxKind;
+
+        // Find the SubscriptBody node in the subscript syntax
+        let Some(body) = subscript_syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::SubscriptBody)
+        else {
+            return;
+        };
+
+        // Check for PropertyAccessors (explicit get/set form)
+        let accessors = body
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PropertyAccessors);
+
+        // Get the getter clause syntax (explicit form)
+        let getter_clause = accessors.as_ref().and_then(|acc| {
+            acc.children()
+                .find(|child| child.kind() == SyntaxKind::GetterClause)
+        });
+
+        // Get the shorthand body (CodeBlock directly in SubscriptBody)
+        let shorthand_body = if accessors.is_none() {
+            body.children()
+                .find(|child| child.kind() == SyntaxKind::CodeBlock)
+        } else {
+            None
+        };
+
+        // Get the setter clause syntax
+        let setter_clause = accessors.as_ref().and_then(|acc| {
+            acc.children()
+                .find(|child| child.kind() == SyntaxKind::SetterClause)
+        });
+
+        // Map getter/setter symbols to their syntax nodes
+        for child in subscript_symbol.metadata().children() {
+            match child.metadata().kind() {
+                KestrelSymbolKind::Getter => {
+                    // Prefer explicit GetterClause, fall back to shorthand CodeBlock
+                    if let Some(ref getter_syntax) = getter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), getter_syntax.clone());
+                    } else if let Some(ref body_syntax) = shorthand_body {
+                        self.syntax_map
+                            .insert(child.metadata().id(), body_syntax.clone());
+                    }
+                }
+                KestrelSymbolKind::Setter => {
+                    if let Some(ref setter_syntax) = setter_clause {
+                        self.syntax_map
+                            .insert(child.metadata().id(), setter_syntax.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 impl Default for SemanticModelBuilder {
@@ -242,7 +318,7 @@ fn builder_for(
     use crate::builders::{
         DeinitBuilder, EnumBuilder, EnumCaseBuilder, ExtensionBuilder, FieldBuilder,
         FunctionBuilder, ImportBuilder, InitializerBuilder, ModuleBuilder, ProtocolBuilder,
-        StructBuilder, TerminalBuilder, TypeAliasBuilder,
+        StructBuilder, SubscriptBuilder, TerminalBuilder, TypeAliasBuilder,
     };
     use kestrel_syntax_tree::SyntaxKind;
 
@@ -257,6 +333,7 @@ fn builder_for(
     static MODULE: ModuleBuilder = ModuleBuilder;
     static PROTOCOL: ProtocolBuilder = ProtocolBuilder;
     static STRUCT: StructBuilder = StructBuilder;
+    static SUBSCRIPT: SubscriptBuilder = SubscriptBuilder;
     static TERMINAL: TerminalBuilder = TerminalBuilder;
     static TYPE_ALIAS: TypeAliasBuilder = TypeAliasBuilder;
 
@@ -273,6 +350,7 @@ fn builder_for(
         SyntaxKind::FunctionDeclaration => Some(&FUNCTION),
         SyntaxKind::InitializerDeclaration => Some(&INITIALIZER),
         SyntaxKind::DeinitDeclaration => Some(&DEINIT),
+        SyntaxKind::SubscriptDeclaration => Some(&SUBSCRIPT),
         SyntaxKind::Visibility | SyntaxKind::Name => Some(&TERMINAL),
         _ => None,
     }

@@ -20,6 +20,7 @@ use crate::common::{
     ProtocolDeclarationData,
     // Shared data types
     StructDeclarationData,
+    SubscriptDeclarationData,
     TypeAliasDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
@@ -30,11 +31,13 @@ use crate::common::{
     emit_module_declaration,
     emit_protocol_declaration,
     emit_struct_declaration,
+    emit_subscript_declaration,
     emit_type_alias_declaration,
     field_declaration_parser_internal,
     function_declaration_parser_internal,
     import_declaration_parser_internal,
     module_declaration_parser_internal,
+    subscript_declaration_parser_internal,
 };
 use crate::enum_decl::{EnumDeclaration, parse_enum_declaration};
 use crate::event::EventSink;
@@ -50,6 +53,7 @@ use crate::protocol::{
     ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
 };
 use crate::r#struct::{StructDeclaration, parse_struct_declaration};
+use crate::subscript::{SubscriptDeclaration, parse_subscript_declaration};
 use crate::type_alias::{
     TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
 };
@@ -66,6 +70,7 @@ pub enum DeclarationItem {
     Extension(ExtensionDeclaration),
     Field(FieldDeclaration),
     Function(FunctionDeclaration),
+    Subscript(SubscriptDeclaration),
     TypeAlias(TypeAliasDeclaration),
 }
 
@@ -81,6 +86,7 @@ impl DeclarationItem {
             DeclarationItem::Extension(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
             DeclarationItem::Function(decl) => &decl.span,
+            DeclarationItem::Subscript(decl) => &decl.span,
             DeclarationItem::TypeAlias(decl) => &decl.span,
         }
     }
@@ -96,6 +102,7 @@ impl DeclarationItem {
             DeclarationItem::Extension(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
             DeclarationItem::Function(decl) => &decl.syntax,
+            DeclarationItem::Subscript(decl) => &decl.syntax,
             DeclarationItem::TypeAlias(decl) => &decl.syntax,
         }
     }
@@ -117,6 +124,7 @@ enum DeclarationItemData {
     Extension(ExtensionDeclarationData),
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
 }
 
@@ -196,6 +204,8 @@ fn declaration_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(DeclarationItemData::Function);
 
+    let subscript_parser = subscript_declaration_parser_internal().map(DeclarationItemData::Subscript);
+
     let field_parser = field_declaration_parser_internal().map(DeclarationItemData::Field);
 
     let type_alias_parser =
@@ -208,6 +218,7 @@ fn declaration_item_parser_internal<'tokens>()
         .or(type_declaration_parser) // Handles both struct and enum
         .or(extension_parser)
         .or(function_parser)
+        .or(subscript_parser)
         .or(field_parser)
         .or(type_alias_parser)
 }
@@ -249,6 +260,9 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         DeclarationItemData::Function(data) => {
             emit_function_declaration(sink, data);
         }
+        DeclarationItemData::Subscript(data) => {
+            emit_subscript_declaration(sink, data);
+        }
         DeclarationItemData::Field(data) => {
             emit_field_declaration(sink, data);
         }
@@ -288,6 +302,9 @@ where
     if try_parse(source, tokens.clone(), sink, parse_function_declaration) {
         return;
     }
+    if try_parse(source, tokens.clone(), sink, parse_subscript_declaration) {
+        return;
+    }
     if try_parse(source, tokens.clone(), sink, parse_field_declaration) {
         return;
     }
@@ -296,7 +313,7 @@ where
     }
 
     // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, subscript, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events

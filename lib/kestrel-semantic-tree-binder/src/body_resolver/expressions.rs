@@ -1445,6 +1445,18 @@ fn expression_references_local(
             .iter()
             .any(|arg| expression_references_local(&arg.value, local_id)),
 
+        // Subscript call - check receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expression_references_local(receiver, local_id)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
         // Leaf expressions - no references
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -2051,6 +2063,18 @@ where
 
         // Lang intrinsic calls - walk arguments
         ExprKind::LangIntrinsic { arguments, .. } => {
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+
+        // Subscript call - walk receiver and arguments
+        ExprKind::SubscriptCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_captures_from_expression(receiver, process);
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }

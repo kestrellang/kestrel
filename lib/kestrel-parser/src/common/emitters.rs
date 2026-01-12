@@ -14,7 +14,8 @@ use super::data::{
     EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
     FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData,
     ParameterAccessMode, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
-    ReceiverModifier, StructDeclarationData, TypeAliasDeclarationData, TypeDeclarationBodyItem,
+    ReceiverModifier, StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData,
+    TypeAliasDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -510,6 +511,7 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
     match item {
         TypeDeclarationBodyItem::Field(data) => emit_field_declaration(sink, data),
         TypeDeclarationBodyItem::Function(data) => emit_function_declaration(sink, data),
+        TypeDeclarationBodyItem::Subscript(data) => emit_subscript_declaration(sink, data),
         TypeDeclarationBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
         TypeDeclarationBodyItem::Deinit(data) => emit_deinit_declaration(sink, data),
         TypeDeclarationBodyItem::Struct(data) => emit_struct_declaration(sink, *data),
@@ -554,6 +556,9 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
     for item in data.body {
         match item {
             ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
+            ProtocolBodyItem::Subscript(subscript_data) => {
+                emit_subscript_declaration(sink, subscript_data)
+            }
             ProtocolBodyItem::AssociatedType(type_data) => {
                 emit_type_alias_declaration(sink, type_data)
             }
@@ -693,6 +698,7 @@ pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarati
 fn emit_extension_body_item(sink: &mut EventSink, item: ExtensionBodyItem) {
     match item {
         ExtensionBodyItem::Function(data) => emit_function_declaration(sink, data),
+        ExtensionBodyItem::Subscript(data) => emit_subscript_declaration(sink, data),
         ExtensionBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
         ExtensionBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
     }
@@ -795,4 +801,92 @@ pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
     sink.finish_node(); // EnumBody
 
     sink.finish_node(); // EnumDeclaration
+}
+
+// =============================================================================
+// Subscript Emitters
+// =============================================================================
+
+/// Emit events for subscript body
+fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
+    sink.start_node(SyntaxKind::SubscriptBody);
+
+    match body {
+        SubscriptBodyData::Shorthand(code_block) => {
+            // Shorthand: just emit the code block directly
+            emit_code_block(sink, code_block);
+        }
+        SubscriptBodyData::Accessors { getter, setter } => {
+            // Wrap accessors in PropertyAccessors node
+            sink.start_node(SyntaxKind::PropertyAccessors);
+
+            // Emit getter
+            if let Some(getter_body) = getter {
+                // Full getter with body: emit GetterClause containing Get token and code block
+                sink.start_node(SyntaxKind::GetterClause);
+                // Emit Get token - use the start of the code block as approximate span
+                let get_span =
+                    Span::from(getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start);
+                sink.add_token(SyntaxKind::Get, get_span);
+                emit_code_block(sink, getter_body);
+                sink.finish_node();
+            } else {
+                // Protocol requirement: just emit Get token without body (no GetterClause wrapper)
+                sink.add_token(SyntaxKind::Get, Span::from(0..3));
+            }
+
+            // Emit setter
+            if let Some(setter_body) = setter {
+                // Check if this is a real setter body or a placeholder for protocol requirement
+                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
+                    // Protocol requirement: just emit Set token without body (no SetterClause wrapper)
+                    sink.add_token(SyntaxKind::Set, Span::from(0..3));
+                } else {
+                    // Full setter with body: emit SetterClause containing Set token and code block
+                    sink.start_node(SyntaxKind::SetterClause);
+                    let set_span = Span::from(
+                        setter_body.lbrace.start.saturating_sub(4)..setter_body.lbrace.start,
+                    );
+                    sink.add_token(SyntaxKind::Set, set_span);
+                    emit_code_block(sink, setter_body);
+                    sink.finish_node();
+                }
+            }
+
+            sink.finish_node(); // PropertyAccessors
+        }
+    }
+
+    sink.finish_node(); // SubscriptBody
+}
+
+/// Emit events for a subscript declaration
+///
+/// This is the single source of truth for subscript declaration emission.
+pub fn emit_subscript_declaration(sink: &mut EventSink, data: SubscriptDeclarationData) {
+    sink.start_node(SyntaxKind::SubscriptDeclaration);
+
+    emit_attribute_list(sink, &data.attributes);
+    emit_visibility(sink, data.visibility);
+    emit_static_modifier(sink, data.is_static);
+
+    sink.add_token(SyntaxKind::Subscript, data.subscript_span);
+
+    if let Some((lbracket, params, rbracket)) = data.type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+
+    // Return type is required for subscripts
+    let (arrow_span, return_ty) = data.return_type;
+    emit_return_type(sink, arrow_span, return_ty);
+
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    emit_subscript_body(sink, &data.body);
+
+    sink.finish_node(); // SubscriptDeclaration
 }

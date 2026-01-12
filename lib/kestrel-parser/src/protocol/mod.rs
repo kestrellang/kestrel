@@ -16,7 +16,8 @@ use crate::common::ConformanceListData;
 use crate::common::{
     ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
     field_declaration_parser_internal, function_declaration_parser_internal, identifier,
-    initializer_declaration_parser_internal, token, visibility_parser_internal,
+    initializer_declaration_parser_internal, subscript_declaration_parser_internal, token,
+    visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
@@ -93,10 +94,12 @@ impl ProtocolDeclaration {
     }
 }
 
-/// Parser for protocol body items (functions, associated types, initializers, or property requirements)
+/// Parser for protocol body items (functions, subscripts, associated types, initializers, or property requirements)
 fn protocol_body_item_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ProtocolBodyItem, ParserExtra<'tokens>> + Clone {
     let function = function_declaration_parser_internal().map(ProtocolBodyItem::Function);
+
+    let subscript = subscript_declaration_parser_internal().map(ProtocolBodyItem::Subscript);
 
     let associated_type =
         type_alias_declaration_parser_internal().map(ProtocolBodyItem::AssociatedType);
@@ -105,14 +108,19 @@ fn protocol_body_item_parser<'tokens>()
 
     let field = field_declaration_parser_internal().map(ProtocolBodyItem::Field);
 
-    // Try function first, then associated type, then initializer, then field (property requirement)
+    // Try function first, then subscript, then associated type, then initializer, then field (property requirement)
     // This works because:
     // - function starts with visibility? followed by (static)? (mutating/consuming)? 'func'
+    // - subscript starts with visibility? followed by (static)? 'subscript'
     // - associated type starts with visibility? followed by 'type'
     // - initializer starts with visibility? followed by 'init'
     // - field starts with visibility? followed by (static)? 'let'/'var'
     // Chumsky will backtrack correctly when the keyword doesn't match
-    function.or(associated_type).or(initializer).or(field)
+    function
+        .or(subscript)
+        .or(associated_type)
+        .or(initializer)
+        .or(field)
 }
 
 /// Internal Chumsky parser for protocol declaration

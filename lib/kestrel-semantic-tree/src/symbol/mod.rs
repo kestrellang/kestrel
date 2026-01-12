@@ -15,6 +15,7 @@ pub mod protocol;
 pub mod setter;
 pub mod source_file;
 pub mod r#struct;
+pub mod subscript;
 pub mod type_alias;
 pub mod type_parameter;
 
@@ -23,3 +24,4 @@ pub use enum_case::EnumCaseSymbol;
 pub use enum_symbol::EnumSymbol;
 pub use getter::GetterSymbol;
 pub use setter::SetterSymbol;
+pub use subscript::SubscriptSymbol;

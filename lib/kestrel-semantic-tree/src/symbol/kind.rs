@@ -17,6 +17,7 @@ pub enum KestrelSymbolKind {
     Setter,
     SourceFile,
     Struct,
+    Subscript,
     TypeAlias,
     TypeParameter,
 }

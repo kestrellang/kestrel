@@ -18,6 +18,7 @@ use kestrel_span::Span;
 use super::data::{
     ComputedBodyData, DeinitDeclarationData, FieldDeclarationData, FunctionDeclarationData,
     InitializerDeclarationData, ParameterAccessMode, ParameterData, ReceiverModifier,
+    SubscriptBodyData, SubscriptDeclarationData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -616,4 +617,120 @@ pub fn deinit_declaration_parser_internal<'tokens>()
     token(Token::Deinit)
         .then(code_block_parser())
         .map(|(deinit_span, body)| DeinitDeclarationData { deinit_span, body })
+}
+
+// =============================================================================
+// Subscript Parsers
+// =============================================================================
+
+/// Parser for subscript body
+///
+/// Handles three forms:
+/// 1. Shorthand: `{ expr }` - just a code block with an expression
+/// 2. Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// 3. Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+fn subscript_body_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, SubscriptBodyData, ParserExtra<'tokens>> + Clone {
+    // Protocol requirement: { get } or { get set }
+    // These have no code block bodies, just keywords
+    let protocol_requirement = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .map(|_| true)
+                .or(empty().to(false)),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|has_setter| {
+            SubscriptBodyData::Accessors {
+                getter: None,
+                setter: if has_setter { Some(CodeBlockData { lbrace: Span::from(0..0), items: vec![], rbrace: Span::from(0..0) }) } else { None },
+            }
+        });
+
+    // Explicit accessors: { get { body } set { body }? }
+    // getter is required, setter is optional
+    let explicit_accessors = skip_trivia()
+        .ignore_then(just(Token::LBrace))
+        .ignore_then(skip_trivia())
+        .ignore_then(just(Token::Get))
+        .ignore_then(code_block_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Set))
+                .ignore_then(code_block_parser())
+                .or_not(),
+        )
+        .then_ignore(skip_trivia())
+        .then_ignore(just(Token::RBrace))
+        .map(|(getter_body, setter_body)| {
+            SubscriptBodyData::Accessors {
+                getter: Some(getter_body),
+                setter: setter_body,
+            }
+        });
+
+    // Shorthand: { expr } - parsed as a code block
+    // This is just a regular code block
+    let shorthand = code_block_parser().map(SubscriptBodyData::Shorthand);
+
+    // Try protocol requirement first (most specific - has get/set keywords but no code blocks)
+    // Then explicit accessors (has get keyword followed by code block)
+    // Then shorthand (just a code block)
+    protocol_requirement
+        .or(explicit_accessors)
+        .or(shorthand)
+}
+
+/// Parser for required return type: `-> Type`
+///
+/// Unlike optional return type parser, this requires the arrow and type.
+/// Used for subscripts which must have a return type.
+fn required_return_type_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, TyVariant), ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(ty_parser())
+}
+
+/// Parser for a subscript declaration
+///
+/// Syntax: `(@attr)* (visibility)? (static)? subscript[T, U]?(params) -> Type (where ...)? { body }`
+///
+/// This is the single source of truth for subscript declaration parsing.
+pub fn subscript_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, SubscriptDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(static_parser())
+        .then(token(Token::Subscript))
+        .then(type_parameter_list_parser().or_not())
+        .then(token(Token::LParen))
+        .then(parameter_list_parser())
+        .then(token(Token::RParen))
+        .then(required_return_type_parser())
+        .then(where_clause_parser().or_not())
+        .then(subscript_body_parser())
+        .map(
+            |((((((((((attributes, visibility), is_static), subscript_span), type_params), lparen), parameters), rparen), return_type), where_clause), body)| {
+                SubscriptDeclarationData {
+                    attributes,
+                    visibility,
+                    is_static,
+                    subscript_span,
+                    type_params,
+                    lparen,
+                    parameters,
+                    rparen,
+                    return_type,
+                    where_clause,
+                    body,
+                }
+            },
+        )
 }

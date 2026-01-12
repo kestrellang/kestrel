@@ -16,7 +16,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::binders::{
     DeinitBinder, EnumBinder, EnumCaseBinder, ExtensionBinder, FieldBinder, FunctionBinder,
     GetterBinder, ImportBinder, InitializerBinder, ModuleBinder, ProtocolBinder, SetterBinder,
-    StructBinder, TerminalBinder, TypeAliasBinder,
+    StructBinder, SubscriptBinder, TerminalBinder, TypeAliasBinder,
 };
 use crate::maps::SourceMap;
 
@@ -142,6 +142,10 @@ impl DeclarationBinderRegistry {
         binders.insert(SyntaxKind::DeinitDeclaration, Box::new(DeinitBinder));
         binders.insert(SyntaxKind::GetterClause, Box::new(GetterBinder));
         binders.insert(SyntaxKind::SetterClause, Box::new(SetterBinder));
+        binders.insert(
+            SyntaxKind::SubscriptDeclaration,
+            Box::new(SubscriptBinder),
+        );
 
         // Register terminal resolvers
         binders.insert(SyntaxKind::Visibility, Box::new(TerminalBinder));

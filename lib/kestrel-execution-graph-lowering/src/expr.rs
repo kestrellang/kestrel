@@ -499,7 +499,18 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 }
             }
 
-            // Not a computed property - use direct assignment
+            // Check if target is a subscript call (subscript assignment)
+            if let ExprKind::SubscriptCall {
+                receiver,
+                getter,
+                arguments,
+            } = &target.kind
+            {
+                // Subscript assignment - generate a setter call
+                return lower_subscript_setter_call(ctx, receiver, *getter, arguments, value, expr);
+            }
+
+            // Not a computed property or subscript - use direct assignment
             let target_place = match lower_expression(ctx, target) {
                 Value::Place(p) => p,
                 Value::Immediate(_) => {
@@ -572,6 +583,12 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             arguments,
             substitutions,
         } => lower_call(ctx, callee, arguments, substitutions, expr),
+
+        ExprKind::SubscriptCall {
+            receiver,
+            getter,
+            arguments,
+        } => lower_subscript_call(ctx, receiver, *getter, arguments, expr),
 
         // === Control Flow ===
         ExprKind::If {
@@ -1167,6 +1184,16 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             ctx.emit_error(LoweringError::internal(
                 "lang intrinsic cannot be used as a value",
                 Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        }
+
+        ExprKind::SubscriptCall { .. } => {
+            // Subscript calls should be resolved to getter calls during call resolution
+            // If we reach here, subscript call resolution is not yet implemented
+            ctx.emit_error(LoweringError::unsupported_expr(
+                "subscript call",
+                expr.span.clone(),
             ));
             Value::Immediate(Immediate::error())
         }
@@ -2240,6 +2267,249 @@ fn lower_call(
     }
 
     Value::Place(result_place)
+}
+
+/// Lower a subscript call: `array(0)`, `dict(key: "foo")`.
+///
+/// Subscript calls have a receiver (the collection), a getter function to call,
+/// and arguments (the index/key).
+fn lower_subscript_call(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    getter_id: SymbolId,
+    arguments: &[CallArgument],
+    expr: &Expression,
+) -> Value {
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    // Lower the receiver expression (e.g., the array)
+    let receiver_value = lower_expression(ctx, receiver);
+
+    // Lower arguments (e.g., the index)
+    let arg_values: Vec<Value> = arguments
+        .iter()
+        .map(|arg| lower_expression(ctx, &arg.value))
+        .collect();
+
+    // Build the full argument list: receiver first, then subscript arguments
+    let mut all_args = vec![receiver_value];
+    all_args.extend(arg_values);
+
+    // Build argument types list
+    let mut all_arg_types: Vec<&Ty> = vec![&receiver.ty];
+    all_arg_types.extend(arguments.iter().map(|arg| &arg.value.ty));
+
+    // Get the result type and create a temp for it
+    let result_ty = lower_type(ctx, &expr.ty);
+    let result_local = ctx.create_temp("subscript", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Track the temp for deinit if needed
+    if ctx.type_needs_deinit(&expr.ty) {
+        ctx.track_statement_temp(result_local);
+    }
+
+    // Get the getter symbol to build the call
+    let getter_symbol = ctx.model.query(SymbolFor { id: getter_id });
+    match getter_symbol {
+        Some(sym) => {
+            // Get the callable behavior for access mode info
+            let callable_beh = sym.metadata().get_behavior::<CallableBehavior>();
+
+            // Build the call arguments with proper access modes
+            let call_args = build_call_args(
+                ctx,
+                all_args,
+                &all_arg_types,
+                callable_beh.as_deref(),
+                true, // has_receiver = true for instance subscripts
+            );
+
+            // Mark moved arguments
+            mark_moved_args(ctx, &call_args);
+
+            // Get the qualified name of the getter
+            let func_name = qualified_name_for_symbol(ctx, &sym);
+
+            // Build type arguments from receiver's substitutions (for generic subscripts)
+            let type_args = get_type_args_for_receiver(ctx, &receiver.ty);
+
+            // Create the callee
+            let mir_callee = if type_args.is_empty() {
+                Callee::direct(func_name)
+            } else {
+                Callee::direct_generic(func_name, type_args)
+            };
+
+            // Emit the call
+            ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
+        }
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("subscript getter symbol not found: {:?}", getter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    }
+
+    Value::Place(result_place)
+}
+
+/// Get type arguments from a receiver type for generic subscript calls.
+fn get_type_args_for_receiver(
+    ctx: &mut LoweringContext,
+    receiver_ty: &Ty,
+) -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    match receiver_ty.kind() {
+        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+            substitutions
+                .types()
+                .map(|ty| lower_type(ctx, ty))
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Lower a subscript setter call: `array(0) = value`.
+///
+/// This finds the setter function from the subscript symbol and generates a call
+/// with the receiver, index arguments, and new value.
+fn lower_subscript_setter_call(
+    ctx: &mut LoweringContext,
+    receiver: &Expression,
+    getter_id: SymbolId,
+    arguments: &[CallArgument],
+    new_value: &Expression,
+    expr: &Expression,
+) -> Value {
+    use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+    use kestrel_semantic_tree::symbol::subscript::SubscriptSymbol;
+    use semantic_tree::symbol::Symbol;
+
+    // The getter_id is the getter symbol. We need to find the parent subscript
+    // and get the setter from it.
+    let getter_symbol = match ctx.model.query(SymbolFor { id: getter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("subscript getter symbol not found: {:?}", getter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the parent subscript symbol
+    let subscript = match getter_symbol.metadata().parent() {
+        Some(parent) if parent.metadata().kind() == KestrelSymbolKind::Subscript => parent,
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "subscript getter has no subscript parent",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the subscript symbol to find the setter
+    let subscript_sym = match subscript.as_ref().downcast_ref::<SubscriptSymbol>() {
+        Some(s) => s,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                "parent is not a SubscriptSymbol",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the setter ID
+    let setter_id = match subscript_sym.setter_id() {
+        Some(id) => id,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                "subscript has no setter (read-only)",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Get the setter symbol
+    let setter_symbol = match ctx.model.query(SymbolFor { id: setter_id }) {
+        Some(sym) => sym,
+        None => {
+            ctx.emit_error(LoweringError::internal(
+                format!("subscript setter symbol not found: {:?}", setter_id),
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    // Lower the receiver
+    let receiver_value = lower_expression(ctx, receiver);
+
+    // Lower the subscript arguments (e.g., the index)
+    let arg_values: Vec<Value> = arguments
+        .iter()
+        .map(|arg| lower_expression(ctx, &arg.value))
+        .collect();
+
+    // Lower the new value
+    let new_value_result = lower_expression(ctx, new_value);
+
+    // Build the full argument list: receiver first, then subscript arguments, then new value
+    let mut all_args = vec![receiver_value];
+    all_args.extend(arg_values);
+    all_args.push(new_value_result);
+
+    // Build argument types list
+    let mut all_arg_types: Vec<&Ty> = vec![&receiver.ty];
+    all_arg_types.extend(arguments.iter().map(|arg| &arg.value.ty));
+    all_arg_types.push(&new_value.ty);
+
+    // Setters return unit
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("subscript_set", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Get the callable behavior for access mode info
+    let callable_beh = setter_symbol.metadata().get_behavior::<CallableBehavior>();
+
+    // Build the call arguments with proper access modes
+    let call_args = build_call_args(
+        ctx,
+        all_args,
+        &all_arg_types,
+        callable_beh.as_deref(),
+        true, // has_receiver = true for instance subscripts
+    );
+
+    // Mark moved arguments
+    mark_moved_args(ctx, &call_args);
+
+    // Get the qualified name of the setter
+    let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
+
+    // Build type arguments from receiver's substitutions
+    let type_args = get_type_args_for_receiver(ctx, &receiver.ty);
+
+    // Create the callee
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(setter_name)
+    } else {
+        Callee::direct_generic(setter_name, type_args)
+    };
+
+    // Emit the call
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Setter returns unit
+    Value::Immediate(Immediate::unit())
 }
 
 /// Find field information from a type.

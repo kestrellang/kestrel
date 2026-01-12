@@ -207,6 +207,7 @@ impl SemanticBinder {
             KestrelSymbolKind::TypeParameter => Some(SyntaxKind::TypeParameter),
             KestrelSymbolKind::Getter => Some(SyntaxKind::GetterClause),
             KestrelSymbolKind::Setter => Some(SyntaxKind::SetterClause),
+            KestrelSymbolKind::Subscript => Some(SyntaxKind::SubscriptDeclaration),
             KestrelSymbolKind::SourceFile => None,
         }
     }

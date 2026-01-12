@@ -230,6 +230,7 @@ pub struct StructDeclarationData {
 pub enum TypeDeclarationBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     Initializer(InitializerDeclarationData),
     Deinit(DeinitDeclarationData), // deinit { } - only valid in struct bodies
     Struct(Box<StructDeclarationData>), // Boxed to avoid infinite size
@@ -352,6 +353,7 @@ pub struct AssociatedTypeBoundsData {
 #[derive(Debug, Clone)]
 pub enum ProtocolBodyItem {
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     AssociatedType(TypeAliasDeclarationData),
     Initializer(InitializerDeclarationData),
     Field(FieldDeclarationData),
@@ -380,6 +382,38 @@ pub struct ExtensionDeclarationData {
 #[derive(Debug, Clone)]
 pub enum ExtensionBodyItem {
     Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
     Initializer(InitializerDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
+}
+
+/// Raw parsed data for subscript declaration internals
+///
+/// Subscript syntax: `(visibility)? (static)? subscript[T]?(params) -> Type (where ...)? { body }`
+/// Body can be shorthand `{ expr }`, explicit `{ get { } set { } }`, or protocol `{ get }` / `{ get set }`
+#[derive(Debug, Clone)]
+pub struct SubscriptDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub is_static: Option<Span>,
+    pub subscript_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub lparen: Span,
+    pub parameters: Vec<ParameterData>,
+    pub rparen: Span,
+    pub return_type: (Span, TyVariant), // (arrow_span, return_ty) - required for subscripts
+    pub where_clause: Option<WhereClauseData>,
+    pub body: SubscriptBodyData,
+}
+
+/// Body data for subscript declarations
+#[derive(Debug, Clone)]
+pub enum SubscriptBodyData {
+    /// Shorthand: `{ expr }` - just a code block with an expression
+    Shorthand(CodeBlockData),
+    /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
+    Accessors {
+        getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
+    },
 }
