@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use kestrel_prelude::primitives;
+use kestrel_prelude::lang;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
@@ -23,7 +23,7 @@ use crate::resolution::{SymbolResolution, TypePathResolution};
 /// Resolve a type path to a Type.
 ///
 /// Handles:
-/// - Primitive types (Int, Bool, String, etc.)
+/// - Built-in lang scalar types (lang.i1, lang.i64, lang.f64, lang.str, etc.)
 /// - User-defined types via scope resolution
 /// - Type parameters
 /// - Associated types (including T.Item style)
@@ -43,12 +43,12 @@ impl Query for ResolveTypePath {
             };
         }
 
-        // Handle built-in primitive types
-        if self.path.len() == 1 {
-            let segment = &self.path[0];
-            if let Some(ty) = resolve_primitive_type(segment, Span::from(0..0)) {
-                return TypePathResolution::Resolved(ty);
-            }
+        // Handle built-in types that don't exist as real symbols.
+        //
+        // - `Self`
+        // - `lang.*` scalar types (i1/i8/.../f16/f32/f64/str)
+        if let Some(ty) = resolve_builtin_type_path(&self.path, Span::from(0..0)) {
+            return TypePathResolution::Resolved(ty);
         }
 
         // First segment: use scope-aware name resolution
@@ -204,20 +204,38 @@ impl Query for ResolveTypePath {
     }
 }
 
-/// Resolve a primitive type name to its semantic type
-fn resolve_primitive_type(name: &str, span: Span) -> Option<Ty> {
+/// Resolve a built-in type path (that doesn't exist as a real symbol) to its semantic type.
+fn resolve_builtin_type_path(path: &[String], span: Span) -> Option<Ty> {
+    if path.len() == 1 && path[0] == "Self" {
+        return Some(Ty::self_type(span));
+    }
+
+    // Support `lang.i1`, `lang.i64`, `lang.f16`, `lang.str`, etc.
+    if path.len() == 2 && path[0] == lang::LANG {
+        return resolve_lang_scalar_type(&path[1], span);
+    }
+
+    None
+}
+
+fn resolve_lang_scalar_type(name: &str, span: Span) -> Option<Ty> {
     match name {
-        primitives::INT => Some(Ty::int(IntBits::I64, span)),
-        primitives::I8 => Some(Ty::int(IntBits::I8, span)),
-        primitives::I16 => Some(Ty::int(IntBits::I16, span)),
-        primitives::I32 => Some(Ty::int(IntBits::I32, span)),
-        primitives::I64 => Some(Ty::int(IntBits::I64, span)),
-        primitives::FLOAT => Some(Ty::float(FloatBits::F64, span)),
-        primitives::F32 => Some(Ty::float(FloatBits::F32, span)),
-        primitives::F64 => Some(Ty::float(FloatBits::F64, span)),
-        primitives::BOOL => Some(Ty::bool(span)),
-        primitives::STRING => Some(Ty::string(span)),
-        primitives::SELF_TYPE => Some(Ty::self_type(span)),
+        lang::I1 => Some(Ty::bool(span)),
+
+        lang::I8 => Some(Ty::int(IntBits::I8, span)),
+        lang::I16 => Some(Ty::int(IntBits::I16, span)),
+        lang::I32 => Some(Ty::int(IntBits::I32, span)),
+        lang::I64 => Some(Ty::int(IntBits::I64, span)),
+
+        // Note: unsigned scalar names exist in kestrel_prelude::lang, but Kestrel's semantic
+        // Ty currently models "IntBits" (signed) for built-in integers. We can add unsigned
+        // semantics later if/when the type system grows an unsigned integer kind.
+
+        lang::F16 => Some(Ty::float(FloatBits::F16, span)),
+        lang::F32 => Some(Ty::float(FloatBits::F32, span)),
+        lang::F64 => Some(Ty::float(FloatBits::F64, span)),
+
+        lang::STR => Some(Ty::string(span)),
         _ => None,
     }
 }

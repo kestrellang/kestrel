@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use kestrel_prelude::{lang, primitives};
+use kestrel_prelude::lang;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ResolveTypePath, SemanticModel, TypePathResolution};
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -213,10 +213,19 @@ impl<'a> TypeResolver<'a> {
             // Non-generic types with type arguments is an error
             _ => {
                 let type_name = match resolved_ty.kind() {
-                    TyKind::Int(_) => primitives::INT.to_string(),
-                    TyKind::Float(_) => primitives::FLOAT.to_string(),
-                    TyKind::Bool => primitives::BOOL.to_string(),
-                    TyKind::String => primitives::STRING.to_string(),
+                    TyKind::Int(bits) => match bits {
+                        IntBits::I8 => "lang.i8".to_string(),
+                        IntBits::I16 => "lang.i16".to_string(),
+                        IntBits::I32 => "lang.i32".to_string(),
+                        IntBits::I64 => "lang.i64".to_string(),
+                    },
+                    TyKind::Float(bits) => match bits {
+                        FloatBits::F16 => "lang.f16".to_string(),
+                        FloatBits::F32 => "lang.f32".to_string(),
+                        FloatBits::F64 => "lang.f64".to_string(),
+                    },
+                    TyKind::Bool => "lang.i1".to_string(),
+                    TyKind::String => "lang.str".to_string(),
                     TyKind::Unit => "()".to_string(),
                     TyKind::Never => "Never".to_string(),
                     TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
@@ -234,8 +243,17 @@ impl<'a> TypeResolver<'a> {
     /// Apply type arguments if all type parameters have defaults.
     /// For types with required parameters (no defaults), returns the type as-is.
     /// This is used for raw type references (no brackets) to apply defaults when possible.
-    fn apply_type_arguments_if_all_have_defaults(&mut self, resolved_ty: &Ty, span: Span) -> Ty {
-        // Get type parameters and check if all have defaults
+    fn apply_inferred_type_arguments_for_raw_reference(
+        &mut self,
+        resolved_ty: &Ty,
+        span: Span,
+    ) -> Ty {
+        // When a generic type is referenced without any type argument brackets (e.g., `Optional`),
+        // treat it as an instantiation with inferred placeholders for all type parameters:
+        // `Optional[_]`, `Map[_, _]`, etc.
+        //
+        // If brackets are present (even empty: `Optional[]`), arity must be exact and is handled
+        // by `apply_type_arguments`.
         let type_params = match resolved_ty.kind() {
             TyKind::Struct { symbol, .. } => symbol.type_parameters(),
             TyKind::Protocol { symbol, .. } => symbol.type_parameters(),
@@ -244,19 +262,15 @@ impl<'a> TypeResolver<'a> {
             _ => return resolved_ty.clone(),
         };
 
-        // If there are no type params, or any param lacks a default, return as-is
         if type_params.is_empty() {
             return resolved_ty.clone();
         }
 
-        let all_have_defaults = type_params.iter().all(|p| p.has_default());
-        if !all_have_defaults {
-            // Some params are required - treat as raw type reference
-            return resolved_ty.clone();
-        }
+        let type_args = (0..type_params.len())
+            .map(|_| Ty::infer(span.clone()))
+            .collect();
 
-        // All params have defaults - apply them
-        self.apply_type_arguments(resolved_ty, Vec::new(), span)
+        self.apply_type_arguments(resolved_ty, type_args, span)
     }
 
     /// Resolve a TyPath node, handling type arguments if present
@@ -274,15 +288,21 @@ impl<'a> TypeResolver<'a> {
                 if segments.len() == 2 && segments[0] == lang::LANG {
                     // Check for lang.ptr[T] generic pointer type
                     if segments[1] == lang::PTR {
-                        let type_args = self.extract_type_arguments(ty_path_node).unwrap_or_default();
-                        if type_args.len() != 1 {
-                            self.diagnostics.throw(LangPtrArityError {
-                                span: ty_span.clone(),
-                                got: type_args.len(),
-                            });
-                            return Ty::error(ty_span);
+                        match self.extract_type_arguments(ty_path_node) {
+                            // No brackets: treat as lang.ptr[_]
+                            None => return Ty::pointer(Ty::infer(ty_span.clone()), ty_span),
+                            // Brackets present (including empty): require exact arity (1)
+                            Some(type_args) if type_args.len() == 1 => {
+                                return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
+                            }
+                            Some(type_args) => {
+                                self.diagnostics.throw(LangPtrArityError {
+                                    span: ty_span.clone(),
+                                    got: type_args.len(),
+                                });
+                                return Ty::error(ty_span);
+                            }
                         }
-                        return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
                     }
 
                     // Check for lang.i* signed integer types
@@ -305,6 +325,9 @@ impl<'a> TypeResolver<'a> {
                     }
 
                     // Check for lang.f* float types
+                    if segments[1] == lang::F16 {
+                        return Ty::float(FloatBits::F16, ty_span);
+                    }
                     if segments[1] == lang::F32 {
                         return Ty::float(FloatBits::F32, ty_span);
                     }
@@ -347,11 +370,11 @@ impl<'a> TypeResolver<'a> {
                             return Ty::error(ty_span);
                         }
                         // No brackets (raw type reference) - for types where all params have defaults,
-                        // apply the defaults (e.g., Addable[Rhs = Self] becomes Addable[Self]).
-                        // For types with required params, return as-is (raw type reference).
+                        // treat it as an instantiation with inferred placeholders for all params:
+                        // `Optional` => `Optional[_]`, `Map` => `Map[_, _]`, etc.
                         None if is_potentially_generic => {
                             return self
-                                .apply_type_arguments_if_all_have_defaults(&resolved, ty_span);
+                                .apply_inferred_type_arguments_for_raw_reference(&resolved, ty_span);
                         }
                         _ => {}
                     }
@@ -435,7 +458,6 @@ impl<'a> TypeResolver<'a> {
         F: FnOnce(Substitutions) -> Ty,
     {
         let max_args = type_params.len();
-        let min_args = type_params.iter().filter(|p| !p.has_default()).count();
         let actual = type_args.len();
 
         // Non-generic type with type args is an error
@@ -452,12 +474,15 @@ impl<'a> TypeResolver<'a> {
             return make_ty(Substitutions::new());
         }
 
-        // Check arity with defaults
-        if actual < min_args {
+        // Check arity.
+        //
+        // Language rule: if the user wrote a type argument list (including an empty list like `Foo[]`),
+        // they must provide the exact number of type arguments. Defaults do not allow partial lists.
+        if actual < max_args {
             self.diagnostics.throw(TooFewTypeArgumentsError {
                 span: span.clone(),
                 type_name: type_name.to_string(),
-                min_expected: min_args,
+                min_expected: max_args,
                 got: actual,
             });
             return Ty::error(span);
@@ -472,17 +497,10 @@ impl<'a> TypeResolver<'a> {
             return Ty::error(span);
         }
 
-        // Build substitutions, using defaults for missing args
+        // Build substitutions.
         let mut substitutions = Substitutions::new();
-        for (i, param) in type_params.iter().enumerate() {
-            let ty = if i < type_args.len() {
-                type_args[i].clone()
-            } else if let Some(default) = param.default() {
-                default.clone()
-            } else {
-                Ty::error(span.clone())
-            };
-            substitutions.insert(param.metadata().id(), ty);
+        for (param, arg) in type_params.iter().zip(type_args.into_iter()) {
+            substitutions.insert(param.metadata().id(), arg);
         }
 
         make_ty(substitutions)

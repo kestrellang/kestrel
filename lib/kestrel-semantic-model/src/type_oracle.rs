@@ -182,6 +182,30 @@ impl TypeOracle for SemanticModel {
             return false;
         }
 
+        // Handle FFISafe conformance for primitive machine types.
+        //
+        // This is primarily used by @extern(.C) validation and by the built-in
+        // "all fields must conform" rule for FFISafe structs.
+        //
+        // Note: `Pointer` here refers to the primitive `lang.ptr[T]` type, not the
+        // stdlib `std.memory.Pointer[T]` struct (which conforms via an extension).
+        if let Some(ffi_safe_id) = self.builtin_protocol(LanguageFeature::FFISafe) {
+            if protocol_id == ffi_safe_id {
+                match ty.kind() {
+                    TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
+                        return true;
+                    }
+                    TyKind::Pointer(pointee) => {
+                        // A pointer is FFI-safe if the pointee type is FFI-safe.
+                        // (If the pointee is an error type, we treat it as conforming
+                        // to suppress cascading diagnostics.)
+                        return self.conforms_to(pointee, protocol_id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // Handle primitive types - they implicitly conform to their literal protocols
         match ty.kind() {
             TyKind::Int(_) => {

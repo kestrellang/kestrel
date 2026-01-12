@@ -396,6 +396,8 @@ pub enum LangPrimitive {
     I32,
     /// 64-bit integer
     I64,
+    /// 16-bit floating point
+    F16,
     /// 32-bit floating point
     F32,
     /// 64-bit floating point
@@ -411,6 +413,7 @@ impl LangPrimitive {
             "i16" => Some(LangPrimitive::I16),
             "i32" => Some(LangPrimitive::I32),
             "i64" => Some(LangPrimitive::I64),
+            "f16" => Some(LangPrimitive::F16),
             "f32" => Some(LangPrimitive::F32),
             "f64" => Some(LangPrimitive::F64),
             _ => None,
@@ -425,6 +428,7 @@ impl LangPrimitive {
             LangPrimitive::I16 => "i16",
             LangPrimitive::I32 => "i32",
             LangPrimitive::I64 => "i64",
+            LangPrimitive::F16 => "f16",
             LangPrimitive::F32 => "f32",
             LangPrimitive::F64 => "f64",
         }
@@ -444,7 +448,7 @@ impl LangPrimitive {
 
     /// Check if this is a floating point type.
     pub fn is_float(&self) -> bool {
-        matches!(self, LangPrimitive::F32 | LangPrimitive::F64)
+        matches!(self, LangPrimitive::F16 | LangPrimitive::F32 | LangPrimitive::F64)
     }
 
     /// Get the bit width of this primitive type.
@@ -453,6 +457,7 @@ impl LangPrimitive {
             LangPrimitive::I1 => 1,
             LangPrimitive::I8 => 8,
             LangPrimitive::I16 => 16,
+            LangPrimitive::F16 => 16,
             LangPrimitive::I32 | LangPrimitive::F32 => 32,
             LangPrimitive::I64 | LangPrimitive::F64 => 64,
         }
@@ -467,6 +472,7 @@ impl LangPrimitive {
             LangPrimitive::I16 => Ty::int(IntBits::I16, span),
             LangPrimitive::I32 => Ty::int(IntBits::I32, span),
             LangPrimitive::I64 => Ty::int(IntBits::I64, span),
+            LangPrimitive::F16 => Ty::float(FloatBits::F16, span),
             LangPrimitive::F32 => Ty::float(FloatBits::F32, span),
             LangPrimitive::F64 => Ty::float(FloatBits::F64, span),
         }

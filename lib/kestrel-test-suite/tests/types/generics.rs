@@ -130,16 +130,14 @@ mod defaults {
 
     #[test]
     fn use_default_type_argument() {
-        // Map[K, V = String] can be used as Map[Int] with V defaulting to String
+        // Even with defaults, an explicit type argument list must provide full arity.
         Test::new(
             r#"module Test
             struct Map[K, V = String] { }
             type IntMap = Map[Int];
         "#,
         )
-        .expect(Compiles)
-        .expect(Symbol::new("Map").has(Behavior::TypeParamCount(2)))
-        .expect(Symbol::new("IntMap").is(SymbolKind::TypeAlias));
+        .expect(HasError("too few type arguments"));
     }
 
     #[test]
@@ -165,10 +163,7 @@ mod defaults {
             type CustomConfig = Config[Bool, Float];
         "#,
         )
-        .expect(Compiles)
-        .expect(Symbol::new("Config").has(Behavior::TypeParamCount(3)))
-        .expect(Symbol::new("SimpleConfig").is(SymbolKind::TypeAlias))
-        .expect(Symbol::new("CustomConfig").is(SymbolKind::TypeAlias));
+        .expect(HasError("too few type arguments"));
     }
 }
 
@@ -582,9 +577,8 @@ mod arity_errors {
 
     #[test]
     fn zero_type_arguments_when_required() {
-        // Using a generic type without [] syntax is a raw type reference, not an instantiation.
-        // This is allowed (e.g., for passing to higher-order generics or future type inference).
-        // Using Box[] (empty brackets) would be different and could trigger arity checking.
+        // Using a generic type without [] syntax is treated as an instantiation where all type
+        // arguments are inferred placeholders.
         Test::new(
             r#"module Test
             struct Box[T] { }
@@ -596,11 +590,10 @@ mod arity_errors {
 
     #[test]
     fn correct_arity_with_defaults() {
-        // Map[K, V = String] allows 1 or 2 type arguments
+        // Even with defaults, an explicit type argument list must provide full arity.
         Test::new(
             r#"module Test
             struct Map[K, V = String] { }
-            type IntMap = Map[Int];
             type IntToInt = Map[Int, Int];
         "#,
         )
@@ -610,8 +603,19 @@ mod arity_errors {
                 .is(SymbolKind::Struct)
                 .has(Behavior::TypeParamCount(2)),
         )
-        .expect(Symbol::new("IntMap").is(SymbolKind::TypeAlias))
         .expect(Symbol::new("IntToInt").is(SymbolKind::TypeAlias));
+    }
+
+    #[test]
+    fn raw_reference_infers_all_type_arguments_even_with_defaults() {
+        Test::new(
+            r#"module Test
+            struct Map[K, V = String] { }
+            type Inferred = Map;
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Inferred").is(SymbolKind::TypeAlias));
     }
 
     #[test]

@@ -31,6 +31,13 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         },
 
         TyKind::Float(bits) => match bits {
+            SemanticFloatBits::F16 => {
+                ctx.emit_error(LoweringError::unsupported_type(
+                    "Float type 'f16'".to_string(),
+                    ty.span().clone(),
+                ));
+                ctx.mir.ty_error()
+            }
             SemanticFloatBits::F32 => ctx.mir.ty_f32(),
             SemanticFloatBits::F64 => ctx.mir.ty_f64(),
         },
@@ -247,6 +254,7 @@ pub fn convert_int_bits(bits: SemanticIntBits) -> kestrel_execution_graph::IntBi
 #[allow(dead_code)]
 pub fn convert_float_bits(bits: SemanticFloatBits) -> kestrel_execution_graph::FloatBits {
     match bits {
+        SemanticFloatBits::F16 => kestrel_execution_graph::FloatBits::F16,
         SemanticFloatBits::F32 => kestrel_execution_graph::FloatBits::F32,
         SemanticFloatBits::F64 => kestrel_execution_graph::FloatBits::F64,
     }

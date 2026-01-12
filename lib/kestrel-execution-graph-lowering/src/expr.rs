@@ -1104,6 +1104,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     use kestrel_semantic_tree::expr::{FloatConstant, LangPrimitive};
 
                     let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
                         LangPrimitive::F32 => FloatBits::F32,
                         LangPrimitive::F64 => FloatBits::F64,
                         _ => unreachable!("float constant on non-float primitive"),
@@ -1129,6 +1130,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     let operand = lower_expression(ctx, &arguments[0].value);
 
                     let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
                         LangPrimitive::F32 => FloatBits::F32,
                         LangPrimitive::F64 => FloatBits::F64,
                         _ => unreachable!("float predicate on non-float primitive"),
@@ -1154,6 +1156,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     let operand = lower_expression(ctx, &arguments[0].value);
 
                     let bits = match primitive {
+                        LangPrimitive::F16 => FloatBits::F16,
                         LangPrimitive::F32 => FloatBits::F32,
                         LangPrimitive::F64 => FloatBits::F64,
                         _ => unreachable!("float math on non-float primitive"),

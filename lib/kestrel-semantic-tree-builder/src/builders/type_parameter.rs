@@ -127,6 +127,7 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
                     lang::I16 => Some(Ty::int(IntBits::I16, span)),
                     lang::I32 => Some(Ty::int(IntBits::I32, span)),
                     lang::I64 => Some(Ty::int(IntBits::I64, span)),
+                    lang::F16 => Some(Ty::float(FloatBits::F16, span)),
                     lang::F32 => Some(Ty::float(FloatBits::F32, span)),
                     lang::F64 => Some(Ty::float(FloatBits::F64, span)),
                     lang::I1 => Some(Ty::bool(span)),
