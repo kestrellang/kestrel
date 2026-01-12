@@ -12,6 +12,9 @@ import std.ops.(
 
 public struct UInt16:
     UnsignedInteger,
+    Integer,
+    Comparable,
+    Equatable,
     Numeric,
     Hashable,
     Addable,

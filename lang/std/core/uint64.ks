@@ -12,6 +12,9 @@ import std.ops.(
 
 public struct UInt64:
     UnsignedInteger,
+    Integer,
+    Comparable,
+    Equatable,
     Numeric,
     Hashable,
     Addable,

@@ -12,6 +12,9 @@ import std.ops.(
 
 public struct UInt8:
     UnsignedInteger,
+    Integer,
+    Comparable,
+    Equatable,
     Numeric,
     Hashable,
     Addable,

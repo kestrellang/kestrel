@@ -26,6 +26,9 @@ import std.ops.(
 
 public struct {{TYPE_NAME}}:
     {{SIGNED_PROTOCOL}},
+    Integer,
+    Comparable,
+    Equatable,
     Numeric,
     Hashable,
     Addable,

@@ -12,6 +12,9 @@ import std.ops.(
 
 public struct Int16:
     SignedInteger,
+    Integer,
+    Comparable,
+    Equatable,
     Numeric,
     Hashable,
     Addable,

@@ -12,6 +12,9 @@ import std.ops.(
 
 public struct Int8:
     SignedInteger,
+    Integer,
+    Comparable,
+    Equatable,
     Numeric,
     Hashable,
     Addable,

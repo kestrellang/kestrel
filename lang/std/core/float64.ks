@@ -11,6 +11,8 @@ import std.ops.(
 
 public struct Float64:
     FloatingPoint,
+    Comparable,
+    Equatable,
     Numeric,
     Addable,
     Subtractable,
