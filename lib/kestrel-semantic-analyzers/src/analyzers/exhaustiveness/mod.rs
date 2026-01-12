@@ -34,12 +34,74 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_pattern_matching::ExhaustivenessChecker;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
+use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 
 mod diagnostics;
 use diagnostics::{
     EmptyMatchError, NonExhaustiveMatchError, OverlappingRangeWarning, UnreachablePatternWarning,
 };
+
+fn resolve_match_scrutinee_type(scrutinee_ty: &Ty, ctx: &AnalysisContext) -> Ty {
+    // Prefer working with expanded aliases so constructor enumeration sees the real type.
+    let scrutinee_ty = scrutinee_ty.expand_aliases();
+
+    if !matches!(scrutinee_ty.kind(), TyKind::SelfType) {
+        return scrutinee_ty;
+    }
+
+    // `Self` for values (e.g. `self`) is represented as TyKind::SelfType.
+    // For exhaustiveness, we want a concrete enum/struct type so we can enumerate constructors.
+    let Some(mut symbol) = ctx.current_symbol() else {
+        return scrutinee_ty;
+    };
+
+    loop {
+        match symbol.metadata().kind() {
+            // Extension methods: `Self` is the extension target type (preserves substitutions).
+            KestrelSymbolKind::Extension => {
+                let ty = symbol
+                    .metadata()
+                    .get_behavior::<ExtensionTargetBehavior>()
+                    .map(|b| b.target_type().clone())
+                    .unwrap_or(scrutinee_ty);
+                return ty.expand_aliases();
+            }
+
+            // Methods inside a struct/enum: `Self` is the container type.
+            KestrelSymbolKind::Struct => {
+                let ty = symbol
+                    .clone()
+                    .downcast_arc::<StructSymbol>()
+                    .map(|sym| Ty::r#struct(sym, scrutinee_ty.span().clone()))
+                    .unwrap_or(scrutinee_ty);
+                return ty.expand_aliases();
+            }
+            KestrelSymbolKind::Enum => {
+                let ty = symbol
+                    .clone()
+                    .downcast_arc::<EnumSymbol>()
+                    .map(|sym| Ty::r#enum(sym, scrutinee_ty.span().clone()))
+                    .unwrap_or(scrutinee_ty);
+                return ty.expand_aliases();
+            }
+
+            // Protocol methods keep `Self` abstract (can't enumerate constructors).
+            KestrelSymbolKind::Protocol => return scrutinee_ty,
+
+            _ => {}
+        }
+
+        let Some(parent) = symbol.metadata().parent() else {
+            return scrutinee_ty;
+        };
+        symbol = parent;
+    }
+}
 
 pub struct ExhaustivenessAnalyzer;
 
@@ -63,7 +125,7 @@ impl Analyzer for ExhaustivenessAnalyzer {
     fn visit_expression(&mut self, expr: &Expression, ctx: &mut AnalysisContext) {
         if let ExprKind::Match { scrutinee, arms } = &expr.kind {
             // Get the scrutinee type
-            let scrutinee_type = &scrutinee.ty;
+            let scrutinee_type = resolve_match_scrutinee_type(&scrutinee.ty, ctx);
 
             // Handle empty match specially
             if arms.is_empty() {
@@ -82,7 +144,7 @@ impl Analyzer for ExhaustivenessAnalyzer {
             let has_guards: Vec<bool> = arms.iter().map(|arm| arm.guard.is_some()).collect();
 
             // Run exhaustiveness check
-            let checker = ExhaustivenessChecker::new(scrutinee_type);
+            let checker = ExhaustivenessChecker::new(&scrutinee_type);
             let result = checker.check(&patterns, &has_guards);
 
             // Report non-exhaustive match

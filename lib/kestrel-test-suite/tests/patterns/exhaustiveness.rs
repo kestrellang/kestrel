@@ -34,6 +34,31 @@ func test(b: Bool) -> Int {
     }
 
     #[test]
+    fn exhaustive_self_match_in_enum_method() {
+        Test::new(
+            r#"
+module Main
+
+enum Toggle {
+    case On
+    case Off
+}
+
+extend Toggle {
+    func asBool() -> Bool {
+        match self {
+            .On => true,
+            .Off => false
+        }
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    #[test]
     fn non_exhaustive_bool() {
         Test::new(
             r#"
