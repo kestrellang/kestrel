@@ -370,6 +370,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     object.ty.id(),
                     field.clone(),
                     false, // instance access
+                    vec![], // no arguments for field access
                     expr.ty.id(),
                     expr.id,
                     expr.span.clone(),
@@ -448,6 +449,10 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
+            // Collect argument type IDs for constraint generation
+            // When the method is resolved, these will be constrained to match parameter types
+            let arg_ty_ids: Vec<_> = arguments.iter().map(|a| a.value.ty.id()).collect();
+
             // Generate a member access constraint to resolve the method once receiver type is known
             ctx.register_type(&receiver.ty);
             ctx.register_type(&expr.ty);
@@ -455,6 +460,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 receiver.ty.id(),
                 method_name.clone(),
                 false, // instance method call
+                arg_ty_ids, // argument types for parameter constraint generation
                 expr.ty.id(),
                 expr.id,
                 expr.span.clone(),

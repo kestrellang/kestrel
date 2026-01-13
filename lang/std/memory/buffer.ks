@@ -3,7 +3,8 @@
 module std.memory
 
 import std.result.(Optional)
-import std.core.(Cloneable, Int)
+import std.core.(Cloneable, Int, Bool)
+import std.ops.(NonCopyable)
 
 public struct Buffer[T, A]: NonCopyable where A: Allocator {
     private var ptr: Pointer[T]
@@ -50,6 +51,16 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     public var capacity: Int { self.cap }
 
     public var pointer: Pointer[T] { self.ptr }
+
+    // Unchecked access - get element at index without bounds checking
+    public func buffer(unchecked index: Int) -> T {
+        self.ptr.offset(by: index).read()
+    }
+
+    // Unchecked set - set element at index without bounds checking
+    public mutating func setBuffer(unchecked index: Int, value: T) {
+        self.ptr.offset(by: index).write(value)
+    }
 
     // Safe access - returns Optional, bounds checked
     //public subscript(safe index: Int) -> Optional[T] {

@@ -72,10 +72,16 @@ impl TypeOracle for SemanticModel {
                             {
                                 let return_ty =
                                     callable.return_type().apply_substitutions(proto_subs);
+                                let parameters: Vec<Ty> = callable
+                                    .parameters()
+                                    .iter()
+                                    .map(|p| p.ty.apply_substitutions(proto_subs))
+                                    .collect();
                                 return Ok(MemberResolution {
                                     ty: return_ty,
                                     symbol_id: member_id,
                                     substitutions: proto_subs.clone(),
+                                    parameters,
                                 });
                             }
                         }
@@ -96,10 +102,16 @@ impl TypeOracle for SemanticModel {
                                 {
                                     let return_ty =
                                         callable.return_type().apply_substitutions(proto_subs);
+                                    let parameters: Vec<Ty> = callable
+                                        .parameters()
+                                        .iter()
+                                        .map(|p| p.ty.apply_substitutions(proto_subs))
+                                        .collect();
                                     return Ok(MemberResolution {
                                         ty: return_ty,
                                         symbol_id: member_id,
                                         substitutions: proto_subs.clone(),
+                                        parameters,
                                     });
                                 }
                             }
@@ -215,10 +227,16 @@ impl TypeOracle for SemanticModel {
                 {
                     if callable.is_static() {
                         let return_ty = callable.return_type().apply_substitutions(&substitutions);
+                        let parameters: Vec<Ty> = callable
+                            .parameters()
+                            .iter()
+                            .map(|p| p.ty.apply_substitutions(&substitutions))
+                            .collect();
                         return Ok(MemberResolution {
                             ty: return_ty,
                             symbol_id: member_id,
                             substitutions,
+                            parameters,
                         });
                     }
                 }
@@ -242,6 +260,7 @@ impl TypeOracle for SemanticModel {
                         ty: member_ty,
                         symbol_id: member_id,
                         substitutions,
+                        parameters: vec![], // field access has no parameters
                     });
                 }
             }
@@ -250,12 +269,18 @@ impl TypeOracle for SemanticModel {
         // Check for method access
         if member_kind == KestrelSymbolKind::Function {
             if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
-                // For methods, return the function type (parameters -> return)
+                // For methods, return the return type and parameter types
                 let return_ty = callable.return_type().apply_substitutions(&substitutions);
+                let parameters: Vec<Ty> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| p.ty.apply_substitutions(&substitutions))
+                    .collect();
                 return Ok(MemberResolution {
                     ty: return_ty,
                     symbol_id: member_id,
                     substitutions,
+                    parameters,
                 });
             }
         }

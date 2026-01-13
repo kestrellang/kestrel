@@ -3,6 +3,7 @@
 module std.result
 
 import std.core.(Equatable, Bool)
+import std.text.(String)
 
 public protocol Error {
     func description() -> String

@@ -203,17 +203,22 @@ impl<'a> InferenceContext<'a> {
     ///
     /// This is used when resolving `receiver.member` where the receiver type
     /// is not yet known.
+    ///
+    /// For method calls, `arguments` contains the type IDs of the call arguments.
+    /// When the method is resolved, constraints will be created to equate
+    /// argument types with parameter types (enabling proper type inference for literals).
     pub fn member_access(
         &mut self,
         receiver: TyId,
         member: String,
         is_static: bool,
+        arguments: Vec<TyId>,
         result: TyId,
         expr_id: ExprId,
         span: Span,
     ) {
         self.constraints.push(Constraint::member_access(
-            receiver, member, is_static, result, expr_id, span,
+            receiver, member, is_static, arguments, result, expr_id, span,
         ));
     }
 

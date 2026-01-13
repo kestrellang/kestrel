@@ -174,10 +174,11 @@ fn try_solve(
             receiver,
             member,
             is_static,
+            arguments,
             result,
             expr_id,
             span,
-        } => resolve_member(ctx, *receiver, member, *is_static, *result, *expr_id, span),
+        } => resolve_member(ctx, *receiver, member, *is_static, arguments, *result, *expr_id, span),
         Constraint::ImplicitMember {
             expr_ty,
             member_name,
@@ -902,6 +903,7 @@ fn resolve_member(
     receiver: TyId,
     member: &str,
     is_static: bool,
+    arguments: &[TyId],
     result: TyId,
     expr_id: kestrel_semantic_tree::expr::ExprId,
     span: &Span,
@@ -933,6 +935,15 @@ fn resolve_member(
             // Register and unify the member type with the result
             ctx.register_type(&resolution.ty);
             ctx.equate(resolution.ty.id(), result, span.clone());
+
+            // Create constraints for argument types vs parameter types.
+            // This enables proper type inference for literals in expressions like `int32 + 5`
+            // where the literal `5` should be constrained to Int32 (not defaulted to Int64).
+            for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
+                ctx.register_type(param_ty);
+                ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
             Ok(SolveResult::Solved)
         }
         Err(MemberError::UnknownType) => {

@@ -2,10 +2,11 @@
 
 module std.collections
 
-import std.core.(Equatable, Hashable, Cloneable, Hasher, Int, Bool)
+import std.core.(Equatable, Hashable, Cloneable, Hasher, Int, Bool, UInt64)
 import std.result.(Optional)
-import std.memory.(Allocator)
+import std.memory.(Allocator, GlobalAllocator)
 import std.iter.(Iterator, Iterable, Collectable)
+import std.collections.(Dictionary, DictionaryIterator)
 
 public struct Set[T, A]:
     Iterable,

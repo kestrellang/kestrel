@@ -2,6 +2,8 @@
 
 module std.core
 
+import std.ops.(ExpressibleByIntLiteral)
+
 // Base numeric protocol
 public protocol Numeric: Equatable, ExpressibleByIntLiteral {
     static var zero: Self { get }

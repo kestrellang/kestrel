@@ -3,6 +3,7 @@
 module std.result
 
 import std.core.(Equatable, Bool)
+import std.text.(String)
 import std.ops.(ExpressibleByNilLiteral, Nil)
 import std.iter.(Iterator, Functor)
 

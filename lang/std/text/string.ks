@@ -280,8 +280,10 @@ public struct String[A]:
                 }
             }
             // Append single byte (careful with UTF-8!)
+            /* TODO: implement byte-by-byte appending with proper COW semantics
             result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i);
             result.storage.value.length = result.storage.value.length + 1;
+            */
             i = i + 1
         }
         result

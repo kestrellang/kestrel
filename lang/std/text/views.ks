@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Int, Bool)
+import std.core.(Equatable, Comparable, Int, Bool, Ordering)
 import std.result.(Optional)
 import std.memory.(Allocator, Slice)
 import std.iter.(Iterator, Iterable)

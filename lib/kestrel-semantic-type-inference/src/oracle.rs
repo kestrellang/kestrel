@@ -17,6 +17,10 @@ pub struct MemberResolution {
     pub symbol_id: SymbolId,
     /// Type argument substitutions from the receiver type
     pub substitutions: Substitutions,
+    /// Parameter types for method calls (empty for field access).
+    /// Used to create constraints between argument types and parameter types
+    /// during type inference, enabling proper type inference for literals.
+    pub parameters: Vec<Ty>,
 }
 
 /// Error when member resolution fails.

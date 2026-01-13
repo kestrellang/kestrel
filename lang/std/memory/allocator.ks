@@ -3,12 +3,12 @@
 module std.memory
 
 import std.result.(Optional)
-import std.core.(Int)
+import std.core.(Int, UInt8)
 
 public protocol Allocator {
-    func allocate(layout: Layout) -> Optional[RawPointer]
-    func deallocate(ptr: RawPointer, layout: Layout)
-    func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer]
+    mutating func allocate(layout: Layout) -> Optional[RawPointer]
+    mutating func deallocate(ptr: RawPointer, layout: Layout)
+    mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer]
 }
 
 // TODO: Protocol extensions not yet supported
@@ -32,7 +32,7 @@ public protocol Allocator {
 public struct SystemAllocator: Allocator {
     public init() {}
 
-    public func allocate(layout: Layout) -> Optional[RawPointer] {
+    public mutating func allocate(layout: Layout) -> Optional[RawPointer] {
         let ptr = lang.alloc(layout.size, layout.alignment);
         if lang.ptr_is_null(ptr) {
             .None
@@ -41,11 +41,11 @@ public struct SystemAllocator: Allocator {
         }
     }
 
-    public func deallocate(ptr: RawPointer, layout: Layout) {
+    public mutating func deallocate(ptr: RawPointer, layout: Layout) {
         lang.dealloc(ptr.raw, layout.size, layout.alignment)
     }
 
-    public func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
+    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
         let newPtr = lang.realloc(ptr.raw, oldLayout.size, newLayout.size, newLayout.alignment);
         if lang.ptr_is_null(newPtr) {
             .None
@@ -81,8 +81,13 @@ public struct ArenaAllocator: Allocator {
         .Some(ptr)
     }
 
-    public func deallocate(ptr: RawPointer, layout: Layout) {
+    public mutating func deallocate(ptr: RawPointer, layout: Layout) {
         // No-op for arena - memory freed all at once
+    }
+
+    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
+        // Arena allocator cannot reuse old blocks
+        .None
     }
 
     public mutating func reset() {
@@ -141,6 +146,11 @@ public struct PoolAllocator[T]: Allocator {
         node.pointee = FreeNode(next: self.freeList);
         self.freeList = .Some(node);
         self.allocated = self.allocated - 1
+    }
+
+    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
+        // Pool allocator cannot resize blocks
+        .None
     }
 
     public var count: Int {
