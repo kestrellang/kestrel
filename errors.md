@@ -2,79 +2,79 @@
 
 | Error Message | Count |
 | :--- | :--- |
-| type `Self` does not conform to protocol `ExpressibleByIntLiteral` | 25 |
-| undefined name 'lang' | 24 |
-| if condition must conform to `BooleanConditional`, found `_` | 16 |
-| member not found: `equals` on type `<error>` | 13 |
+| if condition must conform to `BooleanConditional`, found `_` | 19 |
 | cannot access member on type '[UInt8]' | 12 |
 | no method 'write' on type 'H' matches the provided arguments | 11 |
-| type arguments cannot be applied to a language intrinsic | 11 |
 | no matching initializer for struct 'UInt32' | 10 |
 | no matching initializer for struct 'UInt8' | 10 |
-| cannot find type 'lang' in this scope | 9 |
-| member 'raw' is private and not accessible from this scope | 7 |
+| type arguments cannot be applied to a language intrinsic | 9 |
+| cannot find type 'Int' in this scope | 6 |
 | member 'substringBytes' is private and not accessible from this scope | 6 |
+| member not found: `equals` on type `<error>` | 6 |
 | member not found: `shiftLeft` on type `<error>` | 6 |
-| non-exhaustive match expression | 6 |
-| type mismatch: expected `T`, found `Self` | 6 |
+| undefined name 'Buffer' | 6 |
 | member not found: `equals` on type `T` | 5 |
-| no matching overload for 'array' with 1 argument(s) | 5 |
 | cannot find type 'Array' in this scope | 4 |
 | cannot use 'self' in free function | 4 |
 | type mismatch: expected `Optional[T]`, found `Self` | 4 |
+| undefined name 'ArcBox' | 4 |
+| cannot find type 'Buffer' in this scope | 3 |
 | could not infer type for 1 placeholder(s) | 3 |
-| no method 'buffer' on type 'StringStorage[A]' | 3 |
 | no method 'byteAt' on type 'String[A]' matches the provided arguments | 3 |
-| undeclared type parameter 'T' in where clause | 3 |
 | undefined name 'Dictionary' | 3 |
 | cannot access member on type 'I16' | 2 |
 | cannot access member on type 'I32' | 2 |
 | cannot access member on type 'I64' | 2 |
 | cannot access member on type 'Self' | 2 |
-| cannot assign to immutable field 'length' | 2 |
-| cannot assign to immutable field 'pointee' | 2 |
+| cannot assign to this expression | 2 |
 | cannot find type 'DictionaryIterator' in this scope | 2 |
 | cannot find type 'I' in this scope | 2 |
-| initializer does not initialize all fields: 'ptr', 'cap' | 2 |
+| member 'raw' is private and not accessible from this scope | 2 |
+| member not found: `lessThan` on type `<error>` | 2 |
 | no matching overload for 'decodeUtf8' with 2 argument(s) | 2 |
-| no method 'allocate' on type 'A' matches the provided arguments | 2 |
 | no method 'ensureCapacity' on type 'String' matches the provided arguments | 2 |
+| non-exhaustive match expression | 2 |
 | symbol 'Array' not found in module 'std.collections' | 2 |
 | type mismatch: expected `Ordering`, found `Self` | 2 |
+| undeclared type parameter 'T' in where clause | 2 |
 | 'Equal' is not a type | 1 |
 | 'Optional' is not a protocol; bound must be a protocol | 1 |
+| Parse error: found 'RBrace' at 3675..3676 expected something else, 'LParen', 'Dot', 'Bang', 'LBrace', 'Equals', or 'Semicolon' | 1 |
 | Parse error: found 'Underscore' at 2353..2354 expected something else, 'Mutating', 'Consuming', or 'RParen' | 1 |
 | Parse error: found 'Underscore' at 6127..6128 expected something else, 'Mutating', 'Consuming', or 'RParen' | 1 |
 | cannot access member on type 'I.Item' | 1 |
 | cannot access member on type 'Inner.Iter' | 1 |
 | cannot access member on type 'Int' | 1 |
-| cannot call 'clone' on type 'T' | 1 |
+| cannot assign to immutable field 'pointee' | 1 |
+| cannot find type 'ArcBox' in this scope | 1 |
 | cannot find type 'Dictionary' in this scope | 1 |
-| cannot find type 'NonCopyable' in this scope | 1 |
-| initializer does not initialize all fields: 'ptr' | 1 |
+| function 'malloc' does not return a value on all code paths | 1 |
+| function 'memcpy' does not return a value on all code paths | 1 |
+| function 'memmove' does not return a value on all code paths | 1 |
+| function 'memset' does not return a value on all code paths | 1 |
+| function 'realloc' does not return a value on all code paths | 1 |
 | initializer does not initialize all fields: 'storage' | 1 |
 | member 'storage' is private and not accessible from this scope | 1 |
 | member not found: `None` on type `Self` | 1 |
 | member not found: `Some` on type `Self` | 1 |
 | member not found: `add` on type `String` | 1 |
 | member not found: `logicalNot` on type `<error>` | 1 |
-| no matching initializer for struct 'ArcBox' | 1 |
+| member not found: `multiply` on type `<error>` | 1 |
 | no matching initializer for struct 'UInt64' | 1 |
 | no member 'toBytes' on type 'UInt64' | 1 |
 | no method 'action' on type 'InspectIterator' | 1 |
-| no method 'deallocate' on type 'A' matches the provided arguments | 1 |
 | no method 'insert' on type 'Set' matches the provided arguments | 1 |
 | no method 'predicate' on type 'FilterIterator' | 1 |
 | no method 'predicate' on type 'SkipWhileIterator' | 1 |
 | no method 'predicate' on type 'TakeWhileIterator' | 1 |
-| no method 'reallocate' on type 'A' matches the provided arguments | 1 |
 | no method 'transform' on type 'FilterMapIterator' | 1 |
 | no method 'transform' on type 'FlatMapIterator' | 1 |
 | struct `SplitIterator` has Cloneable field `string` but does not conform to Cloneable | 1 |
+| symbol 'ArcBox' not found in module 'std.memory' | 1 |
+| symbol 'Buffer' not found in module 'std.memory' | 1 |
 | symbol 'Dictionary' not found in module 'std.collections' | 1 |
 | symbol 'DictionaryIterator' not found in module 'std.collections' | 1 |
 | symbol 'Nil' not found in module 'std.ops' | 1 |
-| symbol 'NonCopyable' not found in module 'std.ops' | 1 |
 | type 'Break' is ambiguous | 1 |
 | type 'BytesIterator' does not satisfy bound | 1 |
 | type 'CharsIterator' does not satisfy bound | 1 |
@@ -94,71 +94,20 @@
 | type mismatch: expected `Self`, found `Result[_, _]` | 1 |
 | undefined name 'bitwiseAnd' | 1 |
 | undefined name 'bitwiseNot' | 1 |
+| while condition must conform to `BooleanConditional`, found `_` | 1 |
 
 2. Details
-
-type `Self` does not conform to protocol `ExpressibleByIntLiteral`
-Call Sites
-- lang/std/iter/adapters.ks:135:29
-- lang/std/iter/adapters.ks:186:32
-- lang/std/iter/adapters.ks:492:29
-- lang/std/memory/buffer.ks:144:21
-- lang/std/memory/pointer.ks:139:21
-- lang/std/memory/pointer.ks:153:23
-- lang/std/memory/pointer.ks:161:23
-- lang/std/memory/pointer.ks:193:29
-- lang/std/text/string.ks:113:34
-- lang/std/text/string.ks:234:21
-- lang/std/text/char.ks:24:22
-- lang/std/text/char.ks:28:24
-- lang/std/text/char.ks:28:45
-- lang/std/text/char.ks:29:24
-- lang/std/text/char.ks:29:45
-- lang/std/text/char.ks:34:23
-- lang/std/text/char.ks:34:44
-- lang/std/text/char.ks:50:22
-- lang/std/text/char.ks:54:23
-- lang/std/text/char.ks:54:44
-- lang/std/text/char.ks:58:23
-- lang/std/text/char.ks:58:44
-- lang/std/text/char.ks:79:25
-- lang/std/text/char.ks:80:30
-- lang/std/text/char.ks:81:30
-
-undefined name 'lang'
-Call Sites
-- lang/std/result/result.ks:58:28
-- lang/std/result/result.ks:78:27
-- lang/std/result/result.ks:87:28
-- lang/std/result/result.ks:93:23
-- lang/std/result/optional.ks:47:22
-- lang/std/result/optional.ks:69:22
-- lang/std/iter/adapters.ks:98:9
-- lang/std/core/bool.ks:27:27
-- lang/std/core/bool.ks:45:27
-- lang/std/core/bool.ks:50:27
-- lang/std/core/bool.ks:55:27
-- lang/std/memory/buffer.ks:23:22
-- lang/std/memory/buffer.ks:35:22
-- lang/std/memory/buffer.ks:111:9
-- lang/std/memory/buffer.ks:117:9
-- lang/std/memory/buffer.ks:121:9
-- lang/std/memory/buffer.ks:134:22
-- lang/std/memory/buffer.ks:169:22
-- lang/std/memory/buffer.ks:182:9
-- lang/std/memory/buffer.ks:191:12
-- lang/std/memory/allocator.ks:36:19
-- lang/std/memory/allocator.ks:45:9
-- lang/std/memory/allocator.ks:49:22
-- lang/std/memory/layout.ks:18:51
 
 if condition must conform to `BooleanConditional`, found `_`
 Call Sites
 - lang/std/iter/adapters.ks:216:16
-- lang/std/memory/buffer.ks:191:12
+- lang/std/memory/allocator.ks:78:12
 - lang/std/ops/range.ks:127:19
 - lang/std/text/views.ks:222:16
 - lang/std/text/views.ks:226:23
+- lang/std/text/string.ks:104:12
+- lang/std/text/string.ks:111:12
+- lang/std/text/string.ks:112:34
 - lang/std/text/string.ks:223:16
 - lang/std/text/string.ks:236:16
 - lang/std/text/char.ks:179:8
@@ -170,22 +119,6 @@ Call Sites
 - lang/std/text/char.ks:202:15
 - lang/std/text/char.ks:208:12
 - lang/std/collections/set.ks:57:12
-
-member not found: `equals` on type `<error>`
-Call Sites
-- lang/std/text/views.ks:222:16
-- lang/std/text/views.ks:226:23
-- lang/std/text/views.ks:230:63
-- lang/std/text/string.ks:223:16
-- lang/std/text/string.ks:223:30
-- lang/std/text/string.ks:223:43
-- lang/std/text/string.ks:223:57
-- lang/std/text/string.ks:236:16
-- lang/std/text/string.ks:236:30
-- lang/std/text/string.ks:236:43
-- lang/std/text/string.ks:236:57
-- lang/std/text/char.ks:146:9
-- lang/std/text/char.ks:160:9
 
 cannot access member on type '[UInt8]'
 Call Sites
@@ -216,20 +149,6 @@ Call Sites
 - lang/std/core/bool.ks:35:13
 - lang/std/collections/set.ks:229:9
 
-type arguments cannot be applied to a language intrinsic
-Call Sites
-- lang/std/memory/buffer.ks:111:79
-- lang/std/memory/buffer.ks:117:80
-- lang/std/memory/buffer.ks:121:57
-- lang/std/memory/pointer.ks:36:22
-- lang/std/memory/pointer.ks:61:22
-- lang/std/memory/pointer.ks:70:29
-- lang/std/memory/pointer.ks:74:26
-- lang/std/memory/pointer.ks:86:69
-- lang/std/memory/pointer.ks:86:22
-- lang/std/memory/pointer.ks:90:25
-- lang/std/memory/layout.ks:18:22
-
 no matching initializer for struct 'UInt32'
 Call Sites
 - lang/std/text/char.ks:181:40
@@ -256,27 +175,26 @@ Call Sites
 - lang/std/text/char.ks:103:31
 - lang/std/text/char.ks:104:31
 
-cannot find type 'lang' in this scope
+type arguments cannot be applied to a language intrinsic
 Call Sites
-- lang/std/core/bool.ks:18:24
-- lang/std/memory/pointer.ks:13:31
-- lang/std/memory/pointer.ks:15:31
-- lang/std/memory/pointer.ks:70:43
-- lang/std/memory/pointer.ks:70:43
-- lang/std/memory/pointer.ks:74:40
-- lang/std/memory/pointer.ks:74:40
-- lang/std/memory/pointer.ks:90:39
-- lang/std/memory/pointer.ks:90:39
+- lang/std/memory/pointer.ks:36:22
+- lang/std/memory/pointer.ks:61:22
+- lang/std/memory/pointer.ks:70:29
+- lang/std/memory/pointer.ks:74:26
+- lang/std/memory/pointer.ks:86:69
+- lang/std/memory/pointer.ks:86:22
+- lang/std/memory/pointer.ks:90:25
+- lang/std/memory/layout.ks:18:22
+- lang/std/memory/layout.ks:18:51
 
-member 'raw' is private and not accessible from this scope
+cannot find type 'Int' in this scope
 Call Sites
-- lang/std/memory/buffer.ks:111:38
-- lang/std/memory/buffer.ks:111:62
-- lang/std/memory/buffer.ks:117:39
-- lang/std/memory/buffer.ks:117:63
-- lang/std/memory/buffer.ks:121:38
-- lang/std/memory/allocator.ks:45:26
-- lang/std/memory/allocator.ks:49:39
+- lang/std/ffi/libc.ks:9:26
+- lang/std/ffi/libc.ks:15:51
+- lang/std/ffi/libc.ks:19:72
+- lang/std/ffi/libc.ks:22:73
+- lang/std/ffi/libc.ks:25:48
+- lang/std/ffi/libc.ks:25:56
 
 member 'substringBytes' is private and not accessible from this scope
 Call Sites
@@ -287,6 +205,15 @@ Call Sites
 - lang/std/text/string.ks:400:42
 - lang/std/text/string.ks:410:38
 
+member not found: `equals` on type `<error>`
+Call Sites
+- lang/std/text/views.ks:222:16
+- lang/std/text/views.ks:226:23
+- lang/std/text/views.ks:230:63
+- lang/std/text/string.ks:112:34
+- lang/std/text/char.ks:146:9
+- lang/std/text/char.ks:160:9
+
 member not found: `shiftLeft` on type `<error>`
 Call Sites
 - lang/std/text/char.ks:190:22
@@ -296,23 +223,14 @@ Call Sites
 - lang/std/text/char.ks:212:22
 - lang/std/text/char.ks:213:22
 
-non-exhaustive match expression
+undefined name 'Buffer'
 Call Sites
-- lang/std/result/result.ks:171:9
-- lang/std/memory/buffer.ks:18:9
-- lang/std/memory/buffer.ks:30:9
-- lang/std/memory/buffer.ks:129:9
-- lang/std/memory/buffer.ks:164:9
-- lang/std/text/char.ks:87:9
-
-type mismatch: expected `T`, found `Self`
-Call Sites
-- lang/std/ops/range.ks:36:9
-- lang/std/ops/range.ks:36:33
-- lang/std/ops/range.ks:69:12
-- lang/std/ops/range.ks:90:9
-- lang/std/ops/range.ks:90:33
-- lang/std/ops/range.ks:130:19
+- lang/std/memory/allocator.ks:70:23
+- lang/std/memory/allocator.ks:120:23
+- lang/std/text/string.ks:32:21
+- lang/std/text/string.ks:39:21
+- lang/std/text/string.ks:46:21
+- lang/std/text/string.ks:59:21
 
 member not found: `equals` on type `T`
 Call Sites
@@ -321,14 +239,6 @@ Call Sites
 - lang/std/ops/range.ks:98:9
 - lang/std/ops/range.ks:98:39
 - lang/std/ops/range.ks:127:19
-
-no matching overload for 'array' with 1 argument(s)
-Call Sites
-- lang/std/memory/buffer.ks:17:22
-- lang/std/memory/buffer.ks:29:22
-- lang/std/memory/buffer.ks:47:22
-- lang/std/memory/buffer.ks:126:25
-- lang/std/memory/buffer.ks:127:25
 
 cannot find type 'Array' in this scope
 Call Sites
@@ -351,29 +261,30 @@ Call Sites
 - lang/std/result/optional.ks:161:9
 - lang/std/result/optional.ks:161:9
 
+undefined name 'ArcBox'
+Call Sites
+- lang/std/text/string.ks:31:24
+- lang/std/text/string.ks:38:24
+- lang/std/text/string.ks:45:24
+- lang/std/text/string.ks:58:24
+
+cannot find type 'Buffer' in this scope
+Call Sites
+- lang/std/memory/allocator.ks:66:25
+- lang/std/memory/allocator.ks:111:25
+- lang/std/text/string.ks:25:21
+
 could not infer type for 1 placeholder(s)
 Call Sites
 - lang/std/iter/adapters.ks:61:20
 - lang/std/iter/adapters.ks:92:20
 - lang/std/text/string.ks:381:20
 
-no method 'buffer' on type 'StringStorage[A]'
-Call Sites
-- lang/std/text/string.ks:222:24
-- lang/std/text/string.ks:235:24
-- lang/std/text/string.ks:351:9
-
 no method 'byteAt' on type 'String[A]' matches the provided arguments
 Call Sites
 - lang/std/text/views.ks:77:24
 - lang/std/text/views.ks:221:24
 - lang/std/text/views.ks:230:63
-
-undeclared type parameter 'T' in where clause
-Call Sites
-- lang/std/result/result.ks:170:61
-- lang/std/memory/buffer.ks:186:48
-- lang/std/collections/set.ks:195:44
 
 undefined name 'Dictionary'
 Call Sites
@@ -401,15 +312,10 @@ Call Sites
 - lang/std/result/result.ks:152:9
 - lang/std/result/optional.ks:126:9
 
-cannot assign to immutable field 'length'
+cannot assign to this expression
 Call Sites
 - lang/std/text/string.ks:146:9
 - lang/std/text/string.ks:345:9
-
-cannot assign to immutable field 'pointee'
-Call Sites
-- lang/std/memory/buffer.ks:167:17
-- lang/std/memory/allocator.ks:146:9
 
 cannot find type 'DictionaryIterator' in this scope
 Call Sites
@@ -421,25 +327,30 @@ Call Sites
 - lang/std/iter/iterator.ks:22:24
 - lang/std/collections/set.ks:39:31
 
-initializer does not initialize all fields: 'ptr', 'cap'
+member 'raw' is private and not accessible from this scope
 Call Sites
-- lang/std/memory/buffer.ks:15:5
-- lang/std/memory/buffer.ks:27:5
+- lang/std/memory/allocator.ks:48:18
+- lang/std/memory/allocator.ks:52:34
+
+member not found: `lessThan` on type `<error>`
+Call Sites
+- lang/std/text/string.ks:111:12
+- lang/std/text/string.ks:116:23
 
 no matching overload for 'decodeUtf8' with 2 argument(s)
 Call Sites
 - lang/std/text/views.ks:127:28
 - lang/std/text/string.ks:381:32
 
-no method 'allocate' on type 'A' matches the provided arguments
-Call Sites
-- lang/std/memory/buffer.ks:18:15
-- lang/std/memory/buffer.ks:30:15
-
 no method 'ensureCapacity' on type 'String' matches the provided arguments
 Call Sites
 - lang/std/text/string.ks:127:9
 - lang/std/text/string.ks:137:9
+
+non-exhaustive match expression
+Call Sites
+- lang/std/result/result.ks:171:9
+- lang/std/text/char.ks:87:9
 
 symbol 'Array' not found in module 'std.collections'
 Call Sites
@@ -451,6 +362,11 @@ Call Sites
 - lang/std/core/ordering.ks:46:18
 - lang/std/core/ordering.ks:53:18
 
+undeclared type parameter 'T' in where clause
+Call Sites
+- lang/std/result/result.ks:170:61
+- lang/std/collections/set.ks:195:44
+
 'Equal' is not a type
 Call Sites
 - lang/std/core/ordering.ks:8:34
@@ -458,6 +374,10 @@ Call Sites
 'Optional' is not a protocol; bound must be a protocol
 Call Sites
 - lang/std/result/result.ks:170:64
+
+Parse error: found 'RBrace' at 3675..3676 expected something else, 'LParen', 'Dot', 'Bang', 'LBrace', 'Equals', or 'Semicolon'
+Call Sites
+- lang/std/memory/buffer.ks:113:5
 
 Parse error: found 'Underscore' at 2353..2354 expected something else, 'Mutating', 'Consuming', or 'RParen'
 Call Sites
@@ -479,21 +399,37 @@ cannot access member on type 'Int'
 Call Sites
 - lang/std/text/views.ks:261:9
 
-cannot call 'clone' on type 'T'
+cannot assign to immutable field 'pointee'
 Call Sites
-- lang/std/memory/buffer.ks:187:23
+- lang/std/memory/allocator.ks:149:9
+
+cannot find type 'ArcBox' in this scope
+Call Sites
+- lang/std/text/string.ks:22:26
 
 cannot find type 'Dictionary' in this scope
 Call Sites
 - lang/std/collections/set.ks:23:23
 
-cannot find type 'NonCopyable' in this scope
+function 'malloc' does not return a value on all code paths
 Call Sites
-- lang/std/memory/buffer.ks:9:29
+- lang/std/ffi/libc.ks:9:13
 
-initializer does not initialize all fields: 'ptr'
+function 'memcpy' does not return a value on all code paths
 Call Sites
-- lang/std/memory/buffer.ks:161:5
+- lang/std/ffi/libc.ks:19:13
+
+function 'memmove' does not return a value on all code paths
+Call Sites
+- lang/std/ffi/libc.ks:22:13
+
+function 'memset' does not return a value on all code paths
+Call Sites
+- lang/std/ffi/libc.ks:25:13
+
+function 'realloc' does not return a value on all code paths
+Call Sites
+- lang/std/ffi/libc.ks:15:13
 
 initializer does not initialize all fields: 'storage'
 Call Sites
@@ -519,9 +455,9 @@ member not found: `logicalNot` on type `<error>`
 Call Sites
 - lang/std/iter/adapters.ks:216:16
 
-no matching initializer for struct 'ArcBox'
+member not found: `multiply` on type `<error>`
 Call Sites
-- lang/std/memory/buffer.ks:183:9
+- lang/std/text/string.ks:117:27
 
 no matching initializer for struct 'UInt64'
 Call Sites
@@ -534,10 +470,6 @@ Call Sites
 no method 'action' on type 'InspectIterator'
 Call Sites
 - lang/std/iter/adapters.ks:116:13
-
-no method 'deallocate' on type 'A' matches the provided arguments
-Call Sites
-- lang/std/memory/buffer.ks:48:9
 
 no method 'insert' on type 'Set' matches the provided arguments
 Call Sites
@@ -555,10 +487,6 @@ no method 'predicate' on type 'TakeWhileIterator'
 Call Sites
 - lang/std/iter/adapters.ks:164:16
 
-no method 'reallocate' on type 'A' matches the provided arguments
-Call Sites
-- lang/std/memory/buffer.ks:129:15
-
 no method 'transform' on type 'FilterMapIterator'
 Call Sites
 - lang/std/iter/adapters.ks:61:29
@@ -571,6 +499,14 @@ struct `SplitIterator` has Cloneable field `string` but does not conform to Clon
 Call Sites
 - lang/std/text/string.ks:359:5
 
+symbol 'ArcBox' not found in module 'std.memory'
+Call Sites
+- lang/std/text/string.ks:7:31
+
+symbol 'Buffer' not found in module 'std.memory'
+Call Sites
+- lang/std/text/string.ks:7:39
+
 symbol 'Dictionary' not found in module 'std.collections'
 Call Sites
 - lang/std/collections/set.ks:9:25
@@ -582,10 +518,6 @@ Call Sites
 symbol 'Nil' not found in module 'std.ops'
 Call Sites
 - lang/std/result/optional.ks:7:42
-
-symbol 'NonCopyable' not found in module 'std.ops'
-Call Sites
-- lang/std/memory/buffer.ks:7:17
 
 type 'Break' is ambiguous
 Call Sites
@@ -657,8 +589,12 @@ Call Sites
 
 undefined name 'bitwiseAnd'
 Call Sites
-- lang/std/memory/allocator.ks:73:66
+- lang/std/memory/allocator.ks:76:66
 
 undefined name 'bitwiseNot'
 Call Sites
-- lang/std/memory/allocator.ks:73:100
+- lang/std/memory/allocator.ks:76:100
+
+while condition must conform to `BooleanConditional`, found `_`
+Call Sites
+- lang/std/text/string.ks:116:23

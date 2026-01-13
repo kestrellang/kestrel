@@ -70,12 +70,18 @@ impl TypeOracle for SemanticModel {
                             if let Some(callable) =
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
-                                let return_ty =
-                                    callable.return_type().apply_substitutions(proto_subs);
+                                // Substitute type parameters and Self (Self = the type parameter)
+                                let return_ty = callable
+                                    .return_type()
+                                    .apply_substitutions(proto_subs)
+                                    .substitute_self(receiver_ty);
                                 let parameters: Vec<Ty> = callable
                                     .parameters()
                                     .iter()
-                                    .map(|p| p.ty.apply_substitutions(proto_subs))
+                                    .map(|p| {
+                                        p.ty.apply_substitutions(proto_subs)
+                                            .substitute_self(receiver_ty)
+                                    })
                                     .collect();
                                 return Ok(MemberResolution {
                                     ty: return_ty,
@@ -100,12 +106,18 @@ impl TypeOracle for SemanticModel {
                                 if let Some(callable) =
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
-                                    let return_ty =
-                                        callable.return_type().apply_substitutions(proto_subs);
+                                    // Substitute type parameters and Self (Self = the type parameter)
+                                    let return_ty = callable
+                                        .return_type()
+                                        .apply_substitutions(proto_subs)
+                                        .substitute_self(receiver_ty);
                                     let parameters: Vec<Ty> = callable
                                         .parameters()
                                         .iter()
-                                        .map(|p| p.ty.apply_substitutions(proto_subs))
+                                        .map(|p| {
+                                            p.ty.apply_substitutions(proto_subs)
+                                                .substitute_self(receiver_ty)
+                                        })
                                         .collect();
                                     return Ok(MemberResolution {
                                         ty: return_ty,
@@ -226,11 +238,18 @@ impl TypeOracle for SemanticModel {
                 if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
                 {
                     if callable.is_static() {
-                        let return_ty = callable.return_type().apply_substitutions(&substitutions);
+                        // Substitute both type parameters and Self with the receiver type
+                        let return_ty = callable
+                            .return_type()
+                            .apply_substitutions(&substitutions)
+                            .substitute_self(receiver_ty);
                         let parameters: Vec<Ty> = callable
                             .parameters()
                             .iter()
-                            .map(|p| p.ty.apply_substitutions(&substitutions))
+                            .map(|p| {
+                                p.ty.apply_substitutions(&substitutions)
+                                    .substitute_self(receiver_ty)
+                            })
                             .collect();
                         return Ok(MemberResolution {
                             ty: return_ty,
@@ -254,8 +273,11 @@ impl TypeOracle for SemanticModel {
         for behavior in member_symbol.metadata().behaviors() {
             if behavior.kind() == KestrelBehaviorKind::MemberAccess {
                 if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
-                    let mut member_ty = access.member_type().clone();
-                    member_ty = member_ty.apply_substitutions(&substitutions);
+                    // Substitute type parameters and Self with the receiver type
+                    let member_ty = access
+                        .member_type()
+                        .apply_substitutions(&substitutions)
+                        .substitute_self(receiver_ty);
                     return Ok(MemberResolution {
                         ty: member_ty,
                         symbol_id: member_id,
@@ -270,11 +292,18 @@ impl TypeOracle for SemanticModel {
         if member_kind == KestrelSymbolKind::Function {
             if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
                 // For methods, return the return type and parameter types
-                let return_ty = callable.return_type().apply_substitutions(&substitutions);
+                // Substitute both type parameters and Self with the receiver type
+                let return_ty = callable
+                    .return_type()
+                    .apply_substitutions(&substitutions)
+                    .substitute_self(receiver_ty);
                 let parameters: Vec<Ty> = callable
                     .parameters()
                     .iter()
-                    .map(|p| p.ty.apply_substitutions(&substitutions))
+                    .map(|p| {
+                        p.ty.apply_substitutions(&substitutions)
+                            .substitute_self(receiver_ty)
+                    })
                     .collect();
                 return Ok(MemberResolution {
                     ty: return_ty,
