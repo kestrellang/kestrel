@@ -172,18 +172,39 @@ fn resolve_getter_body(
 
 /// Get the type of `self` for a getter
 ///
-/// Returns the type of the containing struct (grandparent of the getter).
+/// Returns the concrete type of the containing struct (grandparent of the getter).
 /// The hierarchy is: Struct -> Field -> Getter
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    // Getter's parent is Field, Field's parent is Struct
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::ty::Substitutions;
+
+    // Getter's parent is Field, Field's parent is Struct/Extension
     let field = symbol.metadata().parent()?;
     let struct_parent = field.metadata().parent()?;
     let struct_span = struct_parent.metadata().span().clone();
 
     match struct_parent.metadata().kind() {
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Extension => {
-            // Use Self type which refers to the containing struct
-            Some(Ty::self_type(struct_span))
+        KestrelSymbolKind::Struct => {
+            // Create concrete struct type with type parameters mapping to themselves
+            let struct_arc = Arc::clone(&struct_parent).downcast_arc::<StructSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = struct_parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), struct_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_struct(struct_arc, substitutions, struct_span))
+        }
+        KestrelSymbolKind::Extension => {
+            // For extension properties, use the target type
+            struct_parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
+                .map(|b| b.target_type().clone())
         }
         _ => None,
     }

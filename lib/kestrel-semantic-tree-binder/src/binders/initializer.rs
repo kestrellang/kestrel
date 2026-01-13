@@ -197,15 +197,28 @@ fn resolve_initializer_body(
 
 /// Get the type of `self` for an initializer
 ///
-/// Returns the type of the containing struct.
+/// Returns the concrete type of the containing struct with type parameters.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::ty::Substitutions;
+
     let parent = symbol.metadata().parent()?;
     let parent_span = parent.metadata().span().clone();
 
     match parent.metadata().kind() {
         KestrelSymbolKind::Struct => {
-            // Use Self type which refers to the containing struct
-            Some(Ty::self_type(parent_span))
+            // Create concrete struct type with type parameters mapping to themselves
+            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
         }
         _ => None,
     }

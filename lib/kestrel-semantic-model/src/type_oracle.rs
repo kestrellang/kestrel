@@ -63,44 +63,13 @@ impl TypeOracle for SemanticModel {
                     substitutions: proto_subs,
                 } = bound.kind()
                 {
-                    // First check protocol's direct members
-                    for child in proto.metadata().children() {
-                        if child.metadata().name().value == member {
-                            let member_id = child.metadata().id();
-                            if let Some(callable) =
-                                child.metadata().get_behavior::<CallableBehavior>()
-                            {
-                                // Substitute type parameters and Self (Self = the type parameter)
-                                let return_ty = callable
-                                    .return_type()
-                                    .apply_substitutions(proto_subs)
-                                    .substitute_self(receiver_ty);
-                                let parameters: Vec<Ty> = callable
-                                    .parameters()
-                                    .iter()
-                                    .map(|p| {
-                                        p.ty.apply_substitutions(proto_subs)
-                                            .substitute_self(receiver_ty)
-                                    })
-                                    .collect();
-                                return Ok(MemberResolution {
-                                    ty: return_ty,
-                                    symbol_id: member_id,
-                                    substitutions: proto_subs.clone(),
-                                    parameters,
-                                });
-                            }
-                        }
-                    }
+                    // Collect the protocol and all its inherited protocols
+                    // E.g., for Comparable, this returns [Comparable, Equatable]
+                    let all_protocols = collect_protocols_with_inherited(proto, proto_subs);
 
-                    // Then check extensions on the protocol
-                    let proto_id = proto.metadata().id();
-                    let proto_extensions = self.query(ExtensionsFor {
-                        target_id: proto_id,
-                    });
-
-                    for ext in &proto_extensions {
-                        for child in ext.metadata().children() {
+                    for (current_proto, current_subs) in &all_protocols {
+                        // Check protocol's direct members
+                        for child in current_proto.metadata().children() {
                             if child.metadata().name().value == member {
                                 let member_id = child.metadata().id();
                                 if let Some(callable) =
@@ -109,22 +78,59 @@ impl TypeOracle for SemanticModel {
                                     // Substitute type parameters and Self (Self = the type parameter)
                                     let return_ty = callable
                                         .return_type()
-                                        .apply_substitutions(proto_subs)
+                                        .apply_substitutions(current_subs)
                                         .substitute_self(receiver_ty);
                                     let parameters: Vec<Ty> = callable
                                         .parameters()
                                         .iter()
                                         .map(|p| {
-                                            p.ty.apply_substitutions(proto_subs)
+                                            p.ty.apply_substitutions(current_subs)
                                                 .substitute_self(receiver_ty)
                                         })
                                         .collect();
                                     return Ok(MemberResolution {
                                         ty: return_ty,
                                         symbol_id: member_id,
-                                        substitutions: proto_subs.clone(),
+                                        substitutions: current_subs.clone(),
                                         parameters,
                                     });
+                                }
+                            }
+                        }
+
+                        // Check extensions on this protocol
+                        let current_proto_id = current_proto.metadata().id();
+                        let proto_extensions = self.query(ExtensionsFor {
+                            target_id: current_proto_id,
+                        });
+
+                        for ext in &proto_extensions {
+                            for child in ext.metadata().children() {
+                                if child.metadata().name().value == member {
+                                    let member_id = child.metadata().id();
+                                    if let Some(callable) =
+                                        child.metadata().get_behavior::<CallableBehavior>()
+                                    {
+                                        // Substitute type parameters and Self (Self = the type parameter)
+                                        let return_ty = callable
+                                            .return_type()
+                                            .apply_substitutions(current_subs)
+                                            .substitute_self(receiver_ty);
+                                        let parameters: Vec<Ty> = callable
+                                            .parameters()
+                                            .iter()
+                                            .map(|p| {
+                                                p.ty.apply_substitutions(current_subs)
+                                                    .substitute_self(receiver_ty)
+                                            })
+                                            .collect();
+                                        return Ok(MemberResolution {
+                                            ty: return_ty,
+                                            symbol_id: member_id,
+                                            substitutions: current_subs.clone(),
+                                            parameters,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -634,6 +640,249 @@ impl TypeOracle for SemanticModel {
     }
 }
 
+// ============================================================================
+// ContextualOracle: Oracle with function context for extension bound lookup
+// ============================================================================
+
+use crate::queries::SymbolFor;
+
+/// Oracle wrapper that has context about the current function being analyzed.
+///
+/// This allows extension where clause bounds to be discovered when resolving
+/// members on type parameters. Without context, the oracle can only find bounds
+/// from the type parameter's parent chain (struct/protocol), missing constraints
+/// added by extensions like `extend Optional[T]: Equatable where T: Equatable`.
+pub struct ContextualOracle<'a> {
+    model: &'a SemanticModel,
+    context_symbol_id: SymbolId,
+}
+
+impl<'a> ContextualOracle<'a> {
+    /// Create a new contextual oracle.
+    ///
+    /// # Arguments
+    /// * `model` - The semantic model
+    /// * `context_symbol_id` - The function/initializer being analyzed
+    pub fn new(model: &'a SemanticModel, context_symbol_id: SymbolId) -> Self {
+        Self {
+            model,
+            context_symbol_id,
+        }
+    }
+}
+
+impl TypeOracle for ContextualOracle<'_> {
+    fn resolve_member(
+        &self,
+        receiver_ty: &Ty,
+        member: &str,
+        is_static: bool,
+    ) -> Result<MemberResolution, MemberError> {
+        resolve_member_with_context(
+            self.model,
+            receiver_ty,
+            member,
+            is_static,
+            Some(self.context_symbol_id),
+        )
+    }
+
+    fn conforms_to(&self, ty: &Ty, protocol_id: SymbolId) -> bool {
+        self.model.conforms_to(ty, protocol_id)
+    }
+
+    fn resolve_associated_type(&self, container: &Ty, assoc_name: &str) -> Option<Ty> {
+        self.model.resolve_associated_type(container, assoc_name)
+    }
+
+    fn expand_type_alias(&self, ty: &Ty) -> Ty {
+        self.model.expand_type_alias(ty)
+    }
+
+    fn symbol_name(&self, symbol_id: SymbolId) -> Option<String> {
+        self.model.symbol_name(symbol_id)
+    }
+
+    fn builtin_protocol(&self, feature: LanguageFeature) -> Option<SymbolId> {
+        self.model.builtin_protocol(feature)
+    }
+
+    fn default_integer_type(&self, span: kestrel_span::Span) -> Ty {
+        self.model.default_integer_type(span)
+    }
+
+    fn default_float_type(&self, span: kestrel_span::Span) -> Ty {
+        self.model.default_float_type(span)
+    }
+}
+
+/// Resolve a member with optional context for extension bound lookup.
+///
+/// This is the context-aware version of resolve_member. When context is provided,
+/// it can find additional bounds from extension where clauses.
+fn resolve_member_with_context(
+    model: &SemanticModel,
+    receiver_ty: &Ty,
+    member: &str,
+    is_static: bool,
+    context: Option<SymbolId>,
+) -> Result<MemberResolution, MemberError> {
+    // Handle inference placeholders
+    if matches!(receiver_ty.kind(), TyKind::Infer) {
+        return Err(MemberError::UnknownType);
+    }
+
+    // Handle error types
+    if matches!(receiver_ty.kind(), TyKind::Error) {
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        });
+    }
+
+    // Handle type parameters - look up member in protocol bounds from where clause
+    if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
+        // Get bounds by walking up the parent chain to find where clauses
+        let mut bounds = get_type_parameter_bounds(type_param);
+
+        // If we have context, also check for extension bounds
+        if let Some(ctx_id) = context {
+            if let Some(ext_bounds) =
+                get_extension_bounds_for_param(model, ctx_id, type_param.metadata().id())
+            {
+                bounds.extend(ext_bounds);
+            }
+        }
+
+        // If any bound is an error type, the type parameter's constraints couldn't be resolved.
+        // Return UnknownType to suppress cascading error messages.
+        if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
+            return Err(MemberError::UnknownType);
+        }
+
+        for bound in &bounds {
+            if let TyKind::Protocol {
+                symbol: proto,
+                substitutions: proto_subs,
+            } = bound.kind()
+            {
+                // Collect the protocol and all its inherited protocols
+                // E.g., for Comparable, this returns [Comparable, Equatable]
+                let all_protocols = collect_protocols_with_inherited(proto, proto_subs);
+
+                for (current_proto, current_subs) in &all_protocols {
+                    // Check protocol's direct members
+                    for child in current_proto.metadata().children() {
+                        if child.metadata().name().value == member {
+                            let member_id = child.metadata().id();
+                            if let Some(callable) =
+                                child.metadata().get_behavior::<CallableBehavior>()
+                            {
+                                // Substitute type parameters and Self (Self = the type parameter)
+                                let return_ty = callable
+                                    .return_type()
+                                    .apply_substitutions(current_subs)
+                                    .substitute_self(receiver_ty);
+                                let parameters: Vec<Ty> = callable
+                                    .parameters()
+                                    .iter()
+                                    .map(|p| {
+                                        p.ty.apply_substitutions(current_subs)
+                                            .substitute_self(receiver_ty)
+                                    })
+                                    .collect();
+                                return Ok(MemberResolution {
+                                    ty: return_ty,
+                                    symbol_id: member_id,
+                                    substitutions: current_subs.clone(),
+                                    parameters,
+                                });
+                            }
+                        }
+                    }
+
+                    // Check extensions on this protocol
+                    let current_proto_id = current_proto.metadata().id();
+                    let proto_extensions = model.query(ExtensionsFor {
+                        target_id: current_proto_id,
+                    });
+
+                    for ext in &proto_extensions {
+                        for child in ext.metadata().children() {
+                            if child.metadata().name().value == member {
+                                let member_id = child.metadata().id();
+                                if let Some(callable) =
+                                    child.metadata().get_behavior::<CallableBehavior>()
+                                {
+                                    // Substitute type parameters and Self (Self = the type parameter)
+                                    let return_ty = callable
+                                        .return_type()
+                                        .apply_substitutions(current_subs)
+                                        .substitute_self(receiver_ty);
+                                    let parameters: Vec<Ty> = callable
+                                        .parameters()
+                                        .iter()
+                                        .map(|p| {
+                                            p.ty.apply_substitutions(current_subs)
+                                                .substitute_self(receiver_ty)
+                                        })
+                                        .collect();
+                                    return Ok(MemberResolution {
+                                        ty: return_ty,
+                                        symbol_id: member_id,
+                                        substitutions: current_subs.clone(),
+                                        parameters,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Member not found in any protocol bound
+        return Err(MemberError::NotFound {
+            receiver_ty: receiver_ty.clone(),
+            member: member.to_string(),
+        });
+    }
+
+    // For non-type-parameter types, delegate to the model's resolve_member
+    // (which doesn't need context)
+    model.resolve_member(receiver_ty, member, is_static)
+}
+
+/// Walk up from a function to find if it's inside an extension,
+/// and if so, return any additional bounds from the extension's where clause.
+fn get_extension_bounds_for_param(
+    model: &SemanticModel,
+    context_id: SymbolId,
+    param_id: SymbolId,
+) -> Option<Vec<Ty>> {
+    let context = model.query(SymbolFor { id: context_id })?;
+    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = Some(context);
+
+    while let Some(sym) = current {
+        if sym.metadata().kind() == KestrelSymbolKind::Extension {
+            // Found extension - check its where clause for bounds on param_id
+            if let Some(ext_target) = sym.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                let where_clause = ext_target.where_clause();
+                let bounds: Vec<Ty> = where_clause
+                    .bounds_for(param_id)
+                    .into_iter()
+                    .filter(|b| matches!(b.kind(), TyKind::Protocol { .. } | TyKind::Error))
+                    .cloned()
+                    .collect();
+                if !bounds.is_empty() {
+                    return Some(bounds);
+                }
+            }
+        }
+        current = sym.metadata().parent();
+    }
+    None
+}
+
 /// Get the container symbol and substitutions from a type.
 fn get_type_container_with_subs(
     ty: &Ty,
@@ -918,6 +1167,71 @@ fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
     }
 }
 
+/// Collect a protocol and all its inherited protocols (transitive closure).
+///
+/// For example, if `Comparable: Equatable`, calling this with `Comparable` returns
+/// `[Comparable, Equatable]` (with appropriate substitutions).
+///
+/// This is used when resolving members on type parameters - we need to search
+/// all inherited protocols, not just the direct bounds.
+fn collect_protocols_with_inherited(
+    proto: &Arc<ProtocolSymbol>,
+    subs: &Substitutions,
+) -> Vec<(Arc<ProtocolSymbol>, Substitutions)> {
+    let mut result = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    collect_protocols_with_inherited_impl(proto, subs, &mut result, &mut visited);
+    result
+}
+
+/// Internal helper that recursively collects protocols while tracking visited protocols.
+fn collect_protocols_with_inherited_impl(
+    proto: &Arc<ProtocolSymbol>,
+    subs: &Substitutions,
+    result: &mut Vec<(Arc<ProtocolSymbol>, Substitutions)>,
+    visited: &mut std::collections::HashSet<SymbolId>,
+) {
+    // Skip if already visited (handles cycles)
+    if !visited.insert(proto.metadata().id()) {
+        return;
+    }
+
+    // Add this protocol to results
+    result.push((proto.clone(), subs.clone()));
+
+    // Get inherited protocols from ConformancesBehavior
+    if let Some(conformances) = proto.metadata().get_behavior::<ConformancesBehavior>() {
+        for conformance in conformances.conformances() {
+            if let TyKind::Protocol {
+                symbol: inherited_proto,
+                substitutions: inherited_subs,
+            } = conformance.kind()
+            {
+                // Apply parent substitutions to inherited protocol's substitutions.
+                // For each type in inherited_subs, apply subs to get the final type.
+                let mut combined_subs = Substitutions::new();
+                for (param_id, ty) in inherited_subs.iter() {
+                    combined_subs.insert(*param_id, subs.apply(ty));
+                }
+                // Also copy over any subs from parent that aren't in inherited_subs
+                for (param_id, ty) in subs.iter() {
+                    if !combined_subs.contains(*param_id) {
+                        combined_subs.insert(*param_id, ty.clone());
+                    }
+                }
+
+                // Recursively collect from inherited protocol
+                collect_protocols_with_inherited_impl(
+                    inherited_proto,
+                    &combined_subs,
+                    result,
+                    visited,
+                );
+            }
+        }
+    }
+}
+
 /// Get protocol bounds for a type parameter by walking up the parent chain.
 ///
 /// This looks at the type parameter's parent symbols (function, struct, protocol)
@@ -952,7 +1266,7 @@ fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
 
 /// Get the where clause from a symbol that can have one.
 ///
-/// Supports FunctionSymbol, StructSymbol, and ProtocolSymbol.
+/// Supports FunctionSymbol, StructSymbol, ProtocolSymbol, and ExtensionSymbol.
 fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereClause> {
     // Try FunctionSymbol
     if let Some(func) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
@@ -965,6 +1279,10 @@ fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<
     // Try ProtocolSymbol
     if let Some(proto) = symbol.as_any().downcast_ref::<ProtocolSymbol>() {
         return Some(proto.where_clause().clone());
+    }
+    // Try ExtensionSymbol
+    if let Some(ext) = symbol.as_any().downcast_ref::<ExtensionSymbol>() {
+        return Some(ext.where_clause());
     }
     None
 }

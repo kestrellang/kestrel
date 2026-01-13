@@ -433,17 +433,56 @@ fn resolve_setter_body(
 
 /// Get the type of `self` for a subscript.
 ///
-/// Returns the Self type which refers to the containing type.
-/// The hierarchy is: Struct/Extension -> Subscript
+/// Returns the concrete type of the containing struct, enum, or extension target.
+/// The hierarchy is: Struct/Extension/Enum -> Subscript
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::ty::Substitutions;
+
     let parent = symbol.metadata().parent()?;
     let parent_span = parent.metadata().span().clone();
 
     match parent.metadata().kind() {
-        KestrelSymbolKind::Struct
-        | KestrelSymbolKind::Protocol
-        | KestrelSymbolKind::Extension
-        | KestrelSymbolKind::Enum => Some(Ty::self_type(parent_span)),
+        KestrelSymbolKind::Struct => {
+            // Create concrete struct type with type parameters mapping to themselves
+            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
+        }
+        KestrelSymbolKind::Enum => {
+            // Create concrete enum type with type parameters mapping to themselves
+            let enum_arc = Arc::clone(&parent).downcast_arc::<EnumSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_enum(enum_arc, substitutions, parent_span))
+        }
+        KestrelSymbolKind::Protocol => {
+            // For protocol subscripts, Self remains abstract
+            Some(Ty::self_type(parent_span))
+        }
+        KestrelSymbolKind::Extension => {
+            // For extension subscripts, use the target type
+            parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
+                .map(|b| b.target_type().clone())
+        }
         _ => None,
     }
 }

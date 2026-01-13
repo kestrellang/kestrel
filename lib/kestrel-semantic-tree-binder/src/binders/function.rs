@@ -598,22 +598,56 @@ fn resolve_return_type_from_syntax(
 
 /// Get the type of `self` for an instance method
 ///
-/// Returns the type of the containing struct, protocol, or extension target.
-/// For extensions, we use Self type which will resolve to the target type.
+/// Returns the concrete type of the containing struct, enum, or extension target.
+/// For structs/enums, this includes type parameters (e.g., `Optional[T]`).
+/// For protocols, we use Self type which remains abstract.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::ty::Substitutions;
+
     let parent = symbol.metadata().parent()?;
     let parent_span = parent.metadata().span().clone();
 
     match parent.metadata().kind() {
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Enum | KestrelSymbolKind::Protocol => {
-            // Use Self type which refers to the containing type
-            // This will be resolved to the concrete type during type checking
+        KestrelSymbolKind::Struct => {
+            // Create concrete struct type with type parameters mapping to themselves
+            let struct_arc = Arc::clone(&parent).downcast_arc::<StructSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
+        }
+        KestrelSymbolKind::Enum => {
+            // Create concrete enum type with type parameters mapping to themselves
+            let enum_arc = Arc::clone(&parent).downcast_arc::<EnumSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), parent_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_enum(enum_arc, substitutions, parent_span))
+        }
+        KestrelSymbolKind::Protocol => {
+            // For protocol methods, Self remains abstract
+            // (protocol methods can be implemented by different concrete types)
             Some(Ty::self_type(parent_span))
         }
         KestrelSymbolKind::Extension => {
-            // For extension methods, Self refers to the target type
-            // Use Self type which will be resolved during type checking
-            Some(Ty::self_type(parent_span))
+            // For extension methods, use the target type from ExtensionTargetBehavior
+            parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
+                .map(|b| b.target_type().clone())
         }
         _ => None,
     }

@@ -8,12 +8,13 @@ use semantic_tree::symbol::SymbolId;
 use crate::SemanticModel;
 use crate::queries::SymbolFor;
 use crate::query::Query;
+use crate::type_oracle::ContextualOracle;
 
 /// Run type inference on a function/initializer body and return the solution.
 ///
 /// This query:
 /// 1. Gets the ExecutableBehavior from the symbol
-/// 2. Creates an InferenceContext with the SemanticModel as TypeOracle
+/// 2. Creates an InferenceContext with a ContextualOracle that knows the current function
 /// 3. Generates constraints from the code block
 /// 4. Solves the constraints and returns the Solution (with any errors)
 pub struct InferenceResultFor {
@@ -36,8 +37,11 @@ impl Query for InferenceResultFor {
             .get_behavior::<CallableBehavior>()
             .map(|c| c.return_type().clone());
 
-        // Create inference context with model as TypeOracle
-        let mut ctx = InferenceContext::new(model);
+        // Create a contextual oracle that knows which function we're analyzing.
+        // This allows extension where clause bounds to be discovered when resolving
+        // members on type parameters (e.g., T: Equatable in extension where clause).
+        let oracle = ContextualOracle::new(model, self.symbol_id);
+        let mut ctx = InferenceContext::new(&oracle);
 
         // Generate constraints from the code block
         generate_constraints(&mut ctx, executable.body(), return_type.as_ref());

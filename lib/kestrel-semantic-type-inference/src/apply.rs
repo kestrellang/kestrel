@@ -723,13 +723,29 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
 /// the actual types are known but the `Local` entries in the container still have
 /// the old placeholder types. When subsequent code references these locals via
 /// `LocalRef`, it reads the type from the container, so we must update it.
-pub fn apply_solution_to_locals(container: &dyn LocalContainer, solution: &Solution) {
+///
+/// Additionally, the `self` local is created with `SelfType` which needs to be
+/// resolved to the concrete type (struct, enum, or extension target type).
+pub fn apply_solution_to_locals(
+    container: &dyn LocalContainer,
+    solution: &Solution,
+    concrete_self_type: Option<&Ty>,
+) {
     for local in container.locals() {
         let ty = local.ty();
+
+        // Handle inference placeholders
         if matches!(ty.kind(), TyKind::Infer) {
             if let Some(resolved) = solution.get_type(ty.id()) {
                 let fully_resolved = resolve_type(resolved, solution);
                 container.update_local_type(local.id(), fully_resolved);
+            }
+        }
+
+        // Handle SelfType -> concrete type
+        if matches!(ty.kind(), TyKind::SelfType) {
+            if let Some(concrete) = concrete_self_type {
+                container.update_local_type(local.id(), concrete.clone());
             }
         }
     }

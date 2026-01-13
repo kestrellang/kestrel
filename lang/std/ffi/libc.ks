@@ -6,20 +6,20 @@ module std.ffi
 
 // Memory allocation
 @extern(.C)
-public func malloc(size: Int) -> lang.ptr[lang.i8] {}
+public func malloc(size: Int) -> lang.ptr[lang.i8]
 
 @extern(.C)
-public func free(ptr: lang.ptr[lang.i8]) {}
+public func free(ptr: lang.ptr[lang.i8])
 
 @extern(.C)
-public func realloc(ptr: lang.ptr[lang.i8], size: Int) -> lang.ptr[lang.i8] {}
+public func realloc(ptr: lang.ptr[lang.i8], size: Int) -> lang.ptr[lang.i8]
 
 // Memory operations
 @extern(.C)
-public func memcpy(dest: lang.ptr[lang.i8], src: lang.ptr[lang.i8], n: Int) -> lang.ptr[lang.i8] {}
+public func memcpy(dest: lang.ptr[lang.i8], src: lang.ptr[lang.i8], n: Int) -> lang.ptr[lang.i8]
 
 @extern(.C)
-public func memmove(dest: lang.ptr[lang.i8], src: lang.ptr[lang.i8], n: Int) -> lang.ptr[lang.i8] {}
+public func memmove(dest: lang.ptr[lang.i8], src: lang.ptr[lang.i8], n: Int) -> lang.ptr[lang.i8]
 
 @extern(.C)
-public func memset(dest: lang.ptr[lang.i8], c: Int, n: Int) -> lang.ptr[lang.i8] {}
+public func memset(dest: lang.ptr[lang.i8], c: Int, n: Int) -> lang.ptr[lang.i8]

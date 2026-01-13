@@ -2,41 +2,38 @@
 
 | Error Message | Count |
 | :--- | :--- |
-| if condition must conform to `BooleanConditional`, found `_` | 19 |
+| if condition must conform to `BooleanConditional`, found `_` | 18 |
 | cannot access member on type '[UInt8]' | 12 |
 | no method 'write' on type 'H' matches the provided arguments | 11 |
 | no matching initializer for struct 'UInt32' | 10 |
 | no matching initializer for struct 'UInt8' | 10 |
 | type arguments cannot be applied to a language intrinsic | 9 |
+| member not found: `equals` on type `<error>` | 8 |
 | cannot find type 'Int' in this scope | 6 |
 | member 'substringBytes' is private and not accessible from this scope | 6 |
-| member not found: `equals` on type `<error>` | 6 |
 | member not found: `shiftLeft` on type `<error>` | 6 |
 | undefined name 'Buffer' | 6 |
-| member not found: `equals` on type `T` | 5 |
 | cannot find type 'Array' in this scope | 4 |
 | cannot use 'self' in free function | 4 |
-| type mismatch: expected `Optional[T]`, found `Self` | 4 |
+| type mismatch: expected `U`, found `U` | 4 |
 | undefined name 'ArcBox' | 4 |
 | cannot find type 'Buffer' in this scope | 3 |
-| could not infer type for 1 placeholder(s) | 3 |
 | no method 'byteAt' on type 'String[A]' matches the provided arguments | 3 |
 | undefined name 'Dictionary' | 3 |
 | cannot access member on type 'I16' | 2 |
 | cannot access member on type 'I32' | 2 |
 | cannot access member on type 'I64' | 2 |
-| cannot access member on type 'Self' | 2 |
 | cannot assign to this expression | 2 |
+| cannot call 'description' on type 'E' | 2 |
 | cannot find type 'DictionaryIterator' in this scope | 2 |
 | cannot find type 'I' in this scope | 2 |
+| could not infer type for 1 placeholder(s) | 2 |
 | member 'raw' is private and not accessible from this scope | 2 |
 | member not found: `lessThan` on type `<error>` | 2 |
 | no matching overload for 'decodeUtf8' with 2 argument(s) | 2 |
-| no method 'ensureCapacity' on type 'String' matches the provided arguments | 2 |
+| no method 'ensureCapacity' on type 'String[A]' matches the provided arguments | 2 |
 | non-exhaustive match expression | 2 |
 | symbol 'Array' not found in module 'std.collections' | 2 |
-| type mismatch: expected `Ordering`, found `Self` | 2 |
-| undeclared type parameter 'T' in where clause | 2 |
 | 'Equal' is not a type | 1 |
 | 'Optional' is not a protocol; bound must be a protocol | 1 |
 | Parse error: found 'RBrace' at 3675..3676 expected something else, 'LParen', 'Dot', 'Bang', 'LBrace', 'Equals', or 'Semicolon' | 1 |
@@ -48,27 +45,20 @@
 | cannot assign to immutable field 'pointee' | 1 |
 | cannot find type 'ArcBox' in this scope | 1 |
 | cannot find type 'Dictionary' in this scope | 1 |
-| function 'malloc' does not return a value on all code paths | 1 |
-| function 'memcpy' does not return a value on all code paths | 1 |
-| function 'memmove' does not return a value on all code paths | 1 |
-| function 'memset' does not return a value on all code paths | 1 |
-| function 'realloc' does not return a value on all code paths | 1 |
 | initializer does not initialize all fields: 'storage' | 1 |
 | member 'storage' is private and not accessible from this scope | 1 |
-| member not found: `None` on type `Self` | 1 |
-| member not found: `Some` on type `Self` | 1 |
 | member not found: `add` on type `String` | 1 |
 | member not found: `logicalNot` on type `<error>` | 1 |
 | member not found: `multiply` on type `<error>` | 1 |
 | no matching initializer for struct 'UInt64' | 1 |
 | no member 'toBytes' on type 'UInt64' | 1 |
-| no method 'action' on type 'InspectIterator' | 1 |
-| no method 'insert' on type 'Set' matches the provided arguments | 1 |
-| no method 'predicate' on type 'FilterIterator' | 1 |
-| no method 'predicate' on type 'SkipWhileIterator' | 1 |
-| no method 'predicate' on type 'TakeWhileIterator' | 1 |
-| no method 'transform' on type 'FilterMapIterator' | 1 |
-| no method 'transform' on type 'FlatMapIterator' | 1 |
+| no method 'action' on type 'InspectIterator[I]' | 1 |
+| no method 'insert' on type 'Set[T, A]' matches the provided arguments | 1 |
+| no method 'predicate' on type 'FilterIterator[I]' | 1 |
+| no method 'predicate' on type 'SkipWhileIterator[I]' | 1 |
+| no method 'predicate' on type 'TakeWhileIterator[I]' | 1 |
+| no method 'transform' on type 'FilterMapIterator[I, U]' | 1 |
+| no method 'transform' on type 'FlatMapIterator[I, Inner]' | 1 |
 | struct `SplitIterator` has Cloneable field `string` but does not conform to Cloneable | 1 |
 | symbol 'ArcBox' not found in module 'std.memory' | 1 |
 | symbol 'Buffer' not found in module 'std.memory' | 1 |
@@ -87,11 +77,11 @@
 | type 'SetIterator' does not satisfy bound | 1 |
 | type 'Slice' is ambiguous | 1 |
 | type 'SliceIterator' does not satisfy bound | 1 |
+| type mismatch: expected `(T) -> Optional[U]`, found `(T) -> Optional[U]` | 1 |
+| type mismatch: expected `(T) -> Result[U, E]`, found `(T) -> Result[U, E]` | 1 |
 | type mismatch: expected `Optional[I.Item]`, found `Optional[Optional[I.Item]]` | 1 |
-| type mismatch: expected `Optional[_]`, found `Self` | 1 |
-| type mismatch: expected `Result[_, _]`, found `Self` | 1 |
-| type mismatch: expected `Self`, found `Optional[_]` | 1 |
-| type mismatch: expected `Self`, found `Result[_, _]` | 1 |
+| type mismatch: expected `Optional[U]`, found `Optional[U]` | 1 |
+| type mismatch: expected `Result[U, E]`, found `Result[U, E]` | 1 |
 | undefined name 'bitwiseAnd' | 1 |
 | undefined name 'bitwiseNot' | 1 |
 | while condition must conform to `BooleanConditional`, found `_` | 1 |
@@ -102,7 +92,6 @@ if condition must conform to `BooleanConditional`, found `_`
 Call Sites
 - lang/std/iter/adapters.ks:216:16
 - lang/std/memory/allocator.ks:78:12
-- lang/std/ops/range.ks:127:19
 - lang/std/text/views.ks:222:16
 - lang/std/text/views.ks:226:23
 - lang/std/text/string.ks:104:12
@@ -187,6 +176,17 @@ Call Sites
 - lang/std/memory/layout.ks:18:22
 - lang/std/memory/layout.ks:18:51
 
+member not found: `equals` on type `<error>`
+Call Sites
+- lang/std/result/error.ks:24:45
+- lang/std/result/error.ks:25:39
+- lang/std/text/views.ks:222:16
+- lang/std/text/views.ks:226:23
+- lang/std/text/views.ks:230:63
+- lang/std/text/string.ks:112:34
+- lang/std/text/char.ks:146:9
+- lang/std/text/char.ks:160:9
+
 cannot find type 'Int' in this scope
 Call Sites
 - lang/std/ffi/libc.ks:9:26
@@ -204,15 +204,6 @@ Call Sites
 - lang/std/text/string.ks:382:42
 - lang/std/text/string.ks:400:42
 - lang/std/text/string.ks:410:38
-
-member not found: `equals` on type `<error>`
-Call Sites
-- lang/std/text/views.ks:222:16
-- lang/std/text/views.ks:226:23
-- lang/std/text/views.ks:230:63
-- lang/std/text/string.ks:112:34
-- lang/std/text/char.ks:146:9
-- lang/std/text/char.ks:160:9
 
 member not found: `shiftLeft` on type `<error>`
 Call Sites
@@ -232,14 +223,6 @@ Call Sites
 - lang/std/text/string.ks:46:21
 - lang/std/text/string.ks:59:21
 
-member not found: `equals` on type `T`
-Call Sites
-- lang/std/ops/range.ks:44:9
-- lang/std/ops/range.ks:44:39
-- lang/std/ops/range.ks:98:9
-- lang/std/ops/range.ks:98:39
-- lang/std/ops/range.ks:127:19
-
 cannot find type 'Array' in this scope
 Call Sites
 - lang/std/text/string.ks:68:29
@@ -254,12 +237,12 @@ Call Sites
 - lang/std/result/optional.ks:30:15
 - lang/std/result/optional.ks:37:15
 
-type mismatch: expected `Optional[T]`, found `Self`
+type mismatch: expected `U`, found `U`
 Call Sites
-- lang/std/result/optional.ks:155:9
-- lang/std/result/optional.ks:155:9
-- lang/std/result/optional.ks:161:9
-- lang/std/result/optional.ks:161:9
+- lang/std/result/result.ks:152:9
+- lang/std/result/result.ks:152:22
+- lang/std/result/optional.ks:126:9
+- lang/std/result/optional.ks:126:22
 
 undefined name 'ArcBox'
 Call Sites
@@ -273,12 +256,6 @@ Call Sites
 - lang/std/memory/allocator.ks:66:25
 - lang/std/memory/allocator.ks:111:25
 - lang/std/text/string.ks:25:21
-
-could not infer type for 1 placeholder(s)
-Call Sites
-- lang/std/iter/adapters.ks:61:20
-- lang/std/iter/adapters.ks:92:20
-- lang/std/text/string.ks:381:20
 
 no method 'byteAt' on type 'String[A]' matches the provided arguments
 Call Sites
@@ -307,15 +284,15 @@ Call Sites
 - lang/std/core/uint64.ks:61:29
 - lang/std/core/int64.ks:63:29
 
-cannot access member on type 'Self'
-Call Sites
-- lang/std/result/result.ks:152:9
-- lang/std/result/optional.ks:126:9
-
 cannot assign to this expression
 Call Sites
 - lang/std/text/string.ks:146:9
 - lang/std/text/string.ks:345:9
+
+cannot call 'description' on type 'E'
+Call Sites
+- lang/std/result/result.ks:58:68
+- lang/std/result/result.ks:87:56
 
 cannot find type 'DictionaryIterator' in this scope
 Call Sites
@@ -326,6 +303,11 @@ cannot find type 'I' in this scope
 Call Sites
 - lang/std/iter/iterator.ks:22:24
 - lang/std/collections/set.ks:39:31
+
+could not infer type for 1 placeholder(s)
+Call Sites
+- lang/std/iter/adapters.ks:92:20
+- lang/std/text/string.ks:381:20
 
 member 'raw' is private and not accessible from this scope
 Call Sites
@@ -342,7 +324,7 @@ Call Sites
 - lang/std/text/views.ks:127:28
 - lang/std/text/string.ks:381:32
 
-no method 'ensureCapacity' on type 'String' matches the provided arguments
+no method 'ensureCapacity' on type 'String[A]' matches the provided arguments
 Call Sites
 - lang/std/text/string.ks:127:9
 - lang/std/text/string.ks:137:9
@@ -356,16 +338,6 @@ symbol 'Array' not found in module 'std.collections'
 Call Sites
 - lang/std/text/string.ks:8:25
 - lang/std/text/char.ks:7:25
-
-type mismatch: expected `Ordering`, found `Self`
-Call Sites
-- lang/std/core/ordering.ks:46:18
-- lang/std/core/ordering.ks:53:18
-
-undeclared type parameter 'T' in where clause
-Call Sites
-- lang/std/result/result.ks:170:61
-- lang/std/collections/set.ks:195:44
 
 'Equal' is not a type
 Call Sites
@@ -411,26 +383,6 @@ cannot find type 'Dictionary' in this scope
 Call Sites
 - lang/std/collections/set.ks:23:23
 
-function 'malloc' does not return a value on all code paths
-Call Sites
-- lang/std/ffi/libc.ks:9:13
-
-function 'memcpy' does not return a value on all code paths
-Call Sites
-- lang/std/ffi/libc.ks:19:13
-
-function 'memmove' does not return a value on all code paths
-Call Sites
-- lang/std/ffi/libc.ks:22:13
-
-function 'memset' does not return a value on all code paths
-Call Sites
-- lang/std/ffi/libc.ks:25:13
-
-function 'realloc' does not return a value on all code paths
-Call Sites
-- lang/std/ffi/libc.ks:15:13
-
 initializer does not initialize all fields: 'storage'
 Call Sites
 - lang/std/text/string.ks:52:5
@@ -438,14 +390,6 @@ Call Sites
 member 'storage' is private and not accessible from this scope
 Call Sites
 - lang/std/text/views.ks:56:36
-
-member not found: `None` on type `Self`
-Call Sites
-- lang/std/result/optional.ks:154:16
-
-member not found: `Some` on type `Self`
-Call Sites
-- lang/std/result/optional.ks:160:16
 
 member not found: `add` on type `String`
 Call Sites
@@ -467,31 +411,31 @@ no member 'toBytes' on type 'UInt64'
 Call Sites
 - lang/std/collections/set.ks:229:42
 
-no method 'action' on type 'InspectIterator'
+no method 'action' on type 'InspectIterator[I]'
 Call Sites
 - lang/std/iter/adapters.ks:116:13
 
-no method 'insert' on type 'Set' matches the provided arguments
+no method 'insert' on type 'Set[T, A]' matches the provided arguments
 Call Sites
 - lang/std/collections/set.ks:42:13
 
-no method 'predicate' on type 'FilterIterator'
+no method 'predicate' on type 'FilterIterator[I]'
 Call Sites
 - lang/std/iter/adapters.ks:39:16
 
-no method 'predicate' on type 'SkipWhileIterator'
+no method 'predicate' on type 'SkipWhileIterator[I]'
 Call Sites
 - lang/std/iter/adapters.ks:216:20
 
-no method 'predicate' on type 'TakeWhileIterator'
+no method 'predicate' on type 'TakeWhileIterator[I]'
 Call Sites
 - lang/std/iter/adapters.ks:164:16
 
-no method 'transform' on type 'FilterMapIterator'
+no method 'transform' on type 'FilterMapIterator[I, U]'
 Call Sites
 - lang/std/iter/adapters.ks:61:29
 
-no method 'transform' on type 'FlatMapIterator'
+no method 'transform' on type 'FlatMapIterator[I, Inner]'
 Call Sites
 - lang/std/iter/adapters.ks:93:38
 
@@ -567,25 +511,25 @@ type 'SliceIterator' does not satisfy bound
 Call Sites
 - lang/std/memory/pointer.ks:104:5
 
+type mismatch: expected `(T) -> Optional[U]`, found `(T) -> Optional[U]`
+Call Sites
+- lang/std/result/optional.ks:126:22
+
+type mismatch: expected `(T) -> Result[U, E]`, found `(T) -> Result[U, E]`
+Call Sites
+- lang/std/result/result.ks:152:22
+
 type mismatch: expected `Optional[I.Item]`, found `Optional[Optional[I.Item]]`
 Call Sites
 - lang/std/iter/adapters.ks:394:20
 
-type mismatch: expected `Optional[_]`, found `Self`
+type mismatch: expected `Optional[U]`, found `Optional[U]`
 Call Sites
-- lang/std/result/optional.ks:166:33
+- lang/std/result/optional.ks:126:9
 
-type mismatch: expected `Result[_, _]`, found `Self`
+type mismatch: expected `Result[U, E]`, found `Result[U, E]`
 Call Sites
-- lang/std/result/result.ks:180:31
-
-type mismatch: expected `Self`, found `Optional[_]`
-Call Sites
-- lang/std/result/optional.ks:166:26
-
-type mismatch: expected `Self`, found `Result[_, _]`
-Call Sites
-- lang/std/result/result.ks:180:24
+- lang/std/result/result.ks:152:9
 
 undefined name 'bitwiseAnd'
 Call Sites

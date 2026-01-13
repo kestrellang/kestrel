@@ -47,8 +47,18 @@ pub(crate) fn resolve_generics(
     // Check for duplicate and shadowed type parameter names
     check_duplicate_type_parameters(&type_parameters, &symbol, ctx);
 
+    // Collect outer type parameters for where clause resolution.
+    // This allows method-level where clauses to reference parent type parameters.
+    // E.g., `func clone() -> Set[T, A] where T: Cloneable` can reference struct's T
+    let outer_type_params = collect_outer_type_parameters(&symbol);
+    let all_type_params: Vec<_> = type_parameters
+        .iter()
+        .chain(outer_type_params.iter())
+        .cloned()
+        .collect();
+
     let where_clause =
-        resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
+        resolve_where_clause(syntax, source, file_id, context_id, ctx, &all_type_params);
     GenericsBehavior::new(type_parameters, where_clause)
 }
 
