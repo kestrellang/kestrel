@@ -48,12 +48,12 @@ public struct UInt8:
     }
 
     public func equals(other: UInt8) -> Bool {
-        lang.i8_eq(self.value, other.value)
+        Bool(boolLiteral: lang.i8_eq(self.value, other.value))
     }
 
     public func compare(other: UInt8) -> Ordering {
-        if lang.i8_unsigned_lt(self.value, other.value) { .Less }
-        else if lang.i8_unsigned_gt(self.value, other.value) { .Greater }
+        if Bool(boolLiteral: lang.i8_unsigned_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.i8_unsigned_gt(self.value, other.value)) { .Greater }
         else { .Equal }
     }
 

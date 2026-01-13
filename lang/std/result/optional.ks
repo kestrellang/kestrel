@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable)
+import std.core.(Equatable, Bool)
 import std.ops.(ExpressibleByNilLiteral, Nil)
 import std.iter.(Iterator, Functor)
 

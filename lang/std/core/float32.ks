@@ -45,11 +45,11 @@ public struct Float32:
     }
 
     public func isNaN() -> Bool {
-        lang.f32_is_nan(self.value)
+        Bool(boolLiteral: lang.f32_is_nan(self.value))
     }
 
     public func isInfinite() -> Bool {
-        lang.f32_is_infinite(self.value)
+        Bool(boolLiteral: lang.f32_is_infinite(self.value))
     }
 
     public func isFinite() -> Bool {
@@ -57,12 +57,12 @@ public struct Float32:
     }
 
     public func equals(other: Float32) -> Bool {
-        lang.f32_eq(self.value, other.value)
+        Bool(boolLiteral: lang.f32_eq(self.value, other.value))
     }
 
     public func compare(other: Float32) -> Ordering {
-        if lang.f32_lt(self.value, other.value) { .Less }
-        else if lang.f32_gt(self.value, other.value) { .Greater }
+        if Bool(boolLiteral: lang.f32_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.f32_gt(self.value, other.value)) { .Greater }
         else { .Equal }
     }
 

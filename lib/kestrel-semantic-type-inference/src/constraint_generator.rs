@@ -265,10 +265,9 @@ fn generate_if_condition_constraints(
     match condition {
         IfCondition::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
-            // Boolean condition must be Bool
-            let bool_ty = Ty::bool(expr.span.clone());
-            ctx.register_type(&bool_ty);
-            ctx.equate(expr.ty.id(), bool_ty.id(), expr.span.clone());
+            // Note: We don't add a conformance constraint for BooleanConditional here
+            // because primitive lang.bool doesn't implement protocols. Instead, the
+            // type checker validates conditions in check_if_condition().
         }
         IfCondition::Let { pattern, value, .. } => {
             // Generate constraints for the scrutinee expression
@@ -560,10 +559,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             condition, body, ..
         } => {
             generate_expression_constraints(ctx, condition);
-            // Condition must be Bool
-            let bool_ty = Ty::bool(condition.span.clone());
-            ctx.register_type(&bool_ty);
-            ctx.equate(condition.ty.id(), bool_ty.id(), condition.span.clone());
+            // Note: We don't add a conformance constraint for BooleanConditional here
+            // because primitive lang.bool doesn't implement protocols. Instead, the
+            // type checker validates conditions in check_while_condition().
 
             for stmt in body {
                 generate_statement_constraints(ctx, stmt);
@@ -820,10 +818,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 if let Some(guard) = &arm.guard {
                     generate_expression_constraints(ctx, guard);
                     ctx.register_type(&guard.ty);
-                    // Guard must be Bool
-                    let bool_ty = Ty::bool(guard.span.clone());
-                    ctx.register_type(&bool_ty);
-                    ctx.equate(guard.ty.id(), bool_ty.id(), guard.span.clone());
+                    // Note: We don't add a conformance constraint for BooleanConditional here
+                    // because primitive lang.bool doesn't implement protocols. The type checker
+                    // will validate guard conditions separately.
                 }
 
                 // Generate constraints for the body

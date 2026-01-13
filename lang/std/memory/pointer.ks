@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, UInt)
+import std.core.(Equatable, UInt, Int, Bool)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 

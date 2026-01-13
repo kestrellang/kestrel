@@ -2,7 +2,7 @@
 
 module std.ops
 
-import std.core.(Equatable, Comparable, Steppable)
+import std.core.(Equatable, Comparable, Steppable, Bool)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 

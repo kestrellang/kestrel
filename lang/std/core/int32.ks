@@ -50,12 +50,12 @@ public struct Int32:
     }
 
     public func equals(other: Int32) -> Bool {
-        lang.i32_eq(self.value, other.value)
+        Bool(boolLiteral: lang.i32_eq(self.value, other.value))
     }
 
     public func compare(other: Int32) -> Ordering {
-        if lang.i32_signed_lt(self.value, other.value) { .Less }
-        else if lang.i32_signed_gt(self.value, other.value) { .Greater }
+        if Bool(boolLiteral: lang.i32_signed_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.i32_signed_gt(self.value, other.value)) { .Greater }
         else { .Equal }
     }
 
@@ -83,7 +83,7 @@ public struct Int32:
     public func divide(other: Int32) -> Int32 { Int32(raw: lang.i32_signed_div(self.value, other.value)) }
     public func modulo(other: Int32) -> Int32 { Int32(raw: lang.i32_signed_rem(self.value, other.value)) }
     public func negate() -> Int32 { Int32(raw: lang.i32_neg(self.value)) }
-    public func abs() -> Int32 { if lang.i32_signed_lt(self.value, 0) { self.negate() } else { self } }
+    public func abs() -> Int32 { if Bool(boolLiteral: lang.i32_signed_lt(self.value, 0)) { self.negate() } else { self } }
     public func bitwiseAnd(other: Int32) -> Int32 { Int32(raw: lang.i32_and(self.value, other.value)) }
     public func bitwiseOr(other: Int32) -> Int32 { Int32(raw: lang.i32_or(self.value, other.value)) }
     public func bitwiseXor(other: Int32) -> Int32 { Int32(raw: lang.i32_xor(self.value, other.value)) }

@@ -48,12 +48,12 @@ public struct UInt32:
     }
 
     public func equals(other: UInt32) -> Bool {
-        lang.i32_eq(self.value, other.value)
+        Bool(boolLiteral: lang.i32_eq(self.value, other.value))
     }
 
     public func compare(other: UInt32) -> Ordering {
-        if lang.i32_unsigned_lt(self.value, other.value) { .Less }
-        else if lang.i32_unsigned_gt(self.value, other.value) { .Greater }
+        if Bool(boolLiteral: lang.i32_unsigned_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.i32_unsigned_gt(self.value, other.value)) { .Greater }
         else { .Equal }
     }
 

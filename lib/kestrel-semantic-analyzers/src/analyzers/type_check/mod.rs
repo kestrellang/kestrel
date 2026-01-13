@@ -4,7 +4,9 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::CallableParamTypesForCall;
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, compute_block_type,
@@ -217,13 +219,27 @@ impl TypeCheckAnalyzer {
     }
 
     fn check_if_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
-        if !condition.ty.is_bool() && !condition.ty.is_error() {
-            ctx.report(ConditionNotBoolError {
-                span: condition.span.clone(),
-                found: condition.ty.to_string(),
-                condition_kind: "if",
-            });
+        if condition.ty.is_error() {
+            return;
         }
+
+        // Accept primitive lang.bool directly
+        if condition.ty.is_bool() {
+            return;
+        }
+
+        // Check BooleanConditional conformance
+        if let Some(protocol_id) = ctx.model.builtin_protocol(LanguageFeature::BooleanConditional) {
+            if ctx.model.conforms_to(&condition.ty, protocol_id) {
+                return;
+            }
+        }
+
+        ctx.report(ConditionNotBoolError {
+            span: condition.span.clone(),
+            found: condition.ty.to_string(),
+            condition_kind: "if",
+        });
     }
 
     fn check_if_branches(
@@ -265,13 +281,27 @@ impl TypeCheckAnalyzer {
     }
 
     fn check_while_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
-        if !condition.ty.is_bool() && !condition.ty.is_error() {
-            ctx.report(ConditionNotBoolError {
-                span: condition.span.clone(),
-                found: condition.ty.to_string(),
-                condition_kind: "while",
-            });
+        if condition.ty.is_error() {
+            return;
         }
+
+        // Accept primitive lang.bool directly
+        if condition.ty.is_bool() {
+            return;
+        }
+
+        // Check BooleanConditional conformance
+        if let Some(protocol_id) = ctx.model.builtin_protocol(LanguageFeature::BooleanConditional) {
+            if ctx.model.conforms_to(&condition.ty, protocol_id) {
+                return;
+            }
+        }
+
+        ctx.report(ConditionNotBoolError {
+            span: condition.span.clone(),
+            found: condition.ty.to_string(),
+            condition_kind: "while",
+        });
     }
 
     fn check_call_arguments(

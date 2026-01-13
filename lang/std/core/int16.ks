@@ -49,12 +49,12 @@ public struct Int16:
     }
 
     public func equals(other: Int16) -> Bool {
-        lang.i16_eq(self.value, other.value)
+        Bool(boolLiteral: lang.i16_eq(self.value, other.value))
     }
 
     public func compare(other: Int16) -> Ordering {
-        if lang.i16_signed_lt(self.value, other.value) { .Less }
-        else if lang.i16_signed_gt(self.value, other.value) { .Greater }
+        if Bool(boolLiteral: lang.i16_signed_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.i16_signed_gt(self.value, other.value)) { .Greater }
         else { .Equal }
     }
 
@@ -82,7 +82,7 @@ public struct Int16:
     public func divide(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.value, other.value)) }
     public func modulo(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.value, other.value)) }
     public func negate() -> Int16 { Int16(raw: lang.i16_neg(self.value)) }
-    public func abs() -> Int16 { if lang.i16_signed_lt(self.value, 0) { self.negate() } else { self } }
+    public func abs() -> Int16 { if Bool(boolLiteral: lang.i16_signed_lt(self.value, 0)) { self.negate() } else { self } }
     public func bitwiseAnd(other: Int16) -> Int16 { Int16(raw: lang.i16_and(self.value, other.value)) }
     public func bitwiseOr(other: Int16) -> Int16 { Int16(raw: lang.i16_or(self.value, other.value)) }
     public func bitwiseXor(other: Int16) -> Int16 { Int16(raw: lang.i16_xor(self.value, other.value)) }

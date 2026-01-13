@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Hashable, Hasher, Cloneable, Ordering, UInt8, UInt64)
+import std.core.(Equatable, Comparable, Hashable, Hasher, Cloneable, Ordering, UInt8, UInt64, Int, Bool)
 import std.result.(Optional)
 import std.memory.(Allocator, ArcBox, Buffer, Slice)
 import std.collections.(Array)

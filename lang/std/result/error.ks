@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable)
+import std.core.(Equatable, Bool)
 
 public protocol Error {
     func description() -> String

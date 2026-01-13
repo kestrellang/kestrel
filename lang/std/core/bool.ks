@@ -3,7 +3,7 @@
 module std.core
 
 import std.ffi.(FFISafe)
-import std.ops.(And, Or, Not, ExpressibleByBoolLiteral)
+import std.ops.(And, Or, Not, ExpressibleByBoolLiteral, BooleanConditional)
 
 public struct Bool:
     Equatable,
@@ -12,6 +12,7 @@ public struct Bool:
     Or[Bool],
     Not,
     ExpressibleByBoolLiteral,
+    BooleanConditional,
     FFISafe
 {
     private var value: lang.bool
@@ -23,7 +24,7 @@ public struct Bool:
 
     // Equatable
     public func equals(other: Bool) -> Bool {
-        lang.bool_eq(self.value, other.value)
+        Bool(boolLiteral: lang.bool_eq(self.value, other.value))
     }
 
     // Hashable
@@ -41,16 +42,21 @@ public struct Bool:
     type Not.Output = Bool
 
     public func logicalAnd(other: Bool) -> Bool {
-        Bool(value: lang.bool_and(self.value, other.value))
+        Bool(boolLiteral: lang.bool_and(self.value, other.value))
     }
 
     // Or
     public func logicalOr(other: Bool) -> Bool {
-        Bool(value: lang.bool_or(self.value, other.value))
+        Bool(boolLiteral: lang.bool_or(self.value, other.value))
     }
 
     // Not
     public func logicalNot() -> Bool {
-        Bool(value: lang.bool_not(self.value))
+        Bool(boolLiteral: lang.bool_not(self.value))
+    }
+
+    // BooleanConditional
+    public func boolValue() -> lang.i1 {
+        self.value
     }
 }

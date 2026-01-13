@@ -3,7 +3,7 @@
 module std.memory
 
 import std.result.(Optional)
-import std.core.(Cloneable)
+import std.core.(Cloneable, Int)
 
 public struct Buffer[T, A]: NonCopyable where A: Allocator {
     private var ptr: Pointer[T]

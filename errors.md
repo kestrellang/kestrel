@@ -3,18 +3,16 @@
 | Error Message | Count |
 | :--- | :--- |
 | type `<error>` is not callable | 93 |
-| cannot find type 'Int' in this scope | 81 |
-| cannot find type 'Bool' in this scope | 77 |
-| type mismatch: expected `Bool`, found `Bool` | 45 |
+| if condition must conform to `BooleanConditional`, found `_` | 57 |
 | undefined name 'lang' | 41 |
-| cannot access member on type '<error>' | 28 |
-| member not found: `add` on type `<error>` | 22 |
-| member not found: `equals` on type `<error>` | 22 |
-| member not found: `lessThan` on type `<error>` | 19 |
+| type `Int` does not conform to protocol `ExpressibleByIntLiteral` | 32 |
+| cannot access member on type '<error>' | 27 |
+| member not found: `add` on type `Int` | 22 |
 | type mismatch: expected `T`, found `T` | 18 |
-| member not found: `greaterThan` on type `<error>` | 13 |
-| member not found: `subtract` on type `<error>` | 13 |
-| method 'equals' has wrong return type for protocol 'Equatable' | 13 |
+| member not found: `lessThan` on type `Int` | 15 |
+| member not found: `equals` on type `<error>` | 14 |
+| member not found: `greaterThan` on type `Int` | 13 |
+| member not found: `subtract` on type `Int` | 13 |
 | cannot access member on type '[UInt8]' | 12 |
 | type arguments cannot be applied to this expression | 12 |
 | no method 'write' on type 'H' matches the provided arguments | 11 |
@@ -22,11 +20,13 @@
 | no matching initializer for struct 'UInt8' | 10 |
 | cannot find type 'lang' in this scope | 9 |
 | undefined name 'panic' | 9 |
+| member not found: `equals` on type `Int` | 8 |
 | type mismatch: expected `UInt32`, found `Int64` | 8 |
 | undefined name 'None' | 8 |
 | member 'raw' is private and not accessible from this scope | 7 |
+| while condition must conform to `BooleanConditional`, found `_` | 7 |
 | member not found: `bitwiseAnd` on type `<error>` | 6 |
-| member not found: `greaterThanOrEqual` on type `<error>` | 6 |
+| member not found: `greaterThanOrEqual` on type `Int` | 6 |
 | member not found: `shiftLeft` on type `<error>` | 6 |
 | non-exhaustive match expression | 6 |
 | type mismatch: expected `A`, found `A` | 6 |
@@ -34,6 +34,7 @@
 | member not found: `equals` on type `T` | 5 |
 | member not found: `greaterThanOrEqual` on type `UInt32` | 5 |
 | member not found: `lessThanOrEqual` on type `UInt32` | 5 |
+| member not found: `lessThan` on type `<error>` | 5 |
 | member not found: `lessThan` on type `UInt32` | 5 |
 | no matching overload for 'array' with 1 argument(s) | 5 |
 | no method 'buffer' on type 'StringStorage[A]' | 5 |
@@ -42,16 +43,13 @@
 | cannot find type 'Array' in this scope | 4 |
 | cannot find type 'String' in this scope | 4 |
 | cannot use 'self' in free function | 4 |
-| member not found: `lessThanOrEqual` on type `<error>` | 4 |
-| member not found: `notEquals` on type `<error>` | 4 |
-| method 'equals' has wrong return type for protocol 'Hashable' | 4 |
+| member not found: `lessThanOrEqual` on type `Int` | 4 |
+| member not found: `notEquals` on type `Int` | 4 |
 | type mismatch: expected `StringStorage[_]`, found `T` | 4 |
 | type mismatch: expected `T`, found `StringStorage[_]` | 4 |
 | type mismatch: expected `UInt64`, found `Int64` | 4 |
 | member not found: `lessThan` on type `T` | 3 |
-| member not found: `multiply` on type `<error>` | 3 |
-| method 'equals' has wrong return type for protocol 'Comparable' | 3 |
-| no matching initializer for struct 'Bool' | 3 |
+| member not found: `multiply` on type `Int` | 3 |
 | no method 'byteAt' on type 'String[A]' matches the provided arguments | 3 |
 | type mismatch: expected `Pointer[T]`, found `Pointer[T]` | 3 |
 | type mismatch: expected `String[A]`, found `String[A]` | 3 |
@@ -68,16 +66,14 @@
 | cannot find type 'DictionaryIterator' in this scope | 2 |
 | cannot find type 'I' in this scope | 2 |
 | initializer does not initialize all fields: 'cap', 'ptr' | 2 |
+| member not found: `add` on type `<error>` | 2 |
 | member not found: `equals` on type `UInt` | 2 |
 | member not found: `greaterThanOrEqual` on type `T` | 2 |
-| member not found: `logicalNot` on type `<error>` | 2 |
-| member not found: `logicalOr` on type `<error>` | 2 |
-| member not found: `modulo` on type `<error>` | 2 |
+| member not found: `modulo` on type `Int` | 2 |
 | no matching overload for 'decodeUtf8' with 2 argument(s) | 2 |
 | no method 'allocate' on type 'A' matches the provided arguments | 2 |
 | no method 'ensureCapacity' on type 'Self' matches the provided arguments | 2 |
 | symbol 'Array' not found in module 'std.collections' | 2 |
-| type `Int` does not conform to protocol `ExpressibleByIntLiteral` | 2 |
 | type mismatch: expected `(T) -> U`, found `(T) -> T` | 2 |
 | type mismatch: expected `Char`, found `U` | 2 |
 | type mismatch: expected `Optional[I.Item]`, found `Optional[U]` | 2 |
@@ -90,10 +86,12 @@
 | Parse error: found 'Dot' at 4073..4074 expected something else, or 'Colon' | 1 |
 | Parse error: found 'If' at 5607..5609 expected something else, 'LParen', 'Dot', 'Bang', 'LBrace', 'Equals', or 'Semicolon' | 1 |
 | cannot access member on type 'I.Item' | 1 |
+| cannot access member on type 'Int' | 1 |
 | cannot assign to immutable field 'peeked' | 1 |
 | cannot assign to immutable field 'storage' | 1 |
 | cannot assign to this expression | 1 |
 | cannot call 'clone' on type 'T' | 1 |
+| cannot find type 'Bool' in this scope | 1 |
 | cannot find type 'Dictionary' in this scope | 1 |
 | cannot find type 'ExpressibleByIntLiteral' in this scope | 1 |
 | cannot find type 'GlobalAllocator' in this scope | 1 |
@@ -101,8 +99,6 @@
 | cannot find type 'Ordering' in this scope | 1 |
 | cannot find type 'UInt64' in this scope | 1 |
 | cannot find type 'UInt8' in this scope | 1 |
-| could not infer type for 1 placeholder(s) | 1 |
-| could not infer type for 3 placeholder(s) | 1 |
 | duplicate definition of field 'codePoints' | 1 |
 | duplicate definition of field 'value' | 1 |
 | function 'next' does not return a value on all code paths | 1 |
@@ -111,7 +107,10 @@
 | member 'storage' is private and not accessible from this scope | 1 |
 | member not found: `None` on type `Self` | 1 |
 | member not found: `Some` on type `Self` | 1 |
+| member not found: `lessThanOrEqual` on type `Int64` | 1 |
 | member not found: `lessThanOrEqual` on type `T` | 1 |
+| member not found: `lessThan` on type `Int64` | 1 |
+| member not found: `logicalNot` on type `<error>` | 1 |
 | method 'compare' has wrong return type for protocol 'Comparable' | 1 |
 | no matching initializer for struct 'ArcBox' | 1 |
 | no matching initializer for struct 'UInt64' | 1 |
@@ -151,15 +150,15 @@
 | type 'SetIterator' does not satisfy bound | 1 |
 | type 'Slice' is ambiguous | 1 |
 | type 'SliceIterator' does not satisfy bound | 1 |
-| type mismatch: expected `(<error>, I.Item)`, found `U` | 1 |
-| type mismatch: expected `(<error>, _)`, found `U` | 1 |
+| type mismatch: expected `(Int, I.Item)`, found `U` | 1 |
+| type mismatch: expected `(Int, _)`, found `U` | 1 |
 | type mismatch: expected `(T) -> U`, found `(CodePoint) -> Char` | 1 |
 | type mismatch: expected `(T) -> U`, found `(I.Item) -> U` | 1 |
-| type mismatch: expected `(T) -> U`, found `(T) -> (<error>, T)` | 1 |
+| type mismatch: expected `(T) -> U`, found `(T) -> (Int, T)` | 1 |
 | type mismatch: expected `ArcBox[StringStorage[A]]`, found `ArcBox[T]` | 1 |
 | type mismatch: expected `CodePoint`, found `T` | 1 |
 | type mismatch: expected `CodePointsIterator[A]`, found `CodePointsIterator[A]` | 1 |
-| type mismatch: expected `Optional[(<error>, I.Item)]`, found `Optional[U]` | 1 |
+| type mismatch: expected `Optional[(Int, I.Item)]`, found `Optional[U]` | 1 |
 | type mismatch: expected `Optional[Char]`, found `Optional[U]` | 1 |
 | type mismatch: expected `Optional[I.Item]`, found `Optional[Optional[I.Item]]` | 1 |
 | type mismatch: expected `Optional[T]`, found `Optional[T]` | 1 |
@@ -192,10 +191,10 @@ Call Sites
 - lang/std/core/uint32.ks:61:29
 - lang/std/core/uint16.ks:61:29
 - lang/std/core/int64.ks:63:29
-- lang/std/core/bool.ks:26:9
-- lang/std/core/bool.ks:44:21
-- lang/std/core/bool.ks:49:21
-- lang/std/core/bool.ks:54:21
+- lang/std/core/bool.ks:27:27
+- lang/std/core/bool.ks:45:27
+- lang/std/core/bool.ks:50:27
+- lang/std/core/bool.ks:55:27
 - lang/std/memory/buffer.ks:22:22
 - lang/std/memory/buffer.ks:34:22
 - lang/std/memory/buffer.ks:100:9
@@ -208,14 +207,14 @@ Call Sites
 - lang/std/memory/buffer.ks:176:23
 - lang/std/memory/buffer.ks:180:12
 - lang/std/memory/buffer.ks:183:13
-- lang/std/memory/allocator.ks:35:19
-- lang/std/memory/allocator.ks:36:12
-- lang/std/memory/allocator.ks:44:9
-- lang/std/memory/allocator.ks:48:22
-- lang/std/memory/allocator.ks:49:12
-- lang/std/memory/allocator.ks:72:77
-- lang/std/memory/allocator.ks:72:29
-- lang/std/memory/allocator.ks:132:19
+- lang/std/memory/allocator.ks:36:19
+- lang/std/memory/allocator.ks:37:12
+- lang/std/memory/allocator.ks:45:9
+- lang/std/memory/allocator.ks:49:22
+- lang/std/memory/allocator.ks:50:12
+- lang/std/memory/allocator.ks:73:77
+- lang/std/memory/allocator.ks:73:29
+- lang/std/memory/allocator.ks:133:19
 - lang/std/memory/pointer.ks:20:20
 - lang/std/memory/pointer.ks:24:25
 - lang/std/memory/pointer.ks:28:9
@@ -269,225 +268,73 @@ Call Sites
 - lang/std/collections/set.ks:243:9
 - lang/std/collections/set.ks:243:9
 
-cannot find type 'Int' in this scope
+if condition must conform to `BooleanConditional`, found `_`
 Call Sites
-- lang/std/iter/adapters.ks:126:28
-- lang/std/iter/adapters.ks:128:38
-- lang/std/iter/adapters.ks:177:28
-- lang/std/iter/adapters.ks:179:38
-- lang/std/iter/adapters.ks:229:23
-- lang/std/iter/adapters.ks:232:33
-- lang/std/iter/adapters.ks:255:18
-- lang/std/iter/adapters.ks:258:24
-- lang/std/iter/adapters.ks:260:34
-- lang/std/iter/adapters.ks:265:46
-- lang/std/iter/adapters.ks:483:28
-- lang/std/iter/adapters.ks:485:34
-- lang/std/iter/adapters.ks:513:41
-- lang/std/memory/buffer.ks:10:22
-- lang/std/memory/buffer.ks:14:27
-- lang/std/memory/buffer.ks:26:27
-- lang/std/memory/buffer.ks:39:49
-- lang/std/memory/buffer.ks:50:26
-- lang/std/memory/buffer.ks:97:56
-- lang/std/memory/buffer.ks:103:56
-- lang/std/memory/buffer.ks:114:49
-- lang/std/memory/buffer.ks:132:35
-- lang/std/memory/buffer.ks:132:48
-- lang/std/memory/buffer.ks:146:23
-- lang/std/memory/allocator.ks:63:25
-- lang/std/memory/allocator.ks:65:27
-- lang/std/memory/allocator.ks:91:27
-- lang/std/memory/allocator.ks:95:32
-- lang/std/memory/allocator.ks:104:28
-- lang/std/memory/allocator.ks:110:27
-- lang/std/memory/allocator.ks:145:23
-- lang/std/memory/allocator.ks:149:26
-- lang/std/memory/pointer.ks:39:34
-- lang/std/memory/pointer.ks:85:30
-- lang/std/memory/pointer.ks:107:22
-- lang/std/memory/pointer.ks:109:45
-- lang/std/memory/pointer.ks:114:23
-- lang/std/memory/pointer.ks:138:35
-- lang/std/memory/pointer.ks:138:48
-- lang/std/memory/pointer.ks:185:28
-- lang/std/memory/pointer.ks:187:45
-- lang/std/memory/layout.ks:9:22
-- lang/std/memory/layout.ks:10:27
-- lang/std/memory/layout.ks:12:28
-- lang/std/memory/layout.ks:12:54
-- lang/std/memory/layout.ks:21:40
-- lang/std/memory/layout.ks:40:55
-- lang/std/memory/layout.ks:53:31
-- lang/std/text/views.ks:21:23
-- lang/std/text/views.ks:68:24
-- lang/std/text/views.ks:70:43
-- lang/std/text/views.ks:102:28
-- lang/std/text/views.ks:115:28
-- lang/std/text/views.ks:117:47
-- lang/std/text/views.ks:156:23
-- lang/std/text/views.ks:203:28
-- lang/std/text/views.ks:206:47
-- lang/std/text/views.ks:250:23
-- lang/std/text/views.ks:252:24
-- lang/std/text/views.ks:266:28
-- lang/std/text/views.ks:268:29
-- lang/std/text/views.ks:278:28
-- lang/std/text/views.ks:280:29
-- lang/std/text/string.ks:26:21
-- lang/std/text/string.ks:44:27
-- lang/std/text/string.ks:81:27
-- lang/std/text/string.ks:109:46
-- lang/std/text/string.ks:197:53
-- lang/std/text/string.ks:296:45
-- lang/std/text/string.ks:296:58
-- lang/std/text/string.ks:348:33
-- lang/std/text/string.ks:359:24
-- lang/std/text/string.ks:362:65
-- lang/std/text/char.ks:78:33
-- lang/std/text/char.ks:85:62
-- lang/std/text/char.ks:141:32
-- lang/std/text/char.ks:150:33
-- lang/std/text/char.ks:172:55
-- lang/std/text/char.ks:172:84
-- lang/std/collections/set.ks:33:34
-- lang/std/collections/set.ks:46:23
-
-cannot find type 'Bool' in this scope
-Call Sites
-- lang/std/result/result.ks:26:22
-- lang/std/result/result.ks:33:23
-- lang/std/result/result.ks:192:48
-- lang/std/result/error.ks:21:64
-- lang/std/result/optional.ks:28:24
-- lang/std/result/optional.ks:35:24
-- lang/std/result/optional.ks:87:42
-- lang/std/result/optional.ks:171:47
-- lang/std/iter/adapters.ks:30:40
-- lang/std/iter/adapters.ks:32:50
-- lang/std/iter/adapters.ks:148:40
-- lang/std/iter/adapters.ks:149:23
-- lang/std/iter/adapters.ks:151:50
-- lang/std/iter/adapters.ks:151:62
-- lang/std/iter/adapters.ks:200:40
-- lang/std/iter/adapters.ks:201:23
-- lang/std/iter/adapters.ks:203:50
-- lang/std/iter/adapters.ks:203:62
-- lang/std/iter/adapters.ks:230:24
-- lang/std/iter/adapters.ks:232:45
-- lang/std/iter/adapters.ks:304:28
-- lang/std/iter/adapters.ks:306:49
-- lang/std/iter/adapters.ks:350:33
-- lang/std/iter/adapters.ks:352:62
-- lang/std/iter/adapters.ks:398:47
-- lang/std/iter/adapters.ks:413:23
-- lang/std/iter/adapters.ks:415:33
-- lang/std/memory/buffer.ks:166:31
-- lang/std/memory/pointer.ks:31:24
-- lang/std/memory/pointer.ks:43:46
-- lang/std/memory/pointer.ks:73:24
-- lang/std/memory/pointer.ks:93:46
-- lang/std/memory/pointer.ks:116:25
-- lang/std/memory/pointer.ks:168:44
-- lang/std/memory/layout.ks:29:42
-- lang/std/ops/range.ks:35:39
-- lang/std/ops/range.ks:39:25
-- lang/std/ops/range.ks:43:44
-- lang/std/ops/range.ks:89:39
-- lang/std/ops/range.ks:93:25
-- lang/std/ops/range.ks:97:50
-- lang/std/ops/range.ks:116:27
-- lang/std/ops/range.ks:118:47
-- lang/std/text/views.ks:25:25
-- lang/std/text/views.ks:204:23
-- lang/std/text/views.ks:206:58
-- lang/std/text/views.ks:256:45
-- lang/std/text/views.ks:272:50
-- lang/std/text/views.ks:284:45
-- lang/std/text/string.ks:77:25
-- lang/std/text/string.ks:159:48
-- lang/std/text/string.ks:176:48
-- lang/std/text/string.ks:186:46
-- lang/std/text/string.ks:306:45
-- lang/std/text/string.ks:360:23
-- lang/std/text/string.ks:362:76
-- lang/std/text/char.ks:23:30
-- lang/std/text/char.ks:27:35
-- lang/std/text/char.ks:33:32
-- lang/std/text/char.ks:37:37
-- lang/std/text/char.ks:41:35
-- lang/std/text/char.ks:49:32
-- lang/std/text/char.ks:53:34
-- lang/std/text/char.ks:57:34
-- lang/std/text/char.ks:111:45
-- lang/std/text/char.ks:145:30
-- lang/std/text/char.ks:159:40
-- lang/std/collections/set.ks:50:25
-- lang/std/collections/set.ks:55:39
-- lang/std/collections/set.ks:64:39
-- lang/std/collections/set.ks:68:41
-- lang/std/collections/set.ks:123:50
-- lang/std/collections/set.ks:132:52
-- lang/std/collections/set.ks:136:54
-- lang/std/collections/set.ks:145:56
-- lang/std/collections/set.ks:149:58
-- lang/std/collections/set.ks:205:45
-
-type mismatch: expected `Bool`, found `Bool`
-Call Sites
-- lang/std/core/int32.ks:53:9
-- lang/std/core/int32.ks:53:9
-- lang/std/core/int16.ks:52:9
-- lang/std/core/int16.ks:52:9
-- lang/std/core/float32.ks:48:9
-- lang/std/core/float32.ks:48:9
-- lang/std/core/float32.ks:52:9
-- lang/std/core/float32.ks:52:9
-- lang/std/core/float32.ks:56:9
-- lang/std/core/float32.ks:56:30
-- lang/std/core/float32.ks:56:13
-- lang/std/core/float32.ks:56:9
-- lang/std/core/float32.ks:56:30
-- lang/std/core/float32.ks:60:9
-- lang/std/core/float32.ks:60:9
-- lang/std/core/uint64.ks:51:9
-- lang/std/core/uint64.ks:51:9
-- lang/std/core/int8.ks:52:9
-- lang/std/core/int8.ks:52:9
-- lang/std/core/uint8.ks:51:9
-- lang/std/core/uint8.ks:51:9
-- lang/std/core/uint32.ks:51:9
-- lang/std/core/uint32.ks:51:9
-- lang/std/core/uint16.ks:51:9
-- lang/std/core/uint16.ks:51:9
-- lang/std/core/float64.ks:53:9
-- lang/std/core/float64.ks:53:9
-- lang/std/core/float64.ks:57:9
-- lang/std/core/float64.ks:57:9
-- lang/std/core/float64.ks:61:9
-- lang/std/core/float64.ks:61:30
-- lang/std/core/float64.ks:61:13
-- lang/std/core/float64.ks:61:9
-- lang/std/core/float64.ks:61:30
-- lang/std/core/float64.ks:65:9
-- lang/std/core/float64.ks:65:9
-- lang/std/core/int64.ks:53:9
-- lang/std/core/int64.ks:53:9
-- lang/std/text/char.ks:42:9
-- lang/std/text/char.ks:43:9
-- lang/std/text/char.ks:44:9
-- lang/std/text/char.ks:45:9
-- lang/std/text/char.ks:46:9
-- lang/std/text/char.ks:50:28
-- lang/std/text/char.ks:112:9
+- lang/std/iter/adapters.ks:134:12
+- lang/std/iter/adapters.ks:491:12
+- lang/std/memory/buffer.ks:98:28
+- lang/std/memory/buffer.ks:99:28
+- lang/std/memory/buffer.ks:104:28
+- lang/std/memory/buffer.ks:105:28
+- lang/std/memory/buffer.ks:133:12
+- lang/std/memory/buffer.ks:180:12
+- lang/std/memory/allocator.ks:75:12
+- lang/std/memory/allocator.ks:126:12
+- lang/std/memory/pointer.ks:139:12
+- lang/std/memory/pointer.ks:153:12
+- lang/std/memory/pointer.ks:161:12
+- lang/std/memory/pointer.ks:169:12
+- lang/std/memory/pointer.ks:193:12
+- lang/std/memory/layout.ks:41:27
+- lang/std/memory/layout.ks:54:12
+- lang/std/ops/range.ks:69:12
+- lang/std/ops/range.ks:127:19
+- lang/std/ops/range.ks:130:19
+- lang/std/text/views.ks:76:12
+- lang/std/text/views.ks:123:12
+- lang/std/text/views.ks:222:16
+- lang/std/text/views.ks:226:23
+- lang/std/text/views.ks:230:20
+- lang/std/text/string.ks:104:12
+- lang/std/text/string.ks:111:12
+- lang/std/text/string.ks:112:34
+- lang/std/text/string.ks:113:20
+- lang/std/text/string.ks:161:12
+- lang/std/text/string.ks:177:12
+- lang/std/text/string.ks:187:12
+- lang/std/text/string.ks:223:16
+- lang/std/text/string.ks:236:16
+- lang/std/text/string.ks:268:16
+- lang/std/text/string.ks:307:12
+- lang/std/text/string.ks:318:25
+- lang/std/text/string.ks:325:12
+- lang/std/text/string.ks:326:17
+- lang/std/text/string.ks:374:16
+- lang/std/text/string.ks:406:12
+- lang/std/text/char.ks:79:12
+- lang/std/text/char.ks:80:17
+- lang/std/text/char.ks:81:17
+- lang/std/text/char.ks:173:8
+- lang/std/text/char.ks:179:8
+- lang/std/text/char.ks:182:15
+- lang/std/text/char.ks:185:15
+- lang/std/text/char.ks:187:12
+- lang/std/text/char.ks:189:12
+- lang/std/text/char.ks:192:15
+- lang/std/text/char.ks:194:12
+- lang/std/text/char.ks:197:12
+- lang/std/text/char.ks:202:15
+- lang/std/text/char.ks:204:12
+- lang/std/text/char.ks:208:12
+- lang/std/collections/set.ks:206:12
 
 undefined name 'lang'
 Call Sites
 - lang/std/result/result.ks:92:23
-- lang/std/core/bool.ks:26:9
-- lang/std/core/bool.ks:44:21
-- lang/std/core/bool.ks:49:21
-- lang/std/core/bool.ks:54:21
+- lang/std/core/bool.ks:27:27
+- lang/std/core/bool.ks:45:27
+- lang/std/core/bool.ks:50:27
+- lang/std/core/bool.ks:55:27
 - lang/std/memory/buffer.ks:100:9
 - lang/std/memory/buffer.ks:100:79
 - lang/std/memory/buffer.ks:106:9
@@ -496,11 +343,11 @@ Call Sites
 - lang/std/memory/buffer.ks:110:57
 - lang/std/memory/buffer.ks:171:9
 - lang/std/memory/buffer.ks:180:12
-- lang/std/memory/allocator.ks:35:19
-- lang/std/memory/allocator.ks:36:12
-- lang/std/memory/allocator.ks:44:9
-- lang/std/memory/allocator.ks:48:22
-- lang/std/memory/allocator.ks:49:12
+- lang/std/memory/allocator.ks:36:19
+- lang/std/memory/allocator.ks:37:12
+- lang/std/memory/allocator.ks:45:9
+- lang/std/memory/allocator.ks:49:22
+- lang/std/memory/allocator.ks:50:12
 - lang/std/memory/pointer.ks:20:20
 - lang/std/memory/pointer.ks:24:25
 - lang/std/memory/pointer.ks:28:9
@@ -525,16 +372,50 @@ Call Sites
 - lang/std/memory/layout.ks:18:22
 - lang/std/memory/layout.ks:18:51
 
+type `Int` does not conform to protocol `ExpressibleByIntLiteral`
+Call Sites
+- lang/std/core/protocols.ks:86:24
+- lang/std/core/protocols.ks:98:24
+- lang/std/memory/buffer.ks:156:60
+- lang/std/memory/allocator.ks:68:23
+- lang/std/memory/allocator.ks:89:23
+- lang/std/memory/allocator.ks:114:26
+- lang/std/memory/pointer.ks:195:44
+- lang/std/memory/layout.ks:55:39
+- lang/std/text/views.ks:60:51
+- lang/std/text/views.ks:98:60
+- lang/std/text/views.ks:103:17
+- lang/std/text/views.ks:195:55
+- lang/std/text/string.ks:32:38
+- lang/std/text/string.ks:33:21
+- lang/std/text/string.ks:39:38
+- lang/std/text/string.ks:40:21
+- lang/std/text/string.ks:47:21
+- lang/std/text/string.ks:113:39
+- lang/std/text/string.ks:146:37
+- lang/std/text/string.ks:198:45
+- lang/std/text/string.ks:220:21
+- lang/std/text/string.ks:242:35
+- lang/std/text/string.ks:292:66
+- lang/std/text/char.ks:79:32
+- lang/std/text/char.ks:80:38
+- lang/std/text/char.ks:81:40
+- lang/std/text/char.ks:82:16
+- lang/std/text/char.ks:151:19
+- lang/std/text/char.ks:181:56
+- lang/std/text/char.ks:191:48
+- lang/std/text/char.ks:201:48
+- lang/std/text/char.ks:215:48
+
 cannot access member on type '<error>'
 Call Sites
 - lang/std/iter/adapters.ks:93:38
 - lang/std/memory/buffer.ks:153:15
 - lang/std/memory/buffer.ks:183:13
-- lang/std/memory/allocator.ks:130:29
+- lang/std/memory/allocator.ks:131:29
 - lang/std/text/views.ks:56:24
 - lang/std/text/views.ks:56:24
 - lang/std/text/views.ks:56:24
-- lang/std/text/views.ks:261:9
 - lang/std/text/char.ks:142:9
 - lang/std/text/char.ks:146:9
 - lang/std/text/char.ks:146:40
@@ -556,14 +437,13 @@ Call Sites
 - lang/std/collections/set.ks:243:9
 - lang/std/collections/set.ks:243:9
 
-member not found: `add` on type `<error>`
+member not found: `add` on type `Int`
 Call Sites
 - lang/std/iter/adapters.ks:268:26
-- lang/std/memory/allocator.ks:74:12
-- lang/std/memory/allocator.ks:79:23
-- lang/std/memory/allocator.ks:131:30
+- lang/std/memory/allocator.ks:132:30
 - lang/std/memory/layout.ks:36:22
 - lang/std/memory/layout.ks:47:22
+- lang/std/memory/layout.ks:48:23
 - lang/std/text/views.ks:78:26
 - lang/std/text/views.ks:128:30
 - lang/std/text/views.ks:133:26
@@ -571,6 +451,7 @@ Call Sites
 - lang/std/text/views.ks:228:34
 - lang/std/text/views.ks:231:38
 - lang/std/text/views.ks:235:30
+- lang/std/text/string.ks:224:25
 - lang/std/text/string.ks:284:43
 - lang/std/text/string.ks:381:30
 - lang/std/text/string.ks:389:15
@@ -580,53 +461,6 @@ Call Sites
 - lang/std/text/char.ks:194:12
 - lang/std/text/char.ks:204:12
 - lang/std/collections/set.ks:78:49
-
-member not found: `equals` on type `<error>`
-Call Sites
-- lang/std/memory/buffer.ks:167:9
-- lang/std/memory/buffer.ks:180:12
-- lang/std/memory/layout.ks:30:9
-- lang/std/memory/layout.ks:30:37
-- lang/std/memory/layout.ks:54:12
-- lang/std/text/views.ks:222:16
-- lang/std/text/views.ks:226:23
-- lang/std/text/views.ks:230:63
-- lang/std/text/views.ks:257:9
-- lang/std/text/views.ks:273:9
-- lang/std/text/views.ks:285:9
-- lang/std/text/string.ks:112:34
-- lang/std/text/string.ks:223:16
-- lang/std/text/string.ks:223:30
-- lang/std/text/string.ks:223:43
-- lang/std/text/string.ks:223:57
-- lang/std/text/string.ks:236:16
-- lang/std/text/string.ks:236:30
-- lang/std/text/string.ks:236:43
-- lang/std/text/string.ks:236:57
-- lang/std/text/char.ks:146:9
-- lang/std/text/char.ks:160:9
-
-member not found: `lessThan` on type `<error>`
-Call Sites
-- lang/std/memory/buffer.ks:98:28
-- lang/std/memory/buffer.ks:99:28
-- lang/std/memory/buffer.ks:104:28
-- lang/std/memory/buffer.ks:105:28
-- lang/std/text/views.ks:76:12
-- lang/std/text/views.ks:220:15
-- lang/std/text/views.ks:230:20
-- lang/std/text/string.ks:111:12
-- lang/std/text/string.ks:113:20
-- lang/std/text/string.ks:116:23
-- lang/std/text/string.ks:318:25
-- lang/std/text/string.ks:325:12
-- lang/std/text/string.ks:406:12
-- lang/std/text/char.ks:179:8
-- lang/std/text/char.ks:182:15
-- lang/std/text/char.ks:185:15
-- lang/std/text/char.ks:192:15
-- lang/std/text/char.ks:202:15
-- lang/std/collections/set.ks:146:9
 
 type mismatch: expected `T`, found `T`
 Call Sites
@@ -649,7 +483,42 @@ Call Sites
 - lang/std/ops/range.ks:107:38
 - lang/std/ops/range.ks:107:55
 
-member not found: `greaterThan` on type `<error>`
+member not found: `lessThan` on type `Int`
+Call Sites
+- lang/std/memory/buffer.ks:98:28
+- lang/std/memory/buffer.ks:99:28
+- lang/std/memory/buffer.ks:104:28
+- lang/std/memory/buffer.ks:105:28
+- lang/std/text/views.ks:76:12
+- lang/std/text/views.ks:220:15
+- lang/std/text/views.ks:230:20
+- lang/std/text/string.ks:111:12
+- lang/std/text/string.ks:113:20
+- lang/std/text/string.ks:116:23
+- lang/std/text/string.ks:221:15
+- lang/std/text/string.ks:318:25
+- lang/std/text/string.ks:325:12
+- lang/std/text/string.ks:406:12
+- lang/std/collections/set.ks:146:9
+
+member not found: `equals` on type `<error>`
+Call Sites
+- lang/std/memory/buffer.ks:180:12
+- lang/std/text/views.ks:222:16
+- lang/std/text/views.ks:226:23
+- lang/std/text/views.ks:230:63
+- lang/std/text/string.ks:223:16
+- lang/std/text/string.ks:223:30
+- lang/std/text/string.ks:223:43
+- lang/std/text/string.ks:223:57
+- lang/std/text/string.ks:236:16
+- lang/std/text/string.ks:236:30
+- lang/std/text/string.ks:236:43
+- lang/std/text/string.ks:236:57
+- lang/std/text/char.ks:146:9
+- lang/std/text/char.ks:160:9
+
+member not found: `greaterThan` on type `Int`
 Call Sites
 - lang/std/iter/adapters.ks:134:12
 - lang/std/iter/adapters.ks:185:15
@@ -665,13 +534,13 @@ Call Sites
 - lang/std/text/string.ks:326:17
 - lang/std/collections/set.ks:150:9
 
-member not found: `subtract` on type `<error>`
+member not found: `subtract` on type `Int`
 Call Sites
 - lang/std/iter/adapters.ks:135:30
 - lang/std/iter/adapters.ks:189:30
 - lang/std/iter/adapters.ks:492:30
 - lang/std/memory/buffer.ks:134:69
-- lang/std/memory/allocator.ks:142:26
+- lang/std/memory/allocator.ks:143:26
 - lang/std/memory/pointer.ks:140:69
 - lang/std/memory/pointer.ks:162:39
 - lang/std/memory/pointer.ks:196:30
@@ -680,22 +549,6 @@ Call Sites
 - lang/std/text/string.ks:188:22
 - lang/std/text/string.ks:237:23
 - lang/std/text/string.ks:297:42
-
-method 'equals' has wrong return type for protocol 'Equatable'
-Call Sites
-- lang/std/memory/pointer.ks:12:15
-- lang/std/memory/pointer.ks:49:15
-- lang/std/memory/pointer.ks:102:15
-- lang/std/memory/layout.ks:8:15
-- lang/std/ops/range.ks:26:15
-- lang/std/ops/range.ks:80:15
-- lang/std/text/views.ks:249:15
-- lang/std/text/views.ks:265:15
-- lang/std/text/views.ks:277:15
-- lang/std/text/string.ks:11:15
-- lang/std/text/char.ks:13:15
-- lang/std/text/char.ks:128:15
-- lang/std/collections/set.ks:10:15
 
 cannot access member on type '[UInt8]'
 Call Sites
@@ -737,8 +590,8 @@ Call Sites
 - lang/std/core/uint32.ks:61:9
 - lang/std/core/uint16.ks:61:9
 - lang/std/core/int64.ks:63:9
-- lang/std/core/bool.ks:32:13
-- lang/std/core/bool.ks:34:13
+- lang/std/core/bool.ks:33:13
+- lang/std/core/bool.ks:35:13
 - lang/std/collections/set.ks:228:9
 
 no matching initializer for struct 'UInt32'
@@ -769,7 +622,7 @@ Call Sites
 
 cannot find type 'lang' in this scope
 Call Sites
-- lang/std/core/bool.ks:17:24
+- lang/std/core/bool.ks:18:24
 - lang/std/memory/pointer.ks:13:31
 - lang/std/memory/pointer.ks:15:31
 - lang/std/memory/pointer.ks:70:43
@@ -790,6 +643,17 @@ Call Sites
 - lang/std/memory/buffer.ks:34:22
 - lang/std/memory/buffer.ks:123:22
 - lang/std/memory/buffer.ks:158:22
+
+member not found: `equals` on type `Int`
+Call Sites
+- lang/std/memory/buffer.ks:167:9
+- lang/std/memory/layout.ks:30:9
+- lang/std/memory/layout.ks:30:37
+- lang/std/memory/layout.ks:54:12
+- lang/std/text/views.ks:257:9
+- lang/std/text/views.ks:273:9
+- lang/std/text/views.ks:285:9
+- lang/std/text/string.ks:112:34
 
 type mismatch: expected `UInt32`, found `Int64`
 Call Sites
@@ -820,8 +684,18 @@ Call Sites
 - lang/std/memory/buffer.ks:106:39
 - lang/std/memory/buffer.ks:106:63
 - lang/std/memory/buffer.ks:110:38
-- lang/std/memory/allocator.ks:44:26
-- lang/std/memory/allocator.ks:48:39
+- lang/std/memory/allocator.ks:45:26
+- lang/std/memory/allocator.ks:49:39
+
+while condition must conform to `BooleanConditional`, found `_`
+Call Sites
+- lang/std/iter/adapters.ks:185:15
+- lang/std/text/views.ks:220:15
+- lang/std/text/string.ks:116:23
+- lang/std/text/string.ks:221:15
+- lang/std/text/string.ks:234:15
+- lang/std/text/string.ks:267:15
+- lang/std/text/string.ks:389:15
 
 member not found: `bitwiseAnd` on type `<error>`
 Call Sites
@@ -832,7 +706,7 @@ Call Sites
 - lang/std/text/char.ks:208:40
 - lang/std/text/char.ks:208:66
 
-member not found: `greaterThanOrEqual` on type `<error>`
+member not found: `greaterThanOrEqual` on type `Int`
 Call Sites
 - lang/std/memory/buffer.ks:133:12
 - lang/std/memory/pointer.ks:139:12
@@ -900,6 +774,14 @@ Call Sites
 - lang/std/text/char.ks:54:30
 - lang/std/text/char.ks:58:30
 
+member not found: `lessThan` on type `<error>`
+Call Sites
+- lang/std/text/char.ks:179:8
+- lang/std/text/char.ks:182:15
+- lang/std/text/char.ks:185:15
+- lang/std/text/char.ks:192:15
+- lang/std/text/char.ks:202:15
+
 member not found: `lessThan` on type `UInt32`
 Call Sites
 - lang/std/text/char.ks:24:9
@@ -960,26 +842,19 @@ Call Sites
 - lang/std/result/optional.ks:29:15
 - lang/std/result/optional.ks:36:15
 
-member not found: `lessThanOrEqual` on type `<error>`
+member not found: `lessThanOrEqual` on type `Int`
 Call Sites
 - lang/std/memory/buffer.ks:133:27
 - lang/std/memory/buffer.ks:133:47
 - lang/std/memory/pointer.ks:139:27
 - lang/std/memory/pointer.ks:139:47
 
-member not found: `notEquals` on type `<error>`
+member not found: `notEquals` on type `Int`
 Call Sites
-- lang/std/memory/allocator.ks:125:12
+- lang/std/memory/allocator.ks:126:12
 - lang/std/memory/pointer.ks:169:12
 - lang/std/text/string.ks:307:12
 - lang/std/collections/set.ks:206:12
-
-method 'equals' has wrong return type for protocol 'Hashable'
-Call Sites
-- lang/std/text/string.ks:11:15
-- lang/std/text/char.ks:13:15
-- lang/std/text/char.ks:128:15
-- lang/std/collections/set.ks:10:15
 
 type mismatch: expected `StringStorage[_]`, found `T`
 Call Sites
@@ -1008,23 +883,11 @@ Call Sites
 - lang/std/ops/range.ks:69:12
 - lang/std/ops/range.ks:130:19
 
-member not found: `multiply` on type `<error>`
+member not found: `multiply` on type `Int`
 Call Sites
 - lang/std/memory/layout.ks:24:19
 - lang/std/memory/layout.ks:60:19
 - lang/std/text/string.ks:117:27
-
-method 'equals' has wrong return type for protocol 'Comparable'
-Call Sites
-- lang/std/text/views.ks:249:15
-- lang/std/text/string.ks:11:15
-- lang/std/text/char.ks:13:15
-
-no matching initializer for struct 'Bool'
-Call Sites
-- lang/std/core/bool.ks:44:9
-- lang/std/core/bool.ks:49:9
-- lang/std/core/bool.ks:54:9
 
 no method 'byteAt' on type 'String[A]' matches the provided arguments
 Call Sites
@@ -1072,23 +935,23 @@ Call Sites
 
 cannot assign to immutable field 'allocated'
 Call Sites
-- lang/std/memory/allocator.ks:131:13
-- lang/std/memory/allocator.ks:142:9
+- lang/std/memory/allocator.ks:132:13
+- lang/std/memory/allocator.ks:143:9
 
 cannot assign to immutable field 'freeList'
 Call Sites
-- lang/std/memory/allocator.ks:130:13
-- lang/std/memory/allocator.ks:141:9
+- lang/std/memory/allocator.ks:131:13
+- lang/std/memory/allocator.ks:142:9
 
 cannot assign to immutable field 'offset'
 Call Sites
-- lang/std/memory/allocator.ks:79:9
-- lang/std/memory/allocator.ks:88:9
+- lang/std/memory/allocator.ks:80:9
+- lang/std/memory/allocator.ks:89:9
 
 cannot assign to immutable field 'pointee'
 Call Sites
 - lang/std/memory/buffer.ks:156:17
-- lang/std/memory/allocator.ks:140:9
+- lang/std/memory/allocator.ks:141:9
 
 cannot assign to immutable variable 'self'
 Call Sites
@@ -1110,6 +973,11 @@ Call Sites
 - lang/std/memory/buffer.ks:14:5
 - lang/std/memory/buffer.ks:26:5
 
+member not found: `add` on type `<error>`
+Call Sites
+- lang/std/memory/allocator.ks:75:12
+- lang/std/memory/allocator.ks:80:23
+
 member not found: `equals` on type `UInt`
 Call Sites
 - lang/std/memory/pointer.ks:44:9
@@ -1120,17 +988,7 @@ Call Sites
 - lang/std/ops/range.ks:36:9
 - lang/std/ops/range.ks:90:9
 
-member not found: `logicalNot` on type `<error>`
-Call Sites
-- lang/std/iter/adapters.ks:313:12
-- lang/std/text/string.ks:104:12
-
-member not found: `logicalOr` on type `<error>`
-Call Sites
-- lang/std/text/views.ks:213:12
-- lang/std/text/char.ks:38:9
-
-member not found: `modulo` on type `<error>`
+member not found: `modulo` on type `Int`
 Call Sites
 - lang/std/memory/layout.ks:35:42
 - lang/std/memory/layout.ks:46:43
@@ -1154,11 +1012,6 @@ symbol 'Array' not found in module 'std.collections'
 Call Sites
 - lang/std/text/string.ks:8:25
 - lang/std/text/char.ks:7:25
-
-type `Int` does not conform to protocol `ExpressibleByIntLiteral`
-Call Sites
-- lang/std/core/protocols.ks:86:24
-- lang/std/core/protocols.ks:98:24
 
 type mismatch: expected `(T) -> U`, found `(T) -> T`
 Call Sites
@@ -1216,6 +1069,10 @@ cannot access member on type 'I.Item'
 Call Sites
 - lang/std/iter/adapters.ks:361:26
 
+cannot access member on type 'Int'
+Call Sites
+- lang/std/text/views.ks:261:9
+
 cannot assign to immutable field 'peeked'
 Call Sites
 - lang/std/iter/adapters.ks:385:13
@@ -1231,6 +1088,10 @@ Call Sites
 cannot call 'clone' on type 'T'
 Call Sites
 - lang/std/memory/buffer.ks:176:23
+
+cannot find type 'Bool' in this scope
+Call Sites
+- lang/std/memory/buffer.ks:166:31
 
 cannot find type 'Dictionary' in this scope
 Call Sites
@@ -1258,15 +1119,7 @@ Call Sites
 
 cannot find type 'UInt8' in this scope
 Call Sites
-- lang/std/memory/allocator.ks:62:32
-
-could not infer type for 1 placeholder(s)
-Call Sites
-- lang/std/text/views.ks:127:16
-
-could not infer type for 3 placeholder(s)
-Call Sites
-- lang/std/text/string.ks:379:20
+- lang/std/memory/allocator.ks:63:32
 
 duplicate definition of field 'codePoints'
 Call Sites
@@ -1300,9 +1153,21 @@ member not found: `Some` on type `Self`
 Call Sites
 - lang/std/result/optional.ks:159:16
 
+member not found: `lessThanOrEqual` on type `Int64`
+Call Sites
+- lang/std/text/string.ks:268:16
+
 member not found: `lessThanOrEqual` on type `T`
 Call Sites
 - lang/std/ops/range.ks:90:33
+
+member not found: `lessThan` on type `Int64`
+Call Sites
+- lang/std/text/string.ks:267:15
+
+member not found: `logicalNot` on type `<error>`
+Call Sites
+- lang/std/text/string.ks:104:12
 
 method 'compare' has wrong return type for protocol 'Comparable'
 Call Sites
@@ -1318,7 +1183,7 @@ Call Sites
 
 no member 'asRaw' on type 'Optional[Pointer[FreeNode]]'
 Call Sites
-- lang/std/memory/allocator.ks:132:24
+- lang/std/memory/allocator.ks:133:24
 
 no member 'next' on type 'Optional[Inner.Iter]'
 Call Sites
@@ -1326,7 +1191,7 @@ Call Sites
 
 no member 'pointee' on type 'Optional[Pointer[FreeNode]]'
 Call Sites
-- lang/std/memory/allocator.ks:130:34
+- lang/std/memory/allocator.ks:131:34
 
 no method 'action' on type 'Self'
 Call Sites
@@ -1406,7 +1271,7 @@ Call Sites
 
 type 'ArenaAllocator' does not implement method 'reallocate' from protocol 'Allocator'
 Call Sites
-- lang/std/memory/allocator.ks:61:15
+- lang/std/memory/allocator.ks:62:15
 
 type 'Break' is ambiguous
 Call Sites
@@ -1438,7 +1303,7 @@ Call Sites
 
 type 'PoolAllocator' does not implement method 'reallocate' from protocol 'Allocator'
 Call Sites
-- lang/std/memory/allocator.ks:101:15
+- lang/std/memory/allocator.ks:102:15
 
 type 'RangeIterator' does not satisfy bound
 Call Sites
@@ -1460,11 +1325,11 @@ type 'SliceIterator' does not satisfy bound
 Call Sites
 - lang/std/memory/pointer.ks:104:5
 
-type mismatch: expected `(<error>, I.Item)`, found `U`
+type mismatch: expected `(Int, I.Item)`, found `U`
 Call Sites
 - lang/std/iter/adapters.ks:266:9
 
-type mismatch: expected `(<error>, _)`, found `U`
+type mismatch: expected `(Int, _)`, found `U`
 Call Sites
 - lang/std/iter/adapters.ks:266:31
 
@@ -1476,7 +1341,7 @@ type mismatch: expected `(T) -> U`, found `(I.Item) -> U`
 Call Sites
 - lang/std/iter/adapters.ks:21:31
 
-type mismatch: expected `(T) -> U`, found `(T) -> (<error>, T)`
+type mismatch: expected `(T) -> U`, found `(T) -> (Int, T)`
 Call Sites
 - lang/std/iter/adapters.ks:266:31
 
@@ -1492,7 +1357,7 @@ type mismatch: expected `CodePointsIterator[A]`, found `CodePointsIterator[A]`
 Call Sites
 - lang/std/text/views.ks:152:39
 
-type mismatch: expected `Optional[(<error>, I.Item)]`, found `Optional[U]`
+type mismatch: expected `Optional[(Int, I.Item)]`, found `Optional[U]`
 Call Sites
 - lang/std/iter/adapters.ks:266:9
 
@@ -1530,8 +1395,8 @@ Call Sites
 
 undefined name 'bitwiseAnd'
 Call Sites
-- lang/std/memory/allocator.ks:72:66
+- lang/std/memory/allocator.ks:73:66
 
 undefined name 'bitwiseNot'
 Call Sites
-- lang/std/memory/allocator.ks:72:100
+- lang/std/memory/allocator.ks:73:100

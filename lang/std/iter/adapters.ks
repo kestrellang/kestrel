@@ -3,7 +3,7 @@
 module std.iter
 
 import std.result.(Optional)
-import std.core.(Cloneable)
+import std.core.(Cloneable, Int, Bool)
 
 // MapIterator
 public struct MapIterator[I, U]: Iterator where I: Iterator {

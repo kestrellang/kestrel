@@ -3,6 +3,7 @@
 module std.memory
 
 import std.result.(Optional)
+import std.core.(Int)
 
 public protocol Allocator {
     func allocate(layout: Layout) -> Optional[RawPointer]

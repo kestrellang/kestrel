@@ -50,11 +50,11 @@ public struct Float64:
     }
 
     public func isNaN() -> Bool {
-        lang.f64_is_nan(self.value)
+        Bool(boolLiteral: lang.f64_is_nan(self.value))
     }
 
     public func isInfinite() -> Bool {
-        lang.f64_is_infinite(self.value)
+        Bool(boolLiteral: lang.f64_is_infinite(self.value))
     }
 
     public func isFinite() -> Bool {
@@ -62,12 +62,12 @@ public struct Float64:
     }
 
     public func equals(other: Float64) -> Bool {
-        lang.f64_eq(self.value, other.value)
+        Bool(boolLiteral: lang.f64_eq(self.value, other.value))
     }
 
     public func compare(other: Float64) -> Ordering {
-        if lang.f64_lt(self.value, other.value) { .Less }
-        else if lang.f64_gt(self.value, other.value) { .Greater }
+        if Bool(boolLiteral: lang.f64_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.f64_gt(self.value, other.value)) { .Greater }
         else { .Equal }
     }
 

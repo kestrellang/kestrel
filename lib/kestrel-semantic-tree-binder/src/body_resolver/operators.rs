@@ -325,76 +325,13 @@ fn desugar_binary_op(
         return Expression::primitive_method_call(lhs, prim_method, vec![arg], full_span);
     }
 
-    // If lhs type is Infer, use a placeholder primitive method.
-    // Type inference will resolve the actual type and correct this.
-    if matches!(lhs.ty.kind(), TyKind::Infer) {
-        let result_ty = match op {
-            // Comparison operators always return Bool
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Le
-            | BinaryOp::Gt
-            | BinaryOp::Ge => Ty::bool(full_span.clone()),
-            // Logical operators return Bool
-            BinaryOp::And | BinaryOp::Or => Ty::bool(full_span.clone()),
-            // Arithmetic operators return the same type as operands
-            _ => lhs.ty.clone(),
-        };
-        let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
-        // Use a placeholder method - type inference will correct this
-        return Expression::primitive_method_call_with_type(
-            lhs,
-            placeholder_method_for_op(op),
-            vec![arg],
-            result_ty,
-            full_span,
-        );
-    }
-
-    // For non-primitive types, create a DeferredMethodCall.
+    // For non-primitive types (including Infer), create a DeferredMethodCall.
     // Type inference will resolve this to a concrete protocol method call.
-    let result_ty = match op {
-        // Comparison operators always return Bool
-        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-            Ty::bool(full_span.clone())
-        }
-        // Logical operators return Bool
-        BinaryOp::And | BinaryOp::Or => Ty::bool(full_span.clone()),
-        // Other operators return Infer (resolved via Output associated type)
-        _ => Ty::infer(full_span.clone()),
-    };
+    // All operators use Infer - type inference will determine the actual return type
+    // from the resolved method (e.g., Bool for comparisons, Output associated type for arithmetic).
+    let result_ty = Ty::infer(full_span.clone());
     let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
     Expression::deferred_method_call(lhs, method_name.to_string(), vec![arg], result_ty, full_span)
-}
-
-/// Get a placeholder primitive method for an operator.
-/// This is used when the operand type is Infer and we need to create a placeholder.
-fn placeholder_method_for_op(op: BinaryOp) -> PrimitiveMethod {
-    match op {
-        BinaryOp::Add => PrimitiveMethod::IntAdd,
-        BinaryOp::Sub => PrimitiveMethod::IntSub,
-        BinaryOp::Mul => PrimitiveMethod::IntMul,
-        BinaryOp::Div => PrimitiveMethod::IntDiv,
-        BinaryOp::Rem => PrimitiveMethod::IntRem,
-        BinaryOp::BitAnd => PrimitiveMethod::IntBitAnd,
-        BinaryOp::BitOr => PrimitiveMethod::IntBitOr,
-        BinaryOp::BitXor => PrimitiveMethod::IntBitXor,
-        BinaryOp::Shl => PrimitiveMethod::IntShl,
-        BinaryOp::Shr => PrimitiveMethod::IntShr,
-        BinaryOp::Eq => PrimitiveMethod::IntEq,
-        BinaryOp::Ne => PrimitiveMethod::IntNe,
-        BinaryOp::Lt => PrimitiveMethod::IntLt,
-        BinaryOp::Le => PrimitiveMethod::IntLe,
-        BinaryOp::Gt => PrimitiveMethod::IntGt,
-        BinaryOp::Ge => PrimitiveMethod::IntGe,
-        BinaryOp::And => PrimitiveMethod::BoolAnd,
-        BinaryOp::Or => PrimitiveMethod::BoolOr,
-        // Range and coalesce operators are not primitive methods - use a placeholder
-        BinaryOp::RangeInclusive | BinaryOp::RangeExclusive | BinaryOp::Coalesce => {
-            PrimitiveMethod::IntAdd // Placeholder, these should be handled differently
-        }
-    }
 }
 
 /// Desugar a unary operator into a method call: operand.method_name()
@@ -412,47 +349,11 @@ fn desugar_unary_op(
         return Expression::primitive_method_call(operand, prim_method, vec![], full_span);
     }
 
-    // If operand type is Infer, use a placeholder primitive method.
-    // Type inference will resolve the actual type and correct this.
-    if matches!(operand.ty.kind(), TyKind::Infer) {
-        let result_ty = match op {
-            // Logical not returns Bool
-            UnaryOp::LogicalNot => Ty::bool(full_span.clone()),
-            // Other operators return the same type as operand
-            UnaryOp::Neg | UnaryOp::BitNot => operand.ty.clone(),
-            // Unwrap returns the unwrapped type (infer for now)
-            UnaryOp::Unwrap => Ty::infer(full_span.clone()),
-        };
-        // Use a placeholder method - type inference will correct this
-        return Expression::primitive_method_call_with_type(
-            operand,
-            placeholder_method_for_unary_op(op),
-            vec![],
-            result_ty,
-            full_span,
-        );
-    }
-
-    // For non-primitive types, create a DeferredMethodCall.
+    // For non-primitive types (including Infer), create a DeferredMethodCall.
     // Type inference will resolve this to a concrete protocol method call.
-    let result_ty = match op {
-        // Logical not returns Bool
-        UnaryOp::LogicalNot => Ty::bool(full_span.clone()),
-        // Other operators return Infer (resolved via Output associated type)
-        UnaryOp::Neg | UnaryOp::BitNot | UnaryOp::Unwrap => Ty::infer(full_span.clone()),
-    };
+    // Use Infer so type inference determines the actual return type from the resolved method.
+    let result_ty = Ty::infer(full_span.clone());
     Expression::deferred_method_call(operand, method_name.to_string(), vec![], result_ty, full_span)
-}
-
-/// Get a placeholder primitive method for a unary operator.
-/// This is used when the operand type is Infer and we need to create a placeholder.
-fn placeholder_method_for_unary_op(op: UnaryOp) -> PrimitiveMethod {
-    match op {
-        UnaryOp::Neg => PrimitiveMethod::IntNeg,
-        UnaryOp::LogicalNot => PrimitiveMethod::BoolNot,
-        UnaryOp::BitNot => PrimitiveMethod::IntBitNot,
-        UnaryOp::Unwrap => PrimitiveMethod::IntAdd, // Placeholder - unwrap is handled specially
-    }
 }
 
 /// Look up a primitive method on a type for binary operators.

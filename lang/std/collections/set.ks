@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Equatable, Hashable, Cloneable, Hasher)
+import std.core.(Equatable, Hashable, Cloneable, Hasher, Int, Bool)
 import std.result.(Optional)
 import std.memory.(Allocator)
 import std.iter.(Iterator, Iterable, Collectable)

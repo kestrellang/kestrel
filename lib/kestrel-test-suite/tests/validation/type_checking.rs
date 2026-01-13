@@ -353,7 +353,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("must be `Bool`"));
+        .expect(HasError("must conform to `BooleanConditional`"));
     }
 
     #[test]
@@ -369,7 +369,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("must be `Bool`"));
+        .expect(HasError("must conform to `BooleanConditional`"));
     }
 
     #[test]
@@ -385,7 +385,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("must be `Bool`"));
+        .expect(HasError("must conform to `BooleanConditional`"));
     }
 
     #[test]
@@ -401,7 +401,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("must be `Bool`"));
+        .expect(HasError("must conform to `BooleanConditional`"));
     }
 
     #[test]
@@ -419,7 +419,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("must be `Bool`"));
+        .expect(HasError("must conform to `BooleanConditional`"));
     }
 
     #[test]
@@ -437,7 +437,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("must be `Bool`"));
+        .expect(HasError("must conform to `BooleanConditional`"));
     }
 
     #[test]

@@ -86,6 +86,9 @@ pub enum LanguageFeature {
     LogicalNotOperatorProtocol,
     LogicalNotOperatorMethod,
 
+    // Boolean conditional protocol (for if/while conditions)
+    BooleanConditional,
+
     // Operator protocols - range
     ExclusiveRangeOperatorProtocol,
     ExclusiveRangeOperatorMethod,
@@ -163,6 +166,8 @@ impl LanguageFeature {
             "LogicalOrOperatorMethod" => Some(Self::LogicalOrOperatorMethod),
             "LogicalNotOperatorProtocol" => Some(Self::LogicalNotOperatorProtocol),
             "LogicalNotOperatorMethod" => Some(Self::LogicalNotOperatorMethod),
+            // Boolean conditional protocol
+            "BooleanConditional" => Some(Self::BooleanConditional),
             // Operator protocols - range
             "ExclusiveRangeOperatorProtocol" => Some(Self::ExclusiveRangeOperatorProtocol),
             "ExclusiveRangeOperatorMethod" => Some(Self::ExclusiveRangeOperatorMethod),
@@ -240,6 +245,8 @@ impl LanguageFeature {
             Self::LogicalOrOperatorMethod => "LogicalOrOperatorMethod",
             Self::LogicalNotOperatorProtocol => "LogicalNotOperatorProtocol",
             Self::LogicalNotOperatorMethod => "LogicalNotOperatorMethod",
+            // Boolean conditional protocol
+            Self::BooleanConditional => "BooleanConditional",
             // Operator protocols - range
             Self::ExclusiveRangeOperatorProtocol => "ExclusiveRangeOperatorProtocol",
             Self::ExclusiveRangeOperatorMethod => "ExclusiveRangeOperatorMethod",
@@ -396,6 +403,8 @@ impl LanguageFeature {
             | Self::LogicalAndOperatorProtocol
             | Self::LogicalOrOperatorProtocol
             | Self::LogicalNotOperatorProtocol
+            // Boolean conditional protocol
+            | Self::BooleanConditional
             // Operator protocols - range
             | Self::ExclusiveRangeOperatorProtocol
             | Self::InclusiveRangeOperatorProtocol => BuiltinDefinition {

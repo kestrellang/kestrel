@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable)
+import std.core.(Equatable, Bool)
 import std.iter.(Iterator, Functor)
 
 public enum Result[T, E]: Tryable, Returnable[T] {

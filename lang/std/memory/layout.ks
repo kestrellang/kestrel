@@ -2,7 +2,7 @@
 
 module std.memory
 
-import std.core.(Equatable)
+import std.core.(Equatable, Int, Bool)
 import std.result.(Optional)
 
 public struct Layout: Equatable {

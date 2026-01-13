@@ -58,12 +58,15 @@ impl IntoDiagnostic for ConditionNotBoolError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!(
-                "{} condition must be `Bool`, found `{}`",
+                "{} condition must conform to `BooleanConditional`, found `{}`",
                 self.condition_kind, self.found
             ))
             .with_labels(vec![
                 Label::primary(self.span.file_id, self.span.range())
-                    .with_message(format!("expected `Bool`, found `{}`", self.found)),
+                    .with_message(format!(
+                        "type `{}` does not conform to `BooleanConditional`",
+                        self.found
+                    )),
             ])
     }
 }

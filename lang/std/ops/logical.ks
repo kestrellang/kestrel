@@ -27,3 +27,9 @@ public protocol Not {
     @builtin(.LogicalNotOperatorMethod)
     func logicalNot() -> Output
 }
+
+// Protocol for types that can be used as boolean conditions in if/while
+@builtin(.BooleanConditional)
+public protocol BooleanConditional {
+    func boolValue() -> lang.i1
+}
