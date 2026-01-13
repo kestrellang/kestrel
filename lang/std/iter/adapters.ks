@@ -95,6 +95,7 @@ public struct FlatMapIterator[I, Inner]: Iterator where I: Iterator, Inner: Iter
                 return .None
             }
         }
+        panic("unreachable")
     }
 }
 
@@ -380,7 +381,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
         self.peeked = peeked;
     }
 
-    public func peek() -> Optional[I.Item] {
+    public mutating func peek() -> Optional[I.Item] {
         if self.peeked.isNone {
             self.peeked = .Some(self.inner.next())
         }
@@ -395,7 +396,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
         self.inner.next()
     }
 
-    public func nextIf(predicate: (I.Item) -> Bool) -> Optional[I.Item] {
+    public mutating func nextIf(predicate: (I.Item) -> Bool) -> Optional[I.Item] {
         if let item = self.peek() {
             if predicate(item) {
                 return self.next()

@@ -906,7 +906,15 @@ fn resolve_member(
     expr_id: kestrel_semantic_tree::expr::ExprId,
     span: &Span,
 ) -> Result<SolveResult, InferenceError> {
-    let receiver_ty = resolve_type(ctx, receiver);
+    let mut receiver_ty = resolve_type(ctx, receiver);
+
+    // Expand type aliases before member lookup.
+    // Type aliases (e.g., Int -> Int64) need to be expanded to their underlying
+    // type so we can look up methods on the actual struct.
+    while matches!(receiver_ty.kind(), TyKind::TypeAlias { .. }) {
+        receiver_ty = ctx.oracle().expand_type_alias(&receiver_ty);
+        ctx.register_type(&receiver_ty);
+    }
 
     // If the receiver type is still an inference placeholder, defer
     if matches!(receiver_ty.kind(), TyKind::Infer) {

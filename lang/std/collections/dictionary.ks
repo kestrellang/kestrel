@@ -77,7 +77,7 @@ public struct Dictionary[K, V, A]:
         if p < 8 { 8 } else { p }
     }
 
-    private func initializeEntries() {
+    private mutating func initializeEntries() {
         /* for i in 0..<self.storage.value.capacity {
             self.storage.value.entries(unchecked: i) = Entry(
                 key: lang.uninitialized[K](),
@@ -106,20 +106,20 @@ public struct Dictionary[K, V, A]:
     }
 
     // COW helper
-    private func ensureUnique() {
+    private mutating func ensureUnique() {
         if not self.storage.isUnique() {
             self.storage = self.storage.deepClone()
         }
     }
 
-    private func ensureCapacity() {
+    private mutating func ensureCapacity() {
         // Resize when load factor > 0.75
         if self.storage.value.count * 4 >= self.storage.value.capacity * 3 {
             self.resize()
         }
     }
 
-    private func resize() {
+    private mutating func resize() {
         let newCapacity = if self.storage.value.capacity == 0 { 8 } else { self.storage.value.capacity * 2 };
         let oldEntries = self.storage.value.entries;
         let oldCapacity = self.storage.value.capacity;
@@ -180,7 +180,7 @@ public struct Dictionary[K, V, A]:
         .None
     }
 
-    private func insertEntry(key: K, value: V, hash: UInt64) {
+    private mutating func insertEntry(key: K, value: V, hash: UInt64) {
         let mask = self.storage.value.capacity - 1;
         var index = Int(hash) & mask;
 
@@ -200,7 +200,7 @@ public struct Dictionary[K, V, A]:
     // Subscript access
     public subscript(key: K) -> Optional[V] {
         get {
-            let hash = self.hash(key: key)
+            let hash = self.hash(key: key);
             if let index = self.findEntry(key: key, hash: hash) {
                 .Some(self.storage.value.entries(unchecked: index).value)
             } else {
@@ -208,7 +208,7 @@ public struct Dictionary[K, V, A]:
             }
         }
         set {
-            self.ensureUnique()
+            self.ensureUnique();
             if let value = newValue {
                 self.insert(value: value, for: key)
             } else {
@@ -218,7 +218,7 @@ public struct Dictionary[K, V, A]:
     }
 
     // Mutation
-    public func insert(value: V, for key: K) -> Optional[V] {
+    public mutating func insert(value: V, for key: K) -> Optional[V] {
         self.ensureUnique();
         let hash = self.hash(key: key);
 
@@ -235,7 +235,7 @@ public struct Dictionary[K, V, A]:
         .None
     }
 
-    public func remove(for key: K) -> Optional[V] {
+    public mutating func remove(for key: K) -> Optional[V] {
         self.ensureUnique();
         let hash = self.hash(key: key);
 
@@ -265,7 +265,7 @@ public struct Dictionary[K, V, A]:
         self.findEntry(key: key, hash: hash).isSome
     }
 
-    public func clear() {
+    public mutating func clear() {
         self.ensureUnique();
         /* for i in 0..<self.storage.value.capacity {
             self.storage.value.entries(unchecked: i).occupied = false
@@ -288,7 +288,7 @@ public struct Dictionary[K, V, A]:
     }
 
     // Get or insert
-    public func getOrInsert(key: K, default defaultValue: V) -> V {
+    public mutating func getOrInsert(key: K, default defaultValue: V) -> V {
         if let .Some(value) = self(key) {
             return value
         }
@@ -296,7 +296,7 @@ public struct Dictionary[K, V, A]:
         defaultValue
     }
 
-    public func getOrInsertWith(key: K, defaultFn: () -> V) -> V {
+    public mutating func getOrInsertWith(key: K, defaultFn: () -> V) -> V {
         if let .Some(value) = self(key) {
             return value
         }

@@ -11,6 +11,7 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
@@ -94,10 +95,11 @@ impl DeclarationBinder for ExtensionBinder {
     }
 }
 
-/// Symbol that can be extended (struct or enum)
+/// Symbol that can be extended (struct, enum, or protocol)
 enum ExtendableSymbol {
     Struct(Arc<StructSymbol>),
     Enum(Arc<EnumSymbol>),
+    Protocol(Arc<ProtocolSymbol>),
 }
 
 impl ExtendableSymbol {
@@ -105,6 +107,7 @@ impl ExtendableSymbol {
         match self {
             ExtendableSymbol::Struct(s) => s.type_parameters(),
             ExtendableSymbol::Enum(e) => e.type_parameters(),
+            ExtendableSymbol::Protocol(p) => p.type_parameters(),
         }
     }
 
@@ -112,6 +115,7 @@ impl ExtendableSymbol {
         match self {
             ExtendableSymbol::Struct(s) => s.metadata().id(),
             ExtendableSymbol::Enum(e) => e.metadata().id(),
+            ExtendableSymbol::Protocol(p) => p.metadata().id(),
         }
     }
 
@@ -119,7 +123,14 @@ impl ExtendableSymbol {
         match self {
             ExtendableSymbol::Struct(s) => s.where_clause(),
             ExtendableSymbol::Enum(e) => e.where_clause(),
+            // Protocols don't inherit their where clause to extensions
+            // Protocol extensions have their own independent where clauses
+            ExtendableSymbol::Protocol(_) => WhereClause::new(),
         }
+    }
+
+    fn is_protocol(&self) -> bool {
+        matches!(self, ExtendableSymbol::Protocol(_))
     }
 }
 
@@ -164,6 +175,7 @@ fn resolve_extension_target(
         TypePathResolution::Resolved(ty) => match ty.kind() {
             TyKind::Struct { symbol, .. } => ExtendableSymbol::Struct(symbol.clone()),
             TyKind::Enum { symbol, .. } => ExtendableSymbol::Enum(symbol.clone()),
+            TyKind::Protocol { symbol, .. } => ExtendableSymbol::Protocol(symbol.clone()),
             _ => {
                 ctx.diagnostics.throw(CannotExtendTypeError {
                     span: ty_span.clone(),
@@ -250,6 +262,10 @@ fn resolve_extension_target(
         }
         ExtendableSymbol::Enum(enum_sym) => {
             Ty::generic_enum(enum_sym.clone(), substitutions, ty_span)
+        }
+        ExtendableSymbol::Protocol(protocol_sym) => {
+            // Protocol extensions don't use substitutions - they apply to all conforming types
+            Ty::protocol(protocol_sym.clone(), ty_span)
         }
     };
 
@@ -398,15 +414,15 @@ impl kestrel_reporting::IntoDiagnostic for CannotExtendTypeError {
     fn into_diagnostic(&self) -> kestrel_reporting::Diagnostic<usize> {
         kestrel_reporting::Diagnostic::error()
             .with_message(format!(
-                "cannot extend type '{}' - only structs and enums can be extended",
+                "cannot extend type '{}' - only structs, enums, and protocols can be extended",
                 self.type_name
             ))
             .with_labels(vec![
                 kestrel_reporting::Label::primary(self.span.file_id, self.span.range())
-                    .with_message("not a struct or enum type"),
+                    .with_message("not a struct, enum, or protocol type"),
             ])
             .with_notes(vec![
-                "Extensions can only be applied to struct and enum types".to_string(),
+                "Extensions can only be applied to struct, enum, and protocol types".to_string(),
             ])
     }
 }

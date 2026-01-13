@@ -113,6 +113,19 @@ fn resolve_type_bound(
         let path_segments = extract_path_from_node(&target_node);
         let target_span = get_node_span(&target_node, file_id);
 
+        // Check if this is a Self.Item: Protocol constraint (for protocol extensions)
+        if !path_segments.is_empty() && path_segments[0] == "Self" {
+            let bounds =
+                resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
+            if bounds.is_empty() {
+                return None;
+            }
+
+            // Create SelfBound with the associated type path (everything after "Self")
+            let associated_type_path: Vec<String> = path_segments[1..].to_vec();
+            return Some(Constraint::self_bound(associated_type_path, target_span, bounds));
+        }
+
         if path_segments.len() >= 2 {
             // If the first segment is a type parameter, validate that the associated type exists
             // on at least one protocol bound (when possible).
@@ -142,7 +155,7 @@ fn resolve_type_bound(
         ));
     }
 
-    // Simple bound: T: Protocol or T: not Copyable
+    // Simple bound: T: Protocol or T: not Copyable or Self: Protocol
     let name_node = find_child(syntax, SyntaxKind::Name)?;
     let name_token = name_node
         .children_with_tokens()
@@ -155,6 +168,24 @@ fn resolve_type_bound(
         file_id,
         (text_range.start().into())..(text_range.end().into()),
     );
+
+    // Check if this is a Self: Protocol constraint (for protocol extensions)
+    if param_name == "Self" {
+        // Check if this is a negative bound (Self: not Copyable) - not typical but handle it
+        if find_child(syntax, SyntaxKind::NegativeConformance).is_some() {
+            // For now, negative Self bounds are not supported - fall through to regular handling
+            // which will create an unresolved constraint
+        } else {
+            let bounds =
+                resolve_protocol_bounds_from_type_bound(syntax, source, file_id, context_id, ctx);
+            if bounds.is_empty() {
+                return None;
+            }
+
+            // Create SelfBound with empty associated type path (just Self: Protocol)
+            return Some(Constraint::self_bound(Vec::new(), param_span, bounds));
+        }
+    }
 
     let param_id = type_params
         .iter()

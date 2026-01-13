@@ -100,13 +100,13 @@ public struct String[A]:
     }
 
     // COW helper
-    private func ensureUnique() {
+    private mutating func ensureUnique() {
         if not self.storage.isUnique() {
             self.storage = self.storage.deepClone()
         }
     }
 
-    private func ensureCapacity(minCapacity: Int) {
+    private mutating func ensureCapacity(minCapacity: Int) {
         self.ensureUnique();
         if self.storage.value.buffer.capacity < minCapacity {
             let newCapacity = if self.storage.value.buffer.capacity == 0 {
@@ -123,7 +123,7 @@ public struct String[A]:
     }
 
     // Mutation
-    public func append(string other: String) {
+    public mutating func append(string other: String) {
         self.ensureCapacity(minCapacity: self.byteCount + other.byteCount)
         /* for i in 0..<other.byteCount {
             self.storage.value.buffer(unchecked: self.storage.value.length) = other.storage.value.buffer(unchecked: i)
@@ -131,7 +131,7 @@ public struct String[A]:
         } */
     }
 
-    public func append(codePoint cp: CodePoint) {
+    public mutating func append(codePoint cp: CodePoint) {
         var bytes: [UInt8] = [];
         cp.encodeUtf8(into: bytes);
         self.ensureCapacity(minCapacity: self.byteCount + bytes.count);
@@ -141,7 +141,7 @@ public struct String[A]:
         } */
     }
 
-    public func clear() {
+    public mutating func clear() {
         self.ensureUnique();
         self.storage.value.length = 0
     }

@@ -87,13 +87,13 @@ public struct Array[T, A]:
     }
 
     // COW helper
-    private func ensureUnique() {
+    private mutating func ensureUnique() {
         if not self.storage.isUnique() {
             self.storage = self.storage.deepClone()
         }
     }
 
-    private func ensureCapacity(minCapacity: Int) {
+    private mutating func ensureCapacity(minCapacity: Int) {
         self.ensureUnique();
         if self.storage.value.buffer.capacity < minCapacity {
             let newCapacity = if self.storage.value.buffer.capacity == 0 {
@@ -145,7 +145,7 @@ public struct Array[T, A]:
     public subscript(unchecked index: Int) -> T {
         get { self.storage.value.buffer(unchecked: index) }
         set {
-            self.ensureUnique()
+            self.ensureUnique();
             self.storage.value.buffer(unchecked: index) = newValue
         }
     }
@@ -161,13 +161,13 @@ public struct Array[T, A]:
     //}
 
     // Mutation
-    public func append(element: T) {
+    public mutating func append(element: T) {
         self.ensureCapacity(minCapacity: self.count + 1);
         self.storage.value.buffer(unchecked: self.storage.value.count) = element;
         self.storage.value.count = self.storage.value.count + 1
     }
 
-    public func append(contentsOf other: Array[T, A]) {
+    public mutating func append(contentsOf other: Array[T, A]) {
         self.ensureCapacity(minCapacity: self.count + other.count);
         /* for i in 0..<other.count {
             self.storage.value.buffer(unchecked: self.storage.value.count) = other(unchecked: i)
@@ -175,7 +175,7 @@ public struct Array[T, A]:
         } */
     }
 
-    public func insert(element: T, at index: Int) {
+    public mutating func insert(element: T, at index: Int) {
         if index < 0 or index > self.count {
             panic("Array.insert: index out of bounds")
         }
@@ -193,7 +193,7 @@ public struct Array[T, A]:
         self.storage.value.count = self.storage.value.count + 1
     }
 
-    public func remove(at index: Int) -> T {
+    public mutating func remove(at index: Int) -> T {
         if index < 0 or index >= self.count {
             panic("Array.remove: index out of bounds")
         }
@@ -210,7 +210,7 @@ public struct Array[T, A]:
         removed
     }
 
-    public func pop() -> Optional[T] {
+    public mutating func pop() -> Optional[T] {
         if self.isEmpty {
             return .None
         }
@@ -220,7 +220,7 @@ public struct Array[T, A]:
         .Some(self.storage.value.buffer(unchecked: self.storage.value.count))
     }
 
-    public func clear() {
+    public mutating func clear() {
         self.ensureUnique();
         self.storage.value.count = 0
     }
@@ -270,7 +270,7 @@ public struct Array[T, A]:
     }
 
     // Sorting
-    public func sort() where T: Comparable {
+    public mutating func sort() where T: Comparable {
         self.ensureUnique()
         // Simple insertion sort for now
         /* for i in 1..<self.count {
@@ -290,7 +290,7 @@ public struct Array[T, A]:
         result
     }
 
-    public func reverse() {
+    public mutating func reverse() {
         self.ensureUnique();
         var left = 0;
         var right = self.count - 1;

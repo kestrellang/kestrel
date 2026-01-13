@@ -3,8 +3,11 @@
 module std.core
 
 import std.core.(Equatable)
+import std.ops.(Equal, NotEqual)
 
-public enum Ordering: Equatable {
+public enum Ordering: Equatable, Equal[Self], NotEqual[Self] {
+    type Equal.Output = Bool
+    type NotEqual.Output = Bool
     case Less
     case Equal
     case Greater
@@ -15,6 +18,15 @@ public enum Ordering: Equatable {
             (.Equal, .Equal) => true,
             (.Greater, .Greater) => true,
             _ => false
+        }
+    }
+
+    public func notEquals(other: Ordering) -> Bool {
+        match (self, other) {
+            (.Less, .Less) => false,
+            (.Equal, .Equal) => false,
+            (.Greater, .Greater) => false,
+            _ => true
         }
     }
 

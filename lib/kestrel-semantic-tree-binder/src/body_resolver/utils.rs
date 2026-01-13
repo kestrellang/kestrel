@@ -307,7 +307,7 @@ pub fn get_type_container(
                 KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
                 KestrelSymbolKind::Extension => {
                     // For extension methods, Self refers to the target type
-                    // Get the ExtensionTargetBehavior and return the target struct/enum
+                    // Get the ExtensionTargetBehavior and return the target struct/enum/protocol
                     if let Some(target_beh) =
                         parent.metadata().get_behavior::<ExtensionTargetBehavior>()
                     {
@@ -316,6 +316,11 @@ pub fn get_type_container(
                                 Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
                             }
                             TyKind::Enum { symbol, .. } => {
+                                Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
+                            }
+                            TyKind::Protocol { symbol, .. } => {
+                                // For protocol extensions, return the protocol symbol
+                                // This allows calling protocol methods on self in default implementations
                                 Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>)
                             }
                             _ => None,

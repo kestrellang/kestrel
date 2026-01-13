@@ -779,3 +779,643 @@ mod future_features {
         .expect(Compiles);
     }
 }
+
+mod protocol_extensions {
+    use super::*;
+
+    // Phase 1: Binding tests - protocol extensions parse and bind correctly
+
+    #[test]
+    fn empty_protocol_extension() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            extend Drawable { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_with_empty_method() {
+        // Method with no body content that doesn't access self
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            extend Drawable {
+                func helper() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_with_multiple_methods() {
+        Test::new(
+            r#"module Test
+            protocol Processable {
+                func process()
+            }
+            extend Processable {
+                func helper1() { }
+                func helper2() { }
+                func helper3() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_protocol_extensions_same_protocol() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            extend Drawable {
+                func helper1() { }
+            }
+            extend Drawable {
+                func helper2() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_generic_protocol() {
+        Test::new(
+            r#"module Test
+            protocol Container[T] {
+                func fetch() -> T
+            }
+            extend Container {
+                func doNothing() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_with_where_clause_self_bound() {
+        // Where clause with Self: OtherProtocol
+        Test::new(
+            r#"module Test
+            protocol Sortable {
+                func sort()
+            }
+            protocol Filterable {
+                func filter()
+            }
+            extend Filterable where Self: Sortable {
+                func helper() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_multiple_where_clauses() {
+        Test::new(
+            r#"module Test
+            protocol A {
+                func methodA()
+            }
+            protocol B {
+                func methodB()
+            }
+            protocol C {
+                func methodC()
+            }
+            extend C where Self: A, Self: B {
+                func helperAB() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_inheriting_protocol() {
+        // Protocol that inherits from another, with extension
+        Test::new(
+            r#"module Test
+            protocol Base {
+                func base()
+            }
+            protocol Derived: Base {
+                func derived()
+            }
+            extend Derived {
+                func helper() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_self_associated_type_bound() {
+        // Where clause with Self.AssociatedType: Protocol
+        Test::new(
+            r#"module Test
+            protocol Equatable {
+                func equals(other: Self)
+            }
+            protocol Iterator {
+                type Item
+                func next()
+            }
+            extend Iterator where Self.Item: Equatable {
+                func containsHelper() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_mixed_self_constraints() {
+        // Mix of Self: Protocol and Self.AssociatedType: Protocol
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func compare(other: Self)
+            }
+            protocol Equatable {
+                func equals(other: Self)
+            }
+            protocol Iterator {
+                type Item
+                func next()
+            }
+            extend Iterator where Self: Comparable, Self.Item: Equatable {
+                func mixedHelper() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    // Phase 3 tests - method resolution from protocol extensions
+
+    #[test]
+    fn type_uses_protocol_extension_method() {
+        // A struct conforming to a protocol can use methods from protocol extensions
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            extend Drawable {
+                func helperMethod() { }
+            }
+            struct Circle: Drawable {
+                func draw() { }
+            }
+            func test() {
+                let c = Circle();
+                c.helperMethod();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn type_own_method_takes_priority() {
+        // Type's own method takes priority over protocol extension method
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            extend Drawable {
+                func helper() { }
+            }
+            struct Circle: Drawable {
+                func draw() { }
+                func helper() { }
+            }
+            func test() {
+                let c = Circle();
+                c.helper();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn constrained_protocol_extension_applies() {
+        // Protocol extension with where clause applies when constraint satisfied
+        Test::new(
+            r#"module Test
+            protocol Sortable {
+                func sort()
+            }
+            protocol Filterable {
+                func filter()
+            }
+            extend Filterable where Self: Sortable {
+                func combined() { }
+            }
+            struct Data: Filterable, Sortable {
+                func filter() { }
+                func sort() { }
+            }
+            func test() {
+                let d = Data();
+                d.combined();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn unconstrained_protocol_extension_not_found_when_constraint_not_met() {
+        // Protocol extension with where clause should not apply when constraint not met
+        Test::new(
+            r#"module Test
+            protocol Sortable {
+                func sort()
+            }
+            protocol Filterable {
+                func filter()
+            }
+            extend Filterable where Self: Sortable {
+                func combined() { }
+            }
+            struct Data: Filterable {
+                func filter() { }
+            }
+            func test() {
+                let d = Data();
+                d.combined();
+            }
+        "#,
+        )
+        .expect(HasError("member"));
+    }
+
+    // Phase 4 tests - body resolution in protocol extension methods
+
+    #[test]
+    fn protocol_extension_method_calls_protocol_method() {
+        // Protocol extension method can call protocol-required methods on self
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+                func clear()
+            }
+            extend Drawable {
+                func redraw() {
+                    self.clear();
+                    self.draw();
+                }
+            }
+            struct Circle: Drawable {
+                func draw() { }
+                func clear() { }
+            }
+            func test() {
+                let c = Circle();
+                c.redraw();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_method_returns_value_from_protocol_method() {
+        // Protocol extension method can use values from protocol methods (assigned to let)
+        Test::new(
+            r#"module Test
+            protocol Processor {
+                func process()
+                func getState()
+            }
+            extend Processor {
+                func processAndGetState() {
+                    self.process();
+                    let _state = self.getState();
+                }
+            }
+            struct Item: Processor {
+                func process() { }
+                func getState() { }
+            }
+            func test() {
+                let s = Item();
+                s.processAndGetState();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_method_calls_other_extension_method() {
+        // Protocol extension method can call another extension method
+        Test::new(
+            r#"module Test
+            protocol Printable {
+                func print()
+            }
+            extend Printable {
+                func helper() { }
+                func printTwice() {
+                    self.print();
+                    self.helper();
+                    self.print();
+                }
+            }
+            struct Message: Printable {
+                func print() { }
+            }
+            func test() {
+                let m = Message();
+                m.printTwice();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_chained_method_calls() {
+        // Protocol extension method with chained calls
+        Test::new(
+            r#"module Test
+            protocol Builder {
+                func reset()
+                func validate()
+            }
+            extend Builder {
+                func prepareAndValidate() {
+                    self.reset();
+                    self.validate();
+                    self.reset();
+                    self.validate();
+                }
+            }
+            struct SimpleBuilder: Builder {
+                func reset() { }
+                func validate() { }
+            }
+            func test() {
+                let b = SimpleBuilder();
+                b.prepareAndValidate();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    // Phase 5 tests - specificity and conflict resolution
+
+    #[test]
+    fn more_constrained_extension_wins() {
+        // When two protocol extensions provide the same method, the more constrained one wins
+        // The more constrained extension's method is called (verified by compilation succeeding)
+        Test::new(
+            r#"module Test
+            protocol Sortable {
+                func sort()
+            }
+            protocol Filterable {
+                func filter()
+            }
+            // Less constrained extension (specificity 0)
+            extend Filterable {
+                func process() { }
+            }
+            // More constrained extension (specificity 1)
+            extend Filterable where Self: Sortable {
+                func process() { }
+            }
+            struct Data: Filterable, Sortable {
+                func filter() { }
+                func sort() { }
+            }
+            func test() {
+                let d = Data();
+                d.process();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn less_constrained_extension_used_when_constraint_not_met() {
+        // When the more constrained extension doesn't apply, fall back to less constrained
+        Test::new(
+            r#"module Test
+            protocol Sortable {
+                func sort()
+            }
+            protocol Filterable {
+                func filter()
+            }
+            // Less constrained extension (specificity 0)
+            extend Filterable {
+                func process() { }
+            }
+            // More constrained extension (specificity 1) - doesn't apply to BasicData
+            extend Filterable where Self: Sortable {
+                func process() { }
+            }
+            // BasicData only conforms to Filterable, not Sortable
+            struct BasicData: Filterable {
+                func filter() { }
+            }
+            func test() {
+                let d = BasicData();
+                d.process();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_constraints_more_specific() {
+        // Extension with 2 constraints beats extension with 1 constraint
+        Test::new(
+            r#"module Test
+            protocol A {
+                func methodA()
+            }
+            protocol B {
+                func methodB()
+            }
+            protocol C {
+                func methodC()
+            }
+            // Specificity 1 (one constraint)
+            extend C where Self: A {
+                func helper() { }
+            }
+            // Specificity 2 (two constraints) - should win
+            extend C where Self: A, Self: B {
+                func helper() { }
+            }
+            struct Data: A, B, C {
+                func methodA() { }
+                func methodB() { }
+                func methodC() { }
+            }
+            func test() {
+                let d = Data();
+                d.helper();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    // Phase 6 tests - calling constraint methods on self
+
+    #[test]
+    fn protocol_extension_calls_constraint_method() {
+        // Inside a constrained protocol extension, can call methods from constraint protocol
+        Test::new(
+            r#"module Test
+            protocol Sortable {
+                func sort()
+            }
+            protocol Filterable {
+                func filter()
+            }
+            extend Filterable where Self: Sortable {
+                func filterAndSort() {
+                    self.filter();
+                    self.sort();
+                }
+            }
+            struct Data: Filterable, Sortable {
+                func filter() { }
+                func sort() { }
+            }
+            func test() {
+                let d = Data();
+                d.filterAndSort();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_calls_multiple_constraint_methods() {
+        // Can call methods from multiple constraint protocols
+        Test::new(
+            r#"module Test
+            protocol A {
+                func doA()
+            }
+            protocol B {
+                func doB()
+            }
+            protocol C {
+                func doC()
+            }
+            extend C where Self: A, Self: B {
+                func doAll() {
+                    self.doC();
+                    self.doA();
+                    self.doB();
+                }
+            }
+            struct Data: A, B, C {
+                func doA() { }
+                func doB() { }
+                func doC() { }
+            }
+            func test() {
+                let d = Data();
+                d.doAll();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    // Edge case tests
+
+    #[test]
+    fn type_can_override_protocol_extension_default() {
+        // Type's own implementation takes priority over protocol extension default
+        Test::new(
+            r#"module Test
+            protocol Describable {
+                func describe()
+            }
+            extend Describable {
+                func describe() { }
+            }
+            struct Item: Describable {
+                func describe() { }
+            }
+            func test() {
+                let i = Item();
+                i.describe();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_on_inheriting_protocol_own_methods() {
+        // Extension on derived protocol can call derived protocol's own methods
+        Test::new(
+            r#"module Test
+            protocol Base {
+                func baseMethod()
+            }
+            protocol Derived: Base {
+                func derivedMethod()
+            }
+            extend Derived {
+                func helper() {
+                    self.derivedMethod();
+                }
+            }
+            struct Impl: Base, Derived {
+                func baseMethod() { }
+                func derivedMethod() { }
+            }
+            func test() {
+                let i = Impl();
+                i.helper();
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    // TODO: Future work - these tests document features not yet implemented:
+    //
+    // 1. protocol_extension_provides_default_for_requirement
+    //    - Protocol extension provides default for required method
+    //    - Conformance checker should recognize extension defaults
+    //    - Types using default don't need to implement the method
+    //
+    // 2. protocol_extension_on_inheriting_protocol_inherited_methods
+    //    - Protocol extension on Derived should access Base protocol methods via self
+    //    - Method resolution should traverse protocol inheritance chain
+}

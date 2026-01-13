@@ -170,6 +170,12 @@ fn validate_constraint(
             validate_bound_type(bound, ctx);
         }
         Constraint::TypeEquality { .. } => { /* validated elsewhere */ }
+        Constraint::SelfBound { bounds, .. } => {
+            // SelfBound is for protocol extensions - Self is always valid, just validate bounds
+            for bound in bounds {
+                validate_bound_type(bound, ctx);
+            }
+        }
     }
 }
 

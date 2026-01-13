@@ -11,13 +11,13 @@ public type Byte = UInt8
 
 // CodePoint - Unicode code point (single scalar value)
 public struct CodePoint: Equatable, Comparable, Hashable {
-    private var value: UInt32
+    private var _value: UInt32
 
     public init(value: UInt32) {
-        self.value = value;
+        self._value = value;
     }
 
-    public var value: UInt32 { self.value }
+    public var value: UInt32 { self._value }
 
     // Character classification
     public func isAscii() -> Bool {
@@ -126,17 +126,17 @@ public struct CodePoint: Equatable, Comparable, Hashable {
 // Char - Extended grapheme cluster (user-perceived character)
 // May be multiple code points (e.g., "é" or "👨‍👩‍👧")
 public struct Char: Equatable, Hashable {
-    private var codePoints: Array[CodePoint]
+    private var _codePoints: Array[CodePoint]
 
     public init(codePoint: CodePoint) {
-        self.codePoints = [codePoint]
+        self._codePoints = [codePoint]
     }
 
     public init(codePoints: Array[CodePoint]) {
-        self.codePoints = codePoints
+        self._codePoints = codePoints
     }
 
-    public var codePoints: Array[CodePoint] { self.codePoints }
+    public var codePoints: Array[CodePoint] { self._codePoints }
 
     public var codePointCount: Int {
         self.codePoints.count

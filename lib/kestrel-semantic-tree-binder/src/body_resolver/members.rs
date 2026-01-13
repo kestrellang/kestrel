@@ -42,7 +42,7 @@ use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
     get_type_parameter_bounds_from_context, infer_type_arguments, matches_signature,
-    substitute_self, substitute_type,
+    substitute_self, substitute_type, type_satisfies_bound,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -166,11 +166,11 @@ pub fn resolve_member_access(
     let applicable_extensions =
         filter_applicable_extensions(extensions, &resolved_base_ty_for_extensions, ctx);
 
-    // If not found in direct children, search extensions
+    // If not found in direct children, search type extensions, then protocol extensions
     let member = match member {
         Some(m) => m,
         None => {
-            // Try to find in applicable extensions
+            // Try to find in applicable type extensions
             let extension_member = applicable_extensions
                 .iter()
                 .flat_map(|ext| ext.metadata().children())
@@ -179,6 +179,38 @@ pub fn resolve_member_access(
             match extension_member {
                 Some(m) => m,
                 None => {
+                    // Try to find in protocol extensions
+                    let protocol_ext_methods =
+                        find_methods_in_protocol_extensions(base_ty, member_name, ctx);
+
+                    if !protocol_ext_methods.is_empty() {
+                        // Found method(s) in protocol extensions - create MethodRef
+                        return Expression::method_ref(
+                            base,
+                            protocol_ext_methods,
+                            member_name.to_string(),
+                            full_span.clone(),
+                        );
+                    }
+
+                    // Try Self constraint protocols (for protocol extensions with where clauses)
+                    if matches!(base_ty.kind(), TyKind::SelfType) {
+                        let constraint_methods =
+                            get_methods_from_self_constraints(member_name, ctx);
+                        if !constraint_methods.is_empty() {
+                            let method_ids: Vec<_> = constraint_methods
+                                .iter()
+                                .map(|m| m.metadata().id())
+                                .collect();
+                            return Expression::method_ref(
+                                base,
+                                method_ids,
+                                member_name.to_string(),
+                                full_span.clone(),
+                            );
+                        }
+                    }
+
                     let error = NoSuchMemberError {
                         member_span,
                         member_name: member_name.to_string(),
@@ -263,7 +295,7 @@ pub fn resolve_member_access(
             .map(|c| c.metadata().id())
             .collect();
 
-        // Also collect methods from applicable extensions
+        // Also collect methods from applicable type extensions
         for extension in &applicable_extensions {
             for child in extension.metadata().children() {
                 if child.metadata().kind() == KestrelSymbolKind::Function
@@ -273,6 +305,10 @@ pub fn resolve_member_access(
                 }
             }
         }
+
+        // Also collect methods from protocol extensions (lowest priority)
+        let protocol_ext_methods = find_methods_in_protocol_extensions(base_ty, member_name, ctx);
+        candidates.extend(protocol_ext_methods);
 
         return Expression::method_ref(
             base,
@@ -569,6 +605,12 @@ pub fn resolve_member_call(
                 }
             }
         }
+    }
+
+    // If still not found and base type is SelfType, check Self constraint protocols
+    // This allows `self.constraintMethod()` inside `extend Proto where Self: OtherProto { ... }`
+    if methods.is_empty() && matches!(base_ty.kind(), TyKind::SelfType) {
+        methods = get_methods_from_self_constraints(member_name, ctx);
     }
 
     if methods.is_empty() {
@@ -1330,6 +1372,14 @@ fn filter_applicable_extensions(
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 
+    // Handle Protocol types specially - return all protocol extensions without filtering
+    // This is used when resolving method calls on `self` inside protocol extension bodies
+    if matches!(actual_ty.kind(), TyKind::Protocol { .. }) {
+        // For protocol extensions, all extensions are applicable (they may have where clauses
+        // but those are checked at call site, not when inside the extension body itself)
+        return extensions;
+    }
+
     // Get substitutions from actual type (struct or enum)
     let actual_subs = if let Some((_, subs)) = actual_ty.as_struct_with_subs() {
         subs
@@ -1614,4 +1664,282 @@ pub fn resolve_delegating_init(
     };
     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
     Expression::error(span)
+}
+
+/// Get all protocols that a concrete type conforms to (including through extensions).
+///
+/// Returns a list of (protocol_symbol, protocol_type) pairs.
+fn get_type_conformances(
+    ty: &Ty,
+    ctx: &BodyResolutionContext,
+) -> Vec<(Arc<ProtocolSymbol>, Ty)> {
+    let mut conformances = Vec::new();
+
+    match ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            // Direct conformances on the struct
+            if let Some(conf_behavior) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
+                for conf_ty in conf_behavior.conformances() {
+                    if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
+                        conformances.push((proto.clone(), conf_ty.clone()));
+                    }
+                }
+            }
+
+            // Conformances added via type extensions
+            let struct_id = symbol.metadata().id();
+            let extensions = ctx.model.query(ExtensionsFor {
+                target_id: struct_id,
+            });
+            for extension in extensions {
+                // Skip protocol extensions when collecting type conformances
+                if let Some(target) = extension.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                    if target.is_protocol_extension() {
+                        continue;
+                    }
+                }
+                if let Some(conf_behavior) =
+                    extension.metadata().get_behavior::<ConformancesBehavior>()
+                {
+                    for conf_ty in conf_behavior.conformances() {
+                        if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
+                            conformances.push((proto.clone(), conf_ty.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        TyKind::Enum { symbol, .. } => {
+            // Direct conformances on the enum
+            if let Some(conf_behavior) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
+                for conf_ty in conf_behavior.conformances() {
+                    if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
+                        conformances.push((proto.clone(), conf_ty.clone()));
+                    }
+                }
+            }
+
+            // Conformances added via type extensions
+            let enum_id = symbol.metadata().id();
+            let extensions = ctx.model.query(ExtensionsFor { target_id: enum_id });
+            for extension in extensions {
+                if let Some(target) = extension.metadata().get_behavior::<ExtensionTargetBehavior>() {
+                    if target.is_protocol_extension() {
+                        continue;
+                    }
+                }
+                if let Some(conf_behavior) =
+                    extension.metadata().get_behavior::<ConformancesBehavior>()
+                {
+                    for conf_ty in conf_behavior.conformances() {
+                        if let TyKind::Protocol { symbol: proto, .. } = conf_ty.kind() {
+                            conformances.push((proto.clone(), conf_ty.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    conformances
+}
+
+/// Get all applicable protocol extensions for a concrete type.
+///
+/// This finds all protocol extensions where:
+/// 1. The concrete type conforms to the target protocol
+/// 2. All SelfBound constraints are satisfied
+fn get_applicable_protocol_extensions(
+    concrete_ty: &Ty,
+    ctx: &BodyResolutionContext,
+) -> Vec<(Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>, usize)> {
+    let conformances = get_type_conformances(concrete_ty, ctx);
+    let mut applicable = Vec::new();
+
+    for (protocol, _protocol_ty) in conformances {
+        // Get all extensions for this protocol
+        let protocol_id = protocol.metadata().id();
+        let extensions = ctx.model.query(ExtensionsFor {
+            target_id: protocol_id,
+        });
+
+        for extension in extensions {
+            // Check if this is actually a protocol extension
+            let target_behavior = match extension.metadata().get_behavior::<ExtensionTargetBehavior>()
+            {
+                Some(b) => b,
+                None => continue,
+            };
+
+            if !target_behavior.is_protocol_extension() {
+                continue;
+            }
+
+            // Check SelfBound constraints
+            if is_protocol_extension_applicable(&extension, concrete_ty, ctx) {
+                let specificity = target_behavior.protocol_extension_specificity();
+                applicable.push((extension, specificity));
+            }
+        }
+    }
+
+    // Sort by specificity (most specific first)
+    applicable.sort_by_key(|(_, specificity)| std::cmp::Reverse(*specificity));
+
+    applicable
+}
+
+/// Check if a protocol extension is applicable to a concrete type.
+///
+/// This checks that all SelfBound constraints in the extension's where clause are satisfied.
+fn is_protocol_extension_applicable(
+    extension: &Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
+    concrete_ty: &Ty,
+    ctx: &BodyResolutionContext,
+) -> bool {
+    use kestrel_semantic_tree::ty::Constraint;
+
+    let target_behavior = match extension.metadata().get_behavior::<ExtensionTargetBehavior>() {
+        Some(b) => b,
+        None => return false,
+    };
+
+    let where_clause = target_behavior.where_clause();
+
+    for constraint in where_clause.constraints() {
+        match constraint {
+            Constraint::SelfBound {
+                associated_type_path,
+                bounds,
+                ..
+            } => {
+                if associated_type_path.is_empty() {
+                    // Self: Protocol - check if concrete type conforms to all bounds
+                    for bound in bounds {
+                        if !type_satisfies_bound(concrete_ty, bound, ctx.model) {
+                            return false;
+                        }
+                    }
+                } else {
+                    // Self.Item: Protocol - resolve associated type and check bounds
+                    // For now, we don't fully support this - requires associated type resolution
+                    // TODO: Implement Self.AssociatedType constraint checking
+                    // For now, skip these constraints (they'll be checked at call site)
+                }
+            }
+            // Other constraint types shouldn't appear in protocol extensions
+            _ => {}
+        }
+    }
+
+    true
+}
+
+/// Find a method in protocol extensions for a given concrete type.
+///
+/// Returns a list of method SymbolIds from applicable protocol extensions.
+/// Only methods from the most specific (highest specificity) extensions are returned.
+/// If multiple extensions at the same specificity provide the method, all are returned
+/// (ambiguity is detected at call resolution time based on signature matching).
+fn find_methods_in_protocol_extensions(
+    concrete_ty: &Ty,
+    method_name: &str,
+    ctx: &BodyResolutionContext,
+) -> Vec<SymbolId> {
+    let applicable_extensions = get_applicable_protocol_extensions(concrete_ty, ctx);
+
+    if applicable_extensions.is_empty() {
+        return Vec::new();
+    }
+
+    // Extensions are sorted by specificity (highest first)
+    // Determine the highest specificity
+    let highest_specificity = applicable_extensions[0].1;
+
+    let mut methods = Vec::new();
+
+    // Only collect methods from extensions at the highest specificity level
+    for (extension, specificity) in applicable_extensions {
+        if specificity < highest_specificity {
+            // We've passed all extensions at the highest specificity level
+            break;
+        }
+
+        for child in extension.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Function
+                && child.metadata().name().value == method_name
+            {
+                methods.push(child.metadata().id());
+            }
+        }
+    }
+
+    methods
+}
+
+/// Get methods from Self constraint protocols when inside a protocol extension.
+///
+/// When a protocol extension has `where Self: OtherProtocol`, methods from
+/// `OtherProtocol` should be accessible on `self` within the extension body.
+///
+/// Returns a list of method symbols from constraint protocols.
+fn get_methods_from_self_constraints(
+    method_name: &str,
+    ctx: &BodyResolutionContext,
+) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+    use kestrel_semantic_tree::ty::Constraint;
+
+    let mut methods = Vec::new();
+
+    // Get the current function
+    let Some(function) = ctx.model.query(SymbolFor {
+        id: ctx.function_id,
+    }) else {
+        return methods;
+    };
+
+    // Get the parent (should be an extension for protocol extensions)
+    let Some(parent) = function.metadata().parent() else {
+        return methods;
+    };
+
+    // Check if we're in a protocol extension
+    if parent.metadata().kind() != KestrelSymbolKind::Extension {
+        return methods;
+    }
+
+    // Get the ExtensionTargetBehavior to check if this is a protocol extension
+    let Some(target_beh) = parent.metadata().get_behavior::<ExtensionTargetBehavior>() else {
+        return methods;
+    };
+
+    if !target_beh.is_protocol_extension() {
+        return methods;
+    }
+
+    // Get the where clause from the extension's target behavior
+    let where_clause = target_beh.where_clause();
+
+    // Look for SelfBound constraints (Self: Protocol)
+    for constraint in where_clause.constraints() {
+        if let Constraint::SelfBound { bounds, .. } = constraint {
+            // Each bound should be a protocol
+            for bound in bounds {
+                if let TyKind::Protocol { symbol, .. } = bound.kind() {
+                    // Search this protocol for the method
+                    for child in symbol.metadata().children() {
+                        if child.metadata().kind() == KestrelSymbolKind::Function
+                            && child.metadata().name().value == method_name
+                        {
+                            methods.push(child);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    methods
 }

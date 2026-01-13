@@ -29,27 +29,34 @@ public protocol Comparable: Equatable {
     func compare(other: Self) -> Ordering
 }
 
-// TODO: Protocol extensions not yet supported
 // Default operator implementations for Comparable
-// extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self] {
-//     type Output = Bool
-//
-//     func lt(other: Self) -> Bool {
-//         self.compare(other) == .Less
-//     }
-//
-//     func le(other: Self) -> Bool {
-//         self.compare(other) != .Greater
-//     }
-//
-//     func gt(other: Self) -> Bool {
-//         self.compare(other) == .Greater
-//     }
-//
-//     func ge(other: Self) -> Bool {
-//         self.compare(other) != .Less
-//     }
-// }
+extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self], NotEqual[Self] {
+    type Less.Output = Bool
+    type LessOrEqual.Output = Bool
+    type Greater.Output = Bool
+    type GreaterOrEqual.Output = Bool
+    type NotEqual.Output = Bool
+
+    public func lessThan(other: Self) -> Bool {
+        self.compare(other) == .Less
+    }
+
+    public func lessThanOrEqual(other: Self) -> Bool {
+        self.compare(other) != .Greater
+    }
+
+    public func greaterThan(other: Self) -> Bool {
+        self.compare(other) == .Greater
+    }
+
+    public func greaterThanOrEqual(other: Self) -> Bool {
+        self.compare(other) != .Less
+    }
+
+    public func notEquals(other: Self) -> Bool {
+        self.compare(other) != .Equal
+    }
+}
 
 // Hashable - types that can be hashed
 public protocol Hashable: Equatable {

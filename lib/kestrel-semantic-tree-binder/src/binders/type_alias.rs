@@ -799,6 +799,8 @@ fn validate_inherited_where_clause_constraints(
                         kestrel_semantic_tree::ty::Constraint::TypeEquality { .. } => {}
                         // NegativeBound constraints don't affect associated type validation
                         kestrel_semantic_tree::ty::Constraint::NegativeBound { .. } => {}
+                        // SelfBound constraints are for protocol extensions, not struct associated types
+                        kestrel_semantic_tree::ty::Constraint::SelfBound { .. } => {}
                     }
                 }
             }

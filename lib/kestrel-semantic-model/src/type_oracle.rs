@@ -13,10 +13,13 @@ use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
-use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind, WhereClause};
 use kestrel_semantic_type_inference::{MemberError, MemberResolution, TypeOracle};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
@@ -37,6 +40,68 @@ impl TypeOracle for SemanticModel {
 
         // Handle error types
         if matches!(receiver_ty.kind(), TyKind::Error) {
+            return Err(MemberError::NotFound {
+                receiver_ty: receiver_ty.clone(),
+                member: member.to_string(),
+            });
+        }
+
+        // Handle type parameters - look up member in protocol bounds from where clause
+        if let TyKind::TypeParameter(type_param) = receiver_ty.kind() {
+            // Get bounds by walking up the parent chain to find where clauses
+            let bounds = get_type_parameter_bounds(type_param);
+
+            for bound in &bounds {
+                if let TyKind::Protocol {
+                    symbol: proto,
+                    substitutions: proto_subs,
+                } = bound.kind()
+                {
+                    // First check protocol's direct members
+                    for child in proto.metadata().children() {
+                        if child.metadata().name().value == member {
+                            let member_id = child.metadata().id();
+                            if let Some(callable) =
+                                child.metadata().get_behavior::<CallableBehavior>()
+                            {
+                                let return_ty =
+                                    callable.return_type().apply_substitutions(proto_subs);
+                                return Ok(MemberResolution {
+                                    ty: return_ty,
+                                    symbol_id: member_id,
+                                    substitutions: proto_subs.clone(),
+                                });
+                            }
+                        }
+                    }
+
+                    // Then check extensions on the protocol
+                    let proto_id = proto.metadata().id();
+                    let proto_extensions = self.query(ExtensionsFor {
+                        target_id: proto_id,
+                    });
+
+                    for ext in &proto_extensions {
+                        for child in ext.metadata().children() {
+                            if child.metadata().name().value == member {
+                                let member_id = child.metadata().id();
+                                if let Some(callable) =
+                                    child.metadata().get_behavior::<CallableBehavior>()
+                                {
+                                    let return_ty =
+                                        callable.return_type().apply_substitutions(proto_subs);
+                                    return Ok(MemberResolution {
+                                        ty: return_ty,
+                                        symbol_id: member_id,
+                                        substitutions: proto_subs.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Member not found in any protocol bound
             return Err(MemberError::NotFound {
                 receiver_ty: receiver_ty.clone(),
                 member: member.to_string(),
@@ -70,7 +135,7 @@ impl TypeOracle for SemanticModel {
                     target_id: container_id,
                 });
 
-                // Find in extensions
+                // Find in extensions on the type itself
                 let extension_member = extensions
                     .iter()
                     .flat_map(|ext| ext.metadata().children())
@@ -79,10 +144,48 @@ impl TypeOracle for SemanticModel {
                 match extension_member {
                     Some(m) => m,
                     None => {
-                        return Err(MemberError::NotFound {
-                            receiver_ty: receiver_ty.clone(),
-                            member: member.to_string(),
+                        // Not found in direct extensions - check extensions on conforming protocols
+                        // e.g., Int64 conforms to Comparable, and `extend Comparable: Less[Self]`
+                        // provides `lessThan` method
+                        let conformances = self.query(ConformancesForSymbol {
+                            symbol_id: container_id,
                         });
+
+                        let mut found_member = None;
+                        for conformance in &conformances {
+                            if let TyKind::Protocol { symbol: proto, .. } = conformance.kind() {
+                                let proto_id = proto.metadata().id();
+                                let proto_extensions = self.query(ExtensionsFor {
+                                    target_id: proto_id,
+                                });
+
+                                // Search extensions on this protocol
+                                for ext in &proto_extensions {
+                                    for child in ext.metadata().children() {
+                                        if child.metadata().name().value == member {
+                                            found_member = Some(child);
+                                            break;
+                                        }
+                                    }
+                                    if found_member.is_some() {
+                                        break;
+                                    }
+                                }
+                            }
+                            if found_member.is_some() {
+                                break;
+                            }
+                        }
+
+                        match found_member {
+                            Some(m) => m,
+                            None => {
+                                return Err(MemberError::NotFound {
+                                    receiver_ty: receiver_ty.clone(),
+                                    member: member.to_string(),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -369,25 +472,23 @@ impl TypeOracle for SemanticModel {
                 substitutions,
             } => resolve_associated_type_from_protocol(symbol, assoc_name, substitutions),
 
-            // For type parameters, look up in bounds
+            // For type parameters, look up in bounds from where clause
             TyKind::TypeParameter(type_param) => {
-                // Get bounds from the type parameter
-                if let Some(conformances) =
-                    type_param.metadata().get_behavior::<ConformancesBehavior>()
-                {
-                    for bound in conformances.conformances() {
-                        if let TyKind::Protocol {
+                // Get bounds by walking up the parent chain to find where clauses
+                let bounds = get_type_parameter_bounds(type_param);
+
+                for bound in &bounds {
+                    if let TyKind::Protocol {
+                        symbol,
+                        substitutions,
+                    } = bound.kind()
+                    {
+                        if let Some(ty) = resolve_associated_type_from_protocol(
                             symbol,
+                            assoc_name,
                             substitutions,
-                        } = bound.kind()
-                        {
-                            if let Some(ty) = resolve_associated_type_from_protocol(
-                                symbol,
-                                assoc_name,
-                                substitutions,
-                            ) {
-                                return Some(ty);
-                            }
+                        ) {
+                            return Some(ty);
                         }
                     }
                 }
@@ -474,6 +575,13 @@ fn get_type_container_with_subs(
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
             Some((dyn_symbol, substitutions.clone()))
         }
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
+            Some((dyn_symbol, substitutions.clone()))
+        }
         TyKind::Protocol {
             symbol,
             substitutions,
@@ -493,6 +601,7 @@ fn get_type_container_with_subs(
 fn get_type_symbol_id(ty: &Ty) -> Option<SymbolId> {
     match ty.kind() {
         TyKind::Struct { symbol, .. } => Some(symbol.metadata().id()),
+        TyKind::Enum { symbol, .. } => Some(symbol.metadata().id()),
         TyKind::Protocol { symbol, .. } => Some(symbol.metadata().id()),
         TyKind::TypeAlias { symbol, .. } => Some(symbol.metadata().id()),
         _ => None,
@@ -735,6 +844,52 @@ fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
         // Different kinds don't match
         _ => false,
     }
+}
+
+/// Get protocol bounds for a type parameter by walking up the parent chain.
+///
+/// This looks at the type parameter's parent symbols (function, struct, protocol)
+/// and extracts bounds from their where clauses.
+fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
+    let param_id = type_param.metadata().id();
+    let mut bounds = Vec::new();
+
+    // Walk up from the type parameter's parent to find where clauses
+    let mut current: Option<Arc<dyn Symbol<KestrelLanguage>>> = type_param.metadata().parent();
+
+    while let Some(parent) = current {
+        if let Some(where_clause) = get_where_clause_from_symbol(parent.as_ref()) {
+            // Extract bounds for this parameter from the where clause
+            for bound in where_clause.bounds_for(param_id) {
+                // Only include resolved Protocol bounds (not error types)
+                if matches!(bound.kind(), TyKind::Protocol { .. }) {
+                    bounds.push(bound.clone());
+                }
+            }
+        }
+        current = parent.metadata().parent();
+    }
+
+    bounds
+}
+
+/// Get the where clause from a symbol that can have one.
+///
+/// Supports FunctionSymbol, StructSymbol, and ProtocolSymbol.
+fn get_where_clause_from_symbol(symbol: &dyn Symbol<KestrelLanguage>) -> Option<WhereClause> {
+    // Try FunctionSymbol
+    if let Some(func) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+        return Some(func.where_clause());
+    }
+    // Try StructSymbol
+    if let Some(struc) = symbol.as_any().downcast_ref::<StructSymbol>() {
+        return Some(struc.where_clause().clone());
+    }
+    // Try ProtocolSymbol
+    if let Some(proto) = symbol.as_any().downcast_ref::<ProtocolSymbol>() {
+        return Some(proto.where_clause().clone());
+    }
+    None
 }
 
 #[cfg(test)]

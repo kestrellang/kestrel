@@ -52,7 +52,7 @@ public struct Set[T, A]:
     }
 
     // Mutation
-    public func insert(element: T) -> Bool {
+    public mutating func insert(element: T) -> Bool {
         if self.dict.contains(key: element) {
             false
         } else {
@@ -61,7 +61,7 @@ public struct Set[T, A]:
         }
     }
 
-    public func remove(element: T) -> Bool {
+    public mutating func remove(element: T) -> Bool {
         self.dict.remove(for: element).isSome
     }
 
@@ -69,7 +69,7 @@ public struct Set[T, A]:
         self.dict.contains(key: element)
     }
 
-    public func clear() {
+    public mutating func clear() {
         self.dict.clear()
     }
 
