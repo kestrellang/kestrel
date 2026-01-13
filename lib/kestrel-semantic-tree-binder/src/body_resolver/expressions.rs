@@ -102,6 +102,8 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
         SyntaxKind::ExprReturn => resolve_return_expression(expr_node, ctx),
 
+        SyntaxKind::ExprTry => resolve_try_expression(expr_node, ctx),
+
         SyntaxKind::ExprTupleIndex => resolve_tuple_index_expression(expr_node, ctx),
 
         SyntaxKind::ExprClosure => resolve_closure_expression(expr_node, ctx),
@@ -963,6 +965,117 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
         });
 
     Expression::return_expr(value, span)
+}
+
+/// Resolve a try expression: try expr
+///
+/// Desugars to:
+/// ```
+/// match expr.tryExtract() {
+///     .Continue(value) => value,
+///     .Break(early) => return R.fromResidual(early)
+/// }
+/// ```
+fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    use kestrel_semantic_tree::expr::MatchArm;
+    use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern};
+
+    let span = get_node_span(node, ctx.file_id);
+
+    // Find the operand expression
+    let operand_node = match node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+    {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let operand = resolve_expression(&operand_node, ctx);
+
+    // Create method call: operand.tryExtract()
+    // This is a deferred method call that will be resolved during type inference
+    let try_extract_call = Expression::deferred_method_call(
+        operand,
+        "tryExtract".to_string(),
+        vec![],
+        Ty::infer(span.clone()), // ControlFlow[Output, Early]
+        span.clone(),
+    );
+
+    // Create locals for the bound variables in each arm
+    // Push scope for continue arm
+    ctx.local_scope.push_scope();
+
+    // Bind 'value' local for .Continue(value) pattern
+    let value_local_id = ctx.local_scope.bind(
+        "$try_value".to_string(), // Use synthetic name to avoid conflicts
+        Ty::infer(span.clone()),
+        false,
+        span.clone(),
+    );
+
+    // Create pattern: .Continue(value)
+    let value_binding_pattern = Pattern::local(
+        value_local_id,
+        Mutability::Immutable,
+        "$try_value".to_string(),
+        Ty::infer(span.clone()),
+        span.clone(),
+    );
+    let continue_binding = EnumPatternBinding::unlabeled(value_binding_pattern, span.clone());
+    let continue_pattern = Pattern::unresolved_enum_variant(
+        "Continue".to_string(),
+        vec![continue_binding],
+        span.clone(),
+    );
+
+    // Body for continue arm: just reference the value
+    let continue_body = Expression::local_ref(value_local_id, Ty::infer(span.clone()), false, span.clone());
+    let continue_arm = MatchArm::new(continue_pattern, continue_body, span.clone());
+
+    ctx.local_scope.pop_scope();
+
+    // Push scope for break arm
+    ctx.local_scope.push_scope();
+
+    // Bind 'early' local for .Break(early) pattern
+    let early_local_id = ctx.local_scope.bind(
+        "$try_early".to_string(),
+        Ty::infer(span.clone()),
+        false,
+        span.clone(),
+    );
+
+    // Create pattern: .Break(early)
+    let early_binding_pattern = Pattern::local(
+        early_local_id,
+        Mutability::Immutable,
+        "$try_early".to_string(),
+        Ty::infer(span.clone()),
+        span.clone(),
+    );
+    let break_binding = EnumPatternBinding::unlabeled(early_binding_pattern, span.clone());
+    let break_pattern = Pattern::unresolved_enum_variant(
+        "Break".to_string(),
+        vec![break_binding],
+        span.clone(),
+    );
+
+    // Body for break arm: return (error placeholder for now)
+    // TODO: Implement proper fromResidual call
+    // For now, just create an error expression that will produce a type error
+    // This allows parsing to work while we implement the full desugaring
+    let break_body = Expression::return_expr(
+        Some(Expression::error(span.clone())),
+        span.clone(),
+    );
+    let break_arm = MatchArm::new(break_pattern, break_body, span.clone());
+
+    ctx.local_scope.pop_scope();
+
+    // Create the match expression
+    Expression::match_expr(try_extract_call, vec![continue_arm, break_arm], span)
 }
 
 /// Resolve the body of a loop, returning statements.

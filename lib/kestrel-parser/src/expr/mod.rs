@@ -320,6 +320,11 @@ pub enum ExprVariant {
         return_span: Span,
         value: Option<Box<ExprVariant>>,
     },
+    /// Try expression: try expr
+    Try {
+        try_span: Span,
+        operand: Box<ExprVariant>,
+    },
     /// Closure expression: { params in body } or { body }
     Closure {
         lbrace: Span,
@@ -497,6 +502,7 @@ fn is_inline_statement_like(expr: &ExprVariant) -> bool {
             | ExprVariant::Loop { .. }
             | ExprVariant::Match { .. }
             | ExprVariant::Return { .. }
+            | ExprVariant::Try { .. }
     )
 }
 
@@ -1348,6 +1354,10 @@ pub fn expr_parser<'tokens>()
             .then(expr.clone().map(Box::new).or_not())
             .map(|(return_span, value)| ExprVariant::Return { return_span, value });
 
+        // Try expression - note: we'll connect it to postfix later for high precedence
+        let try_keyword = skip_trivia()
+            .ignore_then(just(Token::Try).map_with(|_, e| to_kestrel_span(e.span())));
+
         // Match expression: match scrutinee { pattern => expr, ... }
         let match_expr =
             {
@@ -1773,7 +1783,15 @@ pub fn expr_parser<'tokens>()
             .then(expr.clone())
             .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
 
-        let non_assignment = unary.or(postfix);
+        // Try expression: try expr (high precedence - binds to postfix)
+        let try_expr = try_keyword
+            .then(postfix.clone())
+            .map(|(try_span, operand)| ExprVariant::Try {
+                try_span,
+                operand: Box::new(operand),
+            });
+
+        let non_assignment = try_expr.or(unary).or(postfix);
 
         // Binary expression
         let binary = non_assignment
@@ -1948,6 +1966,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Return { return_span, value } => {
             emit_return_expr(sink, return_span.clone(), value.as_deref());
+        }
+        ExprVariant::Try { try_span, operand } => {
+            emit_try_expr(sink, try_span.clone(), operand);
         }
         ExprVariant::Closure {
             lbrace,
@@ -2454,6 +2475,15 @@ fn emit_return_expr(sink: &mut EventSink, return_span: Span, value: Option<&Expr
     if let Some(val) = value {
         emit_expr_variant(sink, val);
     }
+    sink.finish_node();
+    sink.finish_node();
+}
+
+fn emit_try_expr(sink: &mut EventSink, try_span: Span, operand: &ExprVariant) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprTry);
+    sink.add_token(SyntaxKind::Try, try_span);
+    emit_expr_variant(sink, operand);
     sink.finish_node();
     sink.finish_node();
 }

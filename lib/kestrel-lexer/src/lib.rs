@@ -199,6 +199,9 @@ pub enum Token {
     #[token("return")]
     Return,
 
+    #[token("try")]
+    Try,
+
     #[token("while")]
     While,
 

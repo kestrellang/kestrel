@@ -183,12 +183,22 @@ extend Optional[T]: Functor {
 }
 
 // Tryable for Optional (try? semantics)
-extend Optional[T]: Tryable[T, Nil] {
-    public func tryExtract() -> Residual[T, Nil] {
+extend Optional[T]: Tryable {
+    type Output = T
+    type Early = ()
+
+    public func tryExtract() -> ControlFlow[T, ()] {
         match self {
-            .Some(value) => .Output(value),
-            .None => .Early(nil)
+            .Some(value) => .Continue(value),
+            .None => .Break(())
         }
+    }
+}
+
+// FromResidual for Optional - enables early return propagation
+extend Optional[T]: FromResidual[()] {
+    public static func fromResidual(residual: ()) -> Optional[T] {
+        .None
     }
 }
 

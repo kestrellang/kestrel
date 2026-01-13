@@ -67,8 +67,7 @@
 | cannot assign to immutable variable 'self' | 2 |
 | cannot find type 'DictionaryIterator' in this scope | 2 |
 | cannot find type 'I' in this scope | 2 |
-| cannot find type 'Nil' in this scope | 2 |
-| initializer does not initialize all fields: 'ptr', 'cap' | 2 |
+| initializer does not initialize all fields: 'cap', 'ptr' | 2 |
 | member not found: `equals` on type `UInt` | 2 |
 | member not found: `greaterThanOrEqual` on type `T` | 2 |
 | member not found: `logicalNot` on type `<error>` | 2 |
@@ -84,7 +83,6 @@
 | type mismatch: expected `Optional[I.Item]`, found `Optional[U]` | 2 |
 | type mismatch: expected `Optional[I.Item]`, found `T` | 2 |
 | type mismatch: expected `Ordering`, found `Self` | 2 |
-| type mismatch: expected `Residual[Output, Early]`, found `Self` | 2 |
 | type mismatch: expected `T`, found `U` | 2 |
 | type mismatch: expected `U`, found `U` | 2 |
 | undeclared type parameter 'T' in where clause | 2 |
@@ -140,13 +138,13 @@
 | struct `SplitIterator` has Cloneable field `string` but does not conform to Cloneable | 1 |
 | symbol 'Nil' not found in module 'std.ops' | 1 |
 | type 'ArenaAllocator' does not implement method 'reallocate' from protocol 'Allocator' | 1 |
+| type 'Break' is ambiguous | 1 |
 | type 'BytesIterator' does not satisfy bound | 1 |
 | type 'CharsIterator' does not satisfy bound | 1 |
 | type 'ClosedRangeIterator' does not satisfy bound | 1 |
 | type 'CodePointsIterator' does not satisfy bound | 1 |
-| type 'Early' is ambiguous | 1 |
+| type 'Continue' is ambiguous | 1 |
 | type 'LinesIterator' does not satisfy bound | 1 |
-| type 'Output' is ambiguous | 1 |
 | type 'PoolAllocator' does not implement method 'reallocate' from protocol 'Allocator' | 1 |
 | type 'RangeIterator' does not satisfy bound | 1 |
 | type 'SelfType' does not accept type arguments | 1 |
@@ -172,17 +170,16 @@
 | type mismatch: expected `StringStorage[A]`, found `T` | 1 |
 | undefined name 'bitwiseAnd' | 1 |
 | undefined name 'bitwiseNot' | 1 |
-| undefined name 'nil' | 1 |
 
 2. Details
 
 type `<error>` is not callable
 Call Sites
-- lang/std/result/result.ks:62:28
-- lang/std/result/result.ks:82:27
-- lang/std/result/result.ks:91:28
-- lang/std/result/result.ks:97:23
-- lang/std/result/result.ks:156:9
+- lang/std/result/result.ks:57:28
+- lang/std/result/result.ks:77:27
+- lang/std/result/result.ks:86:28
+- lang/std/result/result.ks:92:23
+- lang/std/result/result.ks:151:9
 - lang/std/result/optional.ks:46:22
 - lang/std/result/optional.ks:68:22
 - lang/std/result/optional.ks:125:9
@@ -360,8 +357,8 @@ cannot find type 'Bool' in this scope
 Call Sites
 - lang/std/result/result.ks:26:22
 - lang/std/result/result.ks:33:23
-- lang/std/result/result.ks:190:48
-- lang/std/result/error.ks:20:59
+- lang/std/result/result.ks:192:48
+- lang/std/result/error.ks:21:64
 - lang/std/result/optional.ks:28:24
 - lang/std/result/optional.ks:35:24
 - lang/std/result/optional.ks:87:42
@@ -486,7 +483,7 @@ Call Sites
 
 undefined name 'lang'
 Call Sites
-- lang/std/result/result.ks:97:23
+- lang/std/result/result.ks:92:23
 - lang/std/core/bool.ks:26:9
 - lang/std/core/bool.ks:44:21
 - lang/std/core/bool.ks:49:21
@@ -633,7 +630,7 @@ Call Sites
 
 type mismatch: expected `T`, found `T`
 Call Sites
-- lang/std/result/result.ks:211:9
+- lang/std/result/result.ks:213:9
 - lang/std/iter/adapters.ks:506:18
 - lang/std/iter/adapters.ks:506:25
 - lang/std/iter/adapters.ks:510:20
@@ -784,9 +781,9 @@ Call Sites
 
 undefined name 'panic'
 Call Sites
-- lang/std/result/result.ks:62:28
-- lang/std/result/result.ks:82:27
-- lang/std/result/result.ks:91:28
+- lang/std/result/result.ks:57:28
+- lang/std/result/result.ks:77:27
+- lang/std/result/result.ks:86:28
 - lang/std/result/optional.ks:46:22
 - lang/std/result/optional.ks:68:22
 - lang/std/memory/buffer.ks:22:22
@@ -855,7 +852,7 @@ Call Sites
 
 non-exhaustive match expression
 Call Sites
-- lang/std/result/result.ks:175:9
+- lang/std/result/result.ks:170:9
 - lang/std/memory/buffer.ks:17:9
 - lang/std/memory/buffer.ks:29:9
 - lang/std/memory/buffer.ks:118:9
@@ -951,8 +948,8 @@ Call Sites
 
 cannot find type 'String' in this scope
 Call Sites
-- lang/std/result/result.ks:88:33
-- lang/std/result/result.ks:95:36
+- lang/std/result/result.ks:83:33
+- lang/std/result/result.ks:90:36
 - lang/std/result/error.ks:8:27
 - lang/std/result/optional.ks:65:33
 
@@ -1070,7 +1067,7 @@ Call Sites
 
 cannot access member on type 'Self'
 Call Sites
-- lang/std/result/result.ks:156:9
+- lang/std/result/result.ks:151:9
 - lang/std/result/optional.ks:125:9
 
 cannot assign to immutable field 'allocated'
@@ -1108,12 +1105,7 @@ Call Sites
 - lang/std/iter/iterator.ks:22:24
 - lang/std/collections/set.ks:38:31
 
-cannot find type 'Nil' in this scope
-Call Sites
-- lang/std/result/optional.ks:186:32
-- lang/std/result/optional.ks:187:45
-
-initializer does not initialize all fields: 'ptr', 'cap'
+initializer does not initialize all fields: 'cap', 'ptr'
 Call Sites
 - lang/std/memory/buffer.ks:14:5
 - lang/std/memory/buffer.ks:26:5
@@ -1193,11 +1185,6 @@ Call Sites
 - lang/std/core/ordering.ks:34:18
 - lang/std/core/ordering.ks:41:18
 
-type mismatch: expected `Residual[Output, Early]`, found `Self`
-Call Sites
-- lang/std/result/error.ks:52:9
-- lang/std/result/error.ks:52:9
-
 type mismatch: expected `T`, found `U`
 Call Sites
 - lang/std/iter/adapters.ks:114:31
@@ -1210,12 +1197,12 @@ Call Sites
 
 undeclared type parameter 'T' in where clause
 Call Sites
-- lang/std/result/result.ks:174:61
+- lang/std/result/result.ks:169:61
 - lang/std/collections/set.ks:194:44
 
 'Optional' is not a protocol; bound must be a protocol
 Call Sites
-- lang/std/result/result.ks:174:64
+- lang/std/result/result.ks:169:64
 
 Parse error: found 'Dot' at 4073..4074 expected something else, or 'Colon'
 Call Sites
@@ -1421,6 +1408,10 @@ type 'ArenaAllocator' does not implement method 'reallocate' from protocol 'Allo
 Call Sites
 - lang/std/memory/allocator.ks:61:15
 
+type 'Break' is ambiguous
+Call Sites
+- lang/std/result/error.ks:15:16
+
 type 'BytesIterator' does not satisfy bound
 Call Sites
 - lang/std/text/views.ks:13:5
@@ -1437,17 +1428,13 @@ type 'CodePointsIterator' does not satisfy bound
 Call Sites
 - lang/std/text/views.ks:89:5
 
-type 'Early' is ambiguous
+type 'Continue' is ambiguous
 Call Sites
-- lang/std/result/error.ks:14:16
+- lang/std/result/error.ks:14:19
 
 type 'LinesIterator' does not satisfy bound
 Call Sites
 - lang/std/text/views.ks:186:5
-
-type 'Output' is ambiguous
-Call Sites
-- lang/std/result/error.ks:13:17
 
 type 'PoolAllocator' does not implement method 'reallocate' from protocol 'Allocator'
 Call Sites
@@ -1519,7 +1506,7 @@ Call Sites
 
 type mismatch: expected `Optional[T]`, found `Optional[T]`
 Call Sites
-- lang/std/result/result.ks:211:22
+- lang/std/result/result.ks:213:22
 
 type mismatch: expected `Optional[U]`, found `Optional[U]`
 Call Sites
@@ -1527,7 +1514,7 @@ Call Sites
 
 type mismatch: expected `Result[T, E]`, found `Self`
 Call Sites
-- lang/std/result/result.ks:184:31
+- lang/std/result/result.ks:179:31
 
 type mismatch: expected `Self`, found `Optional[T]`
 Call Sites
@@ -1535,7 +1522,7 @@ Call Sites
 
 type mismatch: expected `Self`, found `Result[T, E]`
 Call Sites
-- lang/std/result/result.ks:184:24
+- lang/std/result/result.ks:179:24
 
 type mismatch: expected `StringStorage[A]`, found `T`
 Call Sites
@@ -1548,7 +1535,3 @@ Call Sites
 undefined name 'bitwiseNot'
 Call Sites
 - lang/std/memory/allocator.ks:72:100
-
-undefined name 'nil'
-Call Sites
-- lang/std/result/optional.ks:190:29

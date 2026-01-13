@@ -8,35 +8,43 @@ public protocol Error {
     func description() -> String
 }
 
-// Residual enum - the fundamental type for early return semantics
-public enum Residual[Output, Early] {
-    case Output(Output)  // continue with value
-    case Early(Early)    // break/return early with value
+// ControlFlow enum - the fundamental type for early return semantics
+@builtin(.ControlFlowEnum)
+public enum ControlFlow[Continue, Break] {
+    case Continue(Continue)
+    case Break(Break)
 }
 
-extend Residual[Output, Early]: Equatable
-    where Output: Equatable, Early: Equatable
+extend ControlFlow[Continue, Break]: Equatable
+    where Continue: Equatable, Break: Equatable
 {
-    public func equals(other: Residual[Output, Early]) -> Bool {
+    public func equals(other: ControlFlow[Continue, Break]) -> Bool {
         match (self, other) {
-            (.Output(a), .Output(b)) => a == b,
-            (.Early(a), .Early(b)) => a == b,
+            (.Continue(a), .Continue(b)) => a == b,
+            (.Break(a), .Break(b)) => a == b,
             _ => false
         }
     }
 }
 
 // Tryable - enables `try expr`
-public protocol Tryable[Output, Early] {
-    func tryExtract() -> Residual[Output, Early]
+@builtin(.TryableProtocol)
+public protocol Tryable {
+    type Output
+    type Early
+
+    @builtin(.TryExtractMethod)
+    func tryExtract() -> ControlFlow[Output, Early]
 }
 
-// Throwable - enables `throw error`
-public protocol Throwable[Early] {
-    static func fromEarly(value: Early) -> Self
+// FromResidual - enables early return propagation
+@builtin(.FromResidualProtocol)
+public protocol FromResidual[Early] {
+    @builtin(.FromResidualMethod)
+    static func fromResidual(residual: Early) -> Self
 }
 
-// Returnable - enables `return value`
+// Returnable - enables `return value` in result-returning contexts
 public protocol Returnable[Output] {
     static func fromOutput(value: Output) -> Self
 }
@@ -44,11 +52,4 @@ public protocol Returnable[Output] {
 // Convertible - for error type conversions
 public protocol Convertible[From] {
     init(from value: From)
-}
-
-// Residual is also Tryable (identity)
-extend Residual[Output, Early]: Tryable[Output, Early] {
-    public func tryExtract() -> Residual[Output, Early] {
-        self
-    }
 }

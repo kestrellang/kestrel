@@ -5,13 +5,13 @@ module std.result
 import std.core.(Equatable)
 import std.iter.(Iterator, Functor)
 
-public enum Result[T, E]:
-    Tryable[T, E],
-    Throwable[E],
-    Returnable[T]
-{
+public enum Result[T, E]: Tryable, Returnable[T] {
     case Ok(T)
     case Err(E)
+
+    // Tryable - associated types
+    type Output = T
+    type Early = E
 
     // Convenience constructors
     public static func ok(value: T) -> Result[T, E] {
@@ -38,16 +38,11 @@ public enum Result[T, E]:
     }
 
     // Tryable - enables `try`
-    public func tryExtract() -> Residual[T, E] {
+    public func tryExtract() -> ControlFlow[T, E] {
         match self {
-            .Ok(value) => .Output(value),
-            .Err(error) => .Early(error)
+            .Ok(value) => .Continue(value),
+            .Err(error) => .Break(error)
         }
-    }
-
-    // Throwable - enables `throw`
-    public static func fromEarly(value: E) -> Result[T, E] {
-        .Err(value)
     }
 
     // Returnable - enables `return value`
@@ -182,6 +177,13 @@ public enum Result[T, E]:
     // Iteration
     public func iter() -> ResultIterator[T, E] {
         ResultIterator(value: self)
+    }
+}
+
+// FromResidual conformance - enables early return propagation
+extend Result[T, E]: FromResidual[E] {
+    public static func fromResidual(residual: E) -> Result[T, E] {
+        .Err(residual)
     }
 }
 

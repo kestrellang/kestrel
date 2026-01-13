@@ -91,6 +91,13 @@ pub enum LanguageFeature {
     ExclusiveRangeOperatorMethod,
     InclusiveRangeOperatorProtocol,
     InclusiveRangeOperatorMethod,
+
+    // Try operator
+    ControlFlowEnum,
+    TryableProtocol,
+    TryExtractMethod,
+    FromResidualProtocol,
+    FromResidualMethod,
 }
 
 impl LanguageFeature {
@@ -161,6 +168,12 @@ impl LanguageFeature {
             "ExclusiveRangeOperatorMethod" => Some(Self::ExclusiveRangeOperatorMethod),
             "InclusiveRangeOperatorProtocol" => Some(Self::InclusiveRangeOperatorProtocol),
             "InclusiveRangeOperatorMethod" => Some(Self::InclusiveRangeOperatorMethod),
+            // Try operator
+            "ControlFlowEnum" => Some(Self::ControlFlowEnum),
+            "TryableProtocol" => Some(Self::TryableProtocol),
+            "TryExtractMethod" => Some(Self::TryExtractMethod),
+            "FromResidualProtocol" => Some(Self::FromResidualProtocol),
+            "FromResidualMethod" => Some(Self::FromResidualMethod),
             _ => None,
         }
     }
@@ -232,6 +245,12 @@ impl LanguageFeature {
             Self::ExclusiveRangeOperatorMethod => "ExclusiveRangeOperatorMethod",
             Self::InclusiveRangeOperatorProtocol => "InclusiveRangeOperatorProtocol",
             Self::InclusiveRangeOperatorMethod => "InclusiveRangeOperatorMethod",
+            // Try operator
+            Self::ControlFlowEnum => "ControlFlowEnum",
+            Self::TryableProtocol => "TryableProtocol",
+            Self::TryExtractMethod => "TryExtractMethod",
+            Self::FromResidualProtocol => "FromResidualProtocol",
+            Self::FromResidualMethod => "FromResidualMethod",
         }
     }
 
@@ -530,6 +549,33 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::ProtocolMethod {
                     protocol_feature: LanguageFeature::InclusiveRangeOperatorProtocol,
+                },
+            },
+            // Try operator
+            Self::ControlFlowEnum => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Enum,
+            },
+            Self::TryableProtocol | Self::FromResidualProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::TryExtractMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::TryableProtocol,
+                },
+            },
+            Self::FromResidualMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::FromResidualProtocol,
                 },
             },
         }
