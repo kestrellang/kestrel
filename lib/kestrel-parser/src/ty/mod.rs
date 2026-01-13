@@ -373,7 +373,11 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
     for (i, span) in segments.iter().enumerate() {
         if i > 0 {
             // Add the dot separator (between path elements)
-            sink.add_token(SyntaxKind::Dot, Span::from(span.start - 1..span.start));
+            let dot_start = span.start.saturating_sub(1);
+            sink.add_token(
+                SyntaxKind::Dot,
+                Span::new(span.file_id, dot_start..span.start),
+            );
         }
 
         // Wrap each identifier in a PathElement node
@@ -513,7 +517,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         TyExpression {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

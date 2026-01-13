@@ -40,6 +40,7 @@ impl DeclarationBinder for ProtocolBinder {
         let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
             syntax,
             &source,
+            file_id,
             context.diagnostics,
         );
         symbol.metadata().add_behavior(attributes_behavior.clone());

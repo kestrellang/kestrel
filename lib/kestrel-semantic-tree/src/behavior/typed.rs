@@ -54,8 +54,8 @@ mod tests {
 
     #[test]
     fn test_typed_behavior_unit() {
-        let ty = Ty::unit(Span::from(0..2));
-        let behavior = TypedBehavior::new(ty, Span::from(0..2));
+        let ty = Ty::unit(Span::new(0, 0..2));
+        let behavior = TypedBehavior::new(ty, Span::new(0, 0..2));
 
         assert!(behavior.ty().is_unit());
         assert_eq!(behavior.ty_span().range(), 0..2);
@@ -64,8 +64,8 @@ mod tests {
     #[test]
     fn test_typed_behavior_int() {
         use crate::ty::IntBits;
-        let ty = Ty::int(IntBits::I64, Span::from(5..8));
-        let behavior = TypedBehavior::new(ty, Span::from(5..8));
+        let ty = Ty::int(IntBits::I64, Span::new(0, 5..8));
+        let behavior = TypedBehavior::new(ty, Span::new(0, 5..8));
 
         assert!(behavior.ty().is_int());
         assert_eq!(behavior.ty().as_int(), Some(IntBits::I64));
@@ -74,12 +74,12 @@ mod tests {
     #[test]
     fn test_typed_behavior_function() {
         use crate::ty::IntBits;
-        let param1 = Ty::int(IntBits::I64, Span::from(1..4));
-        let param2 = Ty::string(Span::from(6..12));
-        let return_ty = Ty::bool(Span::from(17..21));
+        let param1 = Ty::int(IntBits::I64, Span::new(0, 1..4));
+        let param2 = Ty::string(Span::new(0, 6..12));
+        let return_ty = Ty::bool(Span::new(0, 17..21));
 
-        let fn_ty = Ty::function(vec![param1, param2], return_ty, Span::from(0..21));
-        let behavior = TypedBehavior::new(fn_ty, Span::from(0..21));
+        let fn_ty = Ty::function(vec![param1, param2], return_ty, Span::new(0, 0..21));
+        let behavior = TypedBehavior::new(fn_ty, Span::new(0, 0..21));
 
         assert!(behavior.ty().is_function());
 

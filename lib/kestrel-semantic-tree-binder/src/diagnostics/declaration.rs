@@ -44,6 +44,8 @@ pub enum TypeAliasContext {
     ModuleLevel,
     /// Type alias in struct body without conformance (requires `= Type`)
     StructWithoutConformance,
+    /// Type alias in extension body without conformance (requires `= Type`)
+    ExtensionWithoutConformance,
 }
 
 impl IntoDiagnostic for TypeAliasRequiresTypeError {
@@ -54,6 +56,10 @@ impl IntoDiagnostic for TypeAliasRequiresTypeError {
                 "must specify a type",
             ),
             TypeAliasContext::StructWithoutConformance => (
+                format!("associated type binding requires a type: '{}'", self.name),
+                "must specify a type with = Type",
+            ),
+            TypeAliasContext::ExtensionWithoutConformance => (
                 format!("associated type binding requires a type: '{}'", self.name),
                 "must specify a type with = Type",
             ),

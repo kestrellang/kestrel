@@ -1295,7 +1295,7 @@ fn resolve_type(ctx: &InferenceContext<'_>, id: TyId) -> Ty {
         .or_else(|| ctx.type_registry().get(&current_id).cloned())
         .unwrap_or_else(|| {
             // If not found anywhere, create an inference placeholder
-            Ty::infer(Span::from(0..0))
+            Ty::infer(Span::new(0, 0..0))
         })
 }
 
@@ -1506,7 +1506,7 @@ mod tests {
             _is_static: bool,
         ) -> Result<MemberResolution, MemberError> {
             Err(MemberError::NotFound {
-                receiver_ty: Ty::unit(Span::from(0..0)),
+                receiver_ty: Ty::unit(Span::new(0, 0..0)),
                 member: String::new(),
             })
         }
@@ -1533,12 +1533,12 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let ty1 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(0..3));
-        let ty2 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(4..7));
+        let ty1 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 0..3));
+        let ty2 = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 4..7));
 
         ctx.register_type(&ty1);
         ctx.register_type(&ty2);
-        ctx.equate(ty1.id(), ty2.id(), Span::from(0..7));
+        ctx.equate(ty1.id(), ty2.id(), Span::new(0, 0..7));
 
         let solution = ctx.solve();
         assert!(!solution.has_errors());
@@ -1549,12 +1549,12 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let infer_ty = Ty::infer(Span::from(0..1));
-        let concrete_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(2..5));
+        let infer_ty = Ty::infer(Span::new(0, 0..1));
+        let concrete_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 2..5));
 
         ctx.register_type(&infer_ty);
         ctx.register_type(&concrete_ty);
-        ctx.equate(infer_ty.id(), concrete_ty.id(), Span::from(0..5));
+        ctx.equate(infer_ty.id(), concrete_ty.id(), Span::new(0, 0..5));
 
         let solution = ctx.solve();
         assert!(!solution.has_errors());
@@ -1569,12 +1569,12 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let int_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::from(0..3));
-        let string_ty = Ty::string(Span::from(4..10));
+        let int_ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, Span::new(0, 0..3));
+        let string_ty = Ty::string(Span::new(0, 4..10));
 
         ctx.register_type(&int_ty);
         ctx.register_type(&string_ty);
-        ctx.equate(int_ty.id(), string_ty.id(), Span::from(0..10));
+        ctx.equate(int_ty.id(), string_ty.id(), Span::new(0, 0..10));
 
         let solution = ctx.solve();
         assert!(solution.has_errors());

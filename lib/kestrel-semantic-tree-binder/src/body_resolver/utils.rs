@@ -141,7 +141,20 @@ pub fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span
     let sym_clone = Arc::clone(struct_symbol);
 
     match sym_clone.downcast_arc::<StructSymbol>() {
-        Ok(struct_arc) => Ty::r#struct(struct_arc, span),
+        Ok(struct_arc) => {
+            let type_params = struct_arc.type_parameters();
+            if type_params.is_empty() {
+                return Ty::r#struct(struct_arc, span);
+            }
+
+            // No explicit type arguments provided: treat as Struct[_, _, ...]
+            let mut substitutions = Substitutions::new();
+            for param in type_params {
+                substitutions.insert(param.metadata().id(), Ty::infer(span.clone()));
+            }
+
+            Ty::generic_struct(struct_arc, substitutions, span)
+        }
         Err(_) => {
             // This shouldn't happen if we're calling this on a struct symbol
             Ty::error(span)

@@ -659,7 +659,7 @@ fn resolve_while_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
     let span = get_node_span(node, ctx.file_id);
 
     // Parse optional label
-    let label_info = extract_loop_label(node);
+    let label_info = extract_loop_label(node, ctx.file_id);
 
     // Check if this is a while-let expression (has WhileLetCondition child)
     let while_let_condition = node
@@ -854,7 +854,7 @@ fn resolve_loop_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -
     let span = get_node_span(node, ctx.file_id);
 
     // Parse optional label
-    let label_info = extract_loop_label(node);
+    let label_info = extract_loop_label(node, ctx.file_id);
 
     // Enter the loop context with the label
     let label_name = label_info.as_ref().map(|l| l.name.clone());
@@ -891,7 +891,7 @@ fn resolve_break_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
     }
 
     // Extract optional label
-    let label_info = extract_break_continue_label(node);
+    let label_info = extract_break_continue_label(node, ctx.file_id);
     let label_name = label_info.as_ref().map(|l| l.name.as_str());
 
     // Find the target loop
@@ -925,7 +925,7 @@ fn resolve_continue_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     }
 
     // Extract optional label
-    let label_info = extract_break_continue_label(node);
+    let label_info = extract_break_continue_label(node, ctx.file_id);
     let label_name = label_info.as_ref().map(|l| l.name.as_str());
 
     // Find the target loop
@@ -1006,7 +1006,7 @@ fn resolve_loop_body(block_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -
 
 /// Extract label info from a loop expression (while/loop).
 /// The label appears as a LoopLabel child before the loop keyword.
-fn extract_loop_label(node: &SyntaxNode) -> Option<LabelInfo> {
+fn extract_loop_label(node: &SyntaxNode, file_id: usize) -> Option<LabelInfo> {
     node.children()
         .find(|c| c.kind() == SyntaxKind::LoopLabel)
         .and_then(|label_node| {
@@ -1021,7 +1021,7 @@ fn extract_loop_label(node: &SyntaxNode) -> Option<LabelInfo> {
                     let end = text_range.end().into();
                     LabelInfo {
                         name: token.text().to_string(),
-                        span: Span::from(start..end),
+                        span: Span::new(file_id, start..end),
                     }
                 })
         })
@@ -1029,7 +1029,7 @@ fn extract_loop_label(node: &SyntaxNode) -> Option<LabelInfo> {
 
 /// Extract label info from a break/continue expression.
 /// The label appears as an Identifier token after the keyword.
-fn extract_break_continue_label(node: &SyntaxNode) -> Option<LabelInfo> {
+fn extract_break_continue_label(node: &SyntaxNode, file_id: usize) -> Option<LabelInfo> {
     // The ExprBreak/ExprContinue contains: keyword token, optional Identifier token
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
@@ -1040,7 +1040,7 @@ fn extract_break_continue_label(node: &SyntaxNode) -> Option<LabelInfo> {
             let end = text_range.end().into();
             LabelInfo {
                 name: token.text().to_string(),
-                span: Span::from(start..end),
+                span: Span::new(file_id, start..end),
             }
         })
 }
@@ -1073,7 +1073,8 @@ fn resolve_tuple_index_expression(
     let (index, index_span) = match index_token {
         Some(token) => {
             let text_range = token.text_range();
-            let idx_span = Span::from(text_range.start().into()..text_range.end().into());
+            let idx_span =
+                Span::new(ctx.file_id, text_range.start().into()..text_range.end().into());
             let index_value = token.text().parse::<usize>().unwrap_or(0);
             (index_value, idx_span)
         }

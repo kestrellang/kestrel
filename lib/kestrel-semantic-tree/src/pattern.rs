@@ -792,8 +792,8 @@ mod tests {
             LocalId(0),
             Mutability::Immutable,
             "x".to_string(),
-            Ty::int(IntBits::I64, Span::from(0..1)),
-            Span::from(0..5),
+            Ty::int(IntBits::I64, Span::new(0, 0..1)),
+            Span::new(0, 0..5),
         );
         assert!(pattern.is_local());
         assert_eq!(pattern.local_id(), Some(LocalId(0)));
@@ -808,15 +808,15 @@ mod tests {
             LocalId(1),
             Mutability::Mutable,
             "y".to_string(),
-            Ty::string(Span::from(0..1)),
-            Span::from(0..5),
+            Ty::string(Span::new(0, 0..1)),
+            Span::new(0, 0..5),
         );
         assert!(pattern.mutability().unwrap().is_mutable());
     }
 
     #[test]
     fn test_wildcard_pattern() {
-        let pattern = Pattern::wildcard(Ty::int(IntBits::I64, Span::from(0..1)), Span::from(0..1));
+        let pattern = Pattern::wildcard(Ty::int(IntBits::I64, Span::new(0, 0..1)), Span::new(0, 0..1));
         assert!(pattern.is_wildcard());
         assert!(pattern.is_irrefutable());
     }
@@ -824,23 +824,23 @@ mod tests {
     #[test]
     fn test_tuple_pattern() {
         let elements = vec![
-            Pattern::wildcard(Ty::int(IntBits::I64, Span::from(1..2)), Span::from(1..2)),
+            Pattern::wildcard(Ty::int(IntBits::I64, Span::new(0, 1..2)), Span::new(0, 1..2)),
             Pattern::local(
                 LocalId(0),
                 Mutability::Immutable,
                 "x".to_string(),
-                Ty::int(IntBits::I64, Span::from(4..5)),
-                Span::from(4..5),
+                Ty::int(IntBits::I64, Span::new(0, 4..5)),
+                Span::new(0, 4..5),
             ),
         ];
         let tuple_ty = Ty::tuple(
             vec![
-                Ty::int(IntBits::I64, Span::from(1..2)),
-                Ty::int(IntBits::I64, Span::from(4..5)),
+                Ty::int(IntBits::I64, Span::new(0, 1..2)),
+                Ty::int(IntBits::I64, Span::new(0, 4..5)),
             ],
-            Span::from(0..6),
+            Span::new(0, 0..6),
         );
-        let pattern = Pattern::tuple(elements, tuple_ty, Span::from(0..6));
+        let pattern = Pattern::tuple(elements, tuple_ty, Span::new(0, 0..6));
         assert!(pattern.is_tuple());
         assert_eq!(pattern.tuple_elements().map(|e| e.len()), Some(2));
         assert!(pattern.is_irrefutable());
@@ -850,8 +850,8 @@ mod tests {
     fn test_literal_pattern() {
         let pattern = Pattern::literal(
             LiteralValue::Integer(42),
-            Ty::int(IntBits::I64, Span::from(0..2)),
-            Span::from(0..2),
+            Ty::int(IntBits::I64, Span::new(0, 0..2)),
+            Span::new(0, 0..2),
         );
         assert!(pattern.is_literal());
         assert_eq!(pattern.literal_value(), Some(&LiteralValue::Integer(42)));
@@ -861,7 +861,7 @@ mod tests {
     #[test]
     fn test_enum_variant_pattern() {
         let pattern =
-            Pattern::unresolved_enum_variant("None".to_string(), vec![], Span::from(0..5));
+            Pattern::unresolved_enum_variant("None".to_string(), vec![], Span::new(0, 0..5));
         assert!(pattern.is_enum_variant());
         assert_eq!(pattern.case_name(), Some("None"));
         assert_eq!(pattern.case_id(), None);
@@ -870,7 +870,7 @@ mod tests {
 
     #[test]
     fn test_error_pattern() {
-        let pattern = Pattern::error(Span::from(0..5));
+        let pattern = Pattern::error(Span::new(0, 0..5));
         assert!(pattern.is_error());
         assert!(pattern.ty.is_error());
         assert!(pattern.is_irrefutable()); // Errors are treated as irrefutable
@@ -881,25 +881,25 @@ mod tests {
         let elements = vec![
             Pattern::literal(
                 LiteralValue::Integer(0),
-                Ty::int(IntBits::I64, Span::from(1..2)),
-                Span::from(1..2),
+                Ty::int(IntBits::I64, Span::new(0, 1..2)),
+                Span::new(0, 1..2),
             ),
             Pattern::local(
                 LocalId(0),
                 Mutability::Immutable,
                 "x".to_string(),
-                Ty::int(IntBits::I64, Span::from(4..5)),
-                Span::from(4..5),
+                Ty::int(IntBits::I64, Span::new(0, 4..5)),
+                Span::new(0, 4..5),
             ),
         ];
         let tuple_ty = Ty::tuple(
             vec![
-                Ty::int(IntBits::I64, Span::from(1..2)),
-                Ty::int(IntBits::I64, Span::from(4..5)),
+                Ty::int(IntBits::I64, Span::new(0, 1..2)),
+                Ty::int(IntBits::I64, Span::new(0, 4..5)),
             ],
-            Span::from(0..6),
+            Span::new(0, 0..6),
         );
-        let pattern = Pattern::tuple(elements, tuple_ty, Span::from(0..6));
+        let pattern = Pattern::tuple(elements, tuple_ty, Span::new(0, 0..6));
         assert!(!pattern.is_irrefutable()); // Has a literal element, so refutable
     }
 }

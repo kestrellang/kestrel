@@ -62,13 +62,25 @@ public struct Int16:
         hasher.write(bytes: self.value.toBytes())
     }
 
-    type Output = Int16
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = Int16
+    type Subtractable.Output = Int16
+    type Multipliable.Output = Int16
+    type Divisible.Output = Int16
+    type Modulo.Output = Int16
+    type Negatable.Output = Int16
+    type BitwiseAnd.Output = Int16
+    type BitwiseOr.Output = Int16
+    type BitwiseXor.Output = Int16
+    type BitwiseNot.Output = Int16
+    type LeftShift.Output = Int16
+    type RightShift.Output = Int16
 
     public func add(other: Int16) -> Int16 { Int16(raw: lang.i16_add(self.value, other.value)) }
     public func subtract(other: Int16) -> Int16 { Int16(raw: lang.i16_sub(self.value, other.value)) }
     public func multiply(other: Int16) -> Int16 { Int16(raw: lang.i16_mul(self.value, other.value)) }
     public func divide(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.value, other.value)) }
-    public func mod(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.value, other.value)) }
+    public func modulo(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.value, other.value)) }
     public func negate() -> Int16 { Int16(raw: lang.i16_neg(self.value)) }
     public func abs() -> Int16 { if lang.i16_signed_lt(self.value, 0) { self.negate() } else { self } }
     public func bitwiseAnd(other: Int16) -> Int16 { Int16(raw: lang.i16_and(self.value, other.value)) }

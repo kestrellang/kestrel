@@ -71,7 +71,12 @@ public struct Float64:
         else { .Equal }
     }
 
-    type Output = Float64
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = Float64
+    type Subtractable.Output = Float64
+    type Multipliable.Output = Float64
+    type Divisible.Output = Float64
+    type Negatable.Output = Float64
 
     public func add(other: Float64) -> Float64 { Float64(raw: lang.f64_add(self.value, other.value)) }
     public func subtract(other: Float64) -> Float64 { Float64(raw: lang.f64_sub(self.value, other.value)) }

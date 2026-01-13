@@ -4,23 +4,26 @@
 
 module std.ops
 
-// TODO: Add back
-//@operator(and)
+@builtin(.LogicalAndOperatorProtocol)
 public protocol And[Rhs = Self] {
     type Output
+
+    @builtin(.LogicalAndOperatorMethod)
     func logicalAnd(other: Rhs) -> Output
 }
 
-// TODO: Add back
-//@operator(or)
+@builtin(.LogicalOrOperatorProtocol)
 public protocol Or[Rhs = Self] {
     type Output
+
+    @builtin(.LogicalOrOperatorMethod)
     func logicalOr(other: Rhs) -> Output
 }
 
-// TODO: Add back
-//@operator(not)
+@builtin(.LogicalNotOperatorProtocol)
 public protocol Not {
     type Output
+
+    @builtin(.LogicalNotOperatorMethod)
     func logicalNot() -> Output
 }

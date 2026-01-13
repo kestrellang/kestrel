@@ -156,7 +156,7 @@ impl<'a> TypeResolver<'a> {
         if let Some(ty_node) = node.children().find(|c| c.kind() == SyntaxKind::Ty) {
             return self.resolve(&ty_node);
         }
-        Ty::error(Span::from(0..0))
+        Ty::error(Span::new(self.file_id, 0..0))
     }
 
     /// Apply type arguments to a generic type
@@ -601,7 +601,7 @@ pub fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
 /// Extract type from a node that contains a Ty child (without resolution)
 pub fn extract_type_from_node(node: &SyntaxNode, source: &str) -> Ty {
     let _ = (node, source);
-    Ty::error(Span::from(0..0))
+    Ty::error(Span::new(0, 0..0))
 }
 
 // =============================================================================

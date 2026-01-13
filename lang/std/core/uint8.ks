@@ -61,13 +61,24 @@ public struct UInt8:
         hasher.write(bytes: [self.value])
     }
 
-    type Output = UInt8
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = UInt8
+    type Subtractable.Output = UInt8
+    type Multipliable.Output = UInt8
+    type Divisible.Output = UInt8
+    type Modulo.Output = UInt8
+    type BitwiseAnd.Output = UInt8
+    type BitwiseOr.Output = UInt8
+    type BitwiseXor.Output = UInt8
+    type BitwiseNot.Output = UInt8
+    type LeftShift.Output = UInt8
+    type RightShift.Output = UInt8
 
     public func add(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.value, other.value)) }
     public func subtract(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.value, other.value)) }
     public func multiply(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.value, other.value)) }
     public func divide(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_div(self.value, other.value)) }
-    public func mod(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.value, other.value)) }
+    public func modulo(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.value, other.value)) }
     public func bitwiseAnd(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_and(self.value, other.value)) }
     public func bitwiseOr(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_or(self.value, other.value)) }
     public func bitwiseXor(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_xor(self.value, other.value)) }

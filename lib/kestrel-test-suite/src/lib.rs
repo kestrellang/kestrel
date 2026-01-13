@@ -234,7 +234,7 @@ impl Test {
                 has_parse_errors = true;
                 // Add parse errors to diagnostics
                 for error in &result.errors {
-                    let span = error.span.clone().unwrap_or(Span::from(0..1));
+                    let span = error.span.clone().unwrap_or(Span::new(0, 0..1));
                     let diagnostic = kestrel_reporting::Diagnostic::error()
                         .with_message(&error.message)
                         .with_labels(vec![kestrel_reporting::Label::primary(

@@ -484,7 +484,15 @@ fn computed_body_parser<'tokens>()
         .map(|has_setter| {
             ComputedBodyData::Accessors {
                 getter: None,
-                setter: if has_setter { Some(CodeBlockData { lbrace: Span::from(0..0), items: vec![], rbrace: Span::from(0..0) }) } else { None },
+                setter: if has_setter {
+                    Some(CodeBlockData {
+                        lbrace: Span::new(0, 0..0),
+                        items: vec![],
+                        rbrace: Span::new(0, 0..0),
+                    })
+                } else {
+                    None
+                },
             }
         });
 
@@ -662,7 +670,15 @@ fn subscript_body_parser<'tokens>()
         .map(|has_setter| {
             SubscriptBodyData::Accessors {
                 getter: None,
-                setter: if has_setter { Some(CodeBlockData { lbrace: Span::from(0..0), items: vec![], rbrace: Span::from(0..0) }) } else { None },
+                setter: if has_setter {
+                    Some(CodeBlockData {
+                        lbrace: Span::new(0, 0..0),
+                        items: vec![],
+                        rbrace: Span::new(0, 0..0),
+                    })
+                } else {
+                    None
+                },
             }
         });
 

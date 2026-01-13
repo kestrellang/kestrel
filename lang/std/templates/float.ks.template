@@ -71,7 +71,12 @@ public struct {{TYPE_NAME}}:
         else { .Equal }
     }
 
-    type Output = {{TYPE_NAME}}
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = {{TYPE_NAME}}
+    type Subtractable.Output = {{TYPE_NAME}}
+    type Multipliable.Output = {{TYPE_NAME}}
+    type Divisible.Output = {{TYPE_NAME}}
+    type Negatable.Output = {{TYPE_NAME}}
 
     public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
     public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }

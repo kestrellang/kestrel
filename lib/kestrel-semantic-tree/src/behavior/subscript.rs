@@ -134,7 +134,7 @@ mod tests {
     use kestrel_span::{Name, Span, Spanned};
 
     fn make_name(s: &str) -> Name {
-        Spanned::new(s.to_string(), Span::from(0..s.len()))
+        Spanned::new(s.to_string(), Span::new(0, 0..s.len()))
     }
 
     #[test]
@@ -142,9 +142,9 @@ mod tests {
         use crate::ty::IntBits;
         let params = vec![CallableParameter::new(
             make_name("index"),
-            Ty::int(IntBits::I64, Span::from(0..3)),
+            Ty::int(IntBits::I64, Span::new(0, 0..3)),
         )];
-        let return_ty = Ty::int(IntBits::I64, Span::from(10..13));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 10..13));
         let behavior = SubscriptBehavior::new(params, return_ty);
 
         assert!(behavior.is_static());
@@ -158,9 +158,9 @@ mod tests {
         use crate::ty::IntBits;
         let params = vec![CallableParameter::new(
             make_name("index"),
-            Ty::int(IntBits::I64, Span::from(0..3)),
+            Ty::int(IntBits::I64, Span::new(0, 0..3)),
         )];
-        let return_ty = Ty::int(IntBits::I64, Span::from(10..13));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 10..13));
         let behavior =
             SubscriptBehavior::with_receiver(params, return_ty, ReceiverKind::Borrowing);
 
@@ -174,9 +174,9 @@ mod tests {
         use crate::ty::IntBits;
         let params = vec![CallableParameter::new(
             make_name("index"),
-            Ty::int(IntBits::I64, Span::from(0..3)),
+            Ty::int(IntBits::I64, Span::new(0, 0..3)),
         )];
-        let return_ty = Ty::int(IntBits::I64, Span::from(10..13));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 10..13));
         let behavior = SubscriptBehavior::new(params, return_ty);
 
         // Unlabeled parameter matches unlabeled argument
@@ -191,9 +191,9 @@ mod tests {
         let params = vec![CallableParameter::with_label(
             make_name("safe"),
             make_name("index"),
-            Ty::int(IntBits::I64, Span::from(0..3)),
+            Ty::int(IntBits::I64, Span::new(0, 0..3)),
         )];
-        let return_ty = Ty::int(IntBits::I64, Span::from(10..13));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 10..13));
         let behavior = SubscriptBehavior::new(params, return_ty);
 
         // Matching label
@@ -208,10 +208,10 @@ mod tests {
     fn test_matches_labels_wrong_arity() {
         use crate::ty::IntBits;
         let params = vec![
-            CallableParameter::new(make_name("row"), Ty::int(IntBits::I64, Span::from(0..3))),
-            CallableParameter::new(make_name("col"), Ty::int(IntBits::I64, Span::from(5..8))),
+            CallableParameter::new(make_name("row"), Ty::int(IntBits::I64, Span::new(0, 0..3))),
+            CallableParameter::new(make_name("col"), Ty::int(IntBits::I64, Span::new(0, 5..8))),
         ];
-        let return_ty = Ty::int(IntBits::I64, Span::from(10..13));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 10..13));
         let behavior = SubscriptBehavior::new(params, return_ty);
 
         // Wrong number of arguments

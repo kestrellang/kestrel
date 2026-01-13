@@ -198,24 +198,24 @@ public struct Dictionary[K, V, A]:
     }
 
     // Subscript access
-    //public subscript(key: K) -> Optional[V] {
-    //    get {
-    //        let hash = self.hash(key: key)
-    //        if let index = self.findEntry(key: key, hash: hash) {
-    //            .Some(self.storage.value.entries(unchecked: index).value)
-    //        } else {
-    //            .None
-    //        }
-    //    }
-    //    set {
-    //        self.ensureUnique()
-    //        if let value = newValue {
-    //            self.insert(value: value, for: key)
-    //        } else {
-    //            self.remove(for: key)
-    //        }
-    //    }
-    //}
+    public subscript(key: K) -> Optional[V] {
+        get {
+            let hash = self.hash(key: key)
+            if let index = self.findEntry(key: key, hash: hash) {
+                .Some(self.storage.value.entries(unchecked: index).value)
+            } else {
+                .None
+            }
+        }
+        set {
+            self.ensureUnique()
+            if let value = newValue {
+                self.insert(value: value, for: key)
+            } else {
+                self.remove(for: key)
+            }
+        }
+    }
 
     // Mutation
     public func insert(value: V, for key: K) -> Optional[V] {
@@ -289,7 +289,7 @@ public struct Dictionary[K, V, A]:
 
     // Get or insert
     public func getOrInsert(key: K, default defaultValue: V) -> V {
-        if let value = self[key] {
+        if let .Some(value) = self(key) {
             return value
         }
         self.insert(value: defaultValue, for: key);
@@ -297,7 +297,7 @@ public struct Dictionary[K, V, A]:
     }
 
     public func getOrInsertWith(key: K, defaultFn: () -> V) -> V {
-        if let value = self[key] {
+        if let .Some(value) = self(key) {
             return value
         }
         let value = defaultFn();
@@ -338,7 +338,7 @@ public struct DictionaryIterator[K, V]: Iterator {
         self.index = index;
     }
 
-    public func next() -> Optional[(K, V)] {
+    public mutating func next() -> Optional[(K, V)] {
         while self.index < self.dict.storage.value.capacity {
             let entry = self.dict.storage.value.entries(unchecked: self.index);
             self.index = self.index + 1;
@@ -375,8 +375,8 @@ public struct KeysIterator[K, V]: Iterator {
         self.dictIter = dictIter
     }
 
-    public func next() -> Optional[K] {
-        self.dictIter.next().map { (key, x) in key }
+    public mutating func next() -> Optional[K] {
+        self.dictIter.next().map { it.0 }
     }
 }
 
@@ -405,7 +405,7 @@ public struct ValuesIterator[K, V]: Iterator {
         self.dictIter = dictIter
     }
 
-    public func next() -> Optional[V] {
-        self.dictIter.next().map { (x, value) in value }
+    public mutating func next() -> Optional[V] {
+        self.dictIter.next().map { it.1 }
     }
 }

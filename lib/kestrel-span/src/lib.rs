@@ -24,26 +24,6 @@ impl Span {
     pub fn range(&self) -> std::ops::Range<usize> {
         self.start..self.end
     }
-
-    /// Create a span with file_id = 0 (for use in parsers where file_id is unknown).
-    pub fn from_range(range: std::ops::Range<usize>) -> Self {
-        Self::new(0, range)
-    }
-
-    /// Create a new span with a different file_id but the same range.
-    pub fn with_file_id(&self, file_id: usize) -> Self {
-        Self {
-            file_id,
-            start: self.start,
-            end: self.end,
-        }
-    }
-}
-
-impl From<std::ops::Range<usize>> for Span {
-    fn from(range: std::ops::Range<usize>) -> Self {
-        Self::from_range(range)
-    }
 }
 
 #[derive(Debug, Clone)]

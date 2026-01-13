@@ -79,7 +79,7 @@ public struct Bytes[R: Read]: Iterator {
 
     var inner: R
 
-    public func next() -> Optional[Result[UInt8]] {
+    public mutating func next() -> Optional[Result[UInt8]] {
         match self.inner.readByte() {
             .Ok(.Some(let b)) => .Some(.Ok(b)),
             .Ok(.None) => .None,
@@ -113,7 +113,7 @@ public struct Chain[R1: Read, R2: Read]: Read {
     var second: R2
     var firstDone: Bool
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int] {
         if not self.firstDone {
             let n = try self.first.read(into: buf)
             if n > 0 { return .Ok(n) }

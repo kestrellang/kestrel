@@ -189,7 +189,7 @@ public struct SliceIterator[T]: Iterator {
         self.remaining = remaining;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         if self.remaining > 0 {
             let value = self.ptr.read();
             self.ptr = self.ptr.offset(by: 1);

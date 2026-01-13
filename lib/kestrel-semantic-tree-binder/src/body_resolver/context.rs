@@ -548,12 +548,13 @@ pub(crate) fn create_local_scope_for_body(
     // Create a dummy function for the LocalScope.
     // The actual local binding will go to this dummy, but that's okay
     // because we're attaching ExecutableBehavior to the real function
-    let name = Spanned::new(temp_name.to_string(), Span::from(0..0));
+    let dummy_span = Span::new(symbol.metadata().span().file_id, 0..0);
+    let name = Spanned::new(temp_name.to_string(), dummy_span.clone());
     let visibility =
-        VisibilityBehavior::new(Some(Visibility::Private), Span::from(0..0), symbol.clone());
+        VisibilityBehavior::new(Some(Visibility::Private), dummy_span.clone(), symbol.clone());
     let dummy_func = Arc::new(FunctionSymbol::new(
         name,
-        Span::from(0..0),
+        dummy_span,
         visibility,
         true,
         true,

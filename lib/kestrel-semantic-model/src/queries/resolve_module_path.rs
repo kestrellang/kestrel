@@ -26,8 +26,8 @@ impl Query for ResolveModulePath {
             return Err(ModuleNotFoundError {
                 path: vec![],
                 failed_segment_index: 0,
-                path_span: Span::from(0..0),
-                failed_segment_span: Span::from(0..0),
+                path_span: Span::new(0, 0..0),
+                failed_segment_span: Span::new(0, 0..0),
             });
         }
 
@@ -43,8 +43,8 @@ impl Query for ResolveModulePath {
                 return Err(ModuleNotFoundError {
                     path: self.path.clone(),
                     failed_segment_index: 0,
-                    path_span: Span::from(0..0),
-                    failed_segment_span: Span::from(0..0),
+                    path_span: Span::new(0, 0..0),
+                    failed_segment_span: Span::new(0, 0..0),
                 });
             }
         };
@@ -63,8 +63,8 @@ impl Query for ResolveModulePath {
                     return Err(ModuleNotFoundError {
                         path: self.path.clone(),
                         failed_segment_index: index,
-                        path_span: Span::from(0..0),
-                        failed_segment_span: Span::from(0..0),
+                        path_span: Span::new(0, 0..0),
+                        failed_segment_span: Span::new(0, 0..0),
                     });
                 }
             }

@@ -1390,36 +1390,21 @@ fn lower_primitive_method_call(
 
     match method {
         // === Unary Operations ===
-        PrimitiveMethod::IntNeg | PrimitiveMethod::IntIdentity => {
-            let op = match method {
-                PrimitiveMethod::IntNeg => UnOp::Neg,
-                PrimitiveMethod::IntIdentity => {
-                    // Identity just returns the value
-                    return receiver_value;
-                }
-                _ => unreachable!(),
-            };
+        PrimitiveMethod::IntNeg => {
             ctx.emit_assign(
                 result_place.clone(),
                 Rvalue::UnaryOp {
-                    op,
+                    op: UnOp::Neg,
                     operand: receiver_value,
                 },
             );
         }
 
-        PrimitiveMethod::FloatNeg | PrimitiveMethod::FloatIdentity => {
-            let op = match method {
-                PrimitiveMethod::FloatNeg => UnOp::FNeg,
-                PrimitiveMethod::FloatIdentity => {
-                    return receiver_value;
-                }
-                _ => unreachable!(),
-            };
+        PrimitiveMethod::FloatNeg => {
             ctx.emit_assign(
                 result_place.clone(),
                 Rvalue::UnaryOp {
-                    op,
+                    op: UnOp::FNeg,
                     operand: receiver_value,
                 },
             );

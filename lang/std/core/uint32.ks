@@ -61,13 +61,24 @@ public struct UInt32:
         hasher.write(bytes: self.value.toBytes())
     }
 
-    type Output = UInt32
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = UInt32
+    type Subtractable.Output = UInt32
+    type Multipliable.Output = UInt32
+    type Divisible.Output = UInt32
+    type Modulo.Output = UInt32
+    type BitwiseAnd.Output = UInt32
+    type BitwiseOr.Output = UInt32
+    type BitwiseXor.Output = UInt32
+    type BitwiseNot.Output = UInt32
+    type LeftShift.Output = UInt32
+    type RightShift.Output = UInt32
 
     public func add(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_add(self.value, other.value)) }
     public func subtract(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_sub(self.value, other.value)) }
     public func multiply(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_mul(self.value, other.value)) }
     public func divide(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_div(self.value, other.value)) }
-    public func mod(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.value, other.value)) }
+    public func modulo(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.value, other.value)) }
     public func bitwiseAnd(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_and(self.value, other.value)) }
     public func bitwiseOr(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_or(self.value, other.value)) }
     public func bitwiseXor(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_xor(self.value, other.value)) }

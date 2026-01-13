@@ -227,57 +227,55 @@ define_primitive_methods! {
 
     // Int arithmetic
     IntAdd        { ty: Int, name: "add", returns: SameAsReceiver },
-    IntSub        { ty: Int, name: "sub", returns: SameAsReceiver },
-    IntMul        { ty: Int, name: "mul", returns: SameAsReceiver },
-    IntDiv        { ty: Int, name: "div", returns: SameAsReceiver },
-    IntRem        { ty: Int, name: "rem", returns: SameAsReceiver },
-    IntNeg        { ty: Int, name: "neg", returns: SameAsReceiver },
-    IntIdentity   { ty: Int, name: "identity", returns: SameAsReceiver },
+    IntSub        { ty: Int, name: "subtract", returns: SameAsReceiver },
+    IntMul        { ty: Int, name: "multiply", returns: SameAsReceiver },
+    IntDiv        { ty: Int, name: "divide", returns: SameAsReceiver },
+    IntRem        { ty: Int, name: "modulo", returns: SameAsReceiver },
+    IntNeg        { ty: Int, name: "negate", returns: SameAsReceiver },
 
     // Int comparison
-    IntEq         { ty: Int, name: "eq", returns: Bool },
-    IntNe         { ty: Int, name: "ne", returns: Bool },
-    IntLt         { ty: Int, name: "lt", returns: Bool },
-    IntLe         { ty: Int, name: "le", returns: Bool },
-    IntGt         { ty: Int, name: "gt", returns: Bool },
-    IntGe         { ty: Int, name: "ge", returns: Bool },
+    IntEq         { ty: Int, name: "equals", returns: Bool },
+    IntNe         { ty: Int, name: "notEquals", returns: Bool },
+    IntLt         { ty: Int, name: "lessThan", returns: Bool },
+    IntLe         { ty: Int, name: "lessThanOrEqual", returns: Bool },
+    IntGt         { ty: Int, name: "greaterThan", returns: Bool },
+    IntGe         { ty: Int, name: "greaterThanOrEqual", returns: Bool },
 
     // Int bitwise
-    IntBitAnd     { ty: Int, name: "bitAnd", returns: SameAsReceiver },
-    IntBitOr      { ty: Int, name: "bitOr", returns: SameAsReceiver },
-    IntBitXor     { ty: Int, name: "bitXor", returns: SameAsReceiver },
-    IntBitNot     { ty: Int, name: "bitNot", returns: SameAsReceiver },
-    IntShl        { ty: Int, name: "shl", returns: SameAsReceiver },
-    IntShr        { ty: Int, name: "shr", returns: SameAsReceiver },
+    IntBitAnd     { ty: Int, name: "bitwiseAnd", returns: SameAsReceiver },
+    IntBitOr      { ty: Int, name: "bitwiseOr", returns: SameAsReceiver },
+    IntBitXor     { ty: Int, name: "bitwiseXor", returns: SameAsReceiver },
+    IntBitNot     { ty: Int, name: "bitwiseNot", returns: SameAsReceiver },
+    IntShl        { ty: Int, name: "shiftLeft", returns: SameAsReceiver },
+    IntShr        { ty: Int, name: "shiftRight", returns: SameAsReceiver },
 
     // Float arithmetic
     FloatAdd      { ty: Float, name: "add", returns: SameAsReceiver },
-    FloatSub      { ty: Float, name: "sub", returns: SameAsReceiver },
-    FloatMul      { ty: Float, name: "mul", returns: SameAsReceiver },
-    FloatDiv      { ty: Float, name: "div", returns: SameAsReceiver },
-    FloatNeg      { ty: Float, name: "neg", returns: SameAsReceiver },
-    FloatIdentity { ty: Float, name: "identity", returns: SameAsReceiver },
+    FloatSub      { ty: Float, name: "subtract", returns: SameAsReceiver },
+    FloatMul      { ty: Float, name: "multiply", returns: SameAsReceiver },
+    FloatDiv      { ty: Float, name: "divide", returns: SameAsReceiver },
+    FloatNeg      { ty: Float, name: "negate", returns: SameAsReceiver },
 
     // Float comparison
-    FloatEq       { ty: Float, name: "eq", returns: Bool },
-    FloatNe       { ty: Float, name: "ne", returns: Bool },
-    FloatLt       { ty: Float, name: "lt", returns: Bool },
-    FloatLe       { ty: Float, name: "le", returns: Bool },
-    FloatGt       { ty: Float, name: "gt", returns: Bool },
-    FloatGe       { ty: Float, name: "ge", returns: Bool },
+    FloatEq       { ty: Float, name: "equals", returns: Bool },
+    FloatNe       { ty: Float, name: "notEquals", returns: Bool },
+    FloatLt       { ty: Float, name: "lessThan", returns: Bool },
+    FloatLe       { ty: Float, name: "lessThanOrEqual", returns: Bool },
+    FloatGt       { ty: Float, name: "greaterThan", returns: Bool },
+    FloatGe       { ty: Float, name: "greaterThanOrEqual", returns: Bool },
 
     // Bool operators
     BoolAnd       { ty: Bool, name: "logicalAnd", returns: Bool },
     BoolOr        { ty: Bool, name: "logicalOr", returns: Bool },
     BoolNot       { ty: Bool, name: "logicalNot", returns: Bool },
-    BoolEq        { ty: Bool, name: "eq", returns: Bool },
-    BoolNe        { ty: Bool, name: "ne", returns: Bool },
+    BoolEq        { ty: Bool, name: "equals", returns: Bool },
+    BoolNe        { ty: Bool, name: "notEquals", returns: Bool },
 
     // String methods
     StringLength    { ty: String, name: "length", returns: Int },
     StringIsEmpty   { ty: String, name: "isEmpty", returns: Bool },
-    StringEq        { ty: String, name: "eq", returns: Bool },
-    StringNe        { ty: String, name: "ne", returns: Bool },
+    StringEq        { ty: String, name: "equals", returns: Bool },
+    StringNe        { ty: String, name: "notEquals", returns: Bool },
     StringUnsafePtr { ty: String, name: "unsafePtr", returns: PointerToI8 },
 }
 
@@ -289,10 +287,8 @@ impl PrimitiveMethod {
             PrimitiveMethod::IntToString
             | PrimitiveMethod::IntAbs
             | PrimitiveMethod::IntNeg
-            | PrimitiveMethod::IntIdentity
             | PrimitiveMethod::IntBitNot
             | PrimitiveMethod::FloatNeg
-            | PrimitiveMethod::FloatIdentity
             | PrimitiveMethod::BoolNot
             | PrimitiveMethod::StringLength
             | PrimitiveMethod::StringIsEmpty
@@ -2613,7 +2609,7 @@ mod tests {
 
     #[test]
     fn test_integer_literal() {
-        let expr = Expression::integer(42, Span::from(0..2));
+        let expr = Expression::integer(42, Span::new(0, 0..2));
         assert!(expr.is_literal());
         assert_eq!(expr.as_literal(), Some(&LiteralValue::Integer(42)));
         assert!(expr.ty.is_int());
@@ -2621,7 +2617,7 @@ mod tests {
 
     #[test]
     fn test_string_literal() {
-        let expr = Expression::string("hello".to_string(), Span::from(0..7));
+        let expr = Expression::string("hello".to_string(), Span::new(0, 0..7));
         assert!(expr.is_literal());
         assert_eq!(
             expr.as_literal(),
@@ -2633,16 +2629,16 @@ mod tests {
     #[test]
     fn test_tuple_expression() {
         let elements = vec![
-            Expression::integer(1, Span::from(1..2)),
-            Expression::integer(2, Span::from(4..5)),
+            Expression::integer(1, Span::new(0, 1..2)),
+            Expression::integer(2, Span::new(0, 4..5)),
         ];
-        let expr = Expression::tuple(elements, Span::from(0..6));
+        let expr = Expression::tuple(elements, Span::new(0, 0..6));
         assert!(expr.ty.is_tuple());
     }
 
     #[test]
     fn test_error_expression() {
-        let expr = Expression::error(Span::from(0..5));
+        let expr = Expression::error(Span::new(0, 0..5));
         assert!(expr.is_error());
         assert!(expr.ty.is_error());
     }

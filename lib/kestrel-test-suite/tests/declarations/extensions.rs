@@ -177,6 +177,43 @@ mod conformance {
     }
 
     #[test]
+    fn extension_provides_associated_type_binding() {
+        Test::new(
+            r#"module Test
+            protocol Factory {
+                type Product;
+                func make() -> Product
+            }
+            struct Maker { }
+            extend Maker: Factory {
+                type Product = Int;
+                func make() -> Int { return 1; }
+            }
+            func useFactory[F](f: F) -> Int where F: Factory { return f.make(); }
+            func test() -> Int { return useFactory(Maker()); }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn extension_missing_associated_type_binding() {
+        Test::new(
+            r#"module Test
+            protocol Factory {
+                type Product;
+                func make() -> Product
+            }
+            struct Maker { }
+            extend Maker: Factory {
+                func make() -> Int { return 1; }
+            }
+        "#,
+        )
+        .expect(HasError("does not provide associated type 'Product'"));
+    }
+
+    #[test]
     fn separate_extensions_satisfy_conformance() {
         Test::new(
             r#"module Test

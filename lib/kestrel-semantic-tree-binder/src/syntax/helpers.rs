@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_syntax_tree::utils::get_node_span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -15,6 +15,47 @@ use crate::declaration_binder::BindingContext;
 use crate::diagnostics::{
     MissingParentProtocolConformanceError, NotAProtocolContext, NotAProtocolError,
 };
+
+/// In conformance lists, a bare protocol reference like `P` should apply default protocol type
+/// arguments (e.g. `protocol P[T = Self]` => `P[T = Self]`), rather than leaving inferred `_`
+/// placeholders from raw type reference resolution.
+fn apply_default_protocol_type_arguments_for_conformance(ty: Ty) -> Ty {
+    let TyKind::Protocol { symbol, substitutions } = ty.kind() else {
+        return ty;
+    };
+
+    let type_params = symbol.type_parameters();
+    if type_params.is_empty() {
+        return ty;
+    }
+
+    let mut new_subs: Substitutions = substitutions.clone();
+    let mut changed = false;
+
+    for param in &type_params {
+        let param_id = param.metadata().id();
+        let existing = new_subs.get(param_id);
+
+        let should_fill = match existing {
+            None => true,
+            Some(existing_ty) => matches!(existing_ty.kind(), TyKind::Infer),
+        };
+        if !should_fill {
+            continue;
+        }
+
+        if let Some(default_ty) = param.default() {
+            new_subs.insert(param_id, default_ty.clone());
+            changed = true;
+        }
+    }
+
+    if changed {
+        Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+    } else {
+        ty
+    }
+}
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
@@ -73,11 +114,12 @@ pub fn resolve_conformance_list(
         let resolved_ty = resolve_type_from_ty_node(&ty_node, &mut type_ctx);
 
         // Validate that it's a protocol
-        match resolved_ty.kind() {
+        match resolved_ty.clone().kind() {
             TyKind::Protocol {
                 symbol: protocol_sym,
                 ..
             } => {
+                let resolved_ty = apply_default_protocol_type_arguments_for_conformance(resolved_ty);
                 if is_negative {
                     // Validate that this protocol allows negation
                     let protocol_id = protocol_sym.metadata().id();
@@ -172,7 +214,7 @@ fn validate_no_conflicting_conformances(
 
     // Check if there's a `not Copyable` in the negative conformances
     let copyable_id = ctx.model.builtin_registry().copyable_protocol();
-    let has_not_copyable = copyable_id.map_or(false, |copyable_id| {
+    let has_not_copyable = copyable_id.is_some_and(|copyable_id| {
         negative_conformances.iter().any(|ty| {
             if let TyKind::Protocol { symbol, .. } = ty.kind() {
                 symbol.metadata().id() == copyable_id
@@ -251,7 +293,6 @@ fn validate_parent_protocol_conformances(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,
 ) {
-    use kestrel_semantic_tree::builtins::LanguageFeature;
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     // Only validate structs, not protocols

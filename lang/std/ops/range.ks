@@ -6,18 +6,20 @@ import std.core.(Equatable, Comparable, Steppable)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 
-// TODO: Add back 
-//@operator(..)
+@builtin(.ExclusiveRangeOperatorProtocol)
 public protocol RangeConstructible[Rhs = Self] {
     type Output
-    func rangeExclusive(to end: Rhs) -> Output
+
+    @builtin(.ExclusiveRangeOperatorMethod)
+    func exclusiveRange(to end: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(..=)
+@builtin(.InclusiveRangeOperatorProtocol)
 public protocol ClosedRangeConstructible[Rhs = Self] {
     type Output
-    func rangeInclusive(to end: Rhs) -> Output
+
+    @builtin(.InclusiveRangeOperatorMethod)
+    func inclusiveRange(to end: Rhs) -> Output
 }
 
 // Range type (exclusive end)
@@ -63,7 +65,7 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
         self.end = end;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         if self.current < self.end {
             let value = self.current;
             self.current = self.current.successor();
@@ -119,7 +121,7 @@ public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable
         self.finished = finished;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         if self.finished {
             .None
         } else if self.current == self.end {

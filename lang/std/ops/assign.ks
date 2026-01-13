@@ -90,7 +90,7 @@ public protocol RightShiftAssign[Rhs = Int] {
 //
 // extend Modulo[Rhs]: ModuloAssign[Rhs] where Output = Self {
 //     func modAssign(other: Rhs) {
-//         self = self.mod(other)
+//         self = self.modulo(other)
 //     }
 // }
 //

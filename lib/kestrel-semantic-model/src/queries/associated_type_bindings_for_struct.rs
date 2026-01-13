@@ -9,7 +9,7 @@ use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::queries::{ResolvedAliasedType, SymbolFor};
+use crate::queries::{ExtensionsFor, ResolvedAliasedType, SymbolFor};
 use crate::query::Query;
 
 /// Collect type-alias bindings within a struct that can satisfy protocol associated types.
@@ -32,22 +32,38 @@ impl Query for AssociatedTypeBindingsForStruct {
 
         let struct_dyn: std::sync::Arc<dyn Symbol<KestrelLanguage>> = symbol;
         let mut bindings = HashMap::new();
-        for child in struct_dyn.metadata().children() {
-            if child.metadata().kind() != KestrelSymbolKind::TypeAlias {
-                continue;
+
+        let mut collect_from_symbol = |parent: &std::sync::Arc<dyn Symbol<KestrelLanguage>>| {
+            for child in parent.metadata().children() {
+                if child.metadata().kind() != KestrelSymbolKind::TypeAlias {
+                    continue;
+                }
+                let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>() else {
+                    continue;
+                };
+                let name = type_alias.metadata().name().value.clone();
+                let alias_id = type_alias.metadata().id();
+                let Some(resolved) = model.query(ResolvedAliasedType {
+                    type_alias_id: alias_id,
+                }) else {
+                    continue;
+                };
+                bindings.insert(name, SignatureType::from_ty(&resolved));
             }
-            let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>() else {
-                continue;
-            };
-            let name = type_alias.metadata().name().value.clone();
-            let alias_id = type_alias.metadata().id();
-            let Some(resolved) = model.query(ResolvedAliasedType {
-                type_alias_id: alias_id,
-            }) else {
-                continue;
-            };
-            bindings.insert(name, SignatureType::from_ty(&resolved));
+        };
+
+        // 1) Bindings in the struct body
+        collect_from_symbol(&struct_dyn);
+
+        // 2) Bindings declared in extensions of this struct
+        let extensions = model.query(ExtensionsFor {
+            target_id: self.struct_id,
+        });
+        for ext in &extensions {
+            let ext_dyn: std::sync::Arc<dyn Symbol<KestrelLanguage>> = ext.clone();
+            collect_from_symbol(&ext_dyn);
         }
+
         bindings
     }
 }

@@ -4,44 +4,50 @@
 
 module std.ops
 
-// TODO: Add back 
-//@operator(==)
+@builtin(.EqualsOperatorProtocol)
 public protocol Equal[Rhs = Self] {
     type Output
-    func eq(other: Rhs) -> Output
+
+    @builtin(.EqualsOperatorMethod)
+    func equals(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(!=)
+@builtin(.NotEqualsOperatorProtocol)
 public protocol NotEqual[Rhs = Self] {
     type Output
-    func ne(other: Rhs) -> Output
+
+    @builtin(.NotEqualsOperatorMethod)
+    func notEquals(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(<)
+@builtin(.LessThanOperatorProtocol)
 public protocol Less[Rhs = Self] {
     type Output
-    func lt(other: Rhs) -> Output
+
+    @builtin(.LessThanOperatorMethod)
+    func lessThan(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(<=)
+@builtin(.LessOrEqualOperatorProtocol)
 public protocol LessOrEqual[Rhs = Self] {
     type Output
-    func le(other: Rhs) -> Output
+
+    @builtin(.LessOrEqualOperatorMethod)
+    func lessThanOrEqual(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(>)
+@builtin(.GreaterThanOperatorProtocol)
 public protocol Greater[Rhs = Self] {
     type Output
-    func gt(other: Rhs) -> Output
+
+    @builtin(.GreaterThanOperatorMethod)
+    func greaterThan(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(>=)
+@builtin(.GreaterOrEqualOperatorProtocol)
 public protocol GreaterOrEqual[Rhs = Self] {
     type Output
-    func ge(other: Rhs) -> Output
+
+    @builtin(.GreaterOrEqualOperatorMethod)
+    func greaterThanOrEqual(other: Rhs) -> Output
 }

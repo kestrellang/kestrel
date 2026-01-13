@@ -213,7 +213,7 @@ public enum JsonValue: Equatable {
 
 // JsonValue implements Serialize
 extend JsonValue: Serialize {
-    public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
+    public mutating func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
         match self {
             .Null => serializer.serializeNil(),
             .Bool(v) => serializer.serializeBool(value: v),
@@ -796,83 +796,83 @@ public struct JsonSerializer: Serializer {
     }
 
     // Primitive serialization
-    public func serializeNil() -> Result[(), JsonError] {
+    public mutating func serializeNil() -> Result[(), JsonError] {
         self.writer.write(value: .Null);
         .Ok(());
     }
 
-    public func serializeBool(value: Bool) -> Result[(), JsonError] {
+    public mutating func serializeBool(value: Bool) -> Result[(), JsonError] {
         self.writer.write(value: .Bool(value));
         .Ok(());
     }
 
-    public func serializeInt(value: Int) -> Result[(), JsonError] {
+    public mutating func serializeInt(value: Int) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(());
     }
 
-    public func serializeInt8(value: Int8) -> Result[(), JsonError] {
+    public mutating func serializeInt8(value: Int8) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(());
     }
 
-    public func serializeInt16(value: Int16) -> Result[(), JsonError] {
+    public mutating func serializeInt16(value: Int16) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeInt32(value: Int32) -> Result[(), JsonError] {
+    public mutating func serializeInt32(value: Int32) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeInt64(value: Int64) -> Result[(), JsonError] {
+    public mutating func serializeInt64(value: Int64) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeUInt(value: UInt) -> Result[(), JsonError] {
+    public mutating func serializeUInt(value: UInt) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeUInt8(value: UInt8) -> Result[(), JsonError] {
+    public mutating func serializeUInt8(value: UInt8) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeUInt16(value: UInt16) -> Result[(), JsonError] {
+    public mutating func serializeUInt16(value: UInt16) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeUInt32(value: UInt32) -> Result[(), JsonError] {
+    public mutating func serializeUInt32(value: UInt32) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeUInt64(value: UInt64) -> Result[(), JsonError] {
+    public mutating func serializeUInt64(value: UInt64) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeFloat32(value: Float32) -> Result[(), JsonError] {
+    public mutating func serializeFloat32(value: Float32) -> Result[(), JsonError] {
         self.writer.write(value: .Number(Float64(value)));
         .Ok(())
     }
 
-    public func serializeFloat64(value: Float64) -> Result[(), JsonError] {
+    public mutating func serializeFloat64(value: Float64) -> Result[(), JsonError] {
         self.writer.write(value: .Number(value));
         .Ok(())
     }
 
-    public func serializeString(value: String) -> Result[(), JsonError] {
+    public mutating func serializeString(value: String) -> Result[(), JsonError] {
         self.writer.write(value: .String(value));
         .Ok(())
     }
 
     // Compound types
-    public func serializeArray[S](values: Array[S]) -> Result[(), JsonError] where S: Serialize {
+    public mutating func serializeArray[S](values: Array[S]) -> Result[(), JsonError] where S: Serialize {
         var arr = /* try */self.beginArray(length: values.count);
         /* for item in values {
             try arr.serializeElement(value: item)
@@ -880,7 +880,7 @@ public struct JsonSerializer: Serializer {
         arr.end()
     }
 
-    public func serializeMap[K, V](entries: Array[(K, V)]) -> Result[(), JsonError] where K: Serialize, V: Serialize {
+    public mutating func serializeMap[K, V](entries: Array[(K, V)]) -> Result[(), JsonError] where K: Serialize, V: Serialize {
         var obj = /* try */self.beginObject(name: "", fieldCount: entries.count);
         /* for (key, value) in entries {
             // For JSON, keys should be strings
@@ -890,15 +890,15 @@ public struct JsonSerializer: Serializer {
         obj.end()
     }
 
-    public func beginObject(name: String, fieldCount: Int) -> Result[JsonObjectSerializer, JsonError] {
+    public mutating func beginObject(name: String, fieldCount: Int) -> Result[JsonObjectSerializer, JsonError] {
         .Ok(JsonObjectSerializer(serializer: self, fieldCount: fieldCount))
     }
 
-    public func beginArray(length: Int) -> Result[JsonArraySerializer, JsonError] {
+    public mutating func beginArray(length: Int) -> Result[JsonArraySerializer, JsonError] {
         .Ok(JsonArraySerializer(serializer: self, length: length))
     }
 
-    public func finish() -> Result[String, JsonError] {
+    public mutating func finish() -> Result[String, JsonError] {
         .Ok(self.writer.output)
     }
 }
@@ -918,7 +918,7 @@ public struct JsonObjectSerializer: ObjectSerializer {
         self.serializer.writer.output.append(codePoint: CodePoint(value: 123)) // '{'
     }
 
-    public func serializeField[V](name: String, value: V) -> Result[(), JsonError] where V: Serialize {
+    public mutating func serializeField[V](name: String, value: V) -> Result[(), JsonError] where V: Serialize {
         if self.currentField > 0 {
             self.serializer.writer.output.append(codePoint: CodePoint(value: 44)); // ','
         }
@@ -929,7 +929,7 @@ public struct JsonObjectSerializer: ObjectSerializer {
         .Ok(())
     }
 
-    public func end() -> Result[(), JsonError] {
+    public mutating func end() -> Result[(), JsonError] {
         self.serializer.writer.output.append(codePoint: CodePoint(value: 125)); // '}'
         .Ok(())
     }
@@ -950,7 +950,7 @@ public struct JsonArraySerializer: ArraySerializer {
         self.serializer.writer.output.append(codePoint: CodePoint(value: 91)) // '['
     }
 
-    public func serializeElement[V](value: V) -> Result[(), JsonError] where V: Serialize {
+    public mutating func serializeElement[V](value: V) -> Result[(), JsonError] where V: Serialize {
         if self.currentIndex > 0 {
             self.serializer.writer.output.append(codePoint: CodePoint(value: 44)); // ','
         }
@@ -959,7 +959,7 @@ public struct JsonArraySerializer: ArraySerializer {
         .Ok(())
     }
 
-    public func end() -> Result[(), JsonError] {
+    public mutating func end() -> Result[(), JsonError] {
         self.serializer.writer.output.append(codePoint: CodePoint(value: 93)); // ']'
         .Ok(())
     }
@@ -995,31 +995,40 @@ public struct JsonDeserializer: Deserializer {
     }
 
     // Primitive deserialization
-    public func deserializeNil() -> Result[(), JsonError] {
-        let value = /* try */self.takeValue();
+    public mutating func deserializeNil() -> Result[(), JsonError] {
+        let value = /* try */match self.takeValue() {
+            .Ok(value) => value,
+            .Err(e) => return .Err(e)
+        };
         match value {
             .Null => .Ok(()),
             _ => .Err(JsonError(message: "expected null"))
         }
     }
 
-    public func deserializeBool() -> Result[Bool, JsonError] {
-        let value = /* try */self.takeValue();
+    public mutating func deserializeBool() -> Result[Bool, JsonError] {
+        let value = /* try */match self.takeValue()  {
+            .Ok(value) => value,
+            .Err(e) => return .Err(e)
+        };
         match value {
             .Bool(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected boolean"))
         }
     }
 
-    public func deserializeInt() -> Result[Int, JsonError] {
-        let value = /* try */self.takeValue();
+    public mutating func deserializeInt() -> Result[Int, JsonError] {
+        let value = /* try */match self.takeValue()  {
+            .Ok(value) => value,
+            .Err(e) => return .Err(e)
+        };
         match value {
             .Number(v) => .Ok(Int(v)),
             _ => .Err(JsonError(message: "expected integer"))
         }
     }
 
-    public func deserializeInt8() -> Result[Int8, JsonError] {
+    public mutating func deserializeInt8() -> Result[Int8, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(Int8(v)),
@@ -1027,7 +1036,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeInt16() -> Result[Int16, JsonError] {
+    public mutating func deserializeInt16() -> Result[Int16, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(Int16(v)),
@@ -1035,7 +1044,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeInt32() -> Result[Int32, JsonError] {
+    public mutating func deserializeInt32() -> Result[Int32, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(Int32(v)),
@@ -1043,7 +1052,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeInt64() -> Result[Int64, JsonError] {
+    public mutating func deserializeInt64() -> Result[Int64, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(Int64(v)),
@@ -1051,7 +1060,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeUInt() -> Result[UInt, JsonError] {
+    public mutating func deserializeUInt() -> Result[UInt, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(UInt(v)),
@@ -1059,7 +1068,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeUInt8() -> Result[UInt8, JsonError] {
+    public mutating func deserializeUInt8() -> Result[UInt8, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(UInt8(v)),
@@ -1067,7 +1076,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeUInt16() -> Result[UInt16, JsonError] {
+    public mutating func deserializeUInt16() -> Result[UInt16, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(UInt16(v)),
@@ -1075,7 +1084,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeUInt32() -> Result[UInt32, JsonError] {
+    public mutating func deserializeUInt32() -> Result[UInt32, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(UInt32(v)),
@@ -1083,7 +1092,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeUInt64() -> Result[UInt64, JsonError] {
+    public mutating func deserializeUInt64() -> Result[UInt64, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(UInt64(v)),
@@ -1091,7 +1100,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeFloat32() -> Result[Float32, JsonError] {
+    public mutating func deserializeFloat32() -> Result[Float32, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(Float32(v)),
@@ -1099,7 +1108,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeFloat64() -> Result[Float64, JsonError] {
+    public mutating func deserializeFloat64() -> Result[Float64, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .Number(v) => .Ok(v),
@@ -1107,7 +1116,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeString() -> Result[String, JsonError] {
+    public mutating func deserializeString() -> Result[String, JsonError] {
         let value = /* try */self.takeValue();
         match value {
             .String(v) => .Ok(v),
@@ -1116,7 +1125,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     // Compound types
-    public func deserializeArray[T]() -> Result[Array[T], JsonError] where T: Deserialize {
+    public mutating func deserializeArray[T]() -> Result[Array[T], JsonError] where T: Deserialize {
         let value = /* try */self.takeValue();
         match value {
             .Array(arr) => {
@@ -1134,7 +1143,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeMap[K, V]() -> Result[Dictionary[K, V], JsonError] where K: Deserialize, K: Hashable, V: Deserialize {
+    public mutating func deserializeMap[K, V]() -> Result[Dictionary[K, V], JsonError] where K: Deserialize, K: Hashable, V: Deserialize {
         let value = /* try */self.takeValue();
         match value {
             .Object(obj) => {
@@ -1155,7 +1164,7 @@ public struct JsonDeserializer: Deserializer {
         }
     }
 
-    public func deserializeObject[V](visitor: V.Visitor) -> Result[V, JsonError] where V: Deserialize {
+    public mutating func deserializeObject[V](visitor: V.Visitor) -> Result[V, JsonError] where V: Deserialize {
         let value = /* try */self.takeValue();
         match value {
             .Object(obj) => {
@@ -1183,7 +1192,7 @@ public struct JsonObjectAccess: ObjectAccess {
         self.currentKey = .None
     }
 
-    public func nextField() -> Result[Optional[String], JsonError] {
+    public mutating func nextField() -> Result[Optional[String], JsonError] {
         if self.index >= self.keys.count {
             return .Ok(.None)
         }
@@ -1193,7 +1202,7 @@ public struct JsonObjectAccess: ObjectAccess {
         .Ok(.Some(key))
     }
 
-    public func value[V]() -> Result[V, JsonError] where V: Deserialize {
+    public mutating func value[V]() -> Result[V, JsonError] where V: Deserialize {
         match self.currentKey {
             .Some(key) => {
                 match self.object(key) {
@@ -1208,7 +1217,7 @@ public struct JsonObjectAccess: ObjectAccess {
         }
     }
 
-    public func skipValue() -> Result[(), JsonError] {
+    public mutating func skipValue() -> Result[(), JsonError] {
         // Just move on - value will be ignored
         .Ok(())
     }
@@ -1228,7 +1237,7 @@ extend JsonValue: Deserialize {
 public struct JsonValueVisitor: ObjectVisitor {
     type Value = JsonValue
 
-    public func visit[A](mutating access: A) -> Result[JsonValue, A.Error] where A: ObjectAccess {
+    public mutating func visit[A](mutating access: A) -> Result[JsonValue, A.Error] where A: ObjectAccess {
         var entries: Dictionary[String, JsonValue] = [];
         while let field = /* try */access.nextField() {
             let value = /* try */access.value[JsonValue]();
@@ -1241,14 +1250,14 @@ public struct JsonValueVisitor: ObjectVisitor {
 // TODO: Protocol extensions not yet supported
 // Add deserializeAny method to Deserializer for JsonValue support
 // extend Deserializer {
-//     public func deserializeAny() -> Result[JsonValue, Error] {
+//     public mutating func deserializeAny() -> Result[JsonValue, Error] {
 //         // Default implementation - specific deserializers can override
 //         .Err(Error(message: "deserializeAny not supported"))
 //     }
 // }
 
 extend JsonDeserializer {
-    public func deserializeAny() -> Result[JsonValue, JsonError] {
+    public mutating func deserializeAny() -> Result[JsonValue, JsonError] {
         self.takeValue()
     }
 }

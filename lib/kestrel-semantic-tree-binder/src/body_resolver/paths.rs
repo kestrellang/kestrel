@@ -38,7 +38,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     // e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
     if let Some(nested_expr) = find_nested_expression(node) {
         let base = resolve_expression(&nested_expr, ctx);
-        let trailing_members = extract_trailing_identifiers(node, ctx.source);
+        let trailing_members = extract_trailing_identifiers(node, ctx.source, ctx.file_id);
         if trailing_members.is_empty() {
             return base;
         }
@@ -46,7 +46,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     }
 
     // Extract the path segments with their spans
-    let path_with_spans = extract_path_segments_with_spans(node, ctx.source);
+    let path_with_spans = extract_path_segments_with_spans(node, ctx.source, ctx.file_id);
 
     if path_with_spans.is_empty() {
         return Expression::error(span);
@@ -423,7 +423,11 @@ fn get_function_context(ctx: &BodyResolutionContext) -> String {
 }
 
 /// Extract path segments with their spans from a path expression node
-fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(String, Span)> {
+fn extract_path_segments_with_spans(
+    node: &SyntaxNode,
+    source: &str,
+    file_id: usize,
+) -> Vec<(String, Span)> {
     let mut segments = Vec::new();
 
     // ExprPath may contain Path or direct PathElements
@@ -431,7 +435,9 @@ fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(Str
         // Path contains PathElements
         for element in path_node.children() {
             if element.kind() == SyntaxKind::PathElement {
-                if let Some((name, span)) = extract_path_element_name_with_span(&element, source) {
+                if let Some((name, span)) =
+                    extract_path_element_name_with_span(&element, source, file_id)
+                {
                     segments.push((name, span));
                 }
             }
@@ -440,7 +446,9 @@ fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(Str
         // Direct identifiers
         for child in node.children() {
             if child.kind() == SyntaxKind::PathElement {
-                if let Some((name, span)) = extract_path_element_name_with_span(&child, source) {
+                if let Some((name, span)) =
+                    extract_path_element_name_with_span(&child, source, file_id)
+                {
                     segments.push((name, span));
                 }
             }
@@ -454,7 +462,7 @@ fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(Str
                         let span = token.text_range();
                         segments.push((
                             token.text().to_string(),
-                            Span::from(span.start().into()..span.end().into()),
+                            Span::new(file_id, span.start().into()..span.end().into()),
                         ));
                     }
                 }
@@ -469,6 +477,7 @@ fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(Str
 fn extract_path_element_name_with_span(
     element: &SyntaxNode,
     _source: &str,
+    file_id: usize,
 ) -> Option<(String, Span)> {
     // PathElement contains Name or Identifier
     if let Some(name_node) = element.children().find(|c| c.kind() == SyntaxKind::Name) {
@@ -480,7 +489,7 @@ fn extract_path_element_name_with_span(
                 let range = t.text_range();
                 (
                     t.text().to_string(),
-                    Span::from(range.start().into()..range.end().into()),
+                    Span::new(file_id, range.start().into()..range.end().into()),
                 )
             });
     }
@@ -494,7 +503,7 @@ fn extract_path_element_name_with_span(
             let range = t.text_range();
             (
                 t.text().to_string(),
-                Span::from(range.start().into()..range.end().into()),
+                Span::new(file_id, range.start().into()..range.end().into()),
             )
         })
 }
@@ -532,7 +541,11 @@ fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
 ///
 /// When a path contains a nested expression (e.g., from member access on a call),
 /// this extracts the identifiers that appear after the expression.
-fn extract_trailing_identifiers(node: &SyntaxNode, _source: &str) -> Vec<(String, Span)> {
+fn extract_trailing_identifiers(
+    node: &SyntaxNode,
+    _source: &str,
+    file_id: usize,
+) -> Vec<(String, Span)> {
     let mut identifiers = Vec::new();
     let mut found_expression = false;
 
@@ -548,7 +561,7 @@ fn extract_trailing_identifiers(node: &SyntaxNode, _source: &str) -> Vec<(String
                 let range = token.text_range();
                 identifiers.push((
                     token.text().to_string(),
-                    Span::from(range.start().into()..range.end().into()),
+                    Span::new(file_id, range.start().into()..range.end().into()),
                 ));
             }
         }

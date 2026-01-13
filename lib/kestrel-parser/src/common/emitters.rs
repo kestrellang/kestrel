@@ -34,7 +34,10 @@ pub fn emit_module_path(sink: &mut EventSink, segments: &[Span]) {
     for (i, span) in segments.iter().enumerate() {
         if i > 0 {
             // Emit dot token between segments
-            sink.add_token(SyntaxKind::Dot, Span::from(span.start - 1..span.start));
+            sink.add_token(
+                SyntaxKind::Dot,
+                Span::new(span.file_id, span.start - 1..span.start),
+            );
         }
         sink.add_token(SyntaxKind::Identifier, span.clone());
     }
@@ -63,26 +66,32 @@ pub fn emit_import_declaration(
     emit_module_path(sink, path_segments);
 
     if let Some(items_list) = &items {
-        let last_segment_end = path_segments.last().unwrap().end;
+        let last_segment = path_segments.last().unwrap();
+        let last_segment_end = last_segment.end;
+        let path_file_id = last_segment.file_id;
         sink.add_token(
             SyntaxKind::Dot,
-            Span::from(last_segment_end..last_segment_end + 1),
+            Span::new(path_file_id, last_segment_end..last_segment_end + 1),
         );
         sink.add_token(
             SyntaxKind::LParen,
-            Span::from(last_segment_end + 1..last_segment_end + 2),
+            Span::new(path_file_id, last_segment_end + 1..last_segment_end + 2),
         );
 
         for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
             if i > 0 {
-                let prev_end = if let Some(alias_s) =
+                let prev_span = if let Some(alias_s) =
                     items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref())
                 {
-                    alias_s.end
+                    alias_s
                 } else {
-                    items_list.get(i - 1).unwrap().0.end
+                    &items_list.get(i - 1).unwrap().0
                 };
-                sink.add_token(SyntaxKind::Comma, Span::from(prev_end..prev_end + 1));
+                let prev_end = prev_span.end;
+                sink.add_token(
+                    SyntaxKind::Comma,
+                    Span::new(prev_span.file_id, prev_end..prev_end + 1),
+                );
             }
 
             sink.start_node(SyntaxKind::ImportItem);
@@ -90,25 +99,33 @@ pub fn emit_import_declaration(
 
             if let Some(alias_s) = alias_span {
                 let as_start = name_span.end + 1;
-                sink.add_token(SyntaxKind::As, Span::from(as_start..as_start + 2));
+                sink.add_token(
+                    SyntaxKind::As,
+                    Span::new(name_span.file_id, as_start..as_start + 2),
+                );
                 sink.add_token(SyntaxKind::Identifier, alias_s.clone());
             }
             sink.finish_node();
         }
 
         let last_item = items_list.last().unwrap();
-        let last_item_end = if let Some(alias_s) = &last_item.1 {
-            alias_s.end
+        let last_item_span = if let Some(alias_s) = &last_item.1 {
+            alias_s
         } else {
-            last_item.0.end
+            &last_item.0
         };
+        let last_item_end = last_item_span.end;
         sink.add_token(
             SyntaxKind::RParen,
-            Span::from(last_item_end..last_item_end + 1),
+            Span::new(last_item_span.file_id, last_item_end..last_item_end + 1),
         );
     } else if let Some(alias_span) = alias {
-        let as_start = path_segments.last().unwrap().end + 1;
-        sink.add_token(SyntaxKind::As, Span::from(as_start..as_start + 2));
+        let last_segment = path_segments.last().unwrap();
+        let as_start = last_segment.end + 1;
+        sink.add_token(
+            SyntaxKind::As,
+            Span::new(last_segment.file_id, as_start..as_start + 2),
+        );
         sink.add_token(SyntaxKind::Identifier, alias_span);
     }
 
@@ -146,7 +163,10 @@ fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
                 if i > 0 {
                     // Emit dot between segments (approximate span)
                     let prev_end = segments[i - 1].end;
-                    sink.add_token(SyntaxKind::Dot, Span::from(prev_end..prev_end + 1));
+                    sink.add_token(
+                        SyntaxKind::Dot,
+                        Span::new(segments[i - 1].file_id, prev_end..prev_end + 1),
+                    );
                 }
                 sink.add_token(SyntaxKind::Identifier, span.clone());
             }
@@ -400,14 +420,16 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
                 // Full getter with body: emit GetterClause containing Get token and code block
                 sink.start_node(SyntaxKind::GetterClause);
                 // Emit Get token - use the start of the code block as approximate span
-                let get_span =
-                    Span::from(getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start);
+                let get_span = Span::new(
+                    getter_body.lbrace.file_id,
+                    getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start,
+                );
                 sink.add_token(SyntaxKind::Get, get_span);
                 emit_code_block(sink, getter_body);
                 sink.finish_node();
             } else {
                 // Protocol requirement: just emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, Span::from(0..3));
+                sink.add_token(SyntaxKind::Get, Span::new(sink.file_id(), 0..3));
             }
 
             // Emit setter
@@ -415,11 +437,12 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
                 // Check if this is a real setter body or a placeholder for protocol requirement
                 if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
                     // Protocol requirement: just emit Set token without body (no SetterClause wrapper)
-                    sink.add_token(SyntaxKind::Set, Span::from(0..3));
+                    sink.add_token(SyntaxKind::Set, Span::new(sink.file_id(), 0..3));
                 } else {
                     // Full setter with body: emit SetterClause containing Set token and code block
                     sink.start_node(SyntaxKind::SetterClause);
-                    let set_span = Span::from(
+                    let set_span = Span::new(
+                        setter_body.lbrace.file_id,
                         setter_body.lbrace.start.saturating_sub(4)..setter_body.lbrace.start,
                     );
                     sink.add_token(SyntaxKind::Set, set_span);
@@ -609,7 +632,10 @@ fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoun
             } else {
                 bounds.colon_span.end
             };
-            sink.add_token(SyntaxKind::Comma, Span::from(prev_end..prev_end + 1));
+            sink.add_token(
+                SyntaxKind::Comma,
+                Span::new(bounds.colon_span.file_id, prev_end..prev_end + 1),
+            );
         }
         emit_ty_variant(sink, bound);
     }
@@ -826,13 +852,16 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
                 sink.start_node(SyntaxKind::GetterClause);
                 // Emit Get token - use the start of the code block as approximate span
                 let get_span =
-                    Span::from(getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start);
+                    Span::new(
+                        getter_body.lbrace.file_id,
+                        getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start,
+                    );
                 sink.add_token(SyntaxKind::Get, get_span);
                 emit_code_block(sink, getter_body);
                 sink.finish_node();
             } else {
                 // Protocol requirement: just emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, Span::from(0..3));
+                sink.add_token(SyntaxKind::Get, Span::new(sink.file_id(), 0..3));
             }
 
             // Emit setter
@@ -840,11 +869,12 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
                 // Check if this is a real setter body or a placeholder for protocol requirement
                 if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
                     // Protocol requirement: just emit Set token without body (no SetterClause wrapper)
-                    sink.add_token(SyntaxKind::Set, Span::from(0..3));
+                    sink.add_token(SyntaxKind::Set, Span::new(sink.file_id(), 0..3));
                 } else {
                     // Full setter with body: emit SetterClause containing Set token and code block
                     sink.start_node(SyntaxKind::SetterClause);
-                    let set_span = Span::from(
+                    let set_span = Span::new(
+                        setter_body.lbrace.file_id,
                         setter_body.lbrace.start.saturating_sub(4)..setter_body.lbrace.start,
                     );
                     sink.add_token(SyntaxKind::Set, set_span);

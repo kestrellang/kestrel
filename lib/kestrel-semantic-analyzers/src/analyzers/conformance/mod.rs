@@ -343,9 +343,19 @@ fn resolve_protocol_type(ty: &Ty) -> Option<(Arc<ProtocolSymbol>, HashMap<String
             let type_params = symbol.type_parameters();
             for type_param in type_params.iter() {
                 let param_id = type_param.metadata().id();
-                if let Some(sub_ty) = substitutions.get(param_id) {
-                    let param_name = type_param.metadata().name().value.clone();
+                let param_name = type_param.metadata().name().value.clone();
+
+                // Prefer explicit substitution unless it's an inferred placeholder (`_`).
+                if let Some(sub_ty) = substitutions.get(param_id)
+                    && !matches!(sub_ty.kind(), TyKind::Infer)
+                {
                     type_param_bindings.insert(param_name, SignatureType::from_ty(sub_ty));
+                    continue;
+                }
+
+                // Otherwise, apply the type parameter's default if present (e.g. Rhs = Self).
+                if let Some(default_ty) = type_param.default() {
+                    type_param_bindings.insert(param_name, SignatureType::from_ty(default_ty));
                 }
             }
             Some((symbol.clone(), type_param_bindings))
@@ -655,9 +665,19 @@ fn resolve_protocol_type_for_link(
             let type_params = symbol.type_parameters();
             for type_param in type_params.iter() {
                 let param_id = type_param.metadata().id();
-                if let Some(sub_ty) = substitutions.get(param_id) {
-                    let param_name = type_param.metadata().name().value.clone();
+                let param_name = type_param.metadata().name().value.clone();
+
+                // Prefer explicit substitution unless it's an inferred placeholder (`_`).
+                if let Some(sub_ty) = substitutions.get(param_id)
+                    && !matches!(sub_ty.kind(), TyKind::Infer)
+                {
                     bindings.insert(param_name, SignatureType::from_ty(sub_ty));
+                    continue;
+                }
+
+                // Otherwise, apply the default if present.
+                if let Some(default_ty) = type_param.default() {
+                    bindings.insert(param_name, SignatureType::from_ty(default_ty));
                 }
             }
             let self_type = struct_dyn

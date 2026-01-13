@@ -35,8 +35,10 @@ public struct Bool:
         }
     }
 
-    // And
-    type Output = Bool
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type And.Output = Bool
+    type Or.Output = Bool
+    type Not.Output = Bool
 
     public func logicalAnd(other: Bool) -> Bool {
         Bool(value: lang.bool_and(self.value, other.value))

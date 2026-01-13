@@ -145,7 +145,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         StructDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         }
     }
 

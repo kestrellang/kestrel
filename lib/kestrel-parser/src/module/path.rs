@@ -55,7 +55,7 @@ impl ModulePath {
                 let range = tok.text_range();
                 let start: usize = range.start().into();
                 let end: usize = range.end().into();
-                (tok.text().to_string(), Span::from(start..end))
+                (tok.text().to_string(), Span::new(0, start..end))
             })
             .collect()
     }
@@ -65,7 +65,7 @@ impl ModulePath {
         let range = self.syntax.text_range();
         let start: usize = range.start().into();
         let end: usize = range.end().into();
-        Span::from(start..end)
+        Span::new(0, start..end)
     }
 
     /// Get the number of segments in the path

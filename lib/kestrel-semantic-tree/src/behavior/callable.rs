@@ -487,7 +487,7 @@ mod tests {
     use kestrel_span::Spanned;
 
     fn make_name(s: &str) -> Name {
-        Spanned::new(s.to_string(), Span::from(0..s.len()))
+        Spanned::new(s.to_string(), Span::new(0, 0..s.len()))
     }
 
     #[test]
@@ -606,11 +606,11 @@ mod tests {
         use crate::ty::IntBits;
         // Unlabeled parameters have None for labels
         let params = vec![
-            CallableParameter::new(make_name("x"), Ty::int(IntBits::I64, Span::from(0..3))),
-            CallableParameter::new(make_name("y"), Ty::int(IntBits::I64, Span::from(5..8))),
+            CallableParameter::new(make_name("x"), Ty::int(IntBits::I64, Span::new(0, 0..3))),
+            CallableParameter::new(make_name("y"), Ty::int(IntBits::I64, Span::new(0, 5..8))),
         ];
-        let return_ty = Ty::int(IntBits::I64, Span::from(13..16));
-        let behavior = CallableBehavior::new(params, return_ty, Span::from(0..20));
+        let return_ty = Ty::int(IntBits::I64, Span::new(0, 13..16));
+        let behavior = CallableBehavior::new(params, return_ty, Span::new(0, 0..20));
 
         let sig = behavior.signature("add");
 
@@ -625,10 +625,10 @@ mod tests {
         let params = vec![CallableParameter::with_label(
             make_name("with"),
             make_name("name"),
-            Ty::string(Span::from(0..6)),
+            Ty::string(Span::new(0, 0..6)),
         )];
-        let return_ty = Ty::unit(Span::from(10..12));
-        let behavior = CallableBehavior::new(params, return_ty, Span::from(0..15));
+        let return_ty = Ty::unit(Span::new(0, 10..12));
+        let behavior = CallableBehavior::new(params, return_ty, Span::new(0, 0..15));
 
         let sig = behavior.signature("greet");
 

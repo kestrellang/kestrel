@@ -72,7 +72,7 @@ public struct BytesIterator[A]: Iterator where A: Allocator {
         self.index = index;
     }
 
-    public func next() -> Optional[Byte] {
+    public mutating func next() -> Optional[Byte] {
         if self.index < self.string.byteCount {
             let byte = self.string.byteAt(index: self.index);
             self.index = self.index + 1;
@@ -119,7 +119,7 @@ public struct CodePointsIterator[A]: Iterator where A: Allocator {
         self.byteIndex = byteIndex
     }
 
-    public func next() -> Optional[CodePoint] {
+    public mutating func next() -> Optional[CodePoint] {
         if self.byteIndex >= self.string.byteCount {
             return .None
         }
@@ -171,7 +171,7 @@ public struct CharsIterator[A]: Iterator where A: Allocator {
         self.codePointsIter = codePointsIter
     }
 
-    public func next() -> Optional[Char] {
+    public mutating func next() -> Optional[Char] {
         // Simplified: treat each code point as a character
         // Full implementation would need grapheme cluster segmentation
         self.codePointsIter.next().map { (cp) in
@@ -209,7 +209,7 @@ public struct LinesIterator[A]: Iterator where A: Allocator {
         self.done = done;
     }
 
-    public func next() -> Optional[String[A]] {
+    public mutating func next() -> Optional[String[A]] {
         if self.done or self.byteIndex >= self.string.byteCount {
             return .None
         }

@@ -269,10 +269,6 @@ func negateFloat() -> Float {
     -3.14
 }
 
-func identity() -> Int {
-    +42
-}
-
 func invert() -> Int {
     !42
 }
@@ -286,11 +282,6 @@ func invert() -> Int {
         )
         .expect(
             Symbol::new("negateFloat")
-                .is(SymbolKind::Function)
-                .has(Behavior::ParameterCount(0)),
-        )
-        .expect(
-            Symbol::new("identity")
                 .is(SymbolKind::Function)
                 .has(Behavior::ParameterCount(0)),
         )

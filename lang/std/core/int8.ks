@@ -62,13 +62,25 @@ public struct Int8:
         hasher.write(bytes: [self.value])
     }
 
-    type Output = Int8
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = Int8
+    type Subtractable.Output = Int8
+    type Multipliable.Output = Int8
+    type Divisible.Output = Int8
+    type Modulo.Output = Int8
+    type Negatable.Output = Int8
+    type BitwiseAnd.Output = Int8
+    type BitwiseOr.Output = Int8
+    type BitwiseXor.Output = Int8
+    type BitwiseNot.Output = Int8
+    type LeftShift.Output = Int8
+    type RightShift.Output = Int8
 
     public func add(other: Int8) -> Int8 { Int8(raw: lang.i8_add(self.value, other.value)) }
     public func subtract(other: Int8) -> Int8 { Int8(raw: lang.i8_sub(self.value, other.value)) }
     public func multiply(other: Int8) -> Int8 { Int8(raw: lang.i8_mul(self.value, other.value)) }
     public func divide(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_div(self.value, other.value)) }
-    public func mod(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.value, other.value)) }
+    public func modulo(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.value, other.value)) }
     public func negate() -> Int8 { Int8(raw: lang.i8_neg(self.value)) }
     public func abs() -> Int8 { if lang.i8_signed_lt(self.value, 0) { self.negate() } else { self } }
     public func bitwiseAnd(other: Int8) -> Int8 { Int8(raw: lang.i8_and(self.value, other.value)) }

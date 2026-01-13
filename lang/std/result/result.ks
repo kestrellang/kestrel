@@ -94,7 +94,7 @@ public enum Result[T, E]:
 
     public func expectErr(message: String) -> E {
         match self {
-            .Ok(_) => panic(message),
+            .Ok(_) => lang.panic(message),
             .Err(error) => error
         }
     }
@@ -211,7 +211,7 @@ public struct ResultIterator[T, E]: Iterator {
         self.value = value.ok()
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         let result = self.value;
         self.value = .None;
         result

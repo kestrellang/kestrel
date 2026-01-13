@@ -6,7 +6,7 @@ import std.result.(Optional)
 
 public protocol Iterator {
     type Item
-    func next() -> Optional[Item]
+    mutating func next() -> Optional[Item]
 }
 
 // Type that can produce an iterator

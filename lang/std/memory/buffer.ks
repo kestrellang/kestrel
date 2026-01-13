@@ -111,7 +111,7 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     }
 
     // Resizing
-    public func resize(to newCapacity: Int) {
+    public mutating func resize(to newCapacity: Int) {
         let oldLayout = Layout.array[T](count: self.cap);
         let newLayout = Layout.array[T](count: newCapacity);
 

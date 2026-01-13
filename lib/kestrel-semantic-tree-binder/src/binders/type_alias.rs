@@ -3,12 +3,12 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
+use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeBoundsBehavior;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
@@ -31,6 +31,8 @@ enum TypeAliasContext {
     Protocol,
     /// In a struct body - creates TypeAliasSymbol (associated type binding)
     Struct,
+    /// In an extension body - creates TypeAliasSymbol (associated type binding)
+    Extension,
     /// At module/file level - creates regular TypeAliasSymbol
     Module,
 }
@@ -76,6 +78,7 @@ impl DeclarationBinder for TypeAliasBinder {
                     let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
                         syntax,
                         &source,
+                        file_id,
                         context.diagnostics,
                     );
                     symbol.metadata().add_behavior(attributes_behavior.clone());
@@ -84,23 +87,27 @@ impl DeclarationBinder for TypeAliasBinder {
                     process_builtin_attribute(symbol, &attributes_behavior, &source, context);
                 }
 
-                // Check for bounds in module-level type aliases (not allowed)
-                if alias_context == TypeAliasContext::Module {
-                    if has_associated_type_bounds(syntax) {
-                        context
-                            .diagnostics
-                            .throw(AssociatedTypeBoundsInWrongContextError {
-                                span: span.clone(),
-                                name: name.clone(),
-                            });
-                    }
+                // Check for bounds on non-protocol type aliases (not allowed)
+                if alias_context != TypeAliasContext::Protocol && has_associated_type_bounds(syntax) {
+                    context
+                        .diagnostics
+                        .throw(AssociatedTypeBoundsInWrongContextError {
+                            span: span.clone(),
+                            name: name.clone(),
+                        });
                 }
 
                 // Validate associated type bindings in struct context
-                if alias_context == TypeAliasContext::Struct {
+                if alias_context == TypeAliasContext::Struct || alias_context == TypeAliasContext::Extension {
                     if let Some(parent) = symbol.metadata().parent() {
-                        validate_struct_associated_type_binding(
-                            syntax, &source, file_id, &name, &parent, context,
+                        validate_conformance_associated_type_binding(
+                            syntax,
+                            &source,
+                            file_id,
+                            &name,
+                            &parent,
+                            conformance_parent_display_name(&parent),
+                            context,
                         );
                     }
                 }
@@ -116,7 +123,7 @@ impl DeclarationBinder for TypeAliasBinder {
                     resolve_aliased_type_from_syntax(syntax, &source, file_id, symbol_id, context)
                 {
                     // Validate constraint satisfaction for struct bindings
-                    if alias_context == TypeAliasContext::Struct {
+                    if alias_context == TypeAliasContext::Struct || alias_context == TypeAliasContext::Extension {
                         if let Some(parent) = symbol.metadata().parent() {
                             validate_struct_binding_constraint_satisfaction(
                                 &resolved_type,
@@ -140,6 +147,9 @@ impl DeclarationBinder for TypeAliasBinder {
                         TypeAliasContext::Module => Some(DiagTypeAliasContext::ModuleLevel),
                         TypeAliasContext::Struct => {
                             Some(DiagTypeAliasContext::StructWithoutConformance)
+                        }
+                        TypeAliasContext::Extension => {
+                            Some(DiagTypeAliasContext::ExtensionWithoutConformance)
                         }
                         TypeAliasContext::Protocol => None, // Abstract associated types are valid
                     };
@@ -187,6 +197,7 @@ fn determine_context(parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>) -> TypeA
         Some(p) => match p.metadata().kind() {
             KestrelSymbolKind::Protocol => TypeAliasContext::Protocol,
             KestrelSymbolKind::Struct => TypeAliasContext::Struct,
+            KestrelSymbolKind::Extension => TypeAliasContext::Extension,
             _ => TypeAliasContext::Module,
         },
         None => TypeAliasContext::Module,
@@ -342,12 +353,13 @@ fn get_type_display_name(ty: &Ty) -> String {
 /// 1. Unqualified bindings are not ambiguous (not defined in multiple conformed protocols)
 /// 2. Qualified bindings reference a protocol the struct conforms to
 /// 3. Qualified bindings reference an associated type that exists in the protocol
-fn validate_struct_associated_type_binding(
+fn validate_conformance_associated_type_binding(
     syntax: &SyntaxNode,
     _source: &str,
     file_id: usize,
     type_name: &str,
     parent: &Arc<dyn Symbol<KestrelLanguage>>,
+    parent_type_name: String,
     ctx: &mut BindingContext,
 ) {
     use crate::diagnostics::{
@@ -355,7 +367,6 @@ fn validate_struct_associated_type_binding(
         QualifiedBindingWrongProtocolError,
     };
 
-    let struct_name = parent.metadata().name().value.clone();
     let binding_span = get_node_span(syntax, file_id);
 
     // Get the struct's conformances
@@ -385,7 +396,7 @@ fn validate_struct_associated_type_binding(
                 if !conforms_to_protocol {
                     ctx.diagnostics.throw(QualifiedBindingNotConformingError {
                         span: binding_span,
-                        struct_name,
+                        struct_name: parent_type_name,
                         protocol_name: protocol_name.clone(),
                     });
                     return;
@@ -447,6 +458,25 @@ fn validate_struct_associated_type_binding(
     // Validate that the bound type satisfies any constraints on the associated type
     // This handles both qualified and unqualified bindings
     // Note: We defer this validation to after the type is resolved in bind_declaration
+}
+
+fn conformance_parent_display_name(parent: &Arc<dyn Symbol<KestrelLanguage>>) -> String {
+    if parent.metadata().kind() == KestrelSymbolKind::Extension {
+        if let Some(target) = parent.metadata().get_behavior::<ExtensionTargetBehavior>() {
+            let ty = target.target_type();
+            return match ty.kind() {
+                TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
+                TyKind::Enum { symbol, .. } => symbol.metadata().name().value.clone(),
+                TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
+                TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+                TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
+                TyKind::Error { .. } => "(extension)".to_string(),
+                _ => "(extension)".to_string(),
+            };
+        }
+    }
+
+    parent.metadata().name().value.clone()
 }
 
 /// Extract the first path segment name from a Ty node

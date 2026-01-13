@@ -7,6 +7,7 @@
 //   {{MAX_VALUE}}      - maximum value for the type
 //   {{SIGNED_PROTOCOL}} - SignedInteger or UnsignedInteger
 //   {{NEGATABLE_LINE}} - "Negatable," for signed, empty for unsigned
+//   {{NEGATABLE_OUTPUT_BINDING}} - "type Negatable.Output = {{TYPE_NAME}}" for signed, empty for unsigned
 //   {{CAST_FROM_I64}}  - e.g., lang.cast_i64_i32
 //   {{DIV_OP}}         - e.g., lang.i32_signed_div or lang.i32_unsigned_div
 //   {{REM_OP}}         - e.g., lang.i32_signed_rem or lang.i32_unsigned_rem
@@ -77,7 +78,19 @@ public struct {{TYPE_NAME}}:
         hasher.write(bytes: self.value.toBytes())
     }
 
-    type Output = {{TYPE_NAME}}
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = {{TYPE_NAME}}
+    type Subtractable.Output = {{TYPE_NAME}}
+    type Multipliable.Output = {{TYPE_NAME}}
+    type Divisible.Output = {{TYPE_NAME}}
+    type Modulo.Output = {{TYPE_NAME}}
+{{NEGATABLE_OUTPUT_BINDING}}
+    type BitwiseAnd.Output = {{TYPE_NAME}}
+    type BitwiseOr.Output = {{TYPE_NAME}}
+    type BitwiseXor.Output = {{TYPE_NAME}}
+    type BitwiseNot.Output = {{TYPE_NAME}}
+    type LeftShift.Output = {{TYPE_NAME}}
+    type RightShift.Output = {{TYPE_NAME}}
 
     public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
     public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }

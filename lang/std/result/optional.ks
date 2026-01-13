@@ -202,7 +202,7 @@ public struct OptionalIterator[T]: Iterator {
         self.value = value;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         let result = self.value;
         self.value = .None;
         result

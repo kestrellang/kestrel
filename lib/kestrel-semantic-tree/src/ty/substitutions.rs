@@ -287,7 +287,7 @@ mod tests {
     fn test_insert_and_get() {
         let mut subs = Substitutions::new();
         let id = SymbolId::new();
-        let ty = Ty::unit(Span::from(0..2));
+        let ty = Ty::unit(Span::new(0, 0..2));
 
         subs.insert(id, ty);
 
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn test_apply_to_base_type() {
         let subs = Substitutions::new();
-        let ty = Ty::int(super::super::IntBits::I32, Span::from(0..3));
+        let ty = Ty::int(super::super::IntBits::I32, Span::new(0, 0..3));
 
         let result = subs.apply(&ty);
         assert!(result.is_int());

@@ -365,7 +365,7 @@ public struct ArrayIterator[T]: Iterator {
         self.index = index;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         if self.index < self.array.count {
             let value = self.array(unchecked: self.index);
             self.index = self.index + 1;

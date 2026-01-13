@@ -548,7 +548,10 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
             // The dot should be a single character somewhere in this gap
             let dot_start = end;
             let dot_end = (end + 1).min(span.start);
-            sink.add_token(SyntaxKind::Dot, Span::from(dot_start..dot_end));
+            sink.add_token(
+                SyntaxKind::Dot,
+                Span::new(span.file_id, dot_start..dot_end),
+            );
         }
         sink.start_node(SyntaxKind::PathElement);
         sink.add_token(SyntaxKind::Identifier, span.clone());

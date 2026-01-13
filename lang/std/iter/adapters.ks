@@ -17,7 +17,7 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
         self.transform = transform;
     }
 
-    public func next() -> Optional[U] {
+    public mutating func next() -> Optional[U] {
         self.inner.next().map(self.transform)
     }
 }
@@ -34,7 +34,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
         self.predicate = predicate;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         while let item = self.inner.next() {
             if self.predicate(item) {
                 return .Some(item)
@@ -56,7 +56,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
         self.transform = transform;
     }
 
-    public func next() -> Optional[U] {
+    public mutating func next() -> Optional[U] {
         while let item = self.inner.next() {
             if let result = self.transform(item) {
                 return .Some(result)
@@ -80,7 +80,7 @@ public struct FlatMapIterator[I, Inner]: Iterator where I: Iterator, Inner: Iter
         self.current = current;
     }
 
-    public func next() -> Optional[Inner.Item] {
+    public mutating func next() -> Optional[Inner.Item] {
         while true {
             if let currentIter = self.current {
                 if let item = currentIter.next() {
@@ -110,7 +110,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
         self.action = action;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         self.inner.next().map { (item) in
             self.action(item);
             item
@@ -130,7 +130,7 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
         self.remaining = remaining;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.remaining > 0 {
             self.remaining = self.remaining - 1;
             self.inner.next()
@@ -154,7 +154,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
         self.done = done;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.done {
             return .None
         }
@@ -181,7 +181,7 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
         self.remaining = remaining;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         while self.remaining > 0 {
             if self.inner.next().isNone {
                 return .None
@@ -206,7 +206,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
         self.done = done;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.done {
             return self.inner.next()
         }
@@ -235,7 +235,7 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
         self.first = first;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.first {
             self.first = false;
             return self.inner.next()
@@ -262,7 +262,7 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
         self.index = index;
     }
 
-    public func next() -> Optional[(Int, I.Item)] {
+    public mutating func next() -> Optional[(Int, I.Item)] {
         self.inner.next().map { (item) in
             let i = self.index;
             self.index = self.index + 1;
@@ -283,7 +283,7 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
         self.second = second;
     }
 
-    public func next() -> Optional[(A.Item, B.Item)] {
+    public mutating func next() -> Optional[(A.Item, B.Item)] {
         if let a = self.first.next() {
             if let b = self.second.next() {
                 return .Some((a, b))
@@ -309,7 +309,7 @@ public struct ChainIterator[A, B]: Iterator
         self.firstDone = firstDone
     }
 
-    public func next() -> Optional[A.Item] {
+    public mutating func next() -> Optional[A.Item] {
         if not self.firstDone {
             if let item = self.first.next() {
                 return .Some(item)
@@ -332,7 +332,7 @@ public struct CycleIterator[I]: Iterator where I: Iterator, I: Cloneable {
         self.current = current;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if let item = self.current.next() {
             return .Some(item)
         }
@@ -355,7 +355,7 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator, I.Item: Clonea
         self.needsSeparator = needsSeparator
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.needsSeparator {
             self.needsSeparator = false;
             return .Some(self.separator.clone())
@@ -387,7 +387,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
         self.peeked.unwrap()
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if let p = self.peeked {
             self.peeked = .None;
             return p
@@ -417,7 +417,7 @@ public struct FuseIterator[I]: Iterator where I: Iterator {
         self.done = done;
     }
 
-    public func next() -> Optional[I.Item] {
+    public mutating func next() -> Optional[I.Item] {
         if self.done {
             return .None
         }
@@ -438,7 +438,7 @@ public struct EmptyIterator[T]: Iterator {
 
     public init() {}
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         .None
     }
 }
@@ -453,7 +453,7 @@ public struct OnceIterator[T]: Iterator {
         self.value = .Some(value)
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         let result = self.value;
         self.value = .None;
         result
@@ -470,7 +470,7 @@ public struct RepeatIterator[T]: Iterator where T: Cloneable {
         self.value = value;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         .Some(self.value.clone())
     }
 }
@@ -487,7 +487,7 @@ public struct RepeatNIterator[T]: Iterator where T: Cloneable {
         self.remaining = count;
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         if self.remaining > 0 {
             self.remaining = self.remaining - 1;
             .Some(self.value.clone())

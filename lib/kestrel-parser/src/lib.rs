@@ -56,7 +56,7 @@
 //!
 //! // Build tree from events
 //! let tree = TreeBuilder::new(source, sink.into_events()).build();
-//! let decl = ModuleDeclaration { syntax: tree, span: Span::from(0..source.len()) };
+//! let decl = ModuleDeclaration { syntax: tree, span: Span::new(file_id, 0..source.len()) };
 //! ```
 
 pub mod attribute;
@@ -148,7 +148,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ModuleDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -177,7 +177,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ImportDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -193,7 +193,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     StructDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -209,7 +209,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     TypeAliasDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -225,7 +225,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     FunctionDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -241,7 +241,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ProtocolDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -257,7 +257,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     EnumDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -273,7 +273,7 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     SubscriptDeclaration {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }
 
@@ -311,6 +311,6 @@ where
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     TyExpression {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(file_id, 0..source.len()),
     }
 }

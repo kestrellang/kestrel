@@ -31,7 +31,10 @@ impl ModuleDeclaration {
     /// Create a new ModuleDeclaration from spans, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
     pub fn new(source: &str, module_span: Span, path_segments: Vec<Span>) -> Self {
-        let full_span = Span::from(module_span.start..path_segments.last().unwrap().end);
+        let full_span = Span::new(
+            module_span.file_id,
+            module_span.start..path_segments.last().unwrap().end,
+        );
         let mut sink = EventSink::new(0);
         emit_module_declaration(&mut sink, module_span, &path_segments);
         Self::from_events(source, sink.into_events(), full_span)
@@ -152,7 +155,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ModuleDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
         let path = decl.path();
 
@@ -186,7 +189,7 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
         let decl = ModuleDeclaration {
             syntax: tree,
-            span: Span::from(0..source.len()),
+            span: Span::new(0, 0..source.len()),
         };
         let path = decl.path();
 

@@ -370,6 +370,7 @@ impl DeclarationBinder for FunctionBinder {
         let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
             syntax,
             &source,
+            file_id,
             context.diagnostics,
         );
         symbol.metadata().add_behavior(attributes_behavior.clone());
@@ -604,7 +605,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
     let parent_span = parent.metadata().span().clone();
 
     match parent.metadata().kind() {
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
+        KestrelSymbolKind::Struct | KestrelSymbolKind::Enum | KestrelSymbolKind::Protocol => {
             // Use Self type which refers to the containing type
             // This will be resolved to the concrete type during type checking
             Some(Ty::self_type(parent_span))
@@ -641,6 +642,7 @@ fn determine_receiver_kind(
     let is_instance_method = matches!(
         parent_kind,
         Some(KestrelSymbolKind::Struct)
+            | Some(KestrelSymbolKind::Enum)
             | Some(KestrelSymbolKind::Protocol)
             | Some(KestrelSymbolKind::Extension)
     );

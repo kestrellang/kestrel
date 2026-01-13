@@ -66,7 +66,12 @@ public struct Float32:
         else { .Equal }
     }
 
-    type Output = Float32
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Addable.Output = Float32
+    type Subtractable.Output = Float32
+    type Multipliable.Output = Float32
+    type Divisible.Output = Float32
+    type Negatable.Output = Float32
 
     public func add(other: Float32) -> Float32 { Float32(raw: lang.f32_add(self.value, other.value)) }
     public func subtract(other: Float32) -> Float32 { Float32(raw: lang.f32_sub(self.value, other.value)) }

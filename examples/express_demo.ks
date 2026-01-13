@@ -17,7 +17,7 @@ struct User: Serialize {
     let name: String;
     let email: String;
 
-    public func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
+    public mutating func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
         let obj = try serializer.beginObject(name: "User", fieldCount: 3);
         try obj.serializeField(name: "id", value: self.id);
         try obj.serializeField(name: "name", value: self.name);
@@ -31,7 +31,7 @@ struct StatusResponse: Serialize {
     let version: String;
     let uptime: Int;
 
-    public func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
+    public mutating func serialize[S: Serializer](to serializer: ref S) -> Result[(), S.Error] {
         let obj = try serializer.beginObject(name: "StatusResponse", fieldCount: 3);
         try obj.serializeField(name: "status", value: self.status);
         try obj.serializeField(name: "version", value: self.version);

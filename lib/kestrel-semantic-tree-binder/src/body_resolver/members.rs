@@ -76,7 +76,7 @@ pub fn resolve_member_access(
 ) -> Expression {
     let base_span = base.span.clone();
     let base_ty = &base.ty;
-    let full_span = Span::from(base_span.start..member_span.end);
+    let full_span = Span::new(base_span.file_id, base_span.start..member_span.end);
 
     // 0. Check if base is a TypeParameterRef (for static method access like T.create())
     if let ExprKind::TypeParameterRef(symbol_id) = &base.kind {
@@ -1053,7 +1053,7 @@ fn resolve_type_parameter_static_member(
         Expression::type_parameter_ref(
             symbol_id,
             type_param_ty.clone(),
-            Span::from(full_span.start..full_span.start),
+            Span::new(full_span.file_id, full_span.start..full_span.start),
         ),
         method_ids,
         member_name.to_string(),

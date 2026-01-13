@@ -1475,7 +1475,7 @@ mod tests {
 
     #[test]
     fn test_unit_type() {
-        let ty = Ty::unit(Span::from(0..2));
+        let ty = Ty::unit(Span::new(0, 0..2));
         assert!(ty.is_unit());
         assert!(!ty.is_never());
         assert!(!ty.is_tuple());
@@ -1486,21 +1486,21 @@ mod tests {
 
     #[test]
     fn test_never_type() {
-        let ty = Ty::never(Span::from(0..1));
+        let ty = Ty::never(Span::new(0, 0..1));
         assert!(!ty.is_unit());
         assert!(ty.is_never());
     }
 
     #[test]
     fn test_error_type() {
-        let ty = Ty::error(Span::from(0..5));
+        let ty = Ty::error(Span::new(0, 0..5));
         assert!(ty.is_error());
         assert!(!ty.is_unit());
     }
 
     #[test]
     fn test_self_type() {
-        let ty = Ty::self_type(Span::from(0..4));
+        let ty = Ty::self_type(Span::new(0, 0..4));
         assert!(ty.is_self_type());
         assert!(!ty.is_unit());
     }
@@ -1508,8 +1508,8 @@ mod tests {
     #[test]
     fn test_tuple_type() {
         let ty = Ty::tuple(
-            vec![Ty::unit(Span::from(0..2)), Ty::never(Span::from(3..4))],
-            Span::from(0..5),
+            vec![Ty::unit(Span::new(0, 0..2)), Ty::never(Span::new(0, 3..4))],
+            Span::new(0, 0..5),
         );
         assert!(ty.is_tuple());
         assert!(!ty.is_unit());
@@ -1523,9 +1523,9 @@ mod tests {
     #[test]
     fn test_function_type() {
         let ty = Ty::function(
-            vec![Ty::unit(Span::from(0..2)), Ty::never(Span::from(4..5))],
-            Ty::unit(Span::from(10..12)),
-            Span::from(0..12),
+            vec![Ty::unit(Span::new(0, 0..2)), Ty::never(Span::new(0, 4..5))],
+            Ty::unit(Span::new(0, 10..12)),
+            Span::new(0, 0..12),
         );
         assert!(ty.is_function());
         assert!(!ty.is_unit());
@@ -1540,13 +1540,13 @@ mod tests {
     #[test]
     fn test_nested_types() {
         let tuple_param = Ty::tuple(
-            vec![Ty::unit(Span::from(1..3)), Ty::never(Span::from(5..6))],
-            Span::from(0..7),
+            vec![Ty::unit(Span::new(0, 1..3)), Ty::never(Span::new(0, 5..6))],
+            Span::new(0, 0..7),
         );
         let fn_ty = Ty::function(
             vec![tuple_param],
-            Ty::unit(Span::from(12..14)),
-            Span::from(0..14),
+            Ty::unit(Span::new(0, 12..14)),
+            Span::new(0, 0..14),
         );
 
         assert!(fn_ty.is_function());
@@ -1564,8 +1564,8 @@ mod tests {
 
     #[test]
     fn test_join_never_with_int() {
-        let never = Ty::never(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
+        let never = Ty::never(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Never joined with Int should give Int
         let result = never.join(&int);
@@ -1578,8 +1578,8 @@ mod tests {
 
     #[test]
     fn test_join_never_with_never() {
-        let never1 = Ty::never(Span::from(0..1));
-        let never2 = Ty::never(Span::from(2..3));
+        let never1 = Ty::never(Span::new(0, 0..1));
+        let never2 = Ty::never(Span::new(0, 2..3));
 
         // Never joined with Never should give Never
         let result = never1.join(&never2);
@@ -1588,8 +1588,8 @@ mod tests {
 
     #[test]
     fn test_join_error_propagates() {
-        let error = Ty::error(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
+        let error = Ty::error(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Error joined with anything should give Error
         let result = error.join(&int);
@@ -1602,8 +1602,8 @@ mod tests {
 
     #[test]
     fn test_join_same_types() {
-        let int1 = Ty::int(IntBits::I64, Span::from(0..3));
-        let int2 = Ty::int(IntBits::I64, Span::from(4..7));
+        let int1 = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let int2 = Ty::int(IntBits::I64, Span::new(0, 4..7));
 
         // Same types should return the first
         let result = int1.join(&int2);
@@ -1614,29 +1614,29 @@ mod tests {
 
     #[test]
     fn test_assignable_same_primitives() {
-        let int1 = Ty::int(IntBits::I64, Span::from(0..3));
-        let int2 = Ty::int(IntBits::I64, Span::from(4..7));
+        let int1 = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let int2 = Ty::int(IntBits::I64, Span::new(0, 4..7));
         assert!(int1.is_assignable_to(&int2));
 
-        let bool1 = Ty::bool(Span::from(0..4));
-        let bool2 = Ty::bool(Span::from(5..9));
+        let bool1 = Ty::bool(Span::new(0, 0..4));
+        let bool2 = Ty::bool(Span::new(0, 5..9));
         assert!(bool1.is_assignable_to(&bool2));
 
-        let string1 = Ty::string(Span::from(0..6));
-        let string2 = Ty::string(Span::from(7..13));
+        let string1 = Ty::string(Span::new(0, 0..6));
+        let string2 = Ty::string(Span::new(0, 7..13));
         assert!(string1.is_assignable_to(&string2));
 
-        let unit1 = Ty::unit(Span::from(0..2));
-        let unit2 = Ty::unit(Span::from(3..5));
+        let unit1 = Ty::unit(Span::new(0, 0..2));
+        let unit2 = Ty::unit(Span::new(0, 3..5));
         assert!(unit1.is_assignable_to(&unit2));
     }
 
     #[test]
     fn test_not_assignable_different_primitives() {
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
-        let float = Ty::float(FloatBits::F64, Span::from(0..3));
-        let bool_ty = Ty::bool(Span::from(0..4));
-        let string = Ty::string(Span::from(0..6));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let float = Ty::float(FloatBits::F64, Span::new(0, 0..3));
+        let bool_ty = Ty::bool(Span::new(0, 0..4));
+        let string = Ty::string(Span::new(0, 0..6));
 
         assert!(!int.is_assignable_to(&float));
         assert!(!int.is_assignable_to(&bool_ty));
@@ -1647,10 +1647,10 @@ mod tests {
 
     #[test]
     fn test_never_assignable_to_anything() {
-        let never = Ty::never(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
-        let string = Ty::string(Span::from(0..6));
-        let unit = Ty::unit(Span::from(0..2));
+        let never = Ty::never(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
+        let string = Ty::string(Span::new(0, 0..6));
+        let unit = Ty::unit(Span::new(0, 0..2));
 
         assert!(never.is_assignable_to(&int));
         assert!(never.is_assignable_to(&string));
@@ -1660,8 +1660,8 @@ mod tests {
 
     #[test]
     fn test_error_assignable_to_anything() {
-        let error = Ty::error(Span::from(0..1));
-        let int = Ty::int(IntBits::I64, Span::from(0..3));
+        let error = Ty::error(Span::new(0, 0..1));
+        let int = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Error is assignable to anything (suppress cascading)
         assert!(error.is_assignable_to(&int));
@@ -1672,92 +1672,92 @@ mod tests {
     fn test_assignable_tuples() {
         let tuple1 = Ty::tuple(
             vec![
-                Ty::int(IntBits::I64, Span::from(0..3)),
-                Ty::bool(Span::from(4..8)),
+                Ty::int(IntBits::I64, Span::new(0, 0..3)),
+                Ty::bool(Span::new(0, 4..8)),
             ],
-            Span::from(0..9),
+            Span::new(0, 0..9),
         );
         let tuple2 = Ty::tuple(
             vec![
-                Ty::int(IntBits::I64, Span::from(10..13)),
-                Ty::bool(Span::from(14..18)),
+                Ty::int(IntBits::I64, Span::new(0, 10..13)),
+                Ty::bool(Span::new(0, 14..18)),
             ],
-            Span::from(10..19),
+            Span::new(0, 10..19),
         );
         assert!(tuple1.is_assignable_to(&tuple2));
 
         // Different element types
         let tuple3 = Ty::tuple(
-            vec![Ty::string(Span::from(0..6)), Ty::bool(Span::from(7..11))],
-            Span::from(0..12),
+            vec![Ty::string(Span::new(0, 0..6)), Ty::bool(Span::new(0, 7..11))],
+            Span::new(0, 0..12),
         );
         assert!(!tuple1.is_assignable_to(&tuple3));
 
         // Different lengths
         let tuple4 = Ty::tuple(
-            vec![Ty::int(IntBits::I64, Span::from(0..3))],
-            Span::from(0..4),
+            vec![Ty::int(IntBits::I64, Span::new(0, 0..3))],
+            Span::new(0, 0..4),
         );
         assert!(!tuple1.is_assignable_to(&tuple4));
     }
 
     #[test]
     fn test_assignable_arrays() {
-        let arr1 = Ty::array(Ty::int(IntBits::I64, Span::from(0..3)), Span::from(0..5));
-        let arr2 = Ty::array(Ty::int(IntBits::I64, Span::from(6..9)), Span::from(6..11));
+        let arr1 = Ty::array(Ty::int(IntBits::I64, Span::new(0, 0..3)), Span::new(0, 0..5));
+        let arr2 = Ty::array(Ty::int(IntBits::I64, Span::new(0, 6..9)), Span::new(0, 6..11));
         assert!(arr1.is_assignable_to(&arr2));
 
         // Different element types
-        let arr3 = Ty::array(Ty::string(Span::from(0..6)), Span::from(0..8));
+        let arr3 = Ty::array(Ty::string(Span::new(0, 0..6)), Span::new(0, 0..8));
         assert!(!arr1.is_assignable_to(&arr3));
     }
 
     #[test]
     fn test_assignable_functions() {
         let fn1 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(0..3))],
-            Ty::bool(Span::from(4..8)),
-            Span::from(0..9),
+            vec![Ty::int(IntBits::I64, Span::new(0, 0..3))],
+            Ty::bool(Span::new(0, 4..8)),
+            Span::new(0, 0..9),
         );
         let fn2 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(10..13))],
-            Ty::bool(Span::from(14..18)),
-            Span::from(10..19),
+            vec![Ty::int(IntBits::I64, Span::new(0, 10..13))],
+            Ty::bool(Span::new(0, 14..18)),
+            Span::new(0, 10..19),
         );
         assert!(fn1.is_assignable_to(&fn2));
 
         // Different param types
         let fn3 = Ty::function(
-            vec![Ty::string(Span::from(0..6))],
-            Ty::bool(Span::from(7..11)),
-            Span::from(0..12),
+            vec![Ty::string(Span::new(0, 0..6))],
+            Ty::bool(Span::new(0, 7..11)),
+            Span::new(0, 0..12),
         );
         assert!(!fn1.is_assignable_to(&fn3));
 
         // Different return type
         let fn4 = Ty::function(
-            vec![Ty::int(IntBits::I64, Span::from(0..3))],
-            Ty::string(Span::from(4..10)),
-            Span::from(0..11),
+            vec![Ty::int(IntBits::I64, Span::new(0, 0..3))],
+            Ty::string(Span::new(0, 4..10)),
+            Span::new(0, 0..11),
         );
         assert!(!fn1.is_assignable_to(&fn4));
 
         // Different arity
         let fn5 = Ty::function(
             vec![
-                Ty::int(IntBits::I64, Span::from(0..3)),
-                Ty::int(IntBits::I64, Span::from(4..7)),
+                Ty::int(IntBits::I64, Span::new(0, 0..3)),
+                Ty::int(IntBits::I64, Span::new(0, 4..7)),
             ],
-            Ty::bool(Span::from(8..12)),
-            Span::from(0..13),
+            Ty::bool(Span::new(0, 8..12)),
+            Span::new(0, 0..13),
         );
         assert!(!fn1.is_assignable_to(&fn5));
     }
 
     #[test]
     fn test_int_bit_widths_not_assignable() {
-        let i32_ty = Ty::int(IntBits::I32, Span::from(0..3));
-        let i64_ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let i32_ty = Ty::int(IntBits::I32, Span::new(0, 0..3));
+        let i64_ty = Ty::int(IntBits::I64, Span::new(0, 0..3));
 
         // Different bit widths are not assignable
         assert!(!i32_ty.is_assignable_to(&i64_ty));

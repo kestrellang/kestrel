@@ -366,7 +366,7 @@ public struct SplitIterator[A]: Iterator where A: Allocator {
         self.done = done;
     }
 
-    public func next() -> Optional[String[A]] {
+    public mutating func next() -> Optional[String[A]] {
         if self.done { return .None }
 
         if self.separator.isEmpty {

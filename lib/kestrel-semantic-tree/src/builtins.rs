@@ -35,11 +35,62 @@ pub enum LanguageFeature {
     // Type alias builtins - default literal types
     DefaultIntegerLiteralType,
     DefaultFloatLiteralType,
-    // Future: Operator protocols
-    // Add, Sub, Mul, Div, Rem, Neg,
-    // BitAnd, BitOr, BitXor, BitNot,
-    // Shl, Shr,
-    // Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual,
+
+    // Operator protocols - arithmetic
+    AddOperatorProtocol,
+    AddOperatorMethod,
+    SubtractOperatorProtocol,
+    SubtractOperatorMethod,
+    MultiplyOperatorProtocol,
+    MultiplyOperatorMethod,
+    DivideOperatorProtocol,
+    DivideOperatorMethod,
+    ModuloOperatorProtocol,
+    ModuloOperatorMethod,
+    NegateOperatorProtocol,
+    NegateOperatorMethod,
+
+    // Operator protocols - comparison
+    EqualsOperatorProtocol,
+    EqualsOperatorMethod,
+    NotEqualsOperatorProtocol,
+    NotEqualsOperatorMethod,
+    LessThanOperatorProtocol,
+    LessThanOperatorMethod,
+    LessOrEqualOperatorProtocol,
+    LessOrEqualOperatorMethod,
+    GreaterThanOperatorProtocol,
+    GreaterThanOperatorMethod,
+    GreaterOrEqualOperatorProtocol,
+    GreaterOrEqualOperatorMethod,
+
+    // Operator protocols - bitwise
+    BitwiseAndOperatorProtocol,
+    BitwiseAndOperatorMethod,
+    BitwiseOrOperatorProtocol,
+    BitwiseOrOperatorMethod,
+    BitwiseXorOperatorProtocol,
+    BitwiseXorOperatorMethod,
+    ShiftLeftOperatorProtocol,
+    ShiftLeftOperatorMethod,
+    ShiftRightOperatorProtocol,
+    ShiftRightOperatorMethod,
+    BitwiseNotOperatorProtocol,
+    BitwiseNotOperatorMethod,
+
+    // Operator protocols - logical
+    LogicalAndOperatorProtocol,
+    LogicalAndOperatorMethod,
+    LogicalOrOperatorProtocol,
+    LogicalOrOperatorMethod,
+    LogicalNotOperatorProtocol,
+    LogicalNotOperatorMethod,
+
+    // Operator protocols - range
+    ExclusiveRangeOperatorProtocol,
+    ExclusiveRangeOperatorMethod,
+    InclusiveRangeOperatorProtocol,
+    InclusiveRangeOperatorMethod,
 }
 
 impl LanguageFeature {
@@ -59,6 +110,57 @@ impl LanguageFeature {
             "FFISafe" => Some(Self::FFISafe),
             "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
             "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
+            // Operator protocols - arithmetic
+            "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
+            "AddOperatorMethod" => Some(Self::AddOperatorMethod),
+            "SubtractOperatorProtocol" => Some(Self::SubtractOperatorProtocol),
+            "SubtractOperatorMethod" => Some(Self::SubtractOperatorMethod),
+            "MultiplyOperatorProtocol" => Some(Self::MultiplyOperatorProtocol),
+            "MultiplyOperatorMethod" => Some(Self::MultiplyOperatorMethod),
+            "DivideOperatorProtocol" => Some(Self::DivideOperatorProtocol),
+            "DivideOperatorMethod" => Some(Self::DivideOperatorMethod),
+            "ModuloOperatorProtocol" => Some(Self::ModuloOperatorProtocol),
+            "ModuloOperatorMethod" => Some(Self::ModuloOperatorMethod),
+            "NegateOperatorProtocol" => Some(Self::NegateOperatorProtocol),
+            "NegateOperatorMethod" => Some(Self::NegateOperatorMethod),
+            // Operator protocols - comparison
+            "EqualsOperatorProtocol" => Some(Self::EqualsOperatorProtocol),
+            "EqualsOperatorMethod" => Some(Self::EqualsOperatorMethod),
+            "NotEqualsOperatorProtocol" => Some(Self::NotEqualsOperatorProtocol),
+            "NotEqualsOperatorMethod" => Some(Self::NotEqualsOperatorMethod),
+            "LessThanOperatorProtocol" => Some(Self::LessThanOperatorProtocol),
+            "LessThanOperatorMethod" => Some(Self::LessThanOperatorMethod),
+            "LessOrEqualOperatorProtocol" => Some(Self::LessOrEqualOperatorProtocol),
+            "LessOrEqualOperatorMethod" => Some(Self::LessOrEqualOperatorMethod),
+            "GreaterThanOperatorProtocol" => Some(Self::GreaterThanOperatorProtocol),
+            "GreaterThanOperatorMethod" => Some(Self::GreaterThanOperatorMethod),
+            "GreaterOrEqualOperatorProtocol" => Some(Self::GreaterOrEqualOperatorProtocol),
+            "GreaterOrEqualOperatorMethod" => Some(Self::GreaterOrEqualOperatorMethod),
+            // Operator protocols - bitwise
+            "BitwiseAndOperatorProtocol" => Some(Self::BitwiseAndOperatorProtocol),
+            "BitwiseAndOperatorMethod" => Some(Self::BitwiseAndOperatorMethod),
+            "BitwiseOrOperatorProtocol" => Some(Self::BitwiseOrOperatorProtocol),
+            "BitwiseOrOperatorMethod" => Some(Self::BitwiseOrOperatorMethod),
+            "BitwiseXorOperatorProtocol" => Some(Self::BitwiseXorOperatorProtocol),
+            "BitwiseXorOperatorMethod" => Some(Self::BitwiseXorOperatorMethod),
+            "ShiftLeftOperatorProtocol" => Some(Self::ShiftLeftOperatorProtocol),
+            "ShiftLeftOperatorMethod" => Some(Self::ShiftLeftOperatorMethod),
+            "ShiftRightOperatorProtocol" => Some(Self::ShiftRightOperatorProtocol),
+            "ShiftRightOperatorMethod" => Some(Self::ShiftRightOperatorMethod),
+            "BitwiseNotOperatorProtocol" => Some(Self::BitwiseNotOperatorProtocol),
+            "BitwiseNotOperatorMethod" => Some(Self::BitwiseNotOperatorMethod),
+            // Operator protocols - logical
+            "LogicalAndOperatorProtocol" => Some(Self::LogicalAndOperatorProtocol),
+            "LogicalAndOperatorMethod" => Some(Self::LogicalAndOperatorMethod),
+            "LogicalOrOperatorProtocol" => Some(Self::LogicalOrOperatorProtocol),
+            "LogicalOrOperatorMethod" => Some(Self::LogicalOrOperatorMethod),
+            "LogicalNotOperatorProtocol" => Some(Self::LogicalNotOperatorProtocol),
+            "LogicalNotOperatorMethod" => Some(Self::LogicalNotOperatorMethod),
+            // Operator protocols - range
+            "ExclusiveRangeOperatorProtocol" => Some(Self::ExclusiveRangeOperatorProtocol),
+            "ExclusiveRangeOperatorMethod" => Some(Self::ExclusiveRangeOperatorMethod),
+            "InclusiveRangeOperatorProtocol" => Some(Self::InclusiveRangeOperatorProtocol),
+            "InclusiveRangeOperatorMethod" => Some(Self::InclusiveRangeOperatorMethod),
             _ => None,
         }
     }
@@ -79,6 +181,57 @@ impl LanguageFeature {
             Self::FFISafe => "FFISafe",
             Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
             Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
+            // Operator protocols - arithmetic
+            Self::AddOperatorProtocol => "AddOperatorProtocol",
+            Self::AddOperatorMethod => "AddOperatorMethod",
+            Self::SubtractOperatorProtocol => "SubtractOperatorProtocol",
+            Self::SubtractOperatorMethod => "SubtractOperatorMethod",
+            Self::MultiplyOperatorProtocol => "MultiplyOperatorProtocol",
+            Self::MultiplyOperatorMethod => "MultiplyOperatorMethod",
+            Self::DivideOperatorProtocol => "DivideOperatorProtocol",
+            Self::DivideOperatorMethod => "DivideOperatorMethod",
+            Self::ModuloOperatorProtocol => "ModuloOperatorProtocol",
+            Self::ModuloOperatorMethod => "ModuloOperatorMethod",
+            Self::NegateOperatorProtocol => "NegateOperatorProtocol",
+            Self::NegateOperatorMethod => "NegateOperatorMethod",
+            // Operator protocols - comparison
+            Self::EqualsOperatorProtocol => "EqualsOperatorProtocol",
+            Self::EqualsOperatorMethod => "EqualsOperatorMethod",
+            Self::NotEqualsOperatorProtocol => "NotEqualsOperatorProtocol",
+            Self::NotEqualsOperatorMethod => "NotEqualsOperatorMethod",
+            Self::LessThanOperatorProtocol => "LessThanOperatorProtocol",
+            Self::LessThanOperatorMethod => "LessThanOperatorMethod",
+            Self::LessOrEqualOperatorProtocol => "LessOrEqualOperatorProtocol",
+            Self::LessOrEqualOperatorMethod => "LessOrEqualOperatorMethod",
+            Self::GreaterThanOperatorProtocol => "GreaterThanOperatorProtocol",
+            Self::GreaterThanOperatorMethod => "GreaterThanOperatorMethod",
+            Self::GreaterOrEqualOperatorProtocol => "GreaterOrEqualOperatorProtocol",
+            Self::GreaterOrEqualOperatorMethod => "GreaterOrEqualOperatorMethod",
+            // Operator protocols - bitwise
+            Self::BitwiseAndOperatorProtocol => "BitwiseAndOperatorProtocol",
+            Self::BitwiseAndOperatorMethod => "BitwiseAndOperatorMethod",
+            Self::BitwiseOrOperatorProtocol => "BitwiseOrOperatorProtocol",
+            Self::BitwiseOrOperatorMethod => "BitwiseOrOperatorMethod",
+            Self::BitwiseXorOperatorProtocol => "BitwiseXorOperatorProtocol",
+            Self::BitwiseXorOperatorMethod => "BitwiseXorOperatorMethod",
+            Self::ShiftLeftOperatorProtocol => "ShiftLeftOperatorProtocol",
+            Self::ShiftLeftOperatorMethod => "ShiftLeftOperatorMethod",
+            Self::ShiftRightOperatorProtocol => "ShiftRightOperatorProtocol",
+            Self::ShiftRightOperatorMethod => "ShiftRightOperatorMethod",
+            Self::BitwiseNotOperatorProtocol => "BitwiseNotOperatorProtocol",
+            Self::BitwiseNotOperatorMethod => "BitwiseNotOperatorMethod",
+            // Operator protocols - logical
+            Self::LogicalAndOperatorProtocol => "LogicalAndOperatorProtocol",
+            Self::LogicalAndOperatorMethod => "LogicalAndOperatorMethod",
+            Self::LogicalOrOperatorProtocol => "LogicalOrOperatorProtocol",
+            Self::LogicalOrOperatorMethod => "LogicalOrOperatorMethod",
+            Self::LogicalNotOperatorProtocol => "LogicalNotOperatorProtocol",
+            Self::LogicalNotOperatorMethod => "LogicalNotOperatorMethod",
+            // Operator protocols - range
+            Self::ExclusiveRangeOperatorProtocol => "ExclusiveRangeOperatorProtocol",
+            Self::ExclusiveRangeOperatorMethod => "ExclusiveRangeOperatorMethod",
+            Self::InclusiveRangeOperatorProtocol => "InclusiveRangeOperatorProtocol",
+            Self::InclusiveRangeOperatorMethod => "InclusiveRangeOperatorMethod",
         }
     }
 
@@ -198,6 +351,186 @@ impl LanguageFeature {
             Self::DefaultFloatLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
+            },
+            // Operator protocols - arithmetic
+            Self::AddOperatorProtocol
+            | Self::SubtractOperatorProtocol
+            | Self::MultiplyOperatorProtocol
+            | Self::DivideOperatorProtocol
+            | Self::ModuloOperatorProtocol
+            | Self::NegateOperatorProtocol
+            // Operator protocols - comparison
+            | Self::EqualsOperatorProtocol
+            | Self::NotEqualsOperatorProtocol
+            | Self::LessThanOperatorProtocol
+            | Self::LessOrEqualOperatorProtocol
+            | Self::GreaterThanOperatorProtocol
+            | Self::GreaterOrEqualOperatorProtocol
+            // Operator protocols - bitwise
+            | Self::BitwiseAndOperatorProtocol
+            | Self::BitwiseOrOperatorProtocol
+            | Self::BitwiseXorOperatorProtocol
+            | Self::ShiftLeftOperatorProtocol
+            | Self::ShiftRightOperatorProtocol
+            | Self::BitwiseNotOperatorProtocol
+            // Operator protocols - logical
+            | Self::LogicalAndOperatorProtocol
+            | Self::LogicalOrOperatorProtocol
+            | Self::LogicalNotOperatorProtocol
+            // Operator protocols - range
+            | Self::ExclusiveRangeOperatorProtocol
+            | Self::InclusiveRangeOperatorProtocol => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            // Operator methods - arithmetic
+            Self::AddOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::AddOperatorProtocol,
+                },
+            },
+            Self::SubtractOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::SubtractOperatorProtocol,
+                },
+            },
+            Self::MultiplyOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::MultiplyOperatorProtocol,
+                },
+            },
+            Self::DivideOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::DivideOperatorProtocol,
+                },
+            },
+            Self::ModuloOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ModuloOperatorProtocol,
+                },
+            },
+            Self::NegateOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::NegateOperatorProtocol,
+                },
+            },
+            // Operator methods - comparison
+            Self::EqualsOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::EqualsOperatorProtocol,
+                },
+            },
+            Self::NotEqualsOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::NotEqualsOperatorProtocol,
+                },
+            },
+            Self::LessThanOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::LessThanOperatorProtocol,
+                },
+            },
+            Self::LessOrEqualOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::LessOrEqualOperatorProtocol,
+                },
+            },
+            Self::GreaterThanOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::GreaterThanOperatorProtocol,
+                },
+            },
+            Self::GreaterOrEqualOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::GreaterOrEqualOperatorProtocol,
+                },
+            },
+            // Operator methods - bitwise
+            Self::BitwiseAndOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseAndOperatorProtocol,
+                },
+            },
+            Self::BitwiseOrOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseOrOperatorProtocol,
+                },
+            },
+            Self::BitwiseXorOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseXorOperatorProtocol,
+                },
+            },
+            Self::ShiftLeftOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ShiftLeftOperatorProtocol,
+                },
+            },
+            Self::ShiftRightOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ShiftRightOperatorProtocol,
+                },
+            },
+            Self::BitwiseNotOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::BitwiseNotOperatorProtocol,
+                },
+            },
+            // Operator methods - logical
+            Self::LogicalAndOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::LogicalAndOperatorProtocol,
+                },
+            },
+            Self::LogicalOrOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::LogicalOrOperatorProtocol,
+                },
+            },
+            Self::LogicalNotOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::LogicalNotOperatorProtocol,
+                },
+            },
+            // Operator methods - range
+            Self::ExclusiveRangeOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::ExclusiveRangeOperatorProtocol,
+                },
+            },
+            Self::InclusiveRangeOperatorMethod => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::ProtocolMethod {
+                    protocol_feature: LanguageFeature::InclusiveRangeOperatorProtocol,
+                },
             },
         }
     }

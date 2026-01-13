@@ -203,7 +203,7 @@ mod tests {
     fn test_event_sink() {
         let mut sink = EventSink::new(0);
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
         sink.finish_node();
 
         let events = sink.events();
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(events[0], Event::StartNode(SyntaxKind::ModulePath));
         assert_eq!(
             events[1],
-            Event::AddToken(SyntaxKind::Identifier, Span::from(0..1))
+            Event::AddToken(SyntaxKind::Identifier, Span::new(0, 0..1))
         );
         assert_eq!(events[2], Event::FinishNode);
     }
@@ -228,7 +228,7 @@ mod tests {
         let mut sink = EventSink::new(0);
 
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
         sink.finish_node();
 
         let builder = TreeBuilder::new(source, sink.into_events());
@@ -244,9 +244,9 @@ mod tests {
         let mut sink = EventSink::new(0);
 
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(0..1));
-        sink.add_token(SyntaxKind::Dot, Span::from(1..2));
-        sink.add_token(SyntaxKind::Identifier, Span::from(2..3));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
+        sink.add_token(SyntaxKind::Dot, Span::new(0, 1..2));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 2..3));
         sink.finish_node();
 
         let builder = TreeBuilder::new(source, sink.into_events());
@@ -263,11 +263,11 @@ mod tests {
 
         // ModuleDeclaration
         sink.start_node(SyntaxKind::ModuleDeclaration);
-        sink.add_token(SyntaxKind::Module, Span::from(0..6));
+        sink.add_token(SyntaxKind::Module, Span::new(0, 0..6));
 
         // ModulePath (child node)
         sink.start_node(SyntaxKind::ModulePath);
-        sink.add_token(SyntaxKind::Identifier, Span::from(7..8));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 7..8));
         sink.finish_node();
 
         sink.finish_node();

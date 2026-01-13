@@ -2,44 +2,50 @@
 
 module std.ops
 
-// TODO: Add back 
-//@operator(+)
+@builtin(.AddOperatorProtocol)
 public protocol Addable[Rhs = Self] {
     type Output
+
+    @builtin(.AddOperatorMethod)
     func add(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(-)
+@builtin(.SubtractOperatorProtocol)
 public protocol Subtractable[Rhs = Self] {
     type Output
+
+    @builtin(.SubtractOperatorMethod)
     func subtract(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(*)
+@builtin(.MultiplyOperatorProtocol)
 public protocol Multipliable[Rhs = Self] {
     type Output
+
+    @builtin(.MultiplyOperatorMethod)
     func multiply(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(/)
+@builtin(.DivideOperatorProtocol)
 public protocol Divisible[Rhs = Self] {
     type Output
+
+    @builtin(.DivideOperatorMethod)
     func divide(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(%)
+@builtin(.ModuloOperatorProtocol)
 public protocol Modulo[Rhs = Self] {
     type Output
-    func mod(other: Rhs) -> Output
+
+    @builtin(.ModuloOperatorMethod)
+    func modulo(other: Rhs) -> Output
 }
 
-// TODO: Add back 
-//@operator(prefix -)
+@builtin(.NegateOperatorProtocol)
 public protocol Negatable {
     type Output
+
+    @builtin(.NegateOperatorMethod)
     func negate() -> Output
 }

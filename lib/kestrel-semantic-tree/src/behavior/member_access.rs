@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn test_member_access_mutable_field() {
-        let field_ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let field_ty = Ty::int(IntBits::I64, Span::new(0, 0..3));
         let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone(), true);
 
         assert_eq!(behavior.member_name(), "x");
@@ -86,11 +86,11 @@ mod tests {
         // Create a mutable parent expression (simulating a var binding)
         let parent = Expression::local_ref(
             crate::symbol::local::LocalId::new(0),
-            Ty::int(IntBits::I64, Span::from(0..1)),
+            Ty::int(IntBits::I64, Span::new(0, 0..1)),
             true, // mutable
-            Span::from(0..2),
+            Span::new(0, 0..2),
         );
-        let result = behavior.access(parent, Span::from(0..4));
+        let result = behavior.access(parent, Span::new(0, 0..4));
 
         // Result should be a mutable field access
         assert!(result.is_mutable());
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_member_access_immutable_field() {
-        let field_ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let field_ty = Ty::int(IntBits::I64, Span::new(0, 0..3));
         let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone(), false);
 
         assert!(!behavior.is_mutable());
@@ -112,11 +112,11 @@ mod tests {
         // Even with mutable parent, immutable field = immutable access
         let parent = Expression::local_ref(
             crate::symbol::local::LocalId::new(0),
-            Ty::int(IntBits::I64, Span::from(0..1)),
+            Ty::int(IntBits::I64, Span::new(0, 0..1)),
             true, // mutable parent
-            Span::from(0..2),
+            Span::new(0, 0..2),
         );
-        let result = behavior.access(parent, Span::from(0..4));
+        let result = behavior.access(parent, Span::new(0, 0..4));
 
         // Result should be immutable (field is let)
         assert!(!result.is_mutable());
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_member_access_mutable_field_immutable_parent() {
-        let field_ty = Ty::int(IntBits::I64, Span::from(0..3));
+        let field_ty = Ty::int(IntBits::I64, Span::new(0, 0..3));
         let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone(), true);
 
         assert!(behavior.is_mutable());
@@ -132,11 +132,11 @@ mod tests {
         // Immutable parent, mutable field = immutable access
         let parent = Expression::local_ref(
             crate::symbol::local::LocalId::new(0),
-            Ty::int(IntBits::I64, Span::from(0..1)),
+            Ty::int(IntBits::I64, Span::new(0, 0..1)),
             false, // immutable parent
-            Span::from(0..2),
+            Span::new(0, 0..2),
         );
-        let result = behavior.access(parent, Span::from(0..4));
+        let result = behavior.access(parent, Span::new(0, 0..4));
 
         // Result should be immutable (parent is let)
         assert!(!result.is_mutable());

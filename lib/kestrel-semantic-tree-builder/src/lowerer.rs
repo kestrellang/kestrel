@@ -427,12 +427,12 @@ struct RootSymbol {
 
 impl RootSymbol {
     fn new() -> Self {
-        let name = Spanned::new("<root>".to_string(), Span::from(0..0));
+        let name = Spanned::new("<root>".to_string(), Span::new(0, 0..0));
 
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(name)
-            .with_declaration_span(Span::from(0..0))
-            .with_span(Span::from(0..0))
+            .with_declaration_span(Span::new(0, 0..0))
+            .with_span(Span::new(0, 0..0))
             .build();
 
         Self { metadata }

@@ -15,7 +15,7 @@ fn parse_expr_from_source(source: &str) -> Expression {
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     Expression {
         syntax: tree,
-        span: Span::from(0..source.len()),
+        span: Span::new(0, 0..source.len()),
     }
 }
 

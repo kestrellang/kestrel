@@ -47,7 +47,7 @@ impl Query for ResolveTypePath {
         //
         // - `Self`
         // - `lang.*` scalar types (i1/i8/.../f16/f32/f64/str)
-        if let Some(ty) = resolve_builtin_type_path(&self.path, Span::from(0..0)) {
+        if let Some(ty) = resolve_builtin_type_path(&self.path, Span::new(0, 0..0)) {
             return TypePathResolution::Resolved(ty);
         }
 
@@ -230,7 +230,6 @@ fn resolve_lang_scalar_type(name: &str, span: Span) -> Option<Ty> {
         // Note: unsigned scalar names exist in kestrel_prelude::lang, but Kestrel's semantic
         // Ty currently models "IntBits" (signed) for built-in integers. We can add unsigned
         // semantics later if/when the type system grows an unsigned integer kind.
-
         lang::F16 => Some(Ty::float(FloatBits::F16, span)),
         lang::F32 => Some(Ty::float(FloatBits::F32, span)),
         lang::F64 => Some(Ty::float(FloatBits::F64, span)),

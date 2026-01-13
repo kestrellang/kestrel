@@ -377,7 +377,7 @@ mod tests {
             _is_static: bool,
         ) -> Result<crate::oracle::MemberResolution, MemberError> {
             Err(MemberError::NotFound {
-                receiver_ty: Ty::unit(Span::from(0..0)),
+                receiver_ty: Ty::unit(Span::new(0, 0..0)),
                 member: String::new(),
             })
         }
@@ -415,10 +415,10 @@ mod tests {
         let oracle = TestOracle;
         let mut ctx = InferenceContext::new(&oracle);
 
-        let ty1 = Ty::unit(Span::from(0..2));
-        let ty2 = Ty::unit(Span::from(3..5));
+        let ty1 = Ty::unit(Span::new(0, 0..2));
+        let ty2 = Ty::unit(Span::new(0, 3..5));
 
-        ctx.equate(ty1.id(), ty2.id(), Span::from(0..5));
+        ctx.equate(ty1.id(), ty2.id(), Span::new(0, 0..5));
 
         assert_eq!(ctx.constraints.len(), 1);
     }

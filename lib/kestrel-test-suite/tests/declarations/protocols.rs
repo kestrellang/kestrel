@@ -162,6 +162,22 @@ mod conformance {
                 .has(Behavior::ConformanceCount(1)),
         );
     }
+
+    #[test]
+    fn protocol_conformance_applies_default_type_arguments() {
+        Test::new(
+            r#"module Test
+            protocol Multipliable[Rhs = Self] {
+                func multiply(other: Rhs) -> Self
+            }
+            struct Box: Multipliable {
+                init() { }
+                func multiply(other: Box) -> Box { Box() }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod inheritance {

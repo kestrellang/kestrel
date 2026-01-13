@@ -13,7 +13,9 @@ public struct Set[T, A]:
     Cloneable
     where A: Allocator
 {
-    type Item = T
+    // Associated type bindings (qualified to avoid ambiguity across protocols)
+    type Iterable.Item = T
+    type Collectable.Item = T
     type Iter = SetIterator[T]
 
     // Use Dictionary with unit value as backing storage
@@ -237,7 +239,7 @@ public struct SetIterator[T]: Iterator {
         self.dictIter = dictIter
     }
 
-    public func next() -> Optional[T] {
+    public mutating func next() -> Optional[T] {
         self.dictIter.next().map { (element, x) in element }
     }
 }
