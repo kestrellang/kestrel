@@ -140,7 +140,8 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         use kestrel_semantic_tree::expr::{LangIntrinsic, LangPrimitive};
 
         // lang.panic_unwind(message: String) -> Never
-        if path[1] == kestrel_prelude::lang::PANIC_UNWIND {
+        // lang.panic is an alias for panic_unwind
+        if path[1] == kestrel_prelude::lang::PANIC_UNWIND || path[1] == "panic" {
             return Expression::lang_intrinsic_ref(LangIntrinsic::PanicUnwind, span);
         }
 
@@ -158,6 +159,109 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     );
                 }
             }
+        }
+
+        // Pointer intrinsics with type arguments
+        // Extract type argument from path (e.g., cast_ptr[Int], sizeof[T])
+        let type_arg = extract_type_arguments_from_path(node, ctx)
+            .and_then(|args| args.into_iter().next());
+        let infer_ty = || Ty::infer(span.clone());
+
+        match path[1].as_str() {
+            "ptr_null" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::PtrNull {
+                        pointee_ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "ptr_from_address" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::PtrFromAddress {
+                        pointee_ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "ptr_to_address" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::PtrToAddress, span);
+            }
+            "ptr_to" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::PtrTo {
+                        pointee_ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "ptr_read" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::PtrRead {
+                        pointee_ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "ptr_write" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::PtrWrite {
+                        pointee_ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "ptr_offset" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::PtrOffset, span);
+            }
+            "ptr_is_null" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::PtrIsNull, span);
+            }
+            "cast_ptr" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::CastPtr {
+                        target_ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "sizeof" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::SizeOf {
+                        ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            "alignof" => {
+                return Expression::lang_intrinsic_ref(
+                    LangIntrinsic::AlignOf {
+                        ty: type_arg.unwrap_or_else(infer_ty),
+                    },
+                    span,
+                );
+            }
+            // Boolean (i1) intrinsics
+            "i1_eq" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::I1Eq, span);
+            }
+            "i1_and" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::I1And, span);
+            }
+            "i1_or" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::I1Or, span);
+            }
+            "i1_not" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::I1Not, span);
+            }
+            // Atomic intrinsics
+            "atomic_add" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::AtomicAdd, span);
+            }
+            "atomic_sub" => {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::AtomicSub, span);
+            }
+            _ => {}
         }
 
         // Parse lang intrinsics: i64_add, i64_signed_div, f64_mul, etc.

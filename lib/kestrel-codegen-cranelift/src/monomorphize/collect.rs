@@ -280,6 +280,46 @@ impl<'a> CollectionContext<'a> {
             Rvalue::FloatMath { operand, .. } => {
                 self.scan_value(operand, subst);
             }
+
+            // Pointer intrinsics
+            Rvalue::PtrNull { ty } | Rvalue::SizeOf { ty } | Rvalue::AlignOf { ty } => {
+                self.scan_type(*ty, subst);
+            }
+            Rvalue::PtrFromAddress { ty, address } => {
+                self.scan_type(*ty, subst);
+                self.scan_value(address, subst);
+            }
+            Rvalue::PtrToAddress { ptr }
+            | Rvalue::PtrIsNull { ptr } => {
+                self.scan_value(ptr, subst);
+            }
+            Rvalue::PtrRead { ptr, ty } => {
+                self.scan_value(ptr, subst);
+                self.scan_type(*ty, subst);
+            }
+            Rvalue::PtrWrite { ptr, value } => {
+                self.scan_value(ptr, subst);
+                self.scan_value(value, subst);
+            }
+            Rvalue::PtrCast { ptr, target_ty } => {
+                self.scan_value(ptr, subst);
+                self.scan_type(*target_ty, subst);
+            }
+
+            // Boolean (i1) intrinsics
+            Rvalue::I1Eq { lhs, rhs } | Rvalue::I1And { lhs, rhs } | Rvalue::I1Or { lhs, rhs } => {
+                self.scan_value(lhs, subst);
+                self.scan_value(rhs, subst);
+            }
+            Rvalue::I1Not { operand } => {
+                self.scan_value(operand, subst);
+            }
+
+            // Atomic intrinsics
+            Rvalue::AtomicAdd { ptr, delta } | Rvalue::AtomicSub { ptr, delta } => {
+                self.scan_value(ptr, subst);
+                self.scan_value(delta, subst);
+            }
         }
     }
 

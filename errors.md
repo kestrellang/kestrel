@@ -2,12 +2,13 @@
 
 | Error Message | Count |
 | :--- | :--- |
-| undefined name 'lang' | 51 |
 | type `Self` does not conform to protocol `ExpressibleByIntLiteral` | 25 |
-| if condition must conform to `BooleanConditional`, found `_` | 18 |
+| undefined name 'lang' | 24 |
+| if condition must conform to `BooleanConditional`, found `_` | 16 |
 | member not found: `equals` on type `<error>` | 13 |
 | cannot access member on type '[UInt8]' | 12 |
 | no method 'write' on type 'H' matches the provided arguments | 11 |
+| type arguments cannot be applied to a language intrinsic | 11 |
 | no matching initializer for struct 'UInt32' | 10 |
 | no matching initializer for struct 'UInt8' | 10 |
 | cannot find type 'lang' in this scope | 9 |
@@ -34,7 +35,7 @@
 | cannot assign to immutable field 'pointee' | 2 |
 | cannot find type 'DictionaryIterator' in this scope | 2 |
 | cannot find type 'I' in this scope | 2 |
-| initializer does not initialize all fields: 'cap', 'ptr' | 2 |
+| initializer does not initialize all fields: 'ptr', 'cap' | 2 |
 | no matching overload for 'decodeUtf8' with 2 argument(s) | 2 |
 | no method 'allocate' on type 'A' matches the provided arguments | 2 |
 | no method 'ensureCapacity' on type 'String' matches the provided arguments | 2 |
@@ -96,60 +97,6 @@
 
 2. Details
 
-undefined name 'lang'
-Call Sites
-- lang/std/result/result.ks:58:28
-- lang/std/result/result.ks:78:27
-- lang/std/result/result.ks:87:28
-- lang/std/result/result.ks:93:23
-- lang/std/result/optional.ks:47:22
-- lang/std/result/optional.ks:69:22
-- lang/std/iter/adapters.ks:98:9
-- lang/std/core/bool.ks:27:27
-- lang/std/core/bool.ks:45:27
-- lang/std/core/bool.ks:50:27
-- lang/std/core/bool.ks:55:27
-- lang/std/memory/buffer.ks:23:22
-- lang/std/memory/buffer.ks:35:22
-- lang/std/memory/buffer.ks:111:9
-- lang/std/memory/buffer.ks:111:79
-- lang/std/memory/buffer.ks:117:9
-- lang/std/memory/buffer.ks:117:80
-- lang/std/memory/buffer.ks:121:9
-- lang/std/memory/buffer.ks:121:57
-- lang/std/memory/buffer.ks:134:22
-- lang/std/memory/buffer.ks:169:22
-- lang/std/memory/buffer.ks:182:9
-- lang/std/memory/buffer.ks:191:12
-- lang/std/memory/allocator.ks:36:19
-- lang/std/memory/allocator.ks:37:12
-- lang/std/memory/allocator.ks:45:9
-- lang/std/memory/allocator.ks:49:22
-- lang/std/memory/allocator.ks:50:12
-- lang/std/memory/pointer.ks:20:20
-- lang/std/memory/pointer.ks:24:25
-- lang/std/memory/pointer.ks:28:9
-- lang/std/memory/pointer.ks:32:9
-- lang/std/memory/pointer.ks:36:22
-- lang/std/memory/pointer.ks:40:25
-- lang/std/memory/pointer.ks:57:20
-- lang/std/memory/pointer.ks:61:22
-- lang/std/memory/pointer.ks:61:39
-- lang/std/memory/pointer.ks:65:15
-- lang/std/memory/pointer.ks:66:15
-- lang/std/memory/pointer.ks:70:9
-- lang/std/memory/pointer.ks:70:29
-- lang/std/memory/pointer.ks:74:9
-- lang/std/memory/pointer.ks:74:26
-- lang/std/memory/pointer.ks:78:9
-- lang/std/memory/pointer.ks:82:9
-- lang/std/memory/pointer.ks:86:22
-- lang/std/memory/pointer.ks:86:39
-- lang/std/memory/pointer.ks:86:69
-- lang/std/memory/pointer.ks:90:25
-- lang/std/memory/layout.ks:18:22
-- lang/std/memory/layout.ks:18:51
-
 type `Self` does not conform to protocol `ExpressibleByIntLiteral`
 Call Sites
 - lang/std/iter/adapters.ks:135:29
@@ -178,12 +125,37 @@ Call Sites
 - lang/std/text/char.ks:80:30
 - lang/std/text/char.ks:81:30
 
+undefined name 'lang'
+Call Sites
+- lang/std/result/result.ks:58:28
+- lang/std/result/result.ks:78:27
+- lang/std/result/result.ks:87:28
+- lang/std/result/result.ks:93:23
+- lang/std/result/optional.ks:47:22
+- lang/std/result/optional.ks:69:22
+- lang/std/iter/adapters.ks:98:9
+- lang/std/core/bool.ks:27:27
+- lang/std/core/bool.ks:45:27
+- lang/std/core/bool.ks:50:27
+- lang/std/core/bool.ks:55:27
+- lang/std/memory/buffer.ks:23:22
+- lang/std/memory/buffer.ks:35:22
+- lang/std/memory/buffer.ks:111:9
+- lang/std/memory/buffer.ks:117:9
+- lang/std/memory/buffer.ks:121:9
+- lang/std/memory/buffer.ks:134:22
+- lang/std/memory/buffer.ks:169:22
+- lang/std/memory/buffer.ks:182:9
+- lang/std/memory/buffer.ks:191:12
+- lang/std/memory/allocator.ks:36:19
+- lang/std/memory/allocator.ks:45:9
+- lang/std/memory/allocator.ks:49:22
+- lang/std/memory/layout.ks:18:51
+
 if condition must conform to `BooleanConditional`, found `_`
 Call Sites
 - lang/std/iter/adapters.ks:216:16
 - lang/std/memory/buffer.ks:191:12
-- lang/std/memory/allocator.ks:37:12
-- lang/std/memory/allocator.ks:50:12
 - lang/std/ops/range.ks:127:19
 - lang/std/text/views.ks:222:16
 - lang/std/text/views.ks:226:23
@@ -243,6 +215,20 @@ Call Sites
 - lang/std/core/bool.ks:33:13
 - lang/std/core/bool.ks:35:13
 - lang/std/collections/set.ks:229:9
+
+type arguments cannot be applied to a language intrinsic
+Call Sites
+- lang/std/memory/buffer.ks:111:79
+- lang/std/memory/buffer.ks:117:80
+- lang/std/memory/buffer.ks:121:57
+- lang/std/memory/pointer.ks:36:22
+- lang/std/memory/pointer.ks:61:22
+- lang/std/memory/pointer.ks:70:29
+- lang/std/memory/pointer.ks:74:26
+- lang/std/memory/pointer.ks:86:69
+- lang/std/memory/pointer.ks:86:22
+- lang/std/memory/pointer.ks:90:25
+- lang/std/memory/layout.ks:18:22
 
 no matching initializer for struct 'UInt32'
 Call Sites
@@ -435,7 +421,7 @@ Call Sites
 - lang/std/iter/iterator.ks:22:24
 - lang/std/collections/set.ks:39:31
 
-initializer does not initialize all fields: 'cap', 'ptr'
+initializer does not initialize all fields: 'ptr', 'cap'
 Call Sites
 - lang/std/memory/buffer.ks:15:5
 - lang/std/memory/buffer.ks:27:5

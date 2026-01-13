@@ -78,7 +78,7 @@ impl fmt::Display for Ty {
             TyKind::Never => f.write_str("!"),
             TyKind::Int(bits) => write!(f, "{:?}", bits),
             TyKind::Float(bits) => write!(f, "{:?}", bits),
-            TyKind::Bool => f.write_str("lang.bool"),
+            TyKind::Bool => f.write_str("lang.i1"),
             TyKind::String => f.write_str("String"),
             TyKind::Tuple(elements) => {
                 f.write_char('(')?;

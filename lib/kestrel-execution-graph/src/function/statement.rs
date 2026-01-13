@@ -187,7 +187,7 @@ pub enum Rvalue {
     IntToString(Value),
 
     // === Pointer operations ===
-    /// `ptr.offset <ptr>, <offset>`
+    /// `ptr.offset <ptr>, <offset>` - byte offset
     PtrOffset { ptr: Value, offset: Value },
     /// `ptr.to.ref <value>`
     PtrToRef(Value),
@@ -195,6 +195,40 @@ pub enum Rvalue {
     PtrToRefMut(Value),
     /// `ref.to.ptr <value>`
     RefToPtr(Value),
+    /// `ptr.null` - create null pointer
+    PtrNull { ty: Id<Ty> },
+    /// `ptr.from_address <addr>` - create pointer from integer address
+    PtrFromAddress { ty: Id<Ty>, address: Value },
+    /// `ptr.to_address <ptr>` - get address from pointer as integer
+    PtrToAddress { ptr: Value },
+    /// `ptr.read <ptr>` - load value from pointer
+    PtrRead { ptr: Value, ty: Id<Ty> },
+    /// `ptr.write <ptr>, <value>` - store value through pointer
+    PtrWrite { ptr: Value, value: Value },
+    /// `ptr.is_null <ptr>` - check if pointer is null
+    PtrIsNull { ptr: Value },
+    /// `ptr.cast <ptr>` - cast pointer to different type
+    PtrCast { ptr: Value, target_ty: Id<Ty> },
+    /// `sizeof <ty>` - size of type in bytes
+    SizeOf { ty: Id<Ty> },
+    /// `alignof <ty>` - alignment of type in bytes
+    AlignOf { ty: Id<Ty> },
+
+    // === Boolean (i1) intrinsics ===
+    /// `i1.eq <lhs>, <rhs>` - boolean equality
+    I1Eq { lhs: Value, rhs: Value },
+    /// `i1.and <lhs>, <rhs>` - boolean AND
+    I1And { lhs: Value, rhs: Value },
+    /// `i1.or <lhs>, <rhs>` - boolean OR
+    I1Or { lhs: Value, rhs: Value },
+    /// `i1.not <operand>` - boolean NOT
+    I1Not { operand: Value },
+
+    // === Atomic intrinsics ===
+    /// `atomic.add <ptr>, <delta>` - atomic fetch-add, returns old value
+    AtomicAdd { ptr: Value, delta: Value },
+    /// `atomic.sub <ptr>, <delta>` - atomic fetch-sub, returns old value
+    AtomicSub { ptr: Value, delta: Value },
 
     // === Callable operations ===
     /// `func.to.escaping path.to.function`
@@ -621,6 +655,99 @@ impl fmt::Display for RvalueDisplay<'_> {
                     FloatMathKind::Sqrt => "sqrt",
                 };
                 write!(f, "{}.{} {}", bits_str, op_str, operand.display(self.ctx))
+            }
+            // Pointer intrinsic displays
+            Rvalue::PtrNull { ty } => {
+                write!(f, "ptr.null {}", self.ctx.ty(*ty).display(self.ctx))
+            }
+            Rvalue::PtrFromAddress { ty, address } => {
+                write!(
+                    f,
+                    "ptr.from_address {} {}",
+                    self.ctx.ty(*ty).display(self.ctx),
+                    address.display(self.ctx)
+                )
+            }
+            Rvalue::PtrToAddress { ptr } => {
+                write!(f, "ptr.to_address {}", ptr.display(self.ctx))
+            }
+            Rvalue::PtrRead { ptr, ty } => {
+                write!(
+                    f,
+                    "ptr.read {} {}",
+                    self.ctx.ty(*ty).display(self.ctx),
+                    ptr.display(self.ctx)
+                )
+            }
+            Rvalue::PtrWrite { ptr, value } => {
+                write!(
+                    f,
+                    "ptr.write {}, {}",
+                    ptr.display(self.ctx),
+                    value.display(self.ctx)
+                )
+            }
+            Rvalue::PtrIsNull { ptr } => {
+                write!(f, "ptr.is_null {}", ptr.display(self.ctx))
+            }
+            Rvalue::PtrCast { ptr, target_ty } => {
+                write!(
+                    f,
+                    "ptr.cast {} {}",
+                    self.ctx.ty(*target_ty).display(self.ctx),
+                    ptr.display(self.ctx)
+                )
+            }
+            Rvalue::SizeOf { ty } => {
+                write!(f, "sizeof {}", self.ctx.ty(*ty).display(self.ctx))
+            }
+            Rvalue::AlignOf { ty } => {
+                write!(f, "alignof {}", self.ctx.ty(*ty).display(self.ctx))
+            }
+            // Boolean (i1) intrinsics
+            Rvalue::I1Eq { lhs, rhs } => {
+                write!(
+                    f,
+                    "i1.eq {}, {}",
+                    lhs.display(self.ctx),
+                    rhs.display(self.ctx)
+                )
+            }
+            Rvalue::I1And { lhs, rhs } => {
+                write!(
+                    f,
+                    "i1.and {}, {}",
+                    lhs.display(self.ctx),
+                    rhs.display(self.ctx)
+                )
+            }
+            Rvalue::I1Or { lhs, rhs } => {
+                write!(
+                    f,
+                    "i1.or {}, {}",
+                    lhs.display(self.ctx),
+                    rhs.display(self.ctx)
+                )
+            }
+            Rvalue::I1Not { operand } => {
+                write!(f, "i1.not {}", operand.display(self.ctx))
+            }
+            // Atomic intrinsics
+            Rvalue::AtomicAdd { ptr, delta } => {
+                write!(
+                    f,
+                    "atomic.add {}, {}",
+                    ptr.display(self.ctx),
+                    delta.display(self.ctx)
+                )
+            }
+            Rvalue::AtomicSub { ptr, delta } => {
+                write!(
+                    f,
+                    "atomic.sub {}, {}",
+                    ptr.display(self.ctx),
+                    delta.display(self.ctx)
+                )
             }
         }
     }

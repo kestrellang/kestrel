@@ -11,7 +11,7 @@ use semantic_tree::symbol::SymbolId;
 
 use crate::stmt::{Statement, StatementKind};
 use crate::symbol::local::LocalId;
-use crate::ty::{Substitutions, Ty};
+use crate::ty::{IntBits, Substitutions, Ty};
 
 /// Globally unique expression identifier.
 /// Every `Expression` instance has a unique `ExprId` assigned at construction.
@@ -578,7 +578,7 @@ pub enum FloatMathOp {
 
 /// Language intrinsics available in the `lang` namespace.
 /// These are compiler-provided functions that lower to special MIR constructs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum LangIntrinsic {
     /// `lang.panic_unwind(message: String) -> Never`
     /// Terminates the program with the given panic message.
@@ -653,6 +653,60 @@ pub enum LangIntrinsic {
         primitive: LangPrimitive,
         op: FloatMathOp,
     },
+
+    // === Pointer intrinsics ===
+    /// `lang.ptr_null[T]()` - Create null pointer of type T
+    PtrNull { pointee_ty: Ty },
+
+    /// `lang.ptr_from_address[T](addr: UInt)` - Create pointer from address
+    PtrFromAddress { pointee_ty: Ty },
+
+    /// `lang.ptr_to_address(ptr: lang.ptr[T])` - Get address as UInt
+    PtrToAddress,
+
+    /// `lang.ptr_to[T](value: T)` - Create pointer to value (stack alloc)
+    PtrTo { pointee_ty: Ty },
+
+    /// `lang.ptr_read[T](ptr: lang.ptr[T])` - Dereference pointer
+    PtrRead { pointee_ty: Ty },
+
+    /// `lang.ptr_write[T](ptr: lang.ptr[T], value: T)` - Write through pointer
+    PtrWrite { pointee_ty: Ty },
+
+    /// `lang.ptr_offset(ptr: lang.ptr[T], offset: Int)` - Byte offset
+    PtrOffset,
+
+    /// `lang.ptr_is_null(ptr: lang.ptr[T])` - Null check
+    PtrIsNull,
+
+    /// `lang.cast_ptr[T](ptr: lang.ptr[U])` - Cast pointer to type T
+    CastPtr { target_ty: Ty },
+
+    /// `lang.sizeof[T]()` - Size of type T in bytes
+    SizeOf { ty: Ty },
+
+    /// `lang.alignof[T]()` - Alignment of type T in bytes
+    AlignOf { ty: Ty },
+
+    // === Boolean (i1) intrinsics ===
+    /// `lang.i1_eq(a, b)` - Boolean equality
+    I1Eq,
+
+    /// `lang.i1_and(a, b)` - Boolean AND
+    I1And,
+
+    /// `lang.i1_or(a, b)` - Boolean OR
+    I1Or,
+
+    /// `lang.i1_not(a)` - Boolean NOT
+    I1Not,
+
+    // === Atomic intrinsics ===
+    /// `lang.atomic_add(place, delta)` - Atomic fetch-add, returns old value
+    AtomicAdd,
+
+    /// `lang.atomic_sub(place, delta)` - Atomic fetch-sub, returns old value
+    AtomicSub,
 }
 
 impl LangIntrinsic {
@@ -670,6 +724,26 @@ impl LangIntrinsic {
             LangIntrinsic::FloatConst { .. } => 0,
             LangIntrinsic::FloatPred { .. } => 1,
             LangIntrinsic::FloatMath { .. } => 1,
+            // Pointer intrinsics
+            LangIntrinsic::PtrNull { .. } => 0,
+            LangIntrinsic::PtrFromAddress { .. } => 1,
+            LangIntrinsic::PtrToAddress => 1,
+            LangIntrinsic::PtrTo { .. } => 1,
+            LangIntrinsic::PtrRead { .. } => 1,
+            LangIntrinsic::PtrWrite { .. } => 2,
+            LangIntrinsic::PtrOffset => 2,
+            LangIntrinsic::PtrIsNull => 1,
+            LangIntrinsic::CastPtr { .. } => 1,
+            LangIntrinsic::SizeOf { .. } => 0,
+            LangIntrinsic::AlignOf { .. } => 0,
+            // Boolean (i1) intrinsics
+            LangIntrinsic::I1Eq => 2,
+            LangIntrinsic::I1And => 2,
+            LangIntrinsic::I1Or => 2,
+            LangIntrinsic::I1Not => 1,
+            // Atomic intrinsics
+            LangIntrinsic::AtomicAdd => 2,
+            LangIntrinsic::AtomicSub => 2,
         }
     }
 
@@ -770,6 +844,26 @@ impl LangIntrinsic {
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
             }
+            // Pointer intrinsics
+            LangIntrinsic::PtrNull { .. } => "lang.ptr_null".to_string(),
+            LangIntrinsic::PtrFromAddress { .. } => "lang.ptr_from_address".to_string(),
+            LangIntrinsic::PtrToAddress => "lang.ptr_to_address".to_string(),
+            LangIntrinsic::PtrTo { .. } => "lang.ptr_to".to_string(),
+            LangIntrinsic::PtrRead { .. } => "lang.ptr_read".to_string(),
+            LangIntrinsic::PtrWrite { .. } => "lang.ptr_write".to_string(),
+            LangIntrinsic::PtrOffset => "lang.ptr_offset".to_string(),
+            LangIntrinsic::PtrIsNull => "lang.ptr_is_null".to_string(),
+            LangIntrinsic::CastPtr { .. } => "lang.cast_ptr".to_string(),
+            LangIntrinsic::SizeOf { .. } => "lang.sizeof".to_string(),
+            LangIntrinsic::AlignOf { .. } => "lang.alignof".to_string(),
+            // Boolean (i1) intrinsics
+            LangIntrinsic::I1Eq => "lang.i1_eq".to_string(),
+            LangIntrinsic::I1And => "lang.i1_and".to_string(),
+            LangIntrinsic::I1Or => "lang.i1_or".to_string(),
+            LangIntrinsic::I1Not => "lang.i1_not".to_string(),
+            // Atomic intrinsics
+            LangIntrinsic::AtomicAdd => "lang.atomic_add".to_string(),
+            LangIntrinsic::AtomicSub => "lang.atomic_sub".to_string(),
         }
     }
 
@@ -799,6 +893,10 @@ impl LangIntrinsic {
             }
             // FloatPred always returns bool (is_nan, is_infinite)
             LangIntrinsic::FloatPred { .. } => true,
+            // PtrIsNull returns bool
+            LangIntrinsic::PtrIsNull => true,
+            // Boolean (i1) intrinsics all return bool
+            LangIntrinsic::I1Eq | LangIntrinsic::I1And | LangIntrinsic::I1Or | LangIntrinsic::I1Not => true,
             _ => false,
         }
     }
@@ -2490,6 +2588,41 @@ impl Expression {
             LangIntrinsic::FloatPred { .. } => Ty::bool(span.clone()),
             // FloatMath returns the float type
             LangIntrinsic::FloatMath { primitive, .. } => primitive.to_ty(span.clone()),
+            // Pointer intrinsics
+            LangIntrinsic::PtrNull { pointee_ty } => {
+                Ty::pointer(pointee_ty.clone(), span.clone())
+            }
+            LangIntrinsic::PtrFromAddress { pointee_ty } => {
+                Ty::pointer(pointee_ty.clone(), span.clone())
+            }
+            LangIntrinsic::PtrToAddress => Ty::int(IntBits::I64, span.clone()),
+            LangIntrinsic::PtrTo { pointee_ty } => {
+                Ty::pointer(pointee_ty.clone(), span.clone())
+            }
+            LangIntrinsic::PtrRead { pointee_ty } => pointee_ty.clone(),
+            LangIntrinsic::PtrWrite { .. } => Ty::unit(span.clone()),
+            LangIntrinsic::PtrOffset => {
+                // Return type matches first argument (pointer type)
+                // For now, use an inference variable
+                Ty::pointer(Ty::infer(span.clone()), span.clone())
+            }
+            LangIntrinsic::PtrIsNull => Ty::bool(span.clone()),
+            LangIntrinsic::CastPtr { target_ty } => {
+                Ty::pointer(target_ty.clone(), span.clone())
+            }
+            LangIntrinsic::SizeOf { .. } | LangIntrinsic::AlignOf { .. } => {
+                Ty::int(IntBits::I64, span.clone())
+            }
+            // Boolean (i1) intrinsics all return bool
+            LangIntrinsic::I1Eq
+            | LangIntrinsic::I1And
+            | LangIntrinsic::I1Or
+            | LangIntrinsic::I1Not => Ty::bool(span.clone()),
+            // Atomic intrinsics return the type of the first argument (the value being modified)
+            LangIntrinsic::AtomicAdd | LangIntrinsic::AtomicSub => {
+                // Return type inferred from first argument
+                Ty::infer(span.clone())
+            }
         };
         Expression {
             id: ExprId::new(),
@@ -2590,6 +2723,86 @@ impl Expression {
                 // (T) -> T
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
+            }
+            // Pointer intrinsics
+            LangIntrinsic::PtrNull { pointee_ty } => {
+                // () -> lang.ptr[T]
+                let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
+                Ty::function(vec![], ptr_ty, span.clone())
+            }
+            LangIntrinsic::PtrFromAddress { pointee_ty } => {
+                // (UInt) -> lang.ptr[T]
+                let uint_ty = Ty::int(IntBits::I64, span.clone());
+                let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
+                Ty::function(vec![uint_ty], ptr_ty, span.clone())
+            }
+            LangIntrinsic::PtrToAddress => {
+                // (lang.ptr[_]) -> UInt
+                let ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
+                let uint_ty = Ty::int(IntBits::I64, span.clone());
+                Ty::function(vec![ptr_ty], uint_ty, span.clone())
+            }
+            LangIntrinsic::PtrTo { pointee_ty } => {
+                // (T) -> lang.ptr[T]
+                let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
+                Ty::function(vec![pointee_ty.clone()], ptr_ty, span.clone())
+            }
+            LangIntrinsic::PtrRead { pointee_ty } => {
+                // (lang.ptr[T]) -> T
+                let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
+                Ty::function(vec![ptr_ty], pointee_ty.clone(), span.clone())
+            }
+            LangIntrinsic::PtrWrite { pointee_ty } => {
+                // (lang.ptr[T], T) -> ()
+                let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
+                Ty::function(
+                    vec![ptr_ty, pointee_ty.clone()],
+                    Ty::unit(span.clone()),
+                    span.clone(),
+                )
+            }
+            LangIntrinsic::PtrOffset => {
+                // (lang.ptr[_], Int) -> lang.ptr[_]
+                let ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
+                let int_ty = Ty::int(IntBits::I64, span.clone());
+                Ty::function(vec![ptr_ty.clone(), int_ty], ptr_ty, span.clone())
+            }
+            LangIntrinsic::PtrIsNull => {
+                // (lang.ptr[_]) -> Bool
+                let ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
+                Ty::function(vec![ptr_ty], Ty::bool(span.clone()), span.clone())
+            }
+            LangIntrinsic::CastPtr { target_ty } => {
+                // (lang.ptr[_]) -> lang.ptr[T]
+                let src_ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
+                let dst_ptr_ty = Ty::pointer(target_ty.clone(), span.clone());
+                Ty::function(vec![src_ptr_ty], dst_ptr_ty, span.clone())
+            }
+            LangIntrinsic::SizeOf { .. } | LangIntrinsic::AlignOf { .. } => {
+                // () -> Int
+                let int_ty = Ty::int(IntBits::I64, span.clone());
+                Ty::function(vec![], int_ty, span.clone())
+            }
+            // Boolean (i1) intrinsics
+            LangIntrinsic::I1Eq | LangIntrinsic::I1And | LangIntrinsic::I1Or => {
+                // (lang.i1, lang.i1) -> lang.i1
+                let bool_ty = Ty::bool(span.clone());
+                Ty::function(vec![bool_ty.clone(), bool_ty.clone()], bool_ty, span.clone())
+            }
+            LangIntrinsic::I1Not => {
+                // (lang.i1) -> lang.i1
+                let bool_ty = Ty::bool(span.clone());
+                Ty::function(vec![bool_ty.clone()], bool_ty, span.clone())
+            }
+            // Atomic intrinsics: (T, T) -> T where T is integer type
+            LangIntrinsic::AtomicAdd | LangIntrinsic::AtomicSub => {
+                // (infer, infer) -> infer - type inferred from arguments
+                let infer_ty = Ty::infer(span.clone());
+                Ty::function(
+                    vec![infer_ty.clone(), infer_ty.clone()],
+                    infer_ty,
+                    span.clone(),
+                )
             }
         };
         Expression {

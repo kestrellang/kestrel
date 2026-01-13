@@ -5,6 +5,7 @@ module std.memory
 import std.result.(Optional)
 import std.core.(Cloneable, Int, Bool)
 import std.ops.(NonCopyable)
+import std.ffi.(memcpy, memmove, memset)
 
 public struct Buffer[T, A]: NonCopyable where A: Allocator {
     private var ptr: Pointer[T]
@@ -108,17 +109,17 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     public func copy(from source: Buffer[T, A], count: Int) {
         let copyCount = if count < source.cap { count } else { source.cap };
         let copyCount = if copyCount < self.cap { copyCount } else { self.cap };
-        lang.memcpy(self.ptr.asRaw().raw, source.ptr.asRaw().raw, copyCount * lang.sizeof[T]())
+        let _ = memcpy(self.ptr.asRaw().raw, source.ptr.asRaw().raw, copyCount * lang.sizeof[T]())
     }
 
     public func move(from source: Buffer[T, A], count: Int) {
         let moveCount = if count < source.cap { count } else { source.cap };
         let moveCount = if moveCount < self.cap { moveCount } else { self.cap };
-        lang.memmove(self.ptr.asRaw().raw, source.ptr.asRaw().raw, moveCount * lang.sizeof[T]())
+        let _ = memmove(self.ptr.asRaw().raw, source.ptr.asRaw().raw, moveCount * lang.sizeof[T]())
     }
 
     public func zeroFill() {
-        lang.memset(self.ptr.asRaw().raw, 0, self.cap * lang.sizeof[T]())
+        let _ = memset(self.ptr.asRaw().raw, 0, self.cap * lang.sizeof[T]())
     }
 
     // Resizing

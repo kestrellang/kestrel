@@ -13,6 +13,7 @@ use kestrel_execution_graph::{
     Ty, UnOp, Value,
 };
 
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{
     AbiParam, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind,
@@ -179,6 +180,141 @@ pub fn compile_rvalue(
                     FloatMathKind::Round => Ok(builder.ins().nearest(operand_val)),
                 },
             }
+        }
+
+        // === Pointer intrinsics ===
+        Rvalue::PtrNull { .. } => {
+            // Return a null pointer (integer 0)
+            let ptr_ty = if ctx.target.is_64bit() {
+                cranelift_codegen::ir::types::I64
+            } else {
+                cranelift_codegen::ir::types::I32
+            };
+            Ok(builder.ins().iconst(ptr_ty, 0))
+        }
+
+        Rvalue::PtrFromAddress { address, .. } => {
+            // Address is already a pointer at the IR level
+            compile_value(ctx, func_def, subst, address, builder, local_map)
+        }
+
+        Rvalue::PtrToAddress { ptr } => {
+            // Pointer is already an integer at the IR level
+            compile_value(ctx, func_def, subst, ptr, builder, local_map)
+        }
+
+        Rvalue::PtrRead { ptr, ty } => {
+            // Load value from pointer
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let pointee_ty = subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty);
+            let cl_ty = translate_type(ctx.mir, pointee_ty, ctx.target);
+            Ok(builder.ins().load(cl_ty, cranelift_codegen::ir::MemFlags::new(), ptr_val, 0))
+        }
+
+        Rvalue::PtrWrite { ptr, value } => {
+            // Store value through pointer
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+            builder.ins().store(cranelift_codegen::ir::MemFlags::new(), val, ptr_val, 0);
+            // Return unit (represented as 0)
+            Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0))
+        }
+
+        Rvalue::PtrIsNull { ptr } => {
+            // Compare pointer to null (0)
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let ptr_ty = builder.func.dfg.value_type(ptr_val);
+            let zero = builder.ins().iconst(ptr_ty, 0);
+            Ok(builder.ins().icmp(
+                cranelift_codegen::ir::condcodes::IntCC::Equal,
+                ptr_val,
+                zero,
+            ))
+        }
+
+        Rvalue::PtrCast { ptr, .. } => {
+            // Pointer cast is a no-op at the IR level (same representation)
+            compile_value(ctx, func_def, subst, ptr, builder, local_map)
+        }
+
+        Rvalue::SizeOf { ty } => {
+            // Return the size of the type as a constant
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty);
+            let layout = ctx.layouts.layout_of(concrete_ty);
+            let size = layout.size as i64;
+            let int_ty = if ctx.target.is_64bit() {
+                cranelift_codegen::ir::types::I64
+            } else {
+                cranelift_codegen::ir::types::I32
+            };
+            Ok(builder.ins().iconst(int_ty, size))
+        }
+
+        Rvalue::AlignOf { ty } => {
+            // Return the alignment of the type as a constant
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty);
+            let layout = ctx.layouts.layout_of(concrete_ty);
+            let align = layout.align as i64;
+            let int_ty = if ctx.target.is_64bit() {
+                cranelift_codegen::ir::types::I64
+            } else {
+                cranelift_codegen::ir::types::I32
+            };
+            Ok(builder.ins().iconst(int_ty, align))
+        }
+
+        // Boolean (i1) intrinsics
+        Rvalue::I1Eq { lhs, rhs } => {
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            // Boolean equality is just integer equality
+            Ok(builder.ins().icmp(IntCC::Equal, lhs_val, rhs_val))
+        }
+        Rvalue::I1And { lhs, rhs } => {
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            // Boolean AND is just bitwise AND on i8/i1
+            Ok(builder.ins().band(lhs_val, rhs_val))
+        }
+        Rvalue::I1Or { lhs, rhs } => {
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            // Boolean OR is just bitwise OR on i8/i1
+            Ok(builder.ins().bor(lhs_val, rhs_val))
+        }
+        Rvalue::I1Not { operand } => {
+            let val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+            // Boolean NOT: XOR with 1
+            let one = builder.ins().iconst(cranelift_codegen::ir::types::I8, 1);
+            Ok(builder.ins().bxor(val, one))
+        }
+
+        // Atomic intrinsics
+        Rvalue::AtomicAdd { ptr, delta } => {
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map)?;
+            let delta_ty = builder.func.dfg.value_type(delta_val);
+            // Cranelift atomic_rmw with Add operation
+            Ok(builder.ins().atomic_rmw(
+                delta_ty,
+                cranelift_codegen::ir::MemFlags::new(),
+                cranelift_codegen::ir::AtomicRmwOp::Add,
+                ptr_val,
+                delta_val,
+            ))
+        }
+        Rvalue::AtomicSub { ptr, delta } => {
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map)?;
+            let delta_ty = builder.func.dfg.value_type(delta_val);
+            // Cranelift atomic_rmw with Sub operation
+            Ok(builder.ins().atomic_rmw(
+                delta_ty,
+                cranelift_codegen::ir::MemFlags::new(),
+                cranelift_codegen::ir::AtomicRmwOp::Sub,
+                ptr_val,
+                delta_val,
+            ))
         }
     }
 }

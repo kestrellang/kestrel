@@ -10,9 +10,9 @@ import std.iter.(Iterator, Iterable)
 // RawPointer - untyped pointer
 // RawPointer is always FFI-safe as it's just an opaque pointer
 public struct RawPointer: Equatable, FFISafe {
-    private var raw: lang.ptr[lang.u8]
+    private var raw: lang.ptr[lang.i8]
 
-    public init(raw: lang.ptr[lang.u8]) {
+    public init(raw: lang.ptr[lang.i8]) {
         self.raw = raw;
     }
 
@@ -67,11 +67,11 @@ public struct Pointer[T]: Equatable {
     }
 
     public var address: UInt {
-        lang.ptr_to_address(lang.cast_ptr[lang.u8](self.raw))
+        lang.ptr_to_address(lang.cast_ptr[lang.i8](self.raw))
     }
 
     public var isNull: Bool {
-        lang.ptr_is_null(lang.cast_ptr[lang.u8](self.raw))
+        lang.ptr_is_null(lang.cast_ptr[lang.i8](self.raw))
     }
 
     public func read() -> T {
@@ -87,7 +87,7 @@ public struct Pointer[T]: Equatable {
     }
 
     public func asRaw() -> RawPointer {
-        RawPointer(raw: lang.cast_ptr[lang.u8](self.raw))
+        RawPointer(raw: lang.cast_ptr[lang.i8](self.raw))
     }
 
     public func equals(other: Pointer[T]) -> Bool {

@@ -447,7 +447,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             intrinsic,
             arguments,
         } => ExprKind::LangIntrinsic {
-            intrinsic: *intrinsic,
+            intrinsic: intrinsic.clone(),
             arguments: arguments
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
@@ -455,7 +455,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         },
 
         // Language intrinsic reference - no changes needed
-        ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(*intrinsic),
+        ExprKind::LangIntrinsicRef(intrinsic) => ExprKind::LangIntrinsicRef(intrinsic.clone()),
 
         // Subscript call - apply solution to receiver and arguments
         ExprKind::SubscriptCall {

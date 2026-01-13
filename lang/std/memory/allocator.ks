@@ -4,6 +4,7 @@ module std.memory
 
 import std.result.(Optional)
 import std.core.(Int, UInt8)
+import std.ffi.(malloc, free, realloc)
 
 public protocol Allocator {
     mutating func allocate(layout: Layout) -> Optional[RawPointer]
@@ -33,7 +34,9 @@ public struct SystemAllocator: Allocator {
     public init() {}
 
     public mutating func allocate(layout: Layout) -> Optional[RawPointer] {
-        let ptr = lang.alloc(layout.size, layout.alignment);
+        // Note: malloc doesn't guarantee alignment beyond natural alignment
+        // For stricter alignment, use posix_memalign
+        let ptr = malloc(layout.size);
         if lang.ptr_is_null(ptr) {
             .None
         } else {
@@ -42,11 +45,11 @@ public struct SystemAllocator: Allocator {
     }
 
     public mutating func deallocate(ptr: RawPointer, layout: Layout) {
-        lang.dealloc(ptr.raw, layout.size, layout.alignment)
+        free(ptr.raw)
     }
 
     public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> Optional[RawPointer] {
-        let newPtr = lang.realloc(ptr.raw, oldLayout.size, newLayout.size, newLayout.alignment);
+        let newPtr = realloc(ptr.raw, newLayout.size);
         if lang.ptr_is_null(newPtr) {
             .None
         } else {

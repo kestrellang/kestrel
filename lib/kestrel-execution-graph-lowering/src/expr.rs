@@ -1178,6 +1178,208 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     );
                     Value::Place(Place::local(result))
                 }
+
+                // === Pointer intrinsics ===
+                LangIntrinsic::PtrNull { .. } => {
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_null", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrNull { ty: result_ty },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::PtrFromAddress { .. } => {
+                    let address = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_from_addr", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrFromAddress { ty: result_ty, address },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::PtrToAddress => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_to_addr", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrToAddress { ptr },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::PtrTo { .. } => {
+                    // ptr_to requires stack slot allocation - complex, emit error for now
+                    ctx.emit_error(LoweringError::unsupported_expr(
+                        "lang.ptr_to intrinsic (stack allocation)",
+                        expr.span.clone(),
+                    ));
+                    Value::Immediate(Immediate::error())
+                }
+                LangIntrinsic::PtrRead { .. } => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_read", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrRead { ptr, ty: result_ty },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::PtrWrite { .. } => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let value = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_write", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrWrite { ptr, value },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::PtrOffset => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let offset = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_offset", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrOffset { ptr, offset },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::PtrIsNull => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_is_null", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrIsNull { ptr },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::CastPtr { .. } => {
+                    let ptr = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("cast_ptr", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::PtrCast { ptr, target_ty: result_ty },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::SizeOf { .. } => {
+                    // sizeof returns the size of the type parameter
+                    // For now, we need to get the type from the intrinsic
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("sizeof", result_ty);
+                    // Get the pointee type from the SizeOf variant
+                    let size_ty = match intrinsic {
+                        LangIntrinsic::SizeOf { ty } => lower_type(ctx, ty),
+                        _ => unreachable!(),
+                    };
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::SizeOf { ty: size_ty },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::AlignOf { .. } => {
+                    // alignof returns the alignment of the type parameter
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("alignof", result_ty);
+                    let align_ty = match intrinsic {
+                        LangIntrinsic::AlignOf { ty } => lower_type(ctx, ty),
+                        _ => unreachable!(),
+                    };
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::AlignOf { ty: align_ty },
+                    );
+                    Value::Place(Place::local(result))
+                }
+                // Boolean (i1) intrinsics
+                LangIntrinsic::I1Eq => {
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_eq", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1Eq { lhs, rhs });
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::I1And => {
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_and", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1And { lhs, rhs });
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::I1Or => {
+                    let lhs = lower_expression(ctx, &arguments[0].value);
+                    let rhs = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_or", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1Or { lhs, rhs });
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::I1Not => {
+                    let operand = lower_expression(ctx, &arguments[0].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("i1_not", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::I1Not { operand });
+                    Value::Place(Place::local(result))
+                }
+                // Atomic intrinsics
+                LangIntrinsic::AtomicAdd => {
+                    // First argument is a place expression - we need its address
+                    let place_value = lower_expression(ctx, &arguments[0].value);
+                    let ptr = match place_value {
+                        Value::Place(p) => {
+                            // Get address of place: ref -> ptr
+                            let ptr_ty = lower_type(ctx, &expr.ty);
+                            let ref_temp = ctx.create_temp("atomic_ref", ptr_ty);
+                            ctx.emit_assign(Place::local(ref_temp), Rvalue::Ref(p));
+                            let ptr_temp = ctx.create_temp("atomic_ptr", ptr_ty);
+                            ctx.emit_assign(
+                                Place::local(ptr_temp),
+                                Rvalue::RefToPtr(Value::Place(Place::local(ref_temp))),
+                            );
+                            Value::Place(Place::local(ptr_temp))
+                        }
+                        v => v, // Already a value (shouldn't happen, but pass through)
+                    };
+                    let delta = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("atomic_add", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::AtomicAdd { ptr, delta });
+                    Value::Place(Place::local(result))
+                }
+                LangIntrinsic::AtomicSub => {
+                    // First argument is a place expression - we need its address
+                    let place_value = lower_expression(ctx, &arguments[0].value);
+                    let ptr = match place_value {
+                        Value::Place(p) => {
+                            // Get address of place: ref -> ptr
+                            let ptr_ty = lower_type(ctx, &expr.ty);
+                            let ref_temp = ctx.create_temp("atomic_ref", ptr_ty);
+                            ctx.emit_assign(Place::local(ref_temp), Rvalue::Ref(p));
+                            let ptr_temp = ctx.create_temp("atomic_ptr", ptr_ty);
+                            ctx.emit_assign(
+                                Place::local(ptr_temp),
+                                Rvalue::RefToPtr(Value::Place(Place::local(ref_temp))),
+                            );
+                            Value::Place(Place::local(ptr_temp))
+                        }
+                        v => v, // Already a value (shouldn't happen, but pass through)
+                    };
+                    let delta = lower_expression(ctx, &arguments[1].value);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("atomic_sub", result_ty);
+                    ctx.emit_assign(Place::local(result), Rvalue::AtomicSub { ptr, delta });
+                    Value::Place(Place::local(result))
+                }
             }
         }
 
