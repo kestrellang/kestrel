@@ -46,8 +46,9 @@ use super::members::{resolve_delegating_init, resolve_member_call, substitute_ca
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
-    infer_type_arguments, is_expression_kind, matches_signature, substitute_self,
-    substitute_type, validate_not_standalone_type_param, verify_type_argument_constraints,
+    infer_type_arguments, is_expression_kind, matches_signature, replace_unsubstituted_type_params,
+    substitute_self, substitute_type, validate_not_standalone_type_param,
+    verify_type_argument_constraints,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -322,6 +323,18 @@ pub fn resolve_call(
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
+    // If the callee is already an error type, don't emit cascading diagnostics.
+    // The original error has already been reported where the error type was created.
+    if matches!(callee.ty.kind(), TyKind::Error) {
+        // Create an error call expression with inferred return type
+        return Expression::call(
+            callee,
+            arguments,
+            Ty::infer(span.clone()),
+            span,
+        );
+    }
+
     // Clone callee.kind to avoid borrow issues
     let callee_kind = callee.kind.clone();
     let callee_ty = callee.ty.clone();
@@ -1199,13 +1212,43 @@ fn resolve_explicit_init_call(
                 // Initializers are not mutable lvalues
                 let init_id = init_sym.metadata().id();
 
-                // Build the function type for the initializer
-                let param_tys: Vec<Ty> =
-                    callable.parameters().iter().map(|p| p.ty.clone()).collect();
+                // Get substitutions from the struct type to apply to initializer parameters.
+                // This maps the struct's type parameters (e.g., Slice's T) to the instantiation
+                // type arguments (e.g., inference placeholders or explicit type args).
+                let struct_subs = match struct_ty.kind() {
+                    TyKind::Struct { substitutions, .. } => substitutions.clone(),
+                    _ => Substitutions::new(),
+                };
+
+                // Build the function type for the initializer, applying struct substitutions
+                // to parameter types so that Slice.init(pointer: Pointer[T], ...) becomes
+                // Slice.init(pointer: Pointer[Infer], ...) when T is an inference placeholder.
+                //
+                // We also need to replace any type parameters that aren't in the substitution
+                // map with inference placeholders - this handles cases where the callable's
+                // parameter types use different TypeParameter symbols than the struct's.
+                let param_tys: Vec<Ty> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| {
+                        let ty = p.ty.apply_substitutions(&struct_subs);
+                        // If the type is still a TypeParameter after substitution,
+                        // replace it with an inference placeholder
+                        replace_unsubstituted_type_params(&ty, &span)
+                    })
+                    .collect();
                 let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
 
                 let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
-                return Expression::call(init_ref, arguments, struct_ty, span);
+                // Use generic_call to store the struct substitutions so that CallableParamTypesForCall
+                // can apply them when type-checking arguments
+                return Expression::generic_call(
+                    init_ref,
+                    arguments,
+                    struct_subs,
+                    struct_ty,
+                    span,
+                );
             }
         }
     }
@@ -1402,6 +1445,7 @@ pub fn resolve_method_call(
                     let mut return_ty =
                         substitute_self(callable.return_type(), &resolved_receiver_ty);
                     let mut call_substitutions = Substitutions::new();
+                    // Handle struct receiver types (e.g., Box[Int])
                     if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Add receiver's substitutions to call_substitutions
                         for (param_id, ty) in substitutions.iter() {
@@ -1409,28 +1453,37 @@ pub fn resolve_method_call(
                         }
                         return_ty = return_ty.apply_substitutions(substitutions);
                     }
+                    // Handle enum receiver types (e.g., Optional[Int])
+                    else if let Some((_, substitutions)) = resolved_receiver_ty.as_enum_with_subs() {
+                        for (param_id, ty) in substitutions.iter() {
+                            call_substitutions.insert(*param_id, ty.clone());
+                        }
+                        return_ty = return_ty.apply_substitutions(substitutions);
+                    }
 
-                    // Infer type parameters from argument types if method parameters contain type parameters
-                    // This handles the case like Box.wrap(42) where T needs to be inferred from the argument
-                    // Also handles Box[Int].wrap(42) where substitutions are already available
+                    // Infer type parameters from argument types if method has its own type parameters
+                    // This handles cases like Optional.map[U](transform: (T) -> U) where U needs
+                    // to be inferred from the closure's return type
                     if explicit_type_args.is_none() {
-                        let arg_types: Vec<Ty> =
-                            arguments.iter().map(|a| a.value.ty.clone()).collect();
-                        let mut inferred_any = false;
-                        for (param, arg_ty) in callable.parameters().iter().zip(arg_types.iter()) {
-                            if let TyKind::TypeParameter(type_param) = param.ty.kind() {
-                                let param_id = type_param.metadata().id();
-                                // Only infer if not already in substitutions
-                                if !call_substitutions.get(param_id).is_some() {
-                                    call_substitutions.insert(param_id, arg_ty.clone());
-                                    inferred_any = true;
+                        use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+                        if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+                            if let Some(generics) = func_sym.metadata().get_behavior::<GenericsBehavior>() {
+                                let method_type_params = generics.type_parameters();
+                                if !method_type_params.is_empty() {
+                                    let arg_types: Vec<Ty> =
+                                        arguments.iter().map(|a| a.value.ty.clone()).collect();
+                                    // Use infer_type_arguments which handles nested types like (T) -> U
+                                    let method_subs = infer_type_arguments(&method_type_params, &callable, &arg_types);
+                                    for (param_id, ty) in method_subs.iter() {
+                                        call_substitutions.insert(*param_id, ty.clone());
+                                    }
+                                    // Reapply substitutions to return type with inferred types
+                                    if !method_subs.is_empty() {
+                                        return_ty = callable.return_type().clone();
+                                        return_ty = return_ty.apply_substitutions(&call_substitutions);
+                                    }
                                 }
                             }
-                        }
-                        // Reapply substitutions to return type with inferred types
-                        if inferred_any {
-                            return_ty = callable.return_type().clone();
-                            return_ty = return_ty.apply_substitutions(&call_substitutions);
                         }
                     }
 

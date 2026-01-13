@@ -43,7 +43,7 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     public func unwrap() -> T {
         match self {
             .Some(value) => value,
-            .None => panic("called unwrap() on None")
+            .None => lang.panic("called unwrap() on None")
         }
     }
 
@@ -65,7 +65,7 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     public func expect(message: String) -> T {
         match self {
             .Some(value) => value,
-            .None => panic(message)
+            .None => lang.panic(message)
         }
     }
 
@@ -148,13 +148,13 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     }
 
     // Take and replace
-    public func take() -> Optional[T] {
+    public mutating func take() -> Optional[T] {
         let result = self;
         self = .None;
         result
     }
 
-    public func replace(value: T) -> Optional[T] {
+    public mutating func replace(value: T) -> Optional[T] {
         let old = self;
         self = .Some(value);
         old

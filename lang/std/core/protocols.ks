@@ -38,23 +38,23 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
     type NotEqual.Output = Bool
 
     public func lessThan(other: Self) -> Bool {
-        self.compare(other) == .Less
+        self.compare(other) == Ordering.Less
     }
 
     public func lessThanOrEqual(other: Self) -> Bool {
-        self.compare(other) != .Greater
+        self.compare(other) != Ordering.Greater
     }
 
     public func greaterThan(other: Self) -> Bool {
-        self.compare(other) == .Greater
+        self.compare(other) == Ordering.Greater
     }
 
     public func greaterThanOrEqual(other: Self) -> Bool {
-        self.compare(other) != .Less
+        self.compare(other) != Ordering.Less
     }
 
     public func notEquals(other: Self) -> Bool {
-        self.compare(other) != .Equal
+        self.compare(other) != Ordering.Equal
     }
 }
 
@@ -65,8 +65,8 @@ public protocol Hashable: Equatable {
 
 // Hasher - types that can compute hash values
 public protocol Hasher {
-    func write(bytes: Slice[UInt8])
-    func finish() -> UInt64
+    mutating func write(bytes: Slice[UInt8])
+    mutating func finish() -> UInt64
 }
 
 // DefaultHasher (SipHash-1-3)
@@ -105,13 +105,13 @@ public struct DefaultHasher: Hasher {
         self.tailLen = 0;
     }
 
-    public func write(bytes: Slice[UInt8]) {
+    public mutating func write(bytes: Slice[UInt8]) {
         // Implementation details - writes bytes into hasher state
         self.length = self.length + UInt64(bytes.count);
         // ... SipHash implementation
     }
 
-    public func finish() -> UInt64 {
+    public mutating func finish() -> UInt64 {
         // Finalize and return hash
         // ... SipHash finalization
         0 // placeholder

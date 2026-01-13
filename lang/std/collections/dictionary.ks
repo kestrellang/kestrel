@@ -21,15 +21,15 @@ public struct Dictionary[K, V, A]:
 
     private var storage: ArcBox[DictionaryStorage[K, V, A]]
 
-    struct Entry[K, V] {
-        var key: K
-        var value: V
+    struct Entry[K1, V1] {
+        var key: K1
+        var value: V1
         var hash: UInt64
         var occupied: Bool
     }
 
-    struct DictionaryStorage[K, V, A] where A: Allocator {
-        var entries: Buffer[Entry[K, V], A]
+    struct DictionaryStorage[K1, V1, A1] where A1: Allocator {
+        var entries: Buffer[Entry[K1, V1], A1]
         var count: Int
         var capacity: Int
     }
@@ -65,7 +65,7 @@ public struct Dictionary[K, V, A]:
     public init(dictionaryLiteral pairs: [(K, V)]) {
         self.init(minimumCapacity: pairs.count)
         /* for (key, value) in pairs {
-            self.insert(value: value, for: key)
+            self.insert(value, for: key)
         } */
     }
 
@@ -177,7 +177,7 @@ public struct Dictionary[K, V, A]:
             index = (index + 1) & mask;
             checked = checked + 1
         }
-        .None
+        return .None
     }
 
     private mutating func insertEntry(key: K, value: V, hash: UInt64) {
@@ -210,7 +210,7 @@ public struct Dictionary[K, V, A]:
         set {
             self.ensureUnique();
             if let value = newValue {
-                self.insert(value: value, for: key)
+                self.insert(value, for: key)
             } else {
                 self.remove(for: key)
             }
@@ -218,21 +218,21 @@ public struct Dictionary[K, V, A]:
     }
 
     // Mutation
-    public mutating func insert(value: V, for key: K) -> Optional[V] {
+    public mutating func insert(_ v: V, for key: K) -> Optional[V] {
         self.ensureUnique();
         let hash = self.hash(key: key);
 
         // Check if key exists
         if let index = self.findEntry(key: key, hash: hash) {
             let oldValue = self.storage.value.entries(unchecked: index).value;
-            self.storage.value.entries(unchecked: index).value = value;
+            self.storage.value.entries(unchecked: index).value = v;
             return .Some(oldValue)
         }
 
         // Insert new entry
         self.ensureCapacity();
-        self.insertEntry(key: key, value: value, hash: hash);
-        .None
+        self.insertEntry(key: key, value: v, hash: hash);
+        return .None
     }
 
     public mutating func remove(for key: K) -> Optional[V] {
@@ -257,7 +257,7 @@ public struct Dictionary[K, V, A]:
 
             return .Some(value)
         }
-        .None
+        return .None
     }
 
     public func contains(key: K) -> Bool {
@@ -282,7 +282,7 @@ public struct Dictionary[K, V, A]:
     public func clone() -> Dictionary[K, V, A] where K: Cloneable, V: Cloneable {
         var result = Dictionary[K, V, A](minimumCapacity: self.count);
         /* for (key, value) in self {
-            result.insert(value: value.clone(), for: key.clone())
+            result.insert(value.clone(), for: key.clone())
         } */
         result
     }
@@ -292,7 +292,7 @@ public struct Dictionary[K, V, A]:
         if let .Some(value) = self(key) {
             return value
         }
-        self.insert(value: defaultValue, for: key);
+        self.insert(defaultValue, for: key);
         defaultValue
     }
 
@@ -301,7 +301,7 @@ public struct Dictionary[K, V, A]:
             return value
         }
         let value = defaultFn();
-        self.insert(value: value, for: key);
+        self.insert(value, for: key);
         value
     }
 }
@@ -346,7 +346,7 @@ public struct DictionaryIterator[K, V]: Iterator {
                 return .Some((entry.key, entry.value))
             }
         }
-        .None
+        return .None
     }
 }
 

@@ -19,7 +19,7 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
                 self.ptr = rawPtr.cast[T]();
                 self.cap = capacity;
             },
-            .None => panic("Buffer allocation failed")
+            .None => lang.panic("Buffer allocation failed")
         }
     }
 
@@ -31,7 +31,7 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
                 self.ptr = rawPtr.cast[T]();
                 self.cap = capacity;
             },
-            .None => panic("Buffer allocation failed")
+            .None => lang.panic("Buffer allocation failed")
         }
     }
 
@@ -120,7 +120,7 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
                 self.ptr = newPtr.cast[T]();
                 self.cap = newCapacity
             },
-            .None => panic("Buffer resize failed")
+            .None => lang.panic("Buffer resize failed")
         }
     }
 
@@ -142,9 +142,9 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
 public struct ArcBox[T] {
     private var ptr: Pointer[ArcBoxStorage[T]]
 
-    struct ArcBoxStorage[T] {
+    struct ArcBoxStorage[T1] {
         var refCount: Int  // Should be atomic
-        var value: T
+        var value: T1
     }
 
     public init(value: T) {
@@ -155,7 +155,7 @@ public struct ArcBox[T] {
                 self.ptr = rawPtr.cast[ArcBoxStorage[T]]();
                 self.ptr.pointee = ArcBoxStorage(refCount: 1, value: value)
             },
-            .None => panic("ArcBox allocation failed")
+            .None => lang.panic("ArcBox allocation failed")
         }
     }
 
@@ -172,7 +172,7 @@ public struct ArcBox[T] {
         ArcBox(ptr: self.ptr)
     }
 
-    public func deepClone[T]() -> ArcBox[T] where T: Cloneable {
+    public func deepClone() -> ArcBox[T] where T: Cloneable {
         ArcBox(value: self.ptr.pointee.value.clone())
     }
 

@@ -241,7 +241,7 @@ public struct LinesIterator[A]: Iterator where A: Allocator {
             return .Some(self.string.substringBytes(from: start, to: self.string.byteCount))
         }
 
-        .None
+        return .None
     }
 }
 

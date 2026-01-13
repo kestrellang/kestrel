@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_model::{ResolveTypePath, SymbolFor, TypePathResolution};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -12,7 +13,9 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::binders::utils::type_paths::resolve_protocol_bound_path;
 use crate::declaration_binder::BindingContext;
-use crate::diagnostics::WhereClauseAssociatedTypeNotFoundError;
+use crate::diagnostics::{
+    DuplicateTypeParameterError, ShadowedTypeParameterError, WhereClauseAssociatedTypeNotFoundError,
+};
 use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child, get_node_span};
 
@@ -40,6 +43,9 @@ pub(crate) fn resolve_generics(
             }
         })
         .collect();
+
+    // Check for duplicate and shadowed type parameter names
+    check_duplicate_type_parameters(&type_parameters, &symbol, ctx);
 
     let where_clause =
         resolve_where_clause(syntax, source, file_id, context_id, ctx, &type_parameters);
@@ -565,4 +571,67 @@ fn extract_path_from_node(node: &SyntaxNode) -> Vec<String> {
     }
 
     segments
+}
+
+/// Check for duplicate type parameter names within the same list,
+/// and for shadowing of type parameters from outer scopes.
+fn check_duplicate_type_parameters(
+    type_params: &[Arc<TypeParameterSymbol>],
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    ctx: &mut BindingContext,
+) {
+    use std::collections::HashMap;
+
+    // Check for duplicates within the same parameter list
+    let mut seen: HashMap<String, usize> = HashMap::new();
+
+    for (i, param) in type_params.iter().enumerate() {
+        let name = param.metadata().name().value.clone();
+        if let Some(&first_idx) = seen.get(&name) {
+            let first = &type_params[first_idx];
+            ctx.diagnostics.throw(DuplicateTypeParameterError {
+                name,
+                first_span: first.metadata().name().span.clone(),
+                duplicate_span: param.metadata().name().span.clone(),
+            });
+        } else {
+            seen.insert(name, i);
+        }
+    }
+
+    // Check for shadowing from outer scopes
+    let outer_type_params = collect_outer_type_parameters(symbol);
+    for param in type_params {
+        let name = &param.metadata().name().value;
+        if let Some(outer_param) = outer_type_params.iter().find(|p| &p.metadata().name().value == name) {
+            ctx.diagnostics.throw(ShadowedTypeParameterError {
+                name: name.clone(),
+                outer_span: outer_param.metadata().name().span.clone(),
+                inner_span: param.metadata().name().span.clone(),
+            });
+        }
+    }
+}
+
+/// Collect type parameters from all ancestor scopes.
+fn collect_outer_type_parameters(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    let mut result = Vec::new();
+    let mut current = symbol.metadata().parent();
+
+    while let Some(parent) = current {
+        // Collect type parameters from this ancestor
+        let children: Vec<Arc<dyn Symbol<KestrelLanguage>>> = parent.metadata().children();
+        for child in children {
+            if child.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                if let Ok(type_param) = child.downcast_arc::<TypeParameterSymbol>() {
+                    result.push(type_param);
+                }
+            }
+        }
+        current = parent.metadata().parent();
+    }
+
+    result
 }

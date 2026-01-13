@@ -23,8 +23,8 @@ public struct Array[T, A]:
 
     private var storage: ArcBox[ArrayStorage[T, A]]
 
-    struct ArrayStorage[T, A] where A: Allocator {
-        var buffer: Buffer[T, A]
+    struct ArrayStorage[T1, A1] where A1: Allocator {
+        var buffer: Buffer[T1, A1]
         var count: Int
     }
 
@@ -93,14 +93,14 @@ public struct Array[T, A]:
         }
     }
 
-    private mutating func ensureCapacity(minCapacity: Int) {
+    public mutating func ensureCapacity(_ capacity: Int) {
         self.ensureUnique();
-        if self.storage.value.buffer.capacity < minCapacity {
+        if self.storage.value.buffer.capacity < capacity {
             let newCapacity = if self.storage.value.buffer.capacity == 0 {
-                if minCapacity < 4 { 4 } else { minCapacity }
+                if capacity < 4 { 4 } else { capacity }
             } else {
                 var cap = self.storage.value.buffer.capacity;
-                while cap < minCapacity {
+                while cap < capacity {
                     cap = cap * 2
                 }
                 cap
@@ -162,13 +162,13 @@ public struct Array[T, A]:
 
     // Mutation
     public mutating func append(element: T) {
-        self.ensureCapacity(minCapacity: self.count + 1);
+        self.ensureCapacity(self.count + 1);
         self.storage.value.buffer(unchecked: self.storage.value.count) = element;
         self.storage.value.count = self.storage.value.count + 1
     }
 
     public mutating func append(contentsOf other: Array[T, A]) {
-        self.ensureCapacity(minCapacity: self.count + other.count);
+        self.ensureCapacity(self.count + other.count);
         /* for i in 0..<other.count {
             self.storage.value.buffer(unchecked: self.storage.value.count) = other(unchecked: i)
             self.storage.value.count += 1
@@ -177,10 +177,10 @@ public struct Array[T, A]:
 
     public mutating func insert(element: T, at index: Int) {
         if index < 0 or index > self.count {
-            panic("Array.insert: index out of bounds")
+            lang.panic("Array.insert: index out of bounds")
         }
 
-        self.ensureCapacity(minCapacity: self.count + 1);
+        self.ensureCapacity(self.count + 1);
 
         // Shift elements right
         var i = self.storage.value.count;
@@ -195,7 +195,7 @@ public struct Array[T, A]:
 
     public mutating func remove(at index: Int) -> T {
         if index < 0 or index >= self.count {
-            panic("Array.remove: index out of bounds")
+            lang.panic("Array.remove: index out of bounds")
         }
 
         self.ensureUnique();
@@ -225,8 +225,8 @@ public struct Array[T, A]:
         self.storage.value.count = 0
     }
 
-    public func reserveCapacity(minimumCapacity: Int) {
-        self.ensureCapacity(minCapacity: minimumCapacity)
+    public mutating func reserveCapacity(minimumCapacity: Int) {
+        self.ensureCapacity(minimumCapacity)
     }
 
     // Access

@@ -14,6 +14,7 @@ use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
@@ -69,11 +70,16 @@ pub fn resolve_member_chain(
 /// 4. Checks visibility
 /// 5. Uses MemberAccessBehavior to produce the result expression
 pub fn resolve_member_access(
-    base: Expression,
+    mut base: Expression,
     member_name: &str,
     member_span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
+    // Resolve SelfType in the base expression before member access.
+    // This ensures that when type inference processes the member access,
+    // it has a concrete type to work with instead of SelfType.
+    base.ty = resolve_self_type_to_concrete(&base.ty, ctx);
+
     let base_span = base.span.clone();
     let base_ty = &base.ty;
     let full_span = Span::new(base_span.file_id, base_span.start..member_span.end);
@@ -132,6 +138,12 @@ pub fn resolve_member_access(
             Ty::infer(member_span.clone()),
             full_span,
         );
+    }
+
+    // 3.5. If base type is Error, propagate error without cascading diagnostics.
+    // The original error has already been reported where the error type was created.
+    if matches!(base_ty.kind(), TyKind::Error) {
+        return Expression::error(full_span);
     }
 
     // 4. Get container from base type
@@ -557,6 +569,11 @@ pub fn resolve_member_call(
         );
     }
 
+    // If base type is Error, propagate error without cascading diagnostics.
+    if matches!(base_ty.kind(), TyKind::Error) {
+        return Expression::error(span);
+    }
+
     // Get container from type (for Struct, Protocol, Self types)
     let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
@@ -677,6 +694,39 @@ pub fn resolve_member_call(
                 // Validate access modes for arguments
                 validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
+                // Build combined substitutions for the Call expression:
+                // 1. Base type substitutions (e.g., T from Optional[T])
+                // 2. Method's own type parameter substitutions (e.g., U from map[U])
+                let mut call_subs = Substitutions::new();
+
+                // Add base type substitutions
+                if let Some((_, base_subs)) = resolved_base_ty.as_struct_with_subs() {
+                    for (key, ty) in base_subs.iter() {
+                        call_subs.insert(*key, ty.clone());
+                    }
+                } else if let Some((_, base_subs)) = resolved_base_ty.as_enum_with_subs() {
+                    for (key, ty) in base_subs.iter() {
+                        call_subs.insert(*key, ty.clone());
+                    }
+                }
+
+                // Infer method's own type parameters from argument types
+                // e.g., for map[U](transform: (T) -> U), infer U from the closure's return type
+                if let Some(generics) = method.metadata().get_behavior::<GenericsBehavior>() {
+                    let method_type_params = generics.type_parameters();
+                    if !method_type_params.is_empty() {
+                        let arg_types: Vec<Ty> =
+                            arguments.iter().map(|a| a.value.ty.clone()).collect();
+                        let method_subs =
+                            infer_type_arguments(method_type_params, &callable, &arg_types);
+                        for (key, ty) in method_subs.iter() {
+                            call_subs.insert(*key, ty.clone());
+                        }
+                        // Also apply method substitutions to return type
+                        return_ty = return_ty.apply_substitutions(&method_subs);
+                    }
+                }
+
                 // Create method ref and then call
                 let method_ref = Expression::method_ref(
                     object.clone(),
@@ -685,7 +735,14 @@ pub fn resolve_member_call(
                     span.clone(),
                 );
 
-                return Expression::call(method_ref, arguments, return_ty, span);
+                // Use generic_call to store substitutions for type checking
+                return Expression::generic_call(
+                    method_ref,
+                    arguments,
+                    call_subs,
+                    return_ty,
+                    span,
+                );
             }
         }
     }
@@ -872,11 +929,28 @@ fn resolve_constrained_member_call(
 
     // Single matching method found
     let winner = matching[0];
-    let return_ty = winner.callable.return_type().clone();
+    let mut return_ty = winner.callable.return_type().clone();
     let method_id = winner.method.metadata().id();
 
     // Validate access modes for arguments
     validate_argument_access_modes(&winner.callable, &arguments, &span, ctx);
+
+    // Build substitutions for the Call expression
+    let mut call_subs = Substitutions::new();
+
+    // Infer method's own type parameters from argument types
+    if let Some(generics) = winner.method.metadata().get_behavior::<GenericsBehavior>() {
+        let method_type_params = generics.type_parameters();
+        if !method_type_params.is_empty() {
+            let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+            let method_subs = infer_type_arguments(method_type_params, &winner.callable, &arg_types);
+            for (key, ty) in method_subs.iter() {
+                call_subs.insert(*key, ty.clone());
+            }
+            // Also apply method substitutions to return type
+            return_ty = return_ty.apply_substitutions(&method_subs);
+        }
+    }
 
     // Create method ref and call
     let method_ref = Expression::method_ref(
@@ -886,7 +960,8 @@ fn resolve_constrained_member_call(
         span.clone(),
     );
 
-    Expression::call(method_ref, arguments, return_ty, span)
+    // Use generic_call to store substitutions for type checking
+    Expression::generic_call(method_ref, arguments, call_subs, return_ty, span)
 }
 
 /// Collect methods from a protocol, including inherited protocols.

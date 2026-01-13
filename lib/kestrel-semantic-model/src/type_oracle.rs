@@ -51,6 +51,12 @@ impl TypeOracle for SemanticModel {
             // Get bounds by walking up the parent chain to find where clauses
             let bounds = get_type_parameter_bounds(type_param);
 
+            // If any bound is an error type, the type parameter's constraints couldn't be resolved.
+            // Return UnknownType to suppress cascading error messages.
+            if bounds.iter().any(|b| matches!(b.kind(), TyKind::Error)) {
+                return Err(MemberError::UnknownType);
+            }
+
             for bound in &bounds {
                 if let TyKind::Protocol {
                     symbol: proto,
@@ -106,6 +112,13 @@ impl TypeOracle for SemanticModel {
                 receiver_ty: receiver_ty.clone(),
                 member: member.to_string(),
             });
+        }
+
+        // Handle SelfType - we can't resolve it in this context (no function context available).
+        // SelfType should ideally be resolved to a concrete type before reaching the type oracle,
+        // but if it wasn't, return UnknownType to suppress cascading error messages.
+        if matches!(receiver_ty.kind(), TyKind::SelfType) {
+            return Err(MemberError::UnknownType);
         }
 
         // Get the container symbol and substitutions
@@ -264,6 +277,10 @@ impl TypeOracle for SemanticModel {
         if matches!(ty.kind(), TyKind::Error) {
             return true;
         }
+
+        // Expand type aliases before checking conformance.
+        // e.g., `Int` is a type alias for `Int64`, so we need to check `Int64`'s conformances.
+        let ty = &ty.expand_aliases();
 
         // Handle tuple types - check if protocol has tuple_conformance_propagation flag
         if let TyKind::Tuple(elements) = ty.kind() {
@@ -590,7 +607,8 @@ fn get_type_container_with_subs(
             Some((dyn_symbol, substitutions.clone()))
         }
         TyKind::SelfType => {
-            // SelfType should be resolved to concrete type before member access
+            // SelfType is handled in resolve_member() before this function is called.
+            // If we reach here, it means SelfType wasn't resolved and we can't proceed.
             None
         }
         _ => None,
@@ -861,9 +879,14 @@ fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
         if let Some(where_clause) = get_where_clause_from_symbol(parent.as_ref()) {
             // Extract bounds for this parameter from the where clause
             for bound in where_clause.bounds_for(param_id) {
-                // Only include resolved Protocol bounds (not error types)
-                if matches!(bound.kind(), TyKind::Protocol { .. }) {
-                    bounds.push(bound.clone());
+                // Include both Protocol bounds and Error bounds.
+                // Error bounds indicate that protocol resolution failed - we include them
+                // so the caller can detect and suppress cascading error messages.
+                match bound.kind() {
+                    TyKind::Protocol { .. } | TyKind::Error => {
+                        bounds.push(bound.clone());
+                    }
+                    _ => {}
                 }
             }
         }

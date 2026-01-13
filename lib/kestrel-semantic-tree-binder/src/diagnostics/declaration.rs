@@ -87,3 +87,46 @@ impl IntoDiagnostic for AssociatedTypeBoundsInWrongContextError {
             ])
     }
 }
+
+/// Error when a generic parameter is declared multiple times in the same parameter list.
+pub struct DuplicateTypeParameterError {
+    pub name: String,
+    pub first_span: Span,
+    pub duplicate_span: Span,
+}
+
+impl IntoDiagnostic for DuplicateTypeParameterError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("duplicate type parameter: '{}'", self.name))
+            .with_labels(vec![
+                Label::secondary(self.first_span.file_id, self.first_span.range())
+                    .with_message("first defined here"),
+                Label::primary(self.duplicate_span.file_id, self.duplicate_span.range())
+                    .with_message("duplicate definition"),
+            ])
+    }
+}
+
+/// Error when a type parameter shadows one from an outer scope.
+pub struct ShadowedTypeParameterError {
+    pub name: String,
+    pub outer_span: Span,
+    pub inner_span: Span,
+}
+
+impl IntoDiagnostic for ShadowedTypeParameterError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type parameter '{}' shadows one from outer scope",
+                self.name
+            ))
+            .with_labels(vec![
+                Label::secondary(self.outer_span.file_id, self.outer_span.range())
+                    .with_message("outer type parameter defined here"),
+                Label::primary(self.inner_span.file_id, self.inner_span.range())
+                    .with_message("shadows outer type parameter"),
+            ])
+    }
+}

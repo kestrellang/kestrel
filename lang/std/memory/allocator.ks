@@ -68,7 +68,7 @@ public struct ArenaAllocator: Allocator {
         self.offset = 0
     }
 
-    public func allocate(layout: Layout) -> Optional[RawPointer] {
+    public mutating func allocate(layout: Layout) -> Optional[RawPointer] {
         // Align offset
         let alignedOffset = (self.offset + layout.alignment - 1).bitwiseAnd((layout.alignment - 1).bitwiseNot());
 
@@ -85,7 +85,7 @@ public struct ArenaAllocator: Allocator {
         // No-op for arena - memory freed all at once
     }
 
-    public func reset() {
+    public mutating func reset() {
         self.offset = 0
     }
 
@@ -121,13 +121,13 @@ public struct PoolAllocator[T]: Allocator {
         } */
     }
 
-    public func allocate(layout: Layout) -> Optional[RawPointer] {
+    public mutating func allocate(layout: Layout) -> Optional[RawPointer] {
         // Pool allocator only works for its specific type size
         if layout.size != Layout.of[T]().size {
             return .None
         }
 
-        if let node = self.freeList {
+        if let .Some(node) = self.freeList {
             self.freeList = node.pointee.next;
             self.allocated = self.allocated + 1;
             .Some(node.asRaw())
@@ -136,7 +136,7 @@ public struct PoolAllocator[T]: Allocator {
         }
     }
 
-    public func deallocate(ptr: RawPointer, layout: Layout) {
+    public mutating func deallocate(ptr: RawPointer, layout: Layout) {
         let node = ptr.cast[FreeNode]();
         node.pointee = FreeNode(next: self.freeList);
         self.freeList = .Some(node);

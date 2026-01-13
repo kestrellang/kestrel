@@ -866,3 +866,70 @@ pub fn type_satisfies_bound(
         _ => false,
     }
 }
+
+/// Replace any remaining type parameters in a type with inference placeholders.
+///
+/// This is used when initializer parameter types might contain type parameters
+/// that weren't in the substitution map (due to symbol ID mismatches between
+/// how type parameters are stored in different phases).
+pub fn replace_unsubstituted_type_params(ty: &Ty, span: &Span) -> Ty {
+    match ty.kind() {
+        // Type parameter - replace with inference placeholder
+        TyKind::TypeParameter(_) => Ty::infer(span.clone()),
+
+        // Composite types - recursively replace
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| replace_unsubstituted_type_params(e, span))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        }
+
+        TyKind::Array(element) => {
+            let new_element = replace_unsubstituted_type_params(element, span);
+            Ty::array(new_element, ty.span().clone())
+        }
+
+        TyKind::Pointer(element) => {
+            let new_element = replace_unsubstituted_type_params(element, span);
+            Ty::pointer(new_element, ty.span().clone())
+        }
+
+        TyKind::Function { params, return_type } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| replace_unsubstituted_type_params(p, span))
+                .collect();
+            let new_return = replace_unsubstituted_type_params(return_type, span);
+            Ty::function(new_params, new_return, ty.span().clone())
+        }
+
+        TyKind::Struct { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_unsubstituted_type_params(sub_ty, span));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        TyKind::Enum { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_unsubstituted_type_params(sub_ty, span));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        TyKind::Protocol { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_unsubstituted_type_params(sub_ty, span));
+            }
+            Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    }
+}

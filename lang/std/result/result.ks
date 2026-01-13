@@ -54,7 +54,7 @@ public enum Result[T, E]: Tryable, Returnable[T] {
     public func unwrap() -> T {
         match self {
             .Ok(value) => value,
-            .Err(error) => panic("called unwrap() on Err: " + error.description())
+            .Err(error) => lang.panic("called unwrap() on Err: " + error.description())
         }
     }
 
@@ -74,7 +74,7 @@ public enum Result[T, E]: Tryable, Returnable[T] {
 
     public func unwrapErr() -> E {
         match self {
-            .Ok(value) => panic("called unwrapErr() on Ok"),
+            .Ok(value) => lang.panic("called unwrapErr() on Ok"),
             .Err(error) => error
         }
     }
@@ -83,7 +83,7 @@ public enum Result[T, E]: Tryable, Returnable[T] {
     public func expect(message: String) -> T {
         match self {
             .Ok(value) => value,
-            .Err(error) => panic(message + ": " + error.description())
+            .Err(error) => lang.panic(message + ": " + error.description())
         }
     }
 

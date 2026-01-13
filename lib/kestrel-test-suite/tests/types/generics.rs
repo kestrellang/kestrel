@@ -195,6 +195,30 @@ mod validation {
             .expect(Compiles)
             .expect(Symbol::new("Good").has(Behavior::TypeParamCount(2)));
     }
+
+    #[test]
+    fn shadowed_type_param_in_method() {
+        // Inner function's T shadows struct's T
+        Test::new(
+            r#"module Test
+            struct Box[T] {
+                func identity[T](value: T) -> T { value }
+            }"#,
+        )
+        .expect(HasError("shadows"));
+    }
+
+    #[test]
+    fn shadowed_type_param_different_name_ok() {
+        // Different names should be fine
+        Test::new(
+            r#"module Test
+            struct Box[T] {
+                func identity[U](value: U) -> U { value }
+            }"#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod where_clause {

@@ -21,8 +21,8 @@ public struct String[A]:
 
     private var storage: ArcBox[StringStorage[A]]
 
-    struct StringStorage[A] where A: Allocator {
-        var buffer: Buffer[UInt8, A]
+    struct StringStorage[A1] where A1: Allocator {
+        var buffer: Buffer[UInt8, A1]
         var length: Int  // byte length
     }
 
@@ -208,7 +208,7 @@ public struct String[A]:
             }
             if found { return .Some(i) }
         } */
-        .None
+        return .None
     }
 
     // Transformation

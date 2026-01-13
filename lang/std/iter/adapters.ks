@@ -40,7 +40,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
                 return .Some(item)
             }
         }
-        .None
+        return .None
     }
 }
 
@@ -62,7 +62,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
                 return .Some(result)
             }
         }
-        .None
+        return .None
     }
 }
 
@@ -82,8 +82,8 @@ public struct FlatMapIterator[I, Inner]: Iterator where I: Iterator, Inner: Iter
 
     public mutating func next() -> Optional[Inner.Item] {
         while true {
-            if let currentIter = self.current {
-                if let item = currentIter.next() {
+            if let .Some(currentIter) = self.current {
+                if let .Some(item) = currentIter.next() {
                     return .Some(item)
                 }
                 self.current = .None
@@ -95,7 +95,7 @@ public struct FlatMapIterator[I, Inner]: Iterator where I: Iterator, Inner: Iter
                 return .None
             }
         }
-        panic("unreachable")
+        lang.panic("unreachable")
     }
 }
 
@@ -166,7 +166,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
             }
             self.done = true;
         }
-        .None
+        return .None
     }
 }
 
@@ -218,7 +218,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
                 return .Some(item)
             }
         }
-        .None
+        return .None
     }
 }
 
@@ -290,7 +290,7 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
                 return .Some((a, b))
             }
         }
-        .None
+        return .None
     }
 }
 
@@ -401,8 +401,8 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
             if predicate(item) {
                 return self.next()
             }
-        }
-        .None
+        };
+        return .None
     }
 }
 
