@@ -456,19 +456,9 @@ pub fn resolve_call(
         ExprKind::LangIntrinsicRef(intrinsic) => {
             use kestrel_semantic_tree::expr::LangIntrinsic;
 
-            // Lang intrinsics cannot have explicit type arguments
-            if let Some(ref type_args) = explicit_type_args {
-                if !type_args.is_empty() {
-                    ctx.diagnostics.add_diagnostic(
-                        TypeArgsOnNonGenericError {
-                            span: span.clone(),
-                            callee_description: "a language intrinsic".to_string(),
-                        }
-                        .into_diagnostic(),
-                    );
-                    return Expression::error(span);
-                }
-            }
+            // Type arguments for lang intrinsics (like sizeof[T], cast_ptr[T]) are already
+            // extracted during path resolution and stored inside the intrinsic itself.
+            // We ignore explicit_type_args here since they've already been processed.
 
             // Validate argument count based on intrinsic
             let expected_arity = intrinsic.arity();
@@ -619,7 +609,7 @@ pub fn resolve_call(
 /// For example: `array(0)` where `array` is a value with subscripts.
 ///
 /// Returns `Some(Expression)` if a matching subscript was found, `None` otherwise.
-fn try_resolve_subscript_call(
+pub fn try_resolve_subscript_call(
     receiver: &Expression,
     arguments: &[CallArgument],
     arg_labels: &[Option<String>],

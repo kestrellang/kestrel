@@ -64,40 +64,40 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     }
 
     // Safe access - returns Optional, bounds checked
-    //public subscript(safe index: Int) -> Optional[T] {
-    //    get {
-    //        if index >= 0 and index < self.cap {
-    //            .Some(self.ptr.offset(by: index).read())
-    //        } else {
-    //            .None
-    //        }
-    //    }
-    //    set {
-    //        if index >= 0 and index < self.cap {
-    //            if let value = newValue {
-    //                self.ptr.offset(by: index).write(value)
-    //            }
-    //        }
-    //    }
-    //}
+    public subscript(safe index: Int) -> Optional[T] {
+        get {
+            if index >= 0 and index < self.cap {
+                .Some(self.ptr.offset(by: index).read())
+            } else {
+                .None
+            }
+        }
+        set {
+            if index >= 0 and index < self.cap {
+                if let value = newValue {
+                    self.ptr.offset(by: index).write(value)
+                }
+            }
+        }
+    }
 
     // Wrapping access - indices wrap around
-    //public subscript(wrapping index: Int) -> T {
-    //    get {
-    //        let wrapped = ((index % self.cap) + self.cap) % self.cap
-    //        self.ptr.offset(by: wrapped).read()
-    //    }
-    //    set {
-    //        let wrapped = ((index % self.cap) + self.cap) % self.cap
-    //        self.ptr.offset(by: wrapped).write(newValue)
-    //    }
-    //}
+    public subscript(wrapping index: Int) -> T {
+        get {
+            let wrapped = ((index % self.cap) + self.cap) % self.cap;
+            self.ptr.offset(by: wrapped).read()
+        }
+        set {
+            let wrapped = ((index % self.cap) + self.cap) % self.cap;
+            self.ptr.offset(by: wrapped).write(newValue)
+        }
+    }
 
     // Unchecked access - no bounds check
-    //public subscript(unchecked index: Int) -> T {
-    //    get { self.ptr.offset(by: index).read() }
-    //    set { self.ptr.offset(by: index).write(newValue) }
-    //}
+    public subscript(unchecked index: Int) -> T {
+        get { self.ptr.offset(by: index).read() }
+        set { self.ptr.offset(by: index).write(newValue) }
+    }
 
     // Bulk operations
     public func fill(with value: T) {
@@ -109,17 +109,17 @@ public struct Buffer[T, A]: NonCopyable where A: Allocator {
     public func copy(from source: Buffer[T, A], count: Int) {
         let copyCount = if count < source.cap { count } else { source.cap };
         let copyCount = if copyCount < self.cap { copyCount } else { self.cap };
-        let _ = memcpy(self.ptr.asRaw().raw, source.ptr.asRaw().raw, copyCount * lang.sizeof[T]())
+        memcpy(self.ptr.asRaw().raw, source.ptr.asRaw().raw, copyCount * Int(lang.sizeof[T]()));
     }
 
     public func move(from source: Buffer[T, A], count: Int) {
         let moveCount = if count < source.cap { count } else { source.cap };
         let moveCount = if moveCount < self.cap { moveCount } else { self.cap };
-        let _ = memmove(self.ptr.asRaw().raw, source.ptr.asRaw().raw, moveCount * lang.sizeof[T]())
+        memmove(self.ptr.asRaw().raw, source.ptr.asRaw().raw, moveCount * Int(lang.sizeof[T]()));
     }
 
     public func zeroFill() {
-        let _ = memset(self.ptr.asRaw().raw, 0, self.cap * lang.sizeof[T]())
+        memset(self.ptr.asRaw().raw, 0, self.cap * Int(lang.sizeof[T]()));
     }
 
     // Resizing

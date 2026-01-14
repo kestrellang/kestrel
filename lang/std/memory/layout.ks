@@ -15,7 +15,7 @@ public struct Layout: Equatable {
     }
 
     public static func of[T]() -> Layout {
-        Layout(size: lang.sizeof[T](), alignment: lang.alignof[T]())
+        Layout(size: Int(lang.sizeof[T]()), alignment: Int(lang.alignof[T]()))
     }
 
     public static func array[T](count: Int) -> Layout {

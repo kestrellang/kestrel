@@ -4,7 +4,7 @@ module std.result
 
 import std.core.(Equatable, Bool)
 import std.text.(String)
-import std.ops.(ExpressibleByNilLiteral, Nil)
+import std.ops.(ExpressibleByNilLiteral)
 import std.iter.(Iterator, Functor)
 
 public enum Optional[T]: ExpressibleByNilLiteral {
@@ -12,7 +12,7 @@ public enum Optional[T]: ExpressibleByNilLiteral {
     case None
 
     // ExpressibleByNilLiteral
-    public init(nilLiteral value: Nil) {
+    public init() {
         self = .None
     }
 

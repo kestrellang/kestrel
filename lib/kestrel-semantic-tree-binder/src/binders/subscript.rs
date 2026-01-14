@@ -4,6 +4,7 @@ use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, CallableParameter, ParameterAccessMode, ReceiverKind,
 };
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
@@ -93,6 +94,24 @@ impl DeclarationBinder for SubscriptBinder {
         if let Some(setter) = subscript.setter() {
             bind_setter_signature(&setter, &resolved_params, &return_type, is_static, &span);
         }
+
+        // Add SubscriptBehavior to the subscript symbol for overload resolution
+        let callable_params: Vec<CallableParameter> = resolved_params
+            .iter()
+            .map(|p| CallableParameter {
+                access_mode: p.access_mode,
+                label: p.label.clone(),
+                bind_name: p.bind_name.clone(),
+                ty: p.ty.clone(),
+            })
+            .collect();
+
+        let subscript_behavior = if is_static {
+            SubscriptBehavior::new(callable_params, return_type)
+        } else {
+            SubscriptBehavior::with_receiver(callable_params, return_type, ReceiverKind::Borrowing)
+        };
+        symbol.metadata().add_behavior(subscript_behavior);
     }
 
     fn bind_body(

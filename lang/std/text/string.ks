@@ -60,12 +60,12 @@ public struct String[A]:
             length: bytes.count
         ))
         /* for i in 0..<bytes.count {
-            self.storage.value.buffer(unchecked: i) = bytes(unchecked: i)
+            (self.storage.value.buffer)(unchecked: i) = bytes(unchecked: i)
         } */
     }
 
     // From code points
-    public init(codePoints: Array[CodePoint]) {
+    public init(codePoints: Array[CodePoint, A]) {
         var bytes: [UInt8] = [];
         /* for cp in codePoints {
             cp.encodeUtf8(into: bytes)
@@ -126,7 +126,7 @@ public struct String[A]:
     public mutating func append(string other: String) {
         self.ensureCapacity(minCapacity: self.byteCount + other.byteCount)
         /* for i in 0..<other.byteCount {
-            self.storage.value.buffer(unchecked: self.storage.value.length) = other.storage.value.buffer(unchecked: i)
+            (self.storage.value.buffer)(unchecked: self.storage.value.length) = (other.storage.value.buffer)(unchecked: i)
             self.storage.value.length += 1
         } */
     }
@@ -136,7 +136,7 @@ public struct String[A]:
         cp.encodeUtf8(into: bytes);
         self.ensureCapacity(minCapacity: self.byteCount + bytes.count);
         /* for byte in bytes {
-            self.storage.value.buffer(unchecked: self.storage.value.length) = byte
+            (self.storage.value.buffer)(unchecked: self.storage.value.length) = byte
             self.storage.value.length += 1
         } */
     }
@@ -163,7 +163,7 @@ public struct String[A]:
         /* for i in 0..=(self.byteCount - substring.byteCount) {
             var found = true
             for j in 0..<substring.byteCount {
-                if self.storage.value.buffer(unchecked: i + j) != substring.storage.value.buffer(unchecked: j) {
+                if (self.storage.value.buffer)(unchecked: i + j) != (substring.storage.value.buffer)(unchecked: j) {
                     found = false
                     break
                 }
@@ -176,7 +176,7 @@ public struct String[A]:
     public func starts(with prefix: String) -> Bool {
         if prefix.byteCount > self.byteCount { return false }
         /* for i in 0..<prefix.byteCount {
-            if self.storage.value.buffer(unchecked: i) != prefix.storage.value.buffer(unchecked: i) {
+            if (self.storage.value.buffer)(unchecked: i) != (prefix.storage.value.buffer)(unchecked: i) {
                 return false
             }
         } */
@@ -187,7 +187,7 @@ public struct String[A]:
         if suffix.byteCount > self.byteCount { return false }
         let offset = self.byteCount - suffix.byteCount;
         /* for i in 0..<suffix.byteCount {
-            if self.storage.value.buffer(unchecked: offset + i) != suffix.storage.value.buffer(unchecked: i) {
+            if (self.storage.value.buffer)(unchecked: offset + i) != (suffix.storage.value.buffer)(unchecked: i) {
                 return false
             }
         } */
@@ -201,7 +201,7 @@ public struct String[A]:
         /* for i in 0..=(self.byteCount - substring.byteCount) {
             var found = true
             for j in 0..<substring.byteCount {
-                if self.storage.value.buffer(unchecked: i + j) != substring.storage.value.buffer(unchecked: j) {
+                if (self.storage.value.buffer)(unchecked: i + j) != (substring.storage.value.buffer)(unchecked: j) {
                     found = false
                     break
                 }
@@ -219,7 +219,7 @@ public struct String[A]:
     public func trimStart() -> String[A] {
         var start = 0;
         while start < self.byteCount {
-            let byte = self.storage.value.buffer(unchecked: start);
+            let byte = (self.storage.value.buffer)(unchecked: start);
             if byte == 32 or byte == 9 or byte == 10 or byte == 13 {
                 start = start + 1
             } else {
@@ -232,7 +232,7 @@ public struct String[A]:
     public func trimEnd() -> String[A] {
         var end = self.byteCount;
         while end > 0 {
-            let byte = self.storage.value.buffer(unchecked: end - 1);
+            let byte = (self.storage.value.buffer)(unchecked: end - 1);
             if byte == 32 or byte == 9 or byte == 10 or byte == 13 {
                 end = end - 1
             } else {
@@ -268,7 +268,7 @@ public struct String[A]:
             if i + pattern.byteCount <= self.byteCount {
                 var found = true;
                 /* for j in 0..<pattern.byteCount {
-                    if self.storage.value.buffer(unchecked: i + j) != pattern.storage.value.buffer(unchecked: j) {
+                    if (self.storage.value.buffer)(unchecked: i + j) != (pattern.storage.value.buffer)(unchecked: j) {
                         found = false;
                         break
                     }
@@ -281,7 +281,7 @@ public struct String[A]:
             }
             // Append single byte (careful with UTF-8!)
             /* TODO: implement byte-by-byte appending with proper COW semantics
-            result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i);
+            (result.storage.value.buffer)(unchecked: result.storage.value.length) = (self.storage.value.buffer)(unchecked: i);
             result.storage.value.length = result.storage.value.length + 1;
             */
             i = i + 1
@@ -298,7 +298,7 @@ public struct String[A]:
     private func substringBytes(from start: Int, to end: Int) -> String[A] {
         var result = String[A](capacity: end - start);
         /* for i in start..<end {
-            result.storage.value.buffer(unchecked: result.storage.value.length) = self.storage.value.buffer(unchecked: i)
+            (result.storage.value.buffer)(unchecked: result.storage.value.length) = (self.storage.value.buffer)(unchecked: i)
             result.storage.value.length += 1
         } */
         result
@@ -308,7 +308,7 @@ public struct String[A]:
     public func equals(other: String[A]) -> Bool {
         if self.byteCount != other.byteCount { return false }
         /* for i in 0..<self.byteCount {
-            if self.storage.value.buffer(unchecked: i) != other.storage.value.buffer(unchecked: i) {
+            if (self.storage.value.buffer)(unchecked: i) != (other.storage.value.buffer)(unchecked: i) {
                 return false
             }
         } */
@@ -319,8 +319,8 @@ public struct String[A]:
     public func compare(other: String[A]) -> Ordering {
         let minLen = if self.byteCount < other.byteCount { self.byteCount } else { other.byteCount };
         /* for i in 0..<minLen {
-            let a = self.storage.value.buffer(unchecked: i)
-            let b = other.storage.value.buffer(unchecked: i)
+            let a = (self.storage.value.buffer)(unchecked: i)
+            let b = (other.storage.value.buffer)(unchecked: i)
             if a < b { return .Less }
             if a > b { return .Greater }
         } */
@@ -332,7 +332,7 @@ public struct String[A]:
     // Hashable
     public func hash[H](mutating into hasher: H) where H: Hasher {
         /* for i in 0..<self.byteCount {
-            hasher.write(bytes: [self.storage.value.buffer(unchecked: i)])
+            hasher.write(bytes: [(self.storage.value.buffer)(unchecked: i)])
         } */
     }
 
@@ -340,7 +340,7 @@ public struct String[A]:
     public func clone() -> String[A] {
         var result = String[A](capacity: self.byteCount);
         /* for i in 0..<self.byteCount {
-            result.storage.value.buffer(unchecked: i) = self.storage.value.buffer(unchecked: i)
+            (result.storage.value.buffer)(unchecked: i) = (self.storage.value.buffer)(unchecked: i)
         } */
         result.storage.value.length = self.byteCount;
         result
@@ -348,7 +348,7 @@ public struct String[A]:
 
     // Raw byte access (for views)
     internal func byteAt(index: Int) -> UInt8 {
-        self.storage.value.buffer(unchecked: index)
+        (self.storage.value.buffer)(unchecked: index)
     }
 }
 

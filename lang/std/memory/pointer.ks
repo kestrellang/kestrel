@@ -83,7 +83,7 @@ public struct Pointer[T]: Equatable {
     }
 
     public func offset(by n: Int) -> Pointer[T] {
-        Pointer(raw: lang.cast_ptr[T](lang.ptr_offset(self.raw, n * lang.sizeof[T]())))
+        Pointer(raw: lang.cast_ptr[T](lang.ptr_offset(self.raw, n * Int(lang.sizeof[T]()))))
     }
 
     public func asRaw() -> RawPointer {

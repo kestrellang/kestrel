@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Equatable, Hashable, Cloneable, UInt64)
+import std.core.(Int, Bool, Equatable, Hashable, Cloneable, UInt64)
 import std.result.(Optional)
 import std.memory.(Allocator, ArcBox)
 import std.iter.(Iterator, Iterable)
@@ -79,7 +79,7 @@ public struct Dictionary[K, V, A]:
 
     private mutating func initializeEntries() {
         /* for i in 0..<self.storage.value.capacity {
-            self.storage.value.entries(unchecked: i) = Entry(
+            (self.storage.value.entries)(unchecked: i) = Entry(
                 key: lang.uninitialized[K](),
                 value: lang.uninitialized[V](),
                 hash: 0,
@@ -148,8 +148,8 @@ public struct Dictionary[K, V, A]:
         let mask = self.storage.value.capacity - 1;
         var index = Int(hash) & mask;
 
-        while self.storage.value.entries(unchecked: index).occupied {
-            if self.storage.value.entries(unchecked: index).hash == hash {
+        while (self.storage.value.entries)(unchecked: index).occupied {
+            if (self.storage.value.entries)(unchecked: index).hash == hash {
                 return index
             }
             index = (index + 1) & mask
@@ -167,7 +167,7 @@ public struct Dictionary[K, V, A]:
         var checked = 0;
 
         while checked < self.storage.value.capacity {
-            let entry = self.storage.value.entries(unchecked: index);
+            let entry = (self.storage.value.entries)(unchecked: index);
             if not entry.occupied {
                 return .None
             }
@@ -184,11 +184,11 @@ public struct Dictionary[K, V, A]:
         let mask = self.storage.value.capacity - 1;
         var index = Int(hash) & mask;
 
-        while self.storage.value.entries(unchecked: index).occupied {
+        while (self.storage.value.entries)(unchecked: index).occupied {
             index = (index + 1) & mask
         }
 
-        self.storage.value.entries(unchecked: index) = Entry(
+        (self.storage.value.entries)(unchecked: index) = Entry(
             key: key,
             value: value,
             hash: hash,
@@ -202,7 +202,7 @@ public struct Dictionary[K, V, A]:
         get {
             let hash = self.hash(key: key);
             if let index = self.findEntry(key: key, hash: hash) {
-                .Some(self.storage.value.entries(unchecked: index).value)
+                .Some((self.storage.value.entries)(unchecked: index).value)
             } else {
                 .None
             }
@@ -218,14 +218,14 @@ public struct Dictionary[K, V, A]:
     }
 
     // Mutation
-    public mutating func insert(_ v: V, for key: K) -> Optional[V] {
+    public mutating func insert(v: V, for key: K) -> Optional[V] {
         self.ensureUnique();
         let hash = self.hash(key: key);
 
         // Check if key exists
         if let index = self.findEntry(key: key, hash: hash) {
-            let oldValue = self.storage.value.entries(unchecked: index).value;
-            self.storage.value.entries(unchecked: index).value = v;
+            let oldValue = (self.storage.value.entries)(unchecked: index).value;
+            (self.storage.value.entries)(unchecked: index).value = v;
             return .Some(oldValue)
         }
 
@@ -240,16 +240,16 @@ public struct Dictionary[K, V, A]:
         let hash = self.hash(key: key);
 
         if let index = self.findEntry(key: key, hash: hash) {
-            let value = self.storage.value.entries(unchecked: index).value;
-            self.storage.value.entries(unchecked: index).occupied = false;
+            let value = (self.storage.value.entries)(unchecked: index).value;
+            (self.storage.value.entries)(unchecked: index).occupied = false;
             self.storage.value.count = self.storage.value.count - 1;
 
             // Rehash following entries (linear probing requires this)
             let mask = self.storage.value.capacity - 1;
             var i = (index + 1) & mask;
-            while self.storage.value.entries(unchecked: i).occupied {
-                let entry = self.storage.value.entries(unchecked: i);
-                self.storage.value.entries(unchecked: i).occupied = false;
+            while (self.storage.value.entries)(unchecked: i).occupied {
+                let entry = (self.storage.value.entries)(unchecked: i);
+                (self.storage.value.entries)(unchecked: i).occupied = false;
                 self.storage.value.count = self.storage.value.count - 1;
                 self.insertEntry(key: entry.key, value: entry.value, hash: entry.hash);
                 i = (i + 1) & mask
@@ -268,7 +268,7 @@ public struct Dictionary[K, V, A]:
     public mutating func clear() {
         self.ensureUnique();
         /* for i in 0..<self.storage.value.capacity {
-            self.storage.value.entries(unchecked: i).occupied = false
+            (self.storage.value.entries)(unchecked: i).occupied = false
         } */
         self.storage.value.count = 0
     }
@@ -340,7 +340,7 @@ public struct DictionaryIterator[K, V]: Iterator {
 
     public mutating func next() -> Optional[(K, V)] {
         while self.index < self.dict.storage.value.capacity {
-            let entry = self.dict.storage.value.entries(unchecked: self.index);
+            let entry = (self.dict.storage.value.entries)(unchecked: self.index);
             self.index = self.index + 1;
             if entry.occupied {
                 return .Some((entry.key, entry.value))

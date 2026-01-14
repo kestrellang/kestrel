@@ -38,7 +38,7 @@ use crate::diagnostics::{
     UnsupportedGenericProtocolBoundError,
 };
 
-use super::calls::{collect_overload_descriptions, validate_argument_access_modes};
+use super::calls::{collect_overload_descriptions, try_resolve_subscript_call, validate_argument_access_modes};
 use super::context::BodyResolutionContext;
 use super::utils::{
     format_symbol_kind, get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
@@ -342,6 +342,95 @@ pub fn resolve_member_access(
     Expression::error(full_span.clone())
 }
 
+/// Try to resolve a field access without emitting errors.
+///
+/// Returns `Some(Expression)` if the field exists and is accessible, `None` otherwise.
+/// This is used for fallback resolution when trying field+subscript after method resolution fails.
+fn try_resolve_field_access(
+    base: &Expression,
+    field_name: &str,
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Expression> {
+    let base_ty = &base.ty;
+
+    // Skip primitive types, type parameters, infer types, and error types
+    if matches!(
+        base_ty.kind(),
+        TyKind::TypeParameter(_) | TyKind::Infer | TyKind::Error
+    ) {
+        return None;
+    }
+
+    // Get container from base type
+    let container = get_type_container(base_ty, ctx)?;
+
+    // Find child with that name in direct children
+    let member = container
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|c| c.metadata().name().value == field_name);
+
+    // If not found in direct children, search extensions
+    let member = match member {
+        Some(m) => m,
+        None => {
+            let container_id = container.metadata().id();
+            let extensions = ctx.model.query(ExtensionsFor {
+                target_id: container_id,
+            });
+            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+            let applicable_extensions =
+                filter_applicable_extensions(extensions, &resolved_base_ty, ctx);
+
+            applicable_extensions
+                .iter()
+                .flat_map(|ext| ext.metadata().children())
+                .find(|child| child.metadata().name().value == field_name)?
+        }
+    };
+
+    // Check visibility (silently fail if not visible)
+    let member_id = member.metadata().id();
+    if !ctx.model.query(IsVisibleFrom {
+        target: member_id,
+        context: ctx.function_id,
+    }) {
+        return None;
+    }
+
+    // Check for MemberAccessBehavior (field) or ComputedMemberAccessBehavior (computed property)
+    for behavior in member.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess {
+            if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
+                let mut result = access.access(base.clone(), span.clone());
+                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+
+                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                    result.ty = result.ty.apply_substitutions(substitutions);
+                }
+                return Some(result);
+            }
+        }
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess {
+            if let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>()
+            {
+                let mut result = access.access(base.clone(), span.clone());
+                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+
+                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                    result.ty = result.ty.apply_substitutions(substitutions);
+                }
+                return Some(result);
+            }
+        }
+    }
+
+    // Member exists but doesn't have field access behavior (e.g., it's a function)
+    None
+}
+
 /// Tracks a method found in a protocol bound, with its source protocol.
 struct ProtocolMethodCandidate {
     method_id: SymbolId,
@@ -631,6 +720,43 @@ pub fn resolve_member_call(
     }
 
     if methods.is_empty() {
+        // No method found - try field + subscript as fallback
+        // This handles: obj.field(index) where field has subscripts
+        if let Some(field_expr) = try_resolve_field_access(object, member_name, span.clone(), ctx) {
+            // Try subscript call on the field
+            if let Some(subscript_expr) =
+                try_resolve_subscript_call(&field_expr, &arguments, arg_labels, &span, ctx)
+            {
+                return subscript_expr;
+            }
+
+            // Check if the field has a callable type (first-class function)
+            let field_ty = field_expr.ty.clone();
+            match field_ty.kind() {
+                TyKind::Function {
+                    params,
+                    return_type,
+                } => {
+                    if arguments.len() != params.len() {
+                        ctx.diagnostics.add_diagnostic(
+                            crate::diagnostics::ClosureArityError {
+                                span: span.clone(),
+                                expected: params.len(),
+                                provided: arguments.len(),
+                            }
+                            .into_diagnostic(),
+                        );
+                        return Expression::error(span);
+                    }
+                    return Expression::call(field_expr, arguments, (**return_type).clone(), span);
+                }
+                TyKind::UnresolvedFunction { return_type, .. } => {
+                    return Expression::call(field_expr, arguments, (**return_type).clone(), span);
+                }
+                _ => {}
+            }
+        }
+
         // Report error: no such method
         let error = NoSuchMethodError {
             call_span: span.clone(),

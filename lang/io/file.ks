@@ -2,7 +2,8 @@
 
 module io.file
 
-import std.(Optional, Array, Slice, UInt8, String, Pointer, NonCopyable)
+import std.(Optional, Array, Slice, UInt8, String, Pointer)
+import std.ops.(NonCopyable)
 import io.libc
 import io.error.(Error, Result)
 import io.read.(Read)

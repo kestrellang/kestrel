@@ -4,6 +4,8 @@
 
 module std.ffi
 
+import std.core.(Int)
+
 // Memory allocation
 @extern(.C)
 public func malloc(size: Int) -> lang.ptr[lang.i8]

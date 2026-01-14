@@ -5,6 +5,7 @@ module std.text
 import std.core.(Equatable, Comparable, Hashable, Hasher, Ordering, UInt8, UInt32, Int, Bool)
 import std.result.(Optional)
 import std.collections.(Array)
+import std.memory.(GlobalAllocator)
 
 // Byte - single UTF-8 byte
 public type Byte = UInt8
@@ -126,17 +127,17 @@ public struct CodePoint: Equatable, Comparable, Hashable {
 // Char - Extended grapheme cluster (user-perceived character)
 // May be multiple code points (e.g., "é" or "👨‍👩‍👧")
 public struct Char: Equatable, Hashable {
-    private var _codePoints: Array[CodePoint]
+    private var _codePoints: Array[CodePoint, GlobalAllocator]
 
     public init(codePoint: CodePoint) {
         self._codePoints = [codePoint]
     }
 
-    public init(codePoints: Array[CodePoint]) {
+    public init(codePoints: Array[CodePoint, GlobalAllocator]) {
         self._codePoints = codePoints
     }
 
-    public var codePoints: Array[CodePoint] { self._codePoints }
+    public var codePoints: Array[CodePoint, GlobalAllocator] { self._codePoints }
 
     public var codePointCount: Int {
         self.codePoints.count
