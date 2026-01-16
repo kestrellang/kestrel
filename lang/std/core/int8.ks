@@ -30,9 +30,18 @@ public struct Int8:
     LeftShift,
     RightShift,
     ExpressibleByIntLiteral,
-    FFISafe
+    FFISafe,
+    Convertible[UInt8],
+    Convertible[UInt16],
+    Convertible[UInt32],
+    Convertible[UInt64],
+    Convertible[Int16],
+    Convertible[Int32],
+    Convertible[Int64]
 {
     private var value: lang.i8
+
+    public var raw: lang.i8 { self.value }
 
     public static var zero: Int8 { Int8(intLiteral: 0) }
     public static var one: Int8 { Int8(intLiteral: 1) }
@@ -47,6 +56,15 @@ public struct Int8:
     init(raw value: lang.i8) {
         self.value = value
     }
+
+    // Conversions from other integer types
+    public init(from other: UInt8) { self.value = other.raw }
+    public init(from other: UInt16) { self.value = lang.cast_i16_i8(other.raw) }
+    public init(from other: UInt32) { self.value = lang.cast_i32_i8(other.raw) }
+    public init(from other: UInt64) { self.value = lang.cast_i64_i8(other.raw) }
+    public init(from other: Int16) { self.value = lang.cast_i16_i8(other.raw) }
+    public init(from other: Int32) { self.value = lang.cast_i32_i8(other.raw) }
+    public init(from other: Int64) { self.value = lang.cast_i64_i8(other.raw) }
 
     public func equals(other: Int8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.value, other.value))

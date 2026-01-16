@@ -116,9 +116,6 @@ impl<'a> LayoutCache<'a> {
             // Pointers and references are pointer-sized
             MirTy::Pointer(_) | MirTy::Ref(_) | MirTy::RefMut(_) => Layout::new(ptr_size, ptr_size),
 
-            // Array is thin pointer (for now)
-            MirTy::Array(_) => Layout::new(ptr_size, ptr_size),
-
             // Tuple: lay out fields sequentially
             MirTy::Tuple(elems) => {
                 let elems = elems.clone();

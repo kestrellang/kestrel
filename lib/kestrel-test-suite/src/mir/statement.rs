@@ -41,8 +41,8 @@ pub enum StatementPattern {
         arity: usize,
     },
 
-    /// Create an array
-    Array,
+    /// Allocate stack buffer for array elements
+    StackAlloc,
 
     /// Specific binary operation
     BinOp(BinOp),
@@ -213,7 +213,7 @@ impl StatementPattern {
                 }
             }
 
-            StatementPattern::Array => matches!(rvalue, Rvalue::Array { .. }),
+            StatementPattern::StackAlloc => matches!(rvalue, Rvalue::StackAlloc { .. }),
 
             StatementPattern::BinOp(expected_op) => {
                 if let Rvalue::BinaryOp { op, .. } = rvalue {
@@ -529,7 +529,7 @@ impl StatementPattern {
                 format!("enum {}.{}", enum_ty, variant)
             }
             StatementPattern::Tuple { arity } => format!("tuple of arity {}", arity),
-            StatementPattern::Array => "array".to_string(),
+            StatementPattern::StackAlloc => "stack_alloc".to_string(),
             StatementPattern::BinOp(op) => format!("binop {:?}", op),
             StatementPattern::AnyBinOp => "any binop".to_string(),
             StatementPattern::UnOp(op) => format!("unop {:?}", op),

@@ -3,11 +3,11 @@
 module std.core
 
 import std.core.(Equatable)
-import std.ops.(Equal, NotEqual)
+import std.ops.(Equal as EqualOp, NotEqual as NotEqualOp)
 
-public enum Ordering: Equatable, Equal[Self], NotEqual[Self] {
-    type Equal.Output = Bool
-    type NotEqual.Output = Bool
+public enum Ordering: Equatable, EqualOp[Self], NotEqualOp[Self] {
+    type EqualOp.Output = Bool
+    type NotEqualOp.Output = Bool
     case Less
     case Equal
     case Greater

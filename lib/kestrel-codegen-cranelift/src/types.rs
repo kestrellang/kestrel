@@ -37,9 +37,6 @@ pub fn translate_type(ctx: &MirContext, ty: Id<Ty>, target: &TargetConfig) -> Cr
         // String is fat pointer - but when passed, it's by pointer to the struct
         MirTy::Str => ptr_type,
 
-        // Arrays are thin pointers (for now)
-        MirTy::Array(_) => ptr_type,
-
         // Compound types are passed by pointer
         MirTy::Tuple(_) | MirTy::Named { .. } => ptr_type,
 

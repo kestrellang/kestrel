@@ -87,22 +87,22 @@ public struct CodePoint: Equatable, Comparable, Hashable {
         let len = self.utf8Length();
         match len {
             1 => {
-                buffer.append(UInt8(self.value))
+                buffer.append(UInt8(from: self.value))
             },
             2 => {
-                buffer.append(UInt8(0xC0 | ((self.value >> 6) & 0x1F)));
-                buffer.append(UInt8(0x80 | (self.value & 0x3F)))
+                buffer.append(UInt8(from: 0xC0 | ((self.value >> 6) & 0x1F)));
+                buffer.append(UInt8(from: 0x80 | (self.value & 0x3F)))
             },
             3 => {
-                buffer.append(UInt8(0xE0 | ((self.value >> 12) & 0x0F)));
-                buffer.append(UInt8(0x80 | ((self.value >> 6) & 0x3F)));
-                buffer.append(UInt8(0x80 | (self.value & 0x3F)))
+                buffer.append(UInt8(from: 0xE0 | ((self.value >> 12) & 0x0F)));
+                buffer.append(UInt8(from: 0x80 | ((self.value >> 6) & 0x3F)));
+                buffer.append(UInt8(from: 0x80 | (self.value & 0x3F)))
             },
             4 => {
-                buffer.append(UInt8(0xF0 | ((self.value >> 18) & 0x07)));
-                buffer.append(UInt8(0x80 | ((self.value >> 12) & 0x3F)));
-                buffer.append(UInt8(0x80 | ((self.value >> 6) & 0x3F)));
-                buffer.append(UInt8(0x80 | (self.value & 0x3F)))
+                buffer.append(UInt8(from: 0xF0 | ((self.value >> 18) & 0x07)));
+                buffer.append(UInt8(from: 0x80 | ((self.value >> 12) & 0x3F)));
+                buffer.append(UInt8(from: 0x80 | ((self.value >> 6) & 0x3F)));
+                buffer.append(UInt8(from: 0x80 | (self.value & 0x3F)))
             }
         };
         return len;
@@ -179,7 +179,7 @@ public func decodeUtf8(bytes: Slice[UInt8], at index: Int) -> Optional[(CodePoin
 
     if first < 0x80 {
         // Single byte (ASCII)
-        return .Some((CodePoint(value: UInt32(first)), 1))
+        return .Some((CodePoint(value: UInt32(from: first)), 1))
     } else if first < 0xC0 {
         // Continuation byte (invalid as start)
         return .None
@@ -188,7 +188,7 @@ public func decodeUtf8(bytes: Slice[UInt8], at index: Int) -> Optional[(CodePoin
         if index + 1 >= bytes.count { return .None }
         let second = bytes(unchecked: index + 1);
         if (second & 0xC0) != 0x80 { return .None }
-        let value = (UInt32(first & 0x1F) << 6) | UInt32(second & 0x3F);
+        let value = (UInt32(from: first & 0x1F) << 6) | UInt32(from: second & 0x3F);
         return .Some((CodePoint(value: value), 2))
     } else if first < 0xF0 {
         // Three bytes
@@ -196,9 +196,9 @@ public func decodeUtf8(bytes: Slice[UInt8], at index: Int) -> Optional[(CodePoin
         let second = bytes(unchecked: index + 1);
         let third = bytes(unchecked: index + 2);
         if (second & 0xC0) != 0x80 or (third & 0xC0) != 0x80 { return .None }
-        let value = (UInt32(first & 0x0F) << 12) |
-                    (UInt32(second & 0x3F) << 6) |
-                    UInt32(third & 0x3F);
+        let value = (UInt32(from: first & 0x0F) << 12) |
+                    (UInt32(from: second & 0x3F) << 6) |
+                    UInt32(from: third & 0x3F);
         return .Some((CodePoint(value: value), 3))
     } else if first < 0xF8 {
         // Four bytes
@@ -209,10 +209,10 @@ public func decodeUtf8(bytes: Slice[UInt8], at index: Int) -> Optional[(CodePoin
         if (second & 0xC0) != 0x80 or (third & 0xC0) != 0x80 or (fourth & 0xC0) != 0x80 {
             return .None
         }
-        let value = (UInt32(first & 0x07) << 18) |
-                    (UInt32(second & 0x3F) << 12) |
-                    (UInt32(third & 0x3F) << 6) |
-                    UInt32(fourth & 0x3F);
+        let value = (UInt32(from: first & 0x07) << 18) |
+                    (UInt32(from: second & 0x3F) << 12) |
+                    (UInt32(from: third & 0x3F) << 6) |
+                    UInt32(from: fourth & 0x3F);
         return .Some((CodePoint(value: value), 4))
     } else {
         return .None

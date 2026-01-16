@@ -111,11 +111,6 @@ impl<'a> Mangler<'a> {
                 }
             }
 
-            MirTy::Array(elem) => {
-                self.output.push('A');
-                self.mangle_type(*elem);
-            }
-
             MirTy::Named { name, type_args } => {
                 let name_data = self.ctx.name(*name);
                 for segment in &name_data.segments {

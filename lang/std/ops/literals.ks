@@ -3,6 +3,7 @@
 module std.ops
 
 import std.core.(Int64, Float64)
+import std.memory.(LiteralSlice)
 
 @builtin(.ExpressibleByBoolLiteral)
 public protocol ExpressibleByBoolLiteral {
@@ -29,10 +30,25 @@ public protocol ExpressibleByNilLiteral {
     init()
 }
 
-@builtin(.ExpressibleByArrayLiteral)
-public protocol ExpressibleByArrayLiteral {
+// Low-level protocol - compiler calls this directly with raw pointer + count
+@builtin(._ExpressibleByArrayLiteral)
+public protocol _ExpressibleByArrayLiteral {
     type Element
-    init(arrayLiteral elements: [Element])
+    init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)
+}
+
+// User-facing protocol - takes LiteralSlice for convenience
+@builtin(.ExpressibleByArrayLiteral)
+public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
+    type Element
+    init(arrayLiteral: LiteralSlice[Element])
+}
+
+// Bridge: default implementation satisfies _ExpressibleByArrayLiteral
+extend ExpressibleByArrayLiteral {
+    public init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64) {
+        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
+    }
 }
 
 @builtin(.ExpressibleByDictionaryLiteral)

@@ -107,15 +107,6 @@ impl Substitution {
                 }
             }
 
-            MirTy::Array(inner) => {
-                let new_inner = self.apply_ty(mir, inner);
-                if new_inner == inner {
-                    ty
-                } else {
-                    mir.intern_type(MirTy::Array(new_inner))
-                }
-            }
-
             // Tuple - recurse into each element
             MirTy::Tuple(elems) => {
                 let new_elems: Vec<_> = elems.iter().map(|e| self.apply_ty(mir, *e)).collect();
@@ -258,19 +249,6 @@ impl Substitution {
                     mir.lookup_type(&MirTy::RefMut(new_inner)).ok_or_else(|| {
                         MonomorphizeError::TypeNotInterned {
                             description: format!("RefMut({:?})", new_inner),
-                        }
-                    })
-                }
-            }
-
-            MirTy::Array(inner) => {
-                let new_inner = self.apply_ty_readonly(mir, *inner)?;
-                if new_inner == *inner {
-                    Ok(ty)
-                } else {
-                    mir.lookup_type(&MirTy::Array(new_inner)).ok_or_else(|| {
-                        MonomorphizeError::TypeNotInterned {
-                            description: format!("Array({:?})", new_inner),
                         }
                     })
                 }

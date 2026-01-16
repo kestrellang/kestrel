@@ -11,15 +11,15 @@ public protocol Error {
 
 // ControlFlow enum - the fundamental type for early return semantics
 @builtin(.ControlFlowEnum)
-public enum ControlFlow[Continue, Break] {
-    case Continue(Continue)
-    case Break(Break)
+public enum ControlFlow[C, B] {
+    case Continue(C)
+    case Break(B)
 }
 
-extend ControlFlow[Continue, Break]: Equatable
-    where Continue: Equatable, Break: Equatable
+extend ControlFlow[C, B]: Equatable
+    where C: Equatable, B: Equatable
 {
-    public func equals(other: ControlFlow[Continue, Break]) -> Bool {
+    public func equals(other: ControlFlow[C, B]) -> Bool {
         match (self, other) {
             (.Continue(a), .Continue(b)) => a == b,
             (.Break(a), .Break(b)) => a == b,

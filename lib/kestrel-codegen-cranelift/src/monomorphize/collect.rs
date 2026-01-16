@@ -195,14 +195,9 @@ impl<'a> CollectionContext<'a> {
                 }
             }
 
-            Rvalue::Array {
-                element_ty,
-                elements,
-            } => {
+            Rvalue::StackAlloc { element_ty, count } => {
                 self.scan_type(*element_ty, subst);
-                for elem in elements {
-                    self.scan_value(elem, subst);
-                }
+                self.scan_value(count, subst);
             }
 
             Rvalue::EnumVariant {
@@ -488,10 +483,7 @@ impl<'a> CollectionContext<'a> {
                 }
             }
 
-            MirTy::Pointer(inner)
-            | MirTy::Ref(inner)
-            | MirTy::RefMut(inner)
-            | MirTy::Array(inner) => {
+            MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
                 self.scan_type(inner, &Substitution::new());
             }
 

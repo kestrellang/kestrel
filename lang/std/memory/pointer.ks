@@ -10,7 +10,7 @@ import std.iter.(Iterator, Iterable)
 // RawPointer - untyped pointer
 // RawPointer is always FFI-safe as it's just an opaque pointer
 public struct RawPointer: Equatable, FFISafe {
-    private var raw: lang.ptr[lang.i8]
+    public var raw: lang.ptr[lang.i8]
 
     public init(raw: lang.ptr[lang.i8]) {
         self.raw = raw;

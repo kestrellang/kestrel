@@ -3,25 +3,22 @@
 | Error Message | Count |
 | :--- | :--- |
 | cannot access member on type '[UInt8]' | 12 |
-| if condition must conform to `BooleanConditional`, found `_` | 12 |
 | no method 'write' on type 'H' matches the provided arguments | 11 |
-| cannot assign to immutable field 'count' | 10 |
-| no matching initializer for struct 'UInt32' | 10 |
-| no matching initializer for struct 'UInt8' | 10 |
-| member 'raw' is private and not accessible from this scope | 7 |
-| member 'substringBytes' is private and not accessible from this scope | 6 |
-| member not found: `shiftLeft` on type `<error>` | 6 |
+| if condition must conform to `BooleanConditional`, found `_` | 10 |
+| type mismatch: expected `Int64`, found `UInt16` | 9 |
+| type mismatch: expected `Int64`, found `UInt32` | 9 |
+| type mismatch: expected `UInt32`, found `Int64` | 9 |
 | non-exhaustive match expression | 6 |
-| undefined name 'index' | 6 |
-| cannot assign to this expression | 5 |
+| cannot assign to immutable field 'count' | 5 |
 | member not found: `equals` on type `<error>` | 5 |
 | no matching overload for 'array' with 1 argument(s) | 5 |
 | no method 'findEntry' on type 'Dictionary[K, V, A]' matches the provided arguments | 5 |
 | no method 'hash' on type 'Dictionary[K, V, A]' matches the provided arguments | 5 |
+| undefined name 'index' | 5 |
+| cannot find type 'Array' in this scope | 4 |
 | cannot use 'self' in free function | 4 |
 | type mismatch: expected `U`, found `U` | 4 |
-| cannot find type 'I' in this scope | 3 |
-| could not infer type for 1 placeholder(s) | 3 |
+| undefined name 'Buffer' | 4 |
 | member not found: `bitwiseAnd` on type `<error>` | 3 |
 | no method 'byteAt' on type 'String[A]' matches the provided arguments | 3 |
 | cannot access member on type 'I16' | 2 |
@@ -31,39 +28,42 @@
 | cannot assign to immutable field 'occupied' | 2 |
 | cannot assign to immutable field 'pointee' | 2 |
 | cannot call 'description' on type 'E' | 2 |
+| cannot find type 'I' in this scope | 2 |
 | cannot use tuple index on type '_' | 2 |
+| could not infer type for 1 placeholder(s) | 2 |
+| field 'storage' has type less visible than the field | 2 |
 | no matching overload for 'decodeUtf8' with 2 argument(s) | 2 |
 | no method 'allocate' on type 'A' matches the provided arguments | 2 |
 | no method 'contains' on type 'Dictionary[T, (), A]' matches the provided arguments | 2 |
 | no method 'ensureCapacity' on type 'String[A]' matches the provided arguments | 2 |
 | no method 'insertEntry' on type 'Dictionary[K, V, A]' matches the provided arguments | 2 |
-| too few type arguments for 'Dictionary' | 2 |
-| type `()` is not callable | 2 |
-| type mismatch: expected `Array[CodePoint, GlobalAllocator]`, found `[CodePoint]` | 2 |
+| symbol 'Array' not found in module 'std.collections' | 2 |
 | undefined name 'key' | 2 |
-| 'Equal' is not a type | 1 |
+| while condition must conform to `BooleanConditional`, found `_` | 2 |
 | 'Optional' is not a protocol; bound must be a protocol | 1 |
-| ambiguous associated type 'Item' - use qualified syntax to disambiguate | 1 |
+| Parse error: found 'Dot' at 583..584 expected something else, or 'Colon' | 1 |
+| Parse error: found 'Identifier' at 1693..1700 expected something else, or 'Colon' | 1 |
 | cannot access member on type 'I.Item' | 1 |
 | cannot access member on type 'Inner.Iter' | 1 |
 | cannot access member on type 'Int' | 1 |
 | cannot access member on type '[(K, V)]' | 1 |
-| cannot access member on type '[T]' | 1 |
 | cannot assign to immutable field 'capacity' | 1 |
 | cannot assign to immutable field 'entries' | 1 |
 | cannot assign to immutable field 'value' | 1 |
+| cannot assign to this expression | 1 |
 | cannot call 'hash' on type 'K' | 1 |
+| cannot find type 'Buffer' in this scope | 1 |
+| cannot find type 'LiteralSlice' in this scope | 1 |
 | closure has 2 parameters but 1 expected | 1 |
-| could not infer type for 4 placeholder(s) | 1 |
+| conflicting associated type 'Element' from inherited protocols | 1 |
+| could not infer type for 10 placeholder(s) | 1 |
+| could not infer type for 2 placeholder(s) | 1 |
 | initializer does not initialize all fields: 'cap', 'ptr' | 1 |
 | initializer does not initialize all fields: 'ptr' | 1 |
 | initializer does not initialize all fields: 'ptr', 'cap' | 1 |
 | initializer does not initialize all fields: 'storage' | 1 |
-| member 'storage' is private and not accessible from this scope | 1 |
 | member not found: `add` on type `<error>` | 1 |
 | member not found: `add` on type `String` | 1 |
-| member not found: `equals` on type `K` | 1 |
-| method 'map' has wrong return type for protocol 'Functor' | 1 |
 | no matching initializer for struct 'ArcBox' | 1 |
 | no matching initializer for struct 'UInt64' | 1 |
 | no member 'toBytes' on type 'UInt64' | 1 |
@@ -71,17 +71,15 @@
 | no method 'insert' on type 'Dictionary[T, (), A]' matches the provided arguments | 1 |
 | no method 'insert' on type 'Set[T, A]' matches the provided arguments | 1 |
 | no method 'reallocate' on type 'A' matches the provided arguments | 1 |
-| struct `ArrayIterator` has Cloneable field `array` but does not conform to Cloneable | 1 |
+| struct `DictionaryIterator` has Cloneable field `dict` but does not conform to Cloneable | 1 |
 | struct `KeysView` has Cloneable field `dict` but does not conform to Cloneable | 1 |
 | struct `SplitIterator` has Cloneable field `string` but does not conform to Cloneable | 1 |
 | struct `ValuesView` has Cloneable field `dict` but does not conform to Cloneable | 1 |
-| type 'ArrayIterator' does not satisfy bound | 1 |
-| type 'Break' is ambiguous | 1 |
+| symbol 'LiteralSlice' not found in module 'std.memory' | 1 |
 | type 'BytesIterator' does not satisfy bound | 1 |
 | type 'CharsIterator' does not satisfy bound | 1 |
 | type 'ClosedRangeIterator' does not satisfy bound | 1 |
 | type 'CodePointsIterator' does not satisfy bound | 1 |
-| type 'Continue' is ambiguous | 1 |
 | type 'DictionaryIterator' does not satisfy bound | 1 |
 | type 'KeysIterator' does not satisfy bound | 1 |
 | type 'LinesIterator' does not satisfy bound | 1 |
@@ -91,6 +89,7 @@
 | type 'Slice' is ambiguous | 1 |
 | type 'SliceIterator' does not satisfy bound | 1 |
 | type 'ValuesIterator' does not satisfy bound | 1 |
+| type `()` is not callable | 1 |
 | type mismatch: expected `((T, ())) -> _`, found `(T, _) -> T` | 1 |
 | type mismatch: expected `(T) -> Optional[U]`, found `(T) -> Optional[U]` | 1 |
 | type mismatch: expected `(T) -> Result[U, E]`, found `(T) -> Result[U, E]` | 1 |
@@ -101,6 +100,8 @@
 | type mismatch: expected `Optional[U]`, found `U` | 1 |
 | type mismatch: expected `Optional[V]`, found `Optional[U]` | 1 |
 | type mismatch: expected `Result[U, E]`, found `Result[U, E]` | 1 |
+| type mismatch: expected `UInt16`, found `UInt32` | 1 |
+| type mismatch: expected `UInt32`, found `UInt16` | 1 |
 | type mismatch: expected `V`, found `U` | 1 |
 | undefined name 'DefaultHasher' | 1 |
 | undefined name 'Self' | 1 |
@@ -112,8 +113,8 @@
 
 cannot access member on type '[UInt8]'
 Call Sites
-- lang/std/text/string.ks:73:25
-- lang/std/text/string.ks:137:59
+- lang/std/text/string.ks:74:25
+- lang/std/text/string.ks:138:59
 - lang/std/text/char.ks:90:17
 - lang/std/text/char.ks:93:17
 - lang/std/text/char.ks:94:17
@@ -125,101 +126,68 @@ Call Sites
 - lang/std/text/char.ks:104:17
 - lang/std/text/char.ks:105:17
 
+no method 'write' on type 'H' matches the provided arguments
+Call Sites
+- lang/std/core/int32.ks:81:9
+- lang/std/core/int16.ks:80:9
+- lang/std/core/uint64.ks:79:9
+- lang/std/core/int8.ks:80:9
+- lang/std/core/uint8.ks:79:9
+- lang/std/core/uint32.ks:79:9
+- lang/std/core/uint16.ks:79:9
+- lang/std/core/int64.ks:81:9
+- lang/std/core/bool.ks:33:13
+- lang/std/core/bool.ks:35:13
+- lang/std/collections/set.ks:229:9
+
 if condition must conform to `BooleanConditional`, found `_`
 Call Sites
 - lang/std/memory/buffer.ks:192:12
 - lang/std/text/views.ks:222:16
 - lang/std/text/views.ks:226:23
-- lang/std/text/char.ks:180:8
-- lang/std/text/char.ks:183:15
-- lang/std/text/char.ks:186:15
 - lang/std/text/char.ks:190:12
-- lang/std/text/char.ks:193:15
 - lang/std/text/char.ks:198:12
-- lang/std/text/char.ks:203:15
 - lang/std/text/char.ks:209:12
-- lang/std/collections/dictionary.ks:345:16
+- lang/std/collections/dictionary.ks:153:16
+- lang/std/collections/dictionary.ks:172:16
+- lang/std/collections/dictionary.ks:175:16
+- lang/std/collections/dictionary.ks:346:16
 
-no method 'write' on type 'H' matches the provided arguments
+type mismatch: expected `Int64`, found `UInt16`
 Call Sites
-- lang/std/core/int32.ks:63:9
-- lang/std/core/int16.ks:62:9
-- lang/std/core/uint64.ks:61:9
-- lang/std/core/int8.ks:62:9
-- lang/std/core/uint8.ks:61:9
-- lang/std/core/uint32.ks:61:9
-- lang/std/core/uint16.ks:61:9
-- lang/std/core/int64.ks:63:9
-- lang/std/core/bool.ks:33:13
-- lang/std/core/bool.ks:35:13
-- lang/std/collections/set.ks:229:9
+- lang/std/text/char.ks:93:43
+- lang/std/text/char.ks:94:43
+- lang/std/text/char.ks:97:43
+- lang/std/text/char.ks:98:43
+- lang/std/text/char.ks:99:43
+- lang/std/text/char.ks:102:43
+- lang/std/text/char.ks:103:43
+- lang/std/text/char.ks:104:43
+- lang/std/text/char.ks:105:43
 
-cannot assign to immutable field 'count'
+type mismatch: expected `Int64`, found `UInt32`
 Call Sites
-- lang/std/collections/array.ks:167:9
-- lang/std/collections/array.ks:193:9
-- lang/std/collections/array.ks:209:9
-- lang/std/collections/array.ks:219:9
-- lang/std/collections/array.ks:225:9
-- lang/std/collections/dictionary.ks:129:9
-- lang/std/collections/dictionary.ks:197:9
-- lang/std/collections/dictionary.ks:245:13
-- lang/std/collections/dictionary.ks:253:17
-- lang/std/collections/dictionary.ks:273:9
+- lang/std/text/char.ks:93:50
+- lang/std/text/char.ks:94:50
+- lang/std/text/char.ks:97:50
+- lang/std/text/char.ks:98:50
+- lang/std/text/char.ks:99:50
+- lang/std/text/char.ks:102:50
+- lang/std/text/char.ks:103:50
+- lang/std/text/char.ks:104:50
+- lang/std/text/char.ks:105:50
 
-no matching initializer for struct 'UInt32'
+type mismatch: expected `UInt32`, found `Int64`
 Call Sites
-- lang/std/text/char.ks:182:40
-- lang/std/text/char.ks:191:22
-- lang/std/text/char.ks:191:51
-- lang/std/text/char.ks:199:22
-- lang/std/text/char.ks:200:22
-- lang/std/text/char.ks:201:21
-- lang/std/text/char.ks:212:22
-- lang/std/text/char.ks:213:22
-- lang/std/text/char.ks:214:22
-- lang/std/text/char.ks:215:21
-
-no matching initializer for struct 'UInt8'
-Call Sites
-- lang/std/text/char.ks:90:31
-- lang/std/text/char.ks:93:31
-- lang/std/text/char.ks:94:31
-- lang/std/text/char.ks:97:31
-- lang/std/text/char.ks:98:31
-- lang/std/text/char.ks:99:31
-- lang/std/text/char.ks:102:31
-- lang/std/text/char.ks:103:31
-- lang/std/text/char.ks:104:31
-- lang/std/text/char.ks:105:31
-
-member 'raw' is private and not accessible from this scope
-Call Sites
-- lang/std/memory/buffer.ks:112:33
-- lang/std/memory/buffer.ks:112:57
-- lang/std/memory/buffer.ks:118:34
-- lang/std/memory/buffer.ks:118:58
-- lang/std/memory/buffer.ks:122:33
-- lang/std/memory/allocator.ks:48:18
-- lang/std/memory/allocator.ks:52:34
-
-member 'substringBytes' is private and not accessible from this scope
-Call Sites
-- lang/std/text/views.ks:223:40
-- lang/std/text/views.ks:227:40
-- lang/std/text/views.ks:241:38
-- lang/std/text/string.ks:382:42
-- lang/std/text/string.ks:400:42
-- lang/std/text/string.ks:410:38
-
-member not found: `shiftLeft` on type `<error>`
-Call Sites
-- lang/std/text/char.ks:191:22
-- lang/std/text/char.ks:199:22
-- lang/std/text/char.ks:200:22
-- lang/std/text/char.ks:212:22
-- lang/std/text/char.ks:213:22
-- lang/std/text/char.ks:214:22
+- lang/std/text/char.ks:93:43
+- lang/std/text/char.ks:94:43
+- lang/std/text/char.ks:97:43
+- lang/std/text/char.ks:98:43
+- lang/std/text/char.ks:99:43
+- lang/std/text/char.ks:102:43
+- lang/std/text/char.ks:103:43
+- lang/std/text/char.ks:104:43
+- lang/std/text/char.ks:105:43
 
 non-exhaustive match expression
 Call Sites
@@ -230,30 +198,21 @@ Call Sites
 - lang/std/memory/buffer.ks:165:9
 - lang/std/text/char.ks:88:9
 
-undefined name 'index'
+cannot assign to immutable field 'count'
 Call Sites
-- lang/std/memory/buffer.ks:69:16
-- lang/std/memory/buffer.ks:69:31
-- lang/std/memory/buffer.ks:70:43
-- lang/std/memory/buffer.ks:87:29
-- lang/std/memory/buffer.ks:98:35
-- lang/std/collections/array.ks:146:54
-
-cannot assign to this expression
-Call Sites
-- lang/std/collections/array.ks:166:9
-- lang/std/collections/array.ks:187:9
-- lang/std/collections/array.ks:299:13
-- lang/std/collections/array.ks:300:13
-- lang/std/collections/dictionary.ks:187:9
+- lang/std/collections/dictionary.ks:130:9
+- lang/std/collections/dictionary.ks:198:9
+- lang/std/collections/dictionary.ks:246:13
+- lang/std/collections/dictionary.ks:254:17
+- lang/std/collections/dictionary.ks:274:9
 
 member not found: `equals` on type `<error>`
 Call Sites
-- lang/std/result/error.ks:24:45
-- lang/std/result/error.ks:25:39
 - lang/std/text/views.ks:222:16
 - lang/std/text/views.ks:226:23
 - lang/std/text/views.ks:230:63
+- lang/std/text/char.ks:147:9
+- lang/std/text/char.ks:161:9
 
 no matching overload for 'array' with 1 argument(s)
 Call Sites
@@ -265,19 +224,34 @@ Call Sites
 
 no method 'findEntry' on type 'Dictionary[K, V, A]' matches the provided arguments
 Call Sites
-- lang/std/collections/dictionary.ks:204:28
-- lang/std/collections/dictionary.ks:204:28
-- lang/std/collections/dictionary.ks:226:24
-- lang/std/collections/dictionary.ks:242:24
-- lang/std/collections/dictionary.ks:265:9
+- lang/std/collections/dictionary.ks:205:28
+- lang/std/collections/dictionary.ks:205:28
+- lang/std/collections/dictionary.ks:227:24
+- lang/std/collections/dictionary.ks:243:24
+- lang/std/collections/dictionary.ks:266:9
 
 no method 'hash' on type 'Dictionary[K, V, A]' matches the provided arguments
 Call Sites
-- lang/std/collections/dictionary.ks:203:24
-- lang/std/collections/dictionary.ks:203:24
-- lang/std/collections/dictionary.ks:223:20
-- lang/std/collections/dictionary.ks:240:20
-- lang/std/collections/dictionary.ks:264:20
+- lang/std/collections/dictionary.ks:204:24
+- lang/std/collections/dictionary.ks:204:24
+- lang/std/collections/dictionary.ks:224:20
+- lang/std/collections/dictionary.ks:241:20
+- lang/std/collections/dictionary.ks:265:20
+
+undefined name 'index'
+Call Sites
+- lang/std/memory/buffer.ks:69:16
+- lang/std/memory/buffer.ks:69:31
+- lang/std/memory/buffer.ks:70:43
+- lang/std/memory/buffer.ks:87:29
+- lang/std/memory/buffer.ks:98:35
+
+cannot find type 'Array' in this scope
+Call Sites
+- lang/std/text/string.ks:69:29
+- lang/std/text/char.ks:130:30
+- lang/std/text/char.ks:136:29
+- lang/std/text/char.ks:140:28
 
 cannot use 'self' in free function
 Call Sites
@@ -293,23 +267,18 @@ Call Sites
 - lang/std/result/optional.ks:126:9
 - lang/std/result/optional.ks:126:22
 
-cannot find type 'I' in this scope
+undefined name 'Buffer'
 Call Sites
-- lang/std/iter/iterator.ks:22:24
-- lang/std/collections/set.ks:39:31
-- lang/std/collections/array.ks:69:31
-
-could not infer type for 1 placeholder(s)
-Call Sites
-- lang/std/iter/adapters.ks:92:20
-- lang/std/text/views.ks:127:16
-- lang/std/text/string.ks:381:20
+- lang/std/collections/dictionary.ks:41:22
+- lang/std/collections/dictionary.ks:49:22
+- lang/std/collections/dictionary.ks:58:22
+- lang/std/collections/dictionary.ks:128:38
 
 member not found: `bitwiseAnd` on type `<error>`
 Call Sites
-- lang/std/collections/dictionary.ks:149:21
-- lang/std/collections/dictionary.ks:166:21
-- lang/std/collections/dictionary.ks:185:21
+- lang/std/collections/dictionary.ks:150:21
+- lang/std/collections/dictionary.ks:167:21
+- lang/std/collections/dictionary.ks:186:21
 
 no method 'byteAt' on type 'String[A]' matches the provided arguments
 Call Sites
@@ -319,28 +288,28 @@ Call Sites
 
 cannot access member on type 'I16'
 Call Sites
-- lang/std/core/int16.ks:62:29
-- lang/std/core/uint16.ks:61:29
+- lang/std/core/int16.ks:80:29
+- lang/std/core/uint16.ks:79:29
 
 cannot access member on type 'I32'
 Call Sites
-- lang/std/core/int32.ks:63:29
-- lang/std/core/uint32.ks:61:29
+- lang/std/core/int32.ks:81:29
+- lang/std/core/uint32.ks:79:29
 
 cannot access member on type 'I64'
 Call Sites
-- lang/std/core/uint64.ks:61:29
-- lang/std/core/int64.ks:63:29
+- lang/std/core/uint64.ks:79:29
+- lang/std/core/int64.ks:81:29
 
 cannot assign to immutable field 'length'
 Call Sites
-- lang/std/text/string.ks:146:9
-- lang/std/text/string.ks:345:9
+- lang/std/text/string.ks:147:9
+- lang/std/text/string.ks:346:9
 
 cannot assign to immutable field 'occupied'
 Call Sites
-- lang/std/collections/dictionary.ks:244:13
-- lang/std/collections/dictionary.ks:252:17
+- lang/std/collections/dictionary.ks:245:13
+- lang/std/collections/dictionary.ks:253:17
 
 cannot assign to immutable field 'pointee'
 Call Sites
@@ -352,15 +321,30 @@ Call Sites
 - lang/std/result/result.ks:58:68
 - lang/std/result/result.ks:87:56
 
+cannot find type 'I' in this scope
+Call Sites
+- lang/std/iter/iterator.ks:22:24
+- lang/std/collections/set.ks:39:31
+
 cannot use tuple index on type '_'
 Call Sites
-- lang/std/collections/dictionary.ks:379:36
-- lang/std/collections/dictionary.ks:409:36
+- lang/std/collections/dictionary.ks:380:36
+- lang/std/collections/dictionary.ks:410:36
+
+could not infer type for 1 placeholder(s)
+Call Sites
+- lang/std/iter/adapters.ks:92:20
+- lang/std/text/string.ks:382:20
+
+field 'storage' has type less visible than the field
+Call Sites
+- lang/std/text/string.ks:23:16
+- lang/std/collections/dictionary.ks:23:16
 
 no matching overload for 'decodeUtf8' with 2 argument(s)
 Call Sites
 - lang/std/text/views.ks:127:28
-- lang/std/text/string.ks:381:32
+- lang/std/text/string.ks:382:32
 
 no method 'allocate' on type 'A' matches the provided arguments
 Call Sites
@@ -374,45 +358,40 @@ Call Sites
 
 no method 'ensureCapacity' on type 'String[A]' matches the provided arguments
 Call Sites
-- lang/std/text/string.ks:127:9
-- lang/std/text/string.ks:137:9
+- lang/std/text/string.ks:128:9
+- lang/std/text/string.ks:138:9
 
 no method 'insertEntry' on type 'Dictionary[K, V, A]' matches the provided arguments
 Call Sites
-- lang/std/collections/dictionary.ks:234:9
-- lang/std/collections/dictionary.ks:254:17
+- lang/std/collections/dictionary.ks:235:9
+- lang/std/collections/dictionary.ks:255:17
 
-too few type arguments for 'Dictionary'
+symbol 'Array' not found in module 'std.collections'
 Call Sites
-- lang/std/collections/dictionary.ks:333:23
-- lang/std/collections/dictionary.ks:336:23
-
-type `()` is not callable
-Call Sites
-- lang/std/collections/array.ks:187:9
-- lang/std/collections/dictionary.ks:187:9
-
-type mismatch: expected `Array[CodePoint, GlobalAllocator]`, found `[CodePoint]`
-Call Sites
-- lang/std/text/char.ks:133:9
-- lang/std/text/char.ks:133:28
+- lang/std/text/string.ks:8:25
+- lang/std/text/char.ks:7:25
 
 undefined name 'key'
 Call Sites
-- lang/std/collections/dictionary.ks:203:39
-- lang/std/collections/dictionary.ks:204:48
+- lang/std/collections/dictionary.ks:204:39
+- lang/std/collections/dictionary.ks:205:48
 
-'Equal' is not a type
+while condition must conform to `BooleanConditional`, found `_`
 Call Sites
-- lang/std/core/ordering.ks:8:34
+- lang/std/collections/dictionary.ks:152:15
+- lang/std/collections/dictionary.ks:251:19
 
 'Optional' is not a protocol; bound must be a protocol
 Call Sites
 - lang/std/result/result.ks:170:64
 
-ambiguous associated type 'Item' - use qualified syntax to disambiguate
+Parse error: found 'Dot' at 583..584 expected something else, or 'Colon'
 Call Sites
-- lang/std/collections/array.ks:19:5
+- lang/std/memory/literal_slice.ks:20:13
+
+Parse error: found 'Identifier' at 1693..1700 expected something else, or 'Colon'
+Call Sites
+- lang/std/collections/array.ks:63:13
 
 cannot access member on type 'I.Item'
 Call Sites
@@ -428,35 +407,51 @@ Call Sites
 
 cannot access member on type '[(K, V)]'
 Call Sites
-- lang/std/collections/dictionary.ks:66:36
-
-cannot access member on type '[T]'
-Call Sites
-- lang/std/collections/array.ks:62:29
+- lang/std/collections/dictionary.ks:67:36
 
 cannot assign to immutable field 'capacity'
 Call Sites
-- lang/std/collections/dictionary.ks:128:9
+- lang/std/collections/dictionary.ks:129:9
 
 cannot assign to immutable field 'entries'
 Call Sites
-- lang/std/collections/dictionary.ks:127:9
+- lang/std/collections/dictionary.ks:128:9
 
 cannot assign to immutable field 'value'
 Call Sites
-- lang/std/collections/dictionary.ks:228:13
+- lang/std/collections/dictionary.ks:229:13
+
+cannot assign to this expression
+Call Sites
+- lang/std/collections/dictionary.ks:188:9
 
 cannot call 'hash' on type 'K'
 Call Sites
-- lang/std/collections/dictionary.ks:143:9
+- lang/std/collections/dictionary.ks:144:9
+
+cannot find type 'Buffer' in this scope
+Call Sites
+- lang/std/collections/dictionary.ks:33:22
+
+cannot find type 'LiteralSlice' in this scope
+Call Sites
+- lang/std/ops/literals.ks:43:24
 
 closure has 2 parameters but 1 expected
 Call Sites
 - lang/std/collections/set.ks:244:34
 
-could not infer type for 4 placeholder(s)
+conflicting associated type 'Element' from inherited protocols
 Call Sites
-- lang/std/collections/dictionary.ks:242:16
+- lang/std/ops/literals.ks:42:5
+
+could not infer type for 10 placeholder(s)
+Call Sites
+- lang/std/collections/dictionary.ks:243:16
+
+could not infer type for 2 placeholder(s)
+Call Sites
+- lang/std/collections/dictionary.ks:227:16
 
 initializer does not initialize all fields: 'cap', 'ptr'
 Call Sites
@@ -472,27 +467,15 @@ Call Sites
 
 initializer does not initialize all fields: 'storage'
 Call Sites
-- lang/std/text/string.ks:52:5
-
-member 'storage' is private and not accessible from this scope
-Call Sites
-- lang/std/text/views.ks:56:36
+- lang/std/text/string.ks:53:5
 
 member not found: `add` on type `<error>`
 Call Sites
-- lang/std/collections/dictionary.ks:249:22
+- lang/std/collections/dictionary.ks:250:22
 
 member not found: `add` on type `String`
 Call Sites
 - lang/std/result/result.ks:58:39
-
-member not found: `equals` on type `K`
-Call Sites
-- lang/std/collections/dictionary.ks:174:39
-
-method 'map' has wrong return type for protocol 'Functor'
-Call Sites
-- lang/std/collections/array.ks:11:15
 
 no matching initializer for struct 'ArcBox'
 Call Sites
@@ -522,29 +505,25 @@ no method 'reallocate' on type 'A' matches the provided arguments
 Call Sites
 - lang/std/memory/buffer.ks:130:15
 
-struct `ArrayIterator` has Cloneable field `array` but does not conform to Cloneable
+struct `DictionaryIterator` has Cloneable field `dict` but does not conform to Cloneable
 Call Sites
-- lang/std/collections/array.ks:360:5
+- lang/std/collections/dictionary.ks:334:5
 
 struct `KeysView` has Cloneable field `dict` but does not conform to Cloneable
 Call Sites
-- lang/std/collections/dictionary.ks:358:5
+- lang/std/collections/dictionary.ks:359:5
 
 struct `SplitIterator` has Cloneable field `string` but does not conform to Cloneable
 Call Sites
-- lang/std/text/string.ks:359:5
+- lang/std/text/string.ks:360:5
 
 struct `ValuesView` has Cloneable field `dict` but does not conform to Cloneable
 Call Sites
-- lang/std/collections/dictionary.ks:388:5
+- lang/std/collections/dictionary.ks:389:5
 
-type 'ArrayIterator' does not satisfy bound
+symbol 'LiteralSlice' not found in module 'std.memory'
 Call Sites
-- lang/std/collections/array.ks:22:5
-
-type 'Break' is ambiguous
-Call Sites
-- lang/std/result/error.ks:16:16
+- lang/std/ops/literals.ks:6:20
 
 type 'BytesIterator' does not satisfy bound
 Call Sites
@@ -562,17 +541,13 @@ type 'CodePointsIterator' does not satisfy bound
 Call Sites
 - lang/std/text/views.ks:89:5
 
-type 'Continue' is ambiguous
-Call Sites
-- lang/std/result/error.ks:15:19
-
 type 'DictionaryIterator' does not satisfy bound
 Call Sites
 - lang/std/collections/dictionary.ks:20:5
 
 type 'KeysIterator' does not satisfy bound
 Call Sites
-- lang/std/collections/dictionary.ks:356:5
+- lang/std/collections/dictionary.ks:357:5
 
 type 'LinesIterator' does not satisfy bound
 Call Sites
@@ -600,7 +575,11 @@ Call Sites
 
 type 'ValuesIterator' does not satisfy bound
 Call Sites
-- lang/std/collections/dictionary.ks:386:5
+- lang/std/collections/dictionary.ks:387:5
+
+type `()` is not callable
+Call Sites
+- lang/std/collections/dictionary.ks:188:9
 
 type mismatch: expected `((T, ())) -> _`, found `(T, _) -> T`
 Call Sites
@@ -616,7 +595,7 @@ Call Sites
 
 type mismatch: expected `K`, found `U`
 Call Sites
-- lang/std/collections/dictionary.ks:379:9
+- lang/std/collections/dictionary.ks:380:9
 
 type mismatch: expected `Optional[I.Item]`, found `Optional[Optional[I.Item]]`
 Call Sites
@@ -624,7 +603,7 @@ Call Sites
 
 type mismatch: expected `Optional[K]`, found `Optional[U]`
 Call Sites
-- lang/std/collections/dictionary.ks:379:9
+- lang/std/collections/dictionary.ks:380:9
 
 type mismatch: expected `Optional[U]`, found `Optional[U]`
 Call Sites
@@ -636,23 +615,31 @@ Call Sites
 
 type mismatch: expected `Optional[V]`, found `Optional[U]`
 Call Sites
-- lang/std/collections/dictionary.ks:409:9
+- lang/std/collections/dictionary.ks:410:9
 
 type mismatch: expected `Result[U, E]`, found `Result[U, E]`
 Call Sites
 - lang/std/result/result.ks:152:9
 
+type mismatch: expected `UInt16`, found `UInt32`
+Call Sites
+- lang/std/text/char.ks:90:43
+
+type mismatch: expected `UInt32`, found `UInt16`
+Call Sites
+- lang/std/text/char.ks:90:37
+
 type mismatch: expected `V`, found `U`
 Call Sites
-- lang/std/collections/dictionary.ks:409:9
+- lang/std/collections/dictionary.ks:410:9
 
 undefined name 'DefaultHasher'
 Call Sites
-- lang/std/collections/dictionary.ks:142:22
+- lang/std/collections/dictionary.ks:143:22
 
 undefined name 'Self'
 Call Sites
-- lang/std/collections/dictionary.ks:55:24
+- lang/std/collections/dictionary.ks:56:24
 
 undefined name 'bitwiseAnd'
 Call Sites

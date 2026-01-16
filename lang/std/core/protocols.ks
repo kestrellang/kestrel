@@ -136,3 +136,8 @@ public protocol Copyable {}
 public protocol Defaultable {
     init()
 }
+
+// Convertible - types that can be converted from another type
+public protocol Convertible[From] {
+    init(from value: From)
+}

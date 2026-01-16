@@ -30,8 +30,6 @@ pub enum MirTy {
     Pointer(Box<MirTy>),
     /// Tuple: `(T, U, ...)`
     Tuple(Vec<MirTy>),
-    /// Array: `[T]`
-    Array(Box<MirTy>),
 
     // Function types
     /// Thin function: `func(T) -> U`
@@ -97,11 +95,6 @@ impl MirTy {
     /// Create a tuple type.
     pub fn tuple(elems: Vec<MirTy>) -> Self {
         MirTy::Tuple(elems)
-    }
-
-    /// Create an array type.
-    pub fn array(elem: MirTy) -> Self {
-        MirTy::Array(Box::new(elem))
     }
 
     /// Create a thin function type.
@@ -208,11 +201,6 @@ impl MirTy {
                     .all(|(e, a)| e.matches(*a, ctx))
             }
 
-            // Arrays
-            (MirTy::Array(expected_elem), ActualTy::Array(actual_elem)) => {
-                expected_elem.matches(*actual_elem, ctx)
-            }
-
             // Function types (thin)
             (
                 MirTy::Func {
@@ -312,7 +300,6 @@ impl MirTy {
                 let elems_str: Vec<_> = elems.iter().map(|e| e.display()).collect();
                 format!("({})", elems_str.join(", "))
             }
-            MirTy::Array(elem) => format!("[{}]", elem.display()),
             MirTy::Func { params, ret } => {
                 let params_str: Vec<_> = params.iter().map(|p| p.display()).collect();
                 format!("func({}) -> {}", params_str.join(", "), ret.display())

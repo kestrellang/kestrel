@@ -1,0 +1,97 @@
+// {{TYPE_NAME}} - {{BITS}}-bit floating point
+// Generated from float.ks.template - DO NOT EDIT
+
+module std.num
+
+import std.ffi.(FFISafe)
+import std.core.(
+    Equatable, Comparable, Ordering, Bool,
+    Addable, Subtractable, Multipliable, Divisible, Negatable,
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral
+)
+
+public struct {{TYPE_NAME}}:
+    Comparable,
+    Equatable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Negatable,
+    ExpressibleByFloatLiteral,
+    ExpressibleByIntLiteral,
+    FFISafe
+{
+    private var value: lang.{{LANG_TYPE}}
+
+    public var raw: lang.{{LANG_TYPE}} { self.value }
+
+    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.0) }
+    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.0) }
+    public static var infinity: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_infinity()) }
+    public static var nan: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_nan()) }
+    // public static var bitWidth: Int { {{BITS}} }
+
+    // Mathematical constants
+    public static var pi: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 3.141592653589793) }
+    public static var e: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 2.718281828459045) }
+    public static var tau: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 6.283185307179586) }
+
+    public init(floatLiteral value: lang.f64) {
+        {{FLOAT_LITERAL_INIT}}
+    }
+
+    public init(intLiteral value: lang.i64) {
+        self.value = lang.cast_i64_{{LANG_TYPE}}(value)
+    }
+
+    init(raw value: lang.{{LANG_TYPE}}) {
+        self.value = value
+    }
+
+    public func isNaN() -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_nan(self.value))
+    }
+
+    public func isInfinite() -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_infinite(self.value))
+    }
+
+    public func isFinite() -> Bool {
+        not self.isNaN() and not self.isInfinite()
+    }
+
+    public func equals(other: {{TYPE_NAME}}) -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.value, other.value))
+    }
+
+    public func compare(other: {{TYPE_NAME}}) -> Ordering {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.value, other.value)) { .Greater }
+        else { .Equal }
+    }
+
+    // Associated type bindings
+    type Addable.Output = {{TYPE_NAME}}
+    type Subtractable.Output = {{TYPE_NAME}}
+    type Multipliable.Output = {{TYPE_NAME}}
+    type Divisible.Output = {{TYPE_NAME}}
+    type Negatable.Output = {{TYPE_NAME}}
+
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.value, other.value)) }
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.value, other.value)) }
+    public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.value)) }
+
+    public func abs() -> {{TYPE_NAME}} {
+        if lang.{{LANG_TYPE}}_lt(self.value, {{ZERO_LITERAL}}) { self.negate() } else { self }
+    }
+
+    public func floor() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_floor(self.value)) }
+    public func ceil() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_ceil(self.value)) }
+    public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.value)) }
+    public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.value)) }
+    public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.value)) }
+}
+{{TYPE_ALIAS}}

@@ -30,9 +30,18 @@ public struct Int16:
     LeftShift,
     RightShift,
     ExpressibleByIntLiteral,
-    FFISafe
+    FFISafe,
+    Convertible[UInt8],
+    Convertible[UInt16],
+    Convertible[UInt32],
+    Convertible[UInt64],
+    Convertible[Int8],
+    Convertible[Int32],
+    Convertible[Int64]
 {
     private var value: lang.i16
+
+    public var raw: lang.i16 { self.value }
 
     public static var zero: Int16 { Int16(intLiteral: 0) }
     public static var one: Int16 { Int16(intLiteral: 1) }
@@ -47,6 +56,15 @@ public struct Int16:
     init(raw value: lang.i16) {
         self.value = value
     }
+
+    // Conversions from other integer types
+    public init(from other: UInt8) { self.value = lang.cast_i8_i16(other.raw) }
+    public init(from other: UInt16) { self.value = other.raw }
+    public init(from other: UInt32) { self.value = lang.cast_i32_i16(other.raw) }
+    public init(from other: UInt64) { self.value = lang.cast_i64_i16(other.raw) }
+    public init(from other: Int8) { self.value = lang.cast_i8_i16(other.raw) }
+    public init(from other: Int32) { self.value = lang.cast_i32_i16(other.raw) }
+    public init(from other: Int64) { self.value = lang.cast_i64_i16(other.raw) }
 
     public func equals(other: Int16) -> Bool {
         Bool(boolLiteral: lang.i16_eq(self.value, other.value))

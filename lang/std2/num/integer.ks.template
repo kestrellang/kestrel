@@ -1,0 +1,94 @@
+// {{TYPE_NAME}} - {{BITS}}-bit {{SIGNEDNESS}} integer
+// Generated from integer.ks.template - DO NOT EDIT
+
+module std.num
+
+import std.ffi.(FFISafe)
+import std.core.(
+    Equatable, Comparable, Ordering, Bool,
+    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
+    ExpressibleByIntLiteral, Convertible
+)
+
+public struct {{TYPE_NAME}}:
+    {{SIGNEDNESS_PROTOCOL}},
+    Steppable,
+    Comparable,
+    Equatable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    {{NEGATABLE}}
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    ExpressibleByIntLiteral,
+    FFISafe,
+{{CONVERTIBLE_CONFORMANCES}}{
+    private var value: lang.{{LANG_TYPE}}
+
+    public var raw: lang.{{LANG_TYPE}} { self.value }
+
+    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 0) }
+    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 1) }
+    public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MIN_VALUE}}) }
+    public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MAX_VALUE}}) }
+    // public static var bitWidth: Int { {{BITS}} }
+
+    public init(intLiteral value: lang.i64) {
+        {{INT_LITERAL_INIT}}
+    }
+
+    init(raw value: lang.{{LANG_TYPE}}) {
+        self.value = value
+    }
+
+{{CONVERTIBLE_INITS}}
+    public func equals(other: {{TYPE_NAME}}) -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.value, other.value))
+    }
+
+    public func compare(other: {{TYPE_NAME}}) -> Ordering {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.value, other.value)) { .Less }
+        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}gt(self.value, other.value)) { .Greater }
+        else { .Equal }
+    }
+
+    public func successor() -> {{TYPE_NAME}} { self.add({{TYPE_NAME}}.one) }
+    public func predecessor() -> {{TYPE_NAME}} { self.subtract({{TYPE_NAME}}.one) }
+
+    // Associated type bindings
+    type Addable.Output = {{TYPE_NAME}}
+    type Subtractable.Output = {{TYPE_NAME}}
+    type Multipliable.Output = {{TYPE_NAME}}
+    type Divisible.Output = {{TYPE_NAME}}
+    type Modulo.Output = {{TYPE_NAME}}
+    {{NEGATABLE_OUTPUT}}
+    type BitwiseAnd.Output = {{TYPE_NAME}}
+    type BitwiseOr.Output = {{TYPE_NAME}}
+    type BitwiseXor.Output = {{TYPE_NAME}}
+    type BitwiseNot.Output = {{TYPE_NAME}}
+    type LeftShift.Output = {{TYPE_NAME}}
+    type RightShift.Output = {{TYPE_NAME}}
+
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.value, other.value)) }
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.value, other.value)) }
+    public func modulo(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.value, other.value)) }
+    {{NEGATE_METHOD}}
+    {{ABS_METHOD}}
+    public func bitwiseAnd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_and(self.value, other.value)) }
+    public func bitwiseOr(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_or(self.value, other.value)) }
+    public func bitwiseXor(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_xor(self.value, other.value)) }
+    public func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.value)) }
+    public func shiftLeft(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.value, {{SHIFT_CAST}})) }
+    public func shiftRight(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.value, {{SHIFT_CAST}})) }
+}
+{{TYPE_ALIAS}}

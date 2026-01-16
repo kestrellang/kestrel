@@ -125,7 +125,6 @@ fn match_pattern(
         (MirTy::Ref(a), MirTy::Ref(b)) => match_pattern(mir, *a, *b, bindings),
         (MirTy::RefMut(a), MirTy::RefMut(b)) => match_pattern(mir, *a, *b, bindings),
         (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(mir, *a, *b, bindings),
-        (MirTy::Array(a), MirTy::Array(b)) => match_pattern(mir, *a, *b, bindings),
 
         // Tuples - match element-wise
         (MirTy::Tuple(elems1), MirTy::Tuple(elems2)) => {

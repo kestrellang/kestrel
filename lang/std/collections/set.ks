@@ -17,7 +17,7 @@ public struct Set[T, A]:
     // Associated type bindings (qualified to avoid ambiguity across protocols)
     type Iterable.Item = T
     type Collectable.Item = T
-    type Iter = SetIterator[T]
+    type Iter = SetIterator[T, A]
 
     // Use Dictionary with unit value as backing storage
     private var dict: Dictionary[T, (), A]
@@ -187,7 +187,7 @@ public struct Set[T, A]:
     }
 
     // Iteration
-    public func iter() -> SetIterator[T] {
+    public func iter() -> SetIterator[T, A] {
         SetIterator(dictIter: self.dict.iter())
     }
 
@@ -231,12 +231,12 @@ extend Set[T, A]: Hashable {
 }
 
 // Set iterator
-public struct SetIterator[T]: Iterator {
+public struct SetIterator[T, A]: Iterator where A: Allocator {
     type Item = T
 
-    private var dictIter: DictionaryIterator[T, ()]
+    private var dictIter: DictionaryIterator[T, (), A]
 
-    public init(dictIter: DictionaryIterator[T, ()]) {
+    public init(dictIter: DictionaryIterator[T, (), A]) {
         self.dictIter = dictIter
     }
 

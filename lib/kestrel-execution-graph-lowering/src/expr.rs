@@ -716,45 +716,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
 
         // === Other ===
         ExprKind::Array(elements) => {
-            // Lower each element
-            let element_values: Vec<Value> =
-                elements.iter().map(|e| lower_expression(ctx, e)).collect();
-
-            // Get the array element type from the expression type
-            let (element_ty, elem_sem_ty) = match expr.ty.kind() {
-                kestrel_semantic_tree::ty::TyKind::Array(elem_ty) => {
-                    (lower_type(ctx, elem_ty), Some(elem_ty))
-                }
-                _ => {
-                    ctx.emit_error(LoweringError::internal(
-                        "array literal with non-array type",
-                        Some(expr.span.clone()),
-                    ));
-                    (ctx.mir.ty_error(), None)
-                }
-            };
-
-            // Create result local and emit array construction
-            let result_ty = lower_type(ctx, &expr.ty);
-            let result_local = ctx.create_temp("array", result_ty);
-            let result_place = Place::local(result_local);
-
-            // Track the temp for deinit if array element type needs deinit
-            if let Some(elem_ty) = elem_sem_ty {
-                if ctx.type_needs_deinit(elem_ty) {
-                    ctx.track_statement_temp(result_local);
-                }
-            }
-
-            ctx.emit_assign(
-                result_place.clone(),
-                Rvalue::Array {
-                    element_ty,
-                    elements: element_values,
-                },
-            );
-
-            Value::Place(result_place)
+            lower_array_literal(ctx, elements, expr)
         }
 
         ExprKind::Tuple(elements) => {
@@ -1408,6 +1370,234 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             Value::Immediate(Immediate::error())
         }
     }
+}
+
+/// Lower an array literal expression.
+///
+/// Array literals like `[1, 2, 3]` are lowered to:
+/// 1. Stack allocate a buffer for the elements
+/// 2. Write each element to the buffer
+/// 3. Call the target type's init(_arrayLiteralPointer:_arrayLiteralCount:) method
+fn lower_array_literal(
+    ctx: &mut LoweringContext,
+    elements: &[Expression],
+    expr: &Expression,
+) -> Value {
+    // Get element type - either from the array type or from the first element
+    let element_sem_ty: Ty = match expr.ty.kind() {
+        TyKind::Array(elem_ty) => (**elem_ty).clone(),
+        TyKind::Struct { .. } => {
+            // For resolved struct types (like Array[Int, GlobalAllocator]),
+            // get element type from the first element
+            if let Some(first_elem) = elements.first() {
+                first_elem.ty.clone()
+            } else {
+                // Empty array - we can't determine element type from elements
+                // For now, use unit type as placeholder
+                Ty::unit(expr.span.clone())
+            }
+        }
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "array literal with non-array type",
+                Some(expr.span.clone()),
+            ));
+            return Value::Immediate(Immediate::error());
+        }
+    };
+
+    let element_ty = lower_type(ctx, &element_sem_ty);
+    let count = elements.len();
+
+    // Lower each element expression
+    let element_values: Vec<Value> = elements.iter().map(|e| lower_expression(ctx, e)).collect();
+
+    // Allocate stack buffer for elements
+    let ptr_ty = ctx.mir.ty_ptr(element_ty);
+    let ptr_local = ctx.create_temp("array_literal_ptr", ptr_ty);
+    let ptr_place = Place::local(ptr_local);
+
+    let i64_ty = ctx.mir.ty_i64();
+    let count_value = Value::Immediate(Immediate::i64(count as i64));
+
+    ctx.emit_assign(
+        ptr_place.clone(),
+        Rvalue::StackAlloc {
+            element_ty,
+            count: count_value.clone(),
+        },
+    );
+
+    // Write each element to the buffer using PtrOffset and PtrWrite
+    // For computing byte offsets, we use index * sizeof(element_ty)
+    let sizeof_local = ctx.create_temp("elem_size", i64_ty);
+    ctx.emit_assign(
+        Place::local(sizeof_local),
+        Rvalue::SizeOf { ty: element_ty },
+    );
+
+    // Pre-compute unit type to avoid borrow issues
+    let unit_ty = ctx.mir.ty_unit();
+
+    for (i, elem_value) in element_values.into_iter().enumerate() {
+        if i == 0 {
+            // First element: write directly to ptr
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(ptr_place.clone()),
+                    value: elem_value,
+                },
+            );
+        } else {
+            // Compute byte offset: i * sizeof(element_ty)
+            let index_value = Value::Immediate(Immediate::i64(i as i64));
+            let offset_local = ctx.create_temp("elem_offset", i64_ty);
+            ctx.emit_assign(
+                Place::local(offset_local),
+                Rvalue::BinaryOp {
+                    op: BinOp::MulSigned,
+                    lhs: index_value,
+                    rhs: Value::Place(Place::local(sizeof_local)),
+                },
+            );
+
+            // Compute element pointer: ptr + offset
+            let elem_ptr_local = ctx.create_temp("elem_ptr", ptr_ty);
+            ctx.emit_assign(
+                Place::local(elem_ptr_local),
+                Rvalue::PtrOffset {
+                    ptr: Value::Place(ptr_place.clone()),
+                    offset: Value::Place(Place::local(offset_local)),
+                },
+            );
+
+            // Write element value
+            let unit_local = ctx.create_temp("ptr_write", unit_ty);
+            ctx.emit_assign(
+                Place::local(unit_local),
+                Rvalue::PtrWrite {
+                    ptr: Value::Place(Place::local(elem_ptr_local)),
+                    value: elem_value,
+                },
+            );
+        }
+    }
+
+    // Look up the init method with _arrayLiteralPointer and _arrayLiteralCount labels
+    // For now, we need to find the target type's init method
+    match expr.ty.kind() {
+        TyKind::Struct { symbol, .. } => {
+            // Call the struct's array literal init
+            lower_array_literal_init_call(ctx, expr, symbol, ptr_place, count_value)
+        }
+        TyKind::Array(_) => {
+            // Array type not resolved to concrete struct type
+            // This means type inference didn't give us a target type
+            // For now, emit an error - full implementation needs type inference changes
+            ctx.emit_error(LoweringError::unsupported_expr(
+                "array literal without concrete target type - use explicit type annotation",
+                expr.span.clone(),
+            ));
+            Value::Immediate(Immediate::error())
+        }
+        _ => {
+            ctx.emit_error(LoweringError::internal(
+                "unexpected array literal target type",
+                Some(expr.span.clone()),
+            ));
+            Value::Immediate(Immediate::error())
+        }
+    }
+}
+
+/// Lower an array literal init call to a struct type.
+fn lower_array_literal_init_call(
+    ctx: &mut LoweringContext,
+    expr: &Expression,
+    struct_symbol: &std::sync::Arc<kestrel_semantic_tree::symbol::r#struct::StructSymbol>,
+    ptr_place: Place,
+    count_value: Value,
+) -> Value {
+    use semantic_tree::symbol::Symbol;
+
+    // Find the init with _arrayLiteralPointer and _arrayLiteralCount parameters
+    let init_symbol = struct_symbol.metadata().children().into_iter().find(|child| {
+        if child.metadata().kind() != KestrelSymbolKind::Initializer {
+            return false;
+        }
+        // Check if this init has parameters with the right labels
+        if let Some(callable) = child.metadata().get_behavior::<CallableBehavior>() {
+            let params = callable.parameters();
+            params.len() >= 2
+                && params
+                    .get(0)
+                    .and_then(|p| p.label.as_ref())
+                    .map_or(false, |l| l.value == "_arrayLiteralPointer")
+                && params
+                    .get(1)
+                    .and_then(|p| p.label.as_ref())
+                    .map_or(false, |l| l.value == "_arrayLiteralCount")
+        } else {
+            false
+        }
+    });
+
+    let Some(_init_sym) = init_symbol else {
+        ctx.emit_error(LoweringError::internal(
+            "array literal target type has no init(_arrayLiteralPointer:_arrayLiteralCount:)",
+            Some(expr.span.clone()),
+        ));
+        return Value::Immediate(Immediate::error());
+    };
+
+    // Build the qualified name for the init function
+    let mut name_parts = Vec::new();
+    collect_symbol_name_parts(
+        &(struct_symbol.clone()
+            as std::sync::Arc<
+                dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+            >),
+        &mut name_parts,
+    );
+    name_parts.push("init".to_string());
+
+    let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
+
+    // Lower the result type
+    let result_ty = lower_type(ctx, &expr.ty);
+
+    // Allocate space for the result
+    let result_local = ctx.create_temp("array_literal", result_ty);
+    let result_place = Place::local(result_local);
+
+    // Create a mutable reference to the result place
+    let ref_ty = ctx.mir.ty_ref_mut(result_ty);
+    let self_ref_local = ctx.create_temp("self_ref", ref_ty);
+    let self_ref_place = Place::local(self_ref_local);
+
+    // Emit: %self_ref = ref var %result
+    ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
+
+    // Build call args: self_ref first (MutRef), then pointer and count
+    let call_args = vec![
+        CallArg::mutating(Value::Place(self_ref_place)),
+        CallArg::copy(Value::Place(ptr_place)),
+        CallArg::copy(count_value),
+    ];
+
+    // Create a temp for the unit return value of init (we discard it)
+    let unit_ty = ctx.mir.ty_unit();
+    let unit_local = ctx.create_temp("init_ret", unit_ty);
+    let unit_place = Place::local(unit_local);
+
+    // Call the init function
+    let mir_callee = Callee::direct(init_name);
+    ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
+
+    // Return the initialized struct
+    Value::Place(result_place)
 }
 
 /// Lower a literal expression.

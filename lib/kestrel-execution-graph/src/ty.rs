@@ -33,9 +33,6 @@ pub enum MirTy {
     /// `(T1, T2, ...)` - tuple type
     Tuple(Vec<Id<Ty>>),
 
-    /// `[T]` - array type
-    Array(Id<Ty>),
-
     /// Named type (struct, enum, protocol).
     Named {
         name: Id<QualifiedName>,
@@ -152,10 +149,6 @@ impl fmt::Display for MirTyDisplay<'_> {
                     write!(f, "{}", self.ctx.ty(*elem).display(self.ctx))?;
                 }
                 write!(f, ")")
-            }
-
-            MirTy::Array(elem) => {
-                write!(f, "[{}]", self.ctx.ty(*elem).display(self.ctx))
             }
 
             MirTy::Named { name, type_args } => {

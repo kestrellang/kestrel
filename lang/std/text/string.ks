@@ -19,7 +19,8 @@ public struct String[A]:
 {
     // Note: String is NOT Iterable - must use a view
 
-    private var storage: ArcBox[StringStorage[A]]
+    // Note: public for iterator access - consider internal visibility when available
+    public var storage: ArcBox[StringStorage[A]]
 
     struct StringStorage[A1] where A1: Allocator {
         var buffer: Buffer[UInt8, A1]
@@ -295,7 +296,7 @@ public struct String[A]:
     }
 
     // Substring by byte indices (internal)
-    private func substringBytes(from start: Int, to end: Int) -> String[A] {
+    public func substringBytes(from start: Int, to end: Int) -> String[A] {
         var result = String[A](capacity: end - start);
         /* for i in start..<end {
             (result.storage.value.buffer)(unchecked: result.storage.value.length) = (self.storage.value.buffer)(unchecked: i)

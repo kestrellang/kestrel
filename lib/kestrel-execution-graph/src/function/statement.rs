@@ -150,10 +150,10 @@ pub enum Rvalue {
     /// `tuple (v0, v1, ...)`
     Tuple(Vec<Value>),
 
-    /// `array [v0, v1, ...]`
-    Array {
+    /// `stack_alloc <element_ty>, <count>` - allocate buffer on stack, returns pointer
+    StackAlloc {
         element_ty: Id<Ty>,
-        elements: Vec<Value>,
+        count: Value,
     },
 
     /// `enum Enum.Variant` or `enum Enum.Variant(payload...)`
@@ -581,18 +581,13 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 write!(f, ")")
             }
-            Rvalue::Array {
-                element_ty,
-                elements,
-            } => {
-                write!(f, "array[{}] [", self.ctx.ty(*element_ty).display(self.ctx))?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", elem.display(self.ctx))?;
-                }
-                write!(f, "]")
+            Rvalue::StackAlloc { element_ty, count } => {
+                write!(
+                    f,
+                    "stack_alloc[{}] {}",
+                    self.ctx.ty(*element_ty).display(self.ctx),
+                    count.display(self.ctx)
+                )
             }
             Rvalue::EnumVariant {
                 enum_ty,

@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Int, Bool, UInt8, UInt32, UInt64, Equatable, Comparable, Cloneable, Hashable, Hasher)
 import std.result.(Optional)
-import std.memory.(Allocator, ArcBox, Buffer)
+import std.memory.(Allocator, ArcBox, Buffer, LiteralSlice)
 import std.iter.(Iterator, Iterable, Collectable, Functor)
 import std.ops.(ExpressibleByArrayLiteral)
 
@@ -16,9 +16,9 @@ public struct Array[T, A]:
     Cloneable
     where A: Allocator
 {
-    type Item = T
-    type Element = T
-    type Inner = T
+    type Iterable.Item = T
+    type Collectable.Item = T
+    type Functor.Inner = T
     type Iter = ArrayIterator[T, A]
 
     private var storage: ArcBox[ArrayStorage[T, A]]
@@ -58,11 +58,11 @@ public struct Array[T, A]:
     }
 
     // ExpressibleByArrayLiteral
-    public init(arrayLiteral elements: [T]) {
-        self.init(capacity: elements.count)
-        // for element in elements {
-        //     self.append(element)
-        // }
+    public init(arrayLiteral elements: LiteralSlice[T]) {
+        self.init(capacity: elements.count);
+        for element in elements {
+            self.append(element)
+        }
     }
 
     // Collectable

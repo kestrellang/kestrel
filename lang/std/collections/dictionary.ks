@@ -17,9 +17,10 @@ public struct Dictionary[K, V, A]:
     type Item = (K, V)
     type Key = K
     type Value = V
-    type Iter = DictionaryIterator[K, V]
+    type Iter = DictionaryIterator[K, V, A]
 
-    private var storage: ArcBox[DictionaryStorage[K, V, A]]
+    // Note: public for iterator access - consider internal visibility when available
+    public var storage: ArcBox[DictionaryStorage[K, V, A]]
 
     struct Entry[K1, V1] {
         var key: K1
@@ -274,7 +275,7 @@ public struct Dictionary[K, V, A]:
     }
 
     // Iteration
-    public func iter() -> DictionaryIterator[K, V] {
+    public func iter() -> DictionaryIterator[K, V, A] {
         DictionaryIterator(dict: self, index: 0)
     }
 
@@ -327,13 +328,13 @@ extend Dictionary[K, V, A]: Equatable where K: Equatable, V: Equatable {
 }
 
 // Dictionary iterator
-public struct DictionaryIterator[K, V]: Iterator {
+public struct DictionaryIterator[K, V, A]: Iterator where A: Allocator {
     type Item = (K, V)
 
-    private var dict: Dictionary[K, V]
+    private var dict: Dictionary[K, V, A]
     private var index: Int
 
-    public init(dict: Dictionary[K, V], index: Int) {
+    public init(dict: Dictionary[K, V, A], index: Int) {
         self.dict = dict;
         self.index = index;
     }
@@ -353,7 +354,7 @@ public struct DictionaryIterator[K, V]: Iterator {
 // Keys view
 public struct KeysView[K, V, A]: Iterable where A: Allocator {
     type Item = K
-    type Iter = KeysIterator[K, V]
+    type Iter = KeysIterator[K, V, A]
 
     private var dict: Dictionary[K, V, A]
 
@@ -361,17 +362,17 @@ public struct KeysView[K, V, A]: Iterable where A: Allocator {
         self.dict = dict;
     }
 
-    public func iter() -> KeysIterator[K, V] {
+    public func iter() -> KeysIterator[K, V, A] {
         KeysIterator(dictIter: self.dict.iter())
     }
 }
 
-public struct KeysIterator[K, V]: Iterator {
+public struct KeysIterator[K, V, A]: Iterator where A: Allocator {
     type Item = K
 
-    private var dictIter: DictionaryIterator[K, V]
+    private var dictIter: DictionaryIterator[K, V, A]
 
-    public init(dictIter: DictionaryIterator[K, V]) {
+    public init(dictIter: DictionaryIterator[K, V, A]) {
         self.dictIter = dictIter
     }
 
@@ -383,7 +384,7 @@ public struct KeysIterator[K, V]: Iterator {
 // Values view
 public struct ValuesView[K, V, A]: Iterable where A: Allocator {
     type Item = V
-    type Iter = ValuesIterator[K, V]
+    type Iter = ValuesIterator[K, V, A]
 
     private var dict: Dictionary[K, V, A]
 
@@ -391,17 +392,17 @@ public struct ValuesView[K, V, A]: Iterable where A: Allocator {
         self.dict = dict;
     }
 
-    public func iter() -> ValuesIterator[K, V] {
+    public func iter() -> ValuesIterator[K, V, A] {
         ValuesIterator(dictIter: self.dict.iter())
     }
 }
 
-public struct ValuesIterator[K, V]: Iterator {
+public struct ValuesIterator[K, V, A]: Iterator where A: Allocator {
     type Item = V
 
-    private var dictIter: DictionaryIterator[K, V]
+    private var dictIter: DictionaryIterator[K, V, A]
 
-    public init(dictIter: DictionaryIterator[K, V]) {
+    public init(dictIter: DictionaryIterator[K, V, A]) {
         self.dictIter = dictIter
     }
 

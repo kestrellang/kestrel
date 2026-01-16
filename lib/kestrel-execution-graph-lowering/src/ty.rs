@@ -48,9 +48,15 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             ctx.mir.ty_tuple(mir_elements)
         }
 
-        TyKind::Array(element_ty) => {
-            let element = lower_type(ctx, element_ty);
-            ctx.mir.ty_array(element)
+        TyKind::Array(_element_ty) => {
+            // Array literal types [T] should be resolved to concrete types
+            // (like Array[T, GlobalAllocator]) during type inference.
+            // If we hit this, type inference didn't resolve the array type.
+            ctx.emit_error(LoweringError::unsupported_type(
+                "Unresolved array type '[T]' - should be resolved to concrete type during type inference".to_string(),
+                ty.span().clone(),
+            ));
+            ctx.mir.ty_error()
         }
 
         TyKind::Pointer(element_ty) => {

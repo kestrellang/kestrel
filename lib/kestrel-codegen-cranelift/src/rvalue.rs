@@ -98,7 +98,9 @@ pub fn compile_rvalue(
 
         Rvalue::Tuple(values) => compile_tuple(ctx, func_def, subst, values, builder, local_map),
 
-        Rvalue::Array { .. } => Err(CodegenError::Unsupported("arrays not yet supported".into())),
+        Rvalue::StackAlloc { element_ty, count } => {
+            compile_stack_alloc(ctx, func_def, subst, *element_ty, count, builder, local_map)
+        }
 
         Rvalue::ApplyPartial { func, captures } => {
             compile_apply_partial(ctx, func_def, subst, *func, captures, builder, local_map)
@@ -551,6 +553,72 @@ fn compile_tuple(
     }
 
     // Return the pointer to the tuple
+    Ok(ptr)
+}
+
+/// Compile a stack allocation for array literals.
+/// Allocates `count` elements of `element_ty` on the stack and returns a pointer.
+fn compile_stack_alloc(
+    ctx: &mut CodegenContext<'_>,
+    _func_def: &FunctionDef,
+    subst: &Substitution,
+    element_ty: Id<Ty>,
+    count: &Value,
+    builder: &mut FunctionBuilder<'_>,
+    _local_map: &HashMap<Id<Local>, Variable>,
+) -> Result<CraneliftValue, CodegenError> {
+    // Apply substitution to get concrete element type
+    let concrete_element_ty = subst
+        .apply_ty_readonly(ctx.mir, element_ty)
+        .unwrap_or(element_ty);
+
+    // Get element layout
+    let element_layout = ctx.layouts.layout_of(concrete_element_ty);
+
+    // For array literals, count must be a compile-time constant
+    let count_value = match count {
+        Value::Immediate(imm) => match &imm.kind {
+            ImmediateKind::IntLiteral { value, .. } => *value as usize,
+            _ => {
+                return Err(CodegenError::Unsupported(
+                    "stack_alloc count must be an integer literal".into(),
+                ))
+            }
+        },
+        Value::Place(_) => {
+            return Err(CodegenError::Unsupported(
+                "stack_alloc with dynamic count not yet supported".into(),
+            ))
+        }
+    };
+
+    // Calculate total size (count * element_size)
+    let total_size = count_value * element_layout.size;
+
+    // Ensure minimum size of 1 byte for empty allocations
+    let total_size = if total_size == 0 { 1 } else { total_size };
+    let align = if element_layout.align == 0 {
+        1
+    } else {
+        element_layout.align
+    };
+
+    // Allocate stack slot
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        total_size as u32,
+        align as u8,
+    ));
+
+    // Get pointer type for the target
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    // Return pointer to the stack slot
+    let ptr = builder.ins().stack_addr(ptr_type, slot, 0);
     Ok(ptr)
 }
 

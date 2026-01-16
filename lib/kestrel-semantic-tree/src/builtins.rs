@@ -27,6 +27,8 @@ pub enum LanguageFeature {
     ExpressibleByBoolLiteral,
     ExpressibleByNilLiteral,
     ExpressibleByArrayLiteral,
+    #[allow(non_camel_case_types)]
+    _ExpressibleByArrayLiteral,
     ExpressibleByDictionaryLiteral,
 
     // Protocol builtins - FFI
@@ -116,6 +118,7 @@ impl LanguageFeature {
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByNilLiteral" => Some(Self::ExpressibleByNilLiteral),
             "ExpressibleByArrayLiteral" => Some(Self::ExpressibleByArrayLiteral),
+            "_ExpressibleByArrayLiteral" => Some(Self::_ExpressibleByArrayLiteral),
             "ExpressibleByDictionaryLiteral" => Some(Self::ExpressibleByDictionaryLiteral),
             "FFISafe" => Some(Self::FFISafe),
             "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
@@ -195,6 +198,7 @@ impl LanguageFeature {
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByNilLiteral => "ExpressibleByNilLiteral",
             Self::ExpressibleByArrayLiteral => "ExpressibleByArrayLiteral",
+            Self::_ExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::ExpressibleByDictionaryLiteral => "ExpressibleByDictionaryLiteral",
             Self::FFISafe => "FFISafe",
             Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
@@ -341,6 +345,16 @@ impl LanguageFeature {
                 },
             },
             Self::ExpressibleByArrayLiteral => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::_ExpressibleByArrayLiteral => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
