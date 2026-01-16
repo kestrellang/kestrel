@@ -69,6 +69,9 @@ enum Commands {
     Build {
         /// Source file to build
         file: String,
+        /// Source files to process
+        #[arg(value_name = "FILES")]
+        files: Vec<String>,
         /// Output file path (defaults to input filename without extension)
         #[arg(short, long)]
         output: Option<String>,
@@ -289,7 +292,7 @@ fn run_program(
 }
 
 fn run_build(
-    file: &str,
+    files: &[String],
     output: Option<&str>,
     target: Option<&str>,
     verbose: bool,
@@ -297,24 +300,40 @@ fn run_build(
     library_paths: Vec<String>,
     frameworks: Vec<String>,
 ) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("error: no input files");
+        return ExitCode::from(1);
+    }
+
     let target_config = match get_target_config(target) {
         Ok(t) => t,
         Err(code) => return code,
     };
 
-    if verbose {
-        eprintln!("  Reading {}", file);
-    }
-    let Some(content) = read_source(file) else {
-        return ExitCode::from(1);
-    };
+    let mut builder = Compilation::builder();
+    let mut io_ok = true;
 
-    // Determine output path
+    for file in files {
+        if verbose {
+            eprintln!("  Reading {}", file);
+        }
+        let Some(content) = read_source(file) else {
+            io_ok = false;
+            continue;
+        };
+        builder = builder.add_source(file.clone(), content);
+    }
+
+    if !io_ok {
+        return ExitCode::from(1);
+    }
+
+    // Determine output path (from first file if not specified)
     let output_path = match output {
         Some(path) => path.to_string(),
         None => {
-            // Strip extension from input file
-            let path = Path::new(file);
+            // Strip extension from first input file
+            let path = Path::new(&files[0]);
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
             if cfg!(windows) {
                 format!("{}.exe", stem)
@@ -324,9 +343,7 @@ fn run_build(
         }
     };
 
-    let compilation = Compilation::builder()
-        .add_source(file.to_string(), content)
-        .build();
+    let compilation = builder.build();
 
     if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
@@ -384,19 +401,25 @@ fn main() -> ExitCode {
         ),
         Some(Commands::Build {
             file,
+            files,
             output,
             libraries,
             library_paths,
             frameworks,
-        }) => run_build(
-            &file,
-            output.as_deref(),
-            cli.target.as_deref(),
-            cli.verbose,
-            libraries,
-            library_paths,
-            frameworks,
-        ),
+        }) => {
+            // Combine main file with additional files
+            let mut all_files = vec![file];
+            all_files.extend(files);
+            run_build(
+                &all_files,
+                output.as_deref(),
+                cli.target.as_deref(),
+                cli.verbose,
+                libraries,
+                library_paths,
+                frameworks,
+            )
+        }
         None => {
             // No subcommand: use global files
             if cli.files.is_empty() {

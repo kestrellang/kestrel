@@ -2,11 +2,13 @@
 
 module io.error
 
-import std.(Error, Result, String)
+import std.num.(Int32, Int64)
+import std.text.(String)
+import std.result.(Result)
 import io.libc
 
 // I/O Error
-public struct Error: std.Error {
+public struct Error {
     var code: Int32
 
     public init(code: Int32) {
@@ -18,8 +20,10 @@ public struct Error: std.Error {
         Error(code: libc.errno())
     }
 
-    public var description: String {
-        match self.code {
+    public func description() -> String {
+        // Convert to Int64 for match (integer literals default to Int64)
+        let code64 = Int64(from: self.code);
+        match code64 {
             1 => "operation not permitted",
             2 => "no such file or directory",
             4 => "interrupted",
@@ -38,26 +42,16 @@ public struct Error: std.Error {
         }
     }
 
-    public var errno: Int32 {
+    public func errno() -> Int32 {
         self.code
     }
 }
 
 // Common error constructors
-extension Error {
-    public static let notFound = Error(code: 2)
-    public static let permissionDenied = Error(code: 13)
-    public static let alreadyExists = Error(code: 17)
-    public static let invalidInput = Error(code: 22)
-    public static let wouldBlock = Error(code: 11)
-    public static let interrupted = Error(code: 4)
-    public static let brokenPipe = Error(code: 32)
-
-    public static func custom(message: String) -> Error {
-        // Use a high errno for custom errors
-        Error(code: 1000)
-    }
-}
-
-// Result type alias
-public type Result[T] = std.Result[T, Error]
+public func notFound() -> Error { Error(code: 2) }
+public func permissionDenied() -> Error { Error(code: 13) }
+public func alreadyExists() -> Error { Error(code: 17) }
+public func invalidInput() -> Error { Error(code: 22) }
+public func wouldBlock() -> Error { Error(code: 11) }
+public func interrupted() -> Error { Error(code: 4) }
+public func brokenPipe() -> Error { Error(code: 32) }

@@ -2,133 +2,26 @@
 
 module io.read
 
-import std.(Optional, Array, Slice, UInt8)
-import io.error.(Error, Result)
+import std.num.(Int64, UInt8)
+import std.result.(Result, Optional)
+import std.memory.(Slice, Pointer)
+import std.collections.(Array)
+import std.core.(Bool)
+import io.error.(Error)
 
 // Read trait - source of bytes
 public protocol Read {
     // Read bytes into buffer, return number of bytes read.
     // Returns 0 on EOF.
-    func read(into buf: Slice[UInt8]) -> Result[Int]
-}
-
-// Extension methods for all readers
-extension Read {
-    // Read until buffer is full or EOF
-    public func readExact(into buf: Slice[UInt8]) -> Result[Unit] {
-        var filled = 0
-        while filled < buf.count {
-            let remaining = buf.slice(from: filled, to: buf.count).unwrap()
-            let n = try self.read(into: remaining)
-            if n == 0 {
-                return .Err(Error.custom(message: "unexpected eof"))
-            }
-            filled += n
-        }
-        .Ok(())
-    }
-
-    // Read all bytes to end into array
-    public func readAll(into buf: ref Array[UInt8]) -> Result[Int] {
-        var total = 0
-        var chunk = Array[UInt8](capacity: 4096)
-        chunk.resize(to: 4096, default: 0)
-
-        while true {
-            let n = try self.read(into: chunk.asSlice())
-            if n == 0 { break }
-            for i in 0..<n {
-                buf.append(chunk(unchecked: i))
-            }
-            total += n
-        }
-        .Ok(total)
-    }
-
-    // Read single byte
-    public func readByte() -> Result[Optional[UInt8]] {
-        var buf = Array[UInt8](capacity: 1)
-        buf.resize(to: 1, default: 0)
-        let n = try self.read(into: buf.asSlice())
-        if n == 0 {
-            .Ok(.None)
-        } else {
-            .Ok(.Some(buf(unchecked: 0)))
-        }
-    }
-
-    // Create an iterator over bytes
-    public func bytes() -> Bytes[Self] {
-        Bytes(inner: self)
-    }
-
-    // Limit bytes read
-    public func take(n: Int) -> Take[Self] {
-        Take(inner: self, remaining: n)
-    }
-
-    // Chain two readers
-    public func chain[R: Read](other: R) -> Chain[Self, R] {
-        Chain(first: self, second: other, firstDone: false)
-    }
-}
-
-// Bytes iterator
-public struct Bytes[R: Read]: Iterator {
-    type Item = Result[UInt8]
-
-    var inner: R
-
-    public mutating func next() -> Optional[Result[UInt8]] {
-        match self.inner.readByte() {
-            .Ok(.Some(let b)) => .Some(.Ok(b)),
-            .Ok(.None) => .None,
-            .Err(let e) => .Some(.Err(e))
-        }
-    }
-}
-
-// Take adapter - limits bytes read
-public struct Take[R: Read]: Read {
-    var inner: R
-    var remaining: Int
-
-    public func read(into buf: Slice[UInt8]) -> Result[Int] {
-        if self.remaining == 0 {
-            return .Ok(0)
-        }
-        let max = if buf.count < self.remaining { buf.count } else { self.remaining }
-        let limited = buf.slice(from: 0, to: max).unwrap()
-        let n = try self.inner.read(into: limited)
-        self.remaining -= n
-        .Ok(n)
-    }
-
-    public var limit: Int { self.remaining }
-}
-
-// Chain adapter - reads from first, then second
-public struct Chain[R1: Read, R2: Read]: Read {
-    var first: R1
-    var second: R2
-    var firstDone: Bool
-
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int] {
-        if not self.firstDone {
-            let n = try self.first.read(into: buf)
-            if n > 0 { return .Ok(n) }
-            self.firstDone = true
-        }
-        self.second.read(into: buf)
-    }
+    func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
 }
 
 // Empty reader - always returns EOF
 public struct Empty: Read {
     public init() {}
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int] {
-        .Ok(0)
+    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        Result.ok(value: 0)
     }
 }
 
@@ -140,41 +33,99 @@ public struct Repeat: Read {
         self.byte = byte
     }
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int] {
-        for i in 0..<buf.count {
-            buf(unchecked: i) = self.byte
+    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        var i: Int64 = 0;
+        while i < buf.count {
+            buf.pointer.offset(by: i).write(self.byte);
+            i = i + 1
         }
-        .Ok(buf.count)
+        Result.ok(value: buf.count)
     }
 }
 
-// Cursor - read from a byte slice
+// Cursor - read from a byte array
 public struct Cursor: Read {
-    var data: Slice[UInt8]
-    var pos: Int
+    var data: Array[UInt8]
+    var pos: Int64
 
-    public init(data: Slice[UInt8]) {
-        self.data = data
-        self.pos = 0
+    public init(data: Array[UInt8]) {
+        self.data = data;
+        self.pos = 0;
     }
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int] {
-        let available = self.data.count - self.pos
-        if available == 0 { return .Ok(0) }
-
-        let n = if buf.count < available { buf.count } else { available }
-        for i in 0..<n {
-            buf(unchecked: i) = self.data(unchecked: self.pos + i)
+    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        let available = self.data.count() - self.pos;
+        if available == 0 {
+            return Result.ok(value: 0)
         }
-        self.pos += n
-        .Ok(n)
+
+        var n: Int64 = buf.count;
+        if n > available {
+            n = available
+        }
+        var i: Int64 = 0;
+        while i < n {
+            buf.pointer.offset(by: i).write(self.data.getUnchecked(self.pos + i));
+            i = i + 1
+        }
+        self.pos = self.pos + n;
+        Result.ok(value: n)
     }
 
-    public var position: Int { self.pos }
+    public func position() -> Int64 { self.pos }
 
-    public func setPosition(to pos: Int) {
-        self.pos = if pos < 0 { 0 }
-            else if pos > self.data.count { self.data.count }
-            else { pos }
+    public mutating func setPosition(to pos: Int64) {
+        let count = self.data.count();
+        if pos < 0 {
+            self.pos = 0
+        } else if pos > count {
+            self.pos = count
+        } else {
+            self.pos = pos
+        }
     }
+}
+
+// Helper functions for readers
+
+// Read single byte from a reader
+public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Read {
+    var buf = Array[UInt8](capacity: 1);
+    buf.append(0);
+    let slice = Slice(pointer: buf.pointer(), count: 1);
+    let n = try reader.read(into: slice);
+    if n == 0 {
+        Result.ok(value: Optional.none())
+    } else {
+        Result.ok(value: Optional.some(value: buf.getUnchecked(0)))
+    }
+}
+
+// Read all bytes from a reader into an array
+public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
+    var total: Int64 = 0;
+    var chunk = Array[UInt8](capacity: 4096);
+    // Initialize chunk with zeros
+    var i: Int64 = 0;
+    while i < 4096 {
+        chunk.append(0);
+        i = i + 1
+    }
+
+    var done: Bool = false;
+    while done == false {
+        let slice = Slice(pointer: chunk.pointer(), count: 4096);
+        let n = try reader.read(into: slice);
+        if n == 0 {
+            done = true
+        } else {
+            var j: Int64 = 0;
+            while j < n {
+                buf.append(chunk.getUnchecked(j));
+                j = j + 1
+            }
+            total = total + n
+        }
+    }
+    Result.ok(value: total)
 }

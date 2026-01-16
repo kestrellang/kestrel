@@ -47,14 +47,17 @@ public struct RawPointer: Equatable, FFISafe {
 
 // Pointer[T] - typed pointer to a single element
 public struct Pointer[T]: Equatable {
-    private var raw: lang.ptr[T]
+    private var _raw: lang.ptr[T]
+
+    // Public getter for FFI interop
+    public var raw: lang.ptr[T] { self._raw }
 
     public init(raw: lang.ptr[T]) {
-        self.raw = raw;
+        self._raw = raw;
     }
 
     public init(to value: T) {
-        self.raw = lang.ptr_to(value)
+        self._raw = lang.ptr_to(value)
     }
 
     public static func nilPointer() -> Pointer[T] {
@@ -62,33 +65,33 @@ public struct Pointer[T]: Equatable {
     }
 
     public var pointee: T {
-        get { lang.ptr_read(self.raw) }
-        set { lang.ptr_write(self.raw, newValue) }
+        get { lang.ptr_read(self._raw) }
+        set { lang.ptr_write(self._raw, newValue) }
     }
 
     public var address: UInt64 {
-        lang.ptr_to_address(lang.cast_ptr[lang.i8](self.raw))
+        lang.ptr_to_address(lang.cast_ptr[lang.i8](self._raw))
     }
 
     public var isNull: Bool {
-        lang.ptr_is_null(lang.cast_ptr[lang.i8](self.raw))
+        lang.ptr_is_null(lang.cast_ptr[lang.i8](self._raw))
     }
 
     public func read() -> T {
-        lang.ptr_read(self.raw)
+        lang.ptr_read(self._raw)
     }
 
     public func write(value: T) {
-        lang.ptr_write(self.raw, value)
+        lang.ptr_write(self._raw, value)
     }
 
     public func offset(by n: Int64) -> Pointer[T] {
         let byteOffset = n * Int64(intLiteral: lang.sizeof[T]());
-        Pointer(raw: lang.ptr_offset[T](self.raw, byteOffset))
+        Pointer(raw: lang.ptr_offset[T](self._raw, byteOffset))
     }
 
     public func asRaw() -> RawPointer {
-        RawPointer(raw: lang.cast_ptr[lang.i8](self.raw))
+        RawPointer(raw: lang.cast_ptr[lang.i8](self._raw))
     }
 
     public func equals(other: Pointer[T]) -> Bool {

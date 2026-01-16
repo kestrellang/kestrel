@@ -681,3 +681,131 @@ This makes Dictionary initialization awkward since you need a key/value to creat
 **Impact:** Dictionary can't use proper hashing and falls back to linear search (O(n) lookups instead of O(1)).
 
 **Workaround:** Use linear search through entries instead of hash-based lookup. Correct but slow.
+
+---
+
+## Phase 24: Set
+
+### `lang.panic` return type `!` doesn't unify with other branch types
+
+**Error:** `type '!' does not conform to protocol 'ExpressibleByBoolLiteral'`
+
+**Cause:** When an if-else expression has a concrete type in one branch and `lang.panic` (which returns `!` never type) in the other, the compiler can't unify the types:
+```kestrel
+public mutating func insert(element: T) -> Bool {
+    if maybeSlot.isSome() {
+        // ... do work
+        true  // Bool
+    } else {
+        lang.panic("...")  // Returns `!`
+    }
+}
+```
+
+**Workaround:** Move the return value outside the if-else:
+```kestrel
+public mutating func insert(element: T) -> Bool {
+    if maybeSlot.isSome() {
+        // ... do work
+    } else {
+        lang.panic("...")
+    }
+    true  // Return after the if-else
+}
+```
+
+---
+
+## I/O Module (io)
+
+### CLI `build` command only accepts single file (FIXED)
+
+**Error:** `module 'X' not found` when passing multiple files to `build`
+
+**Cause:** The `build` command accepted `file: String` not `files: Vec<String>`. When multiple files were passed, only the first was compiled.
+
+**Fix:** Updated `src/main.rs` to accept multiple files in the `Build` command, matching `Check` behavior.
+
+---
+
+### Cross-module enum shorthand resolution fails
+
+**Error:** `undefined name 'Ok'`
+
+**Cause:** Using `.Ok(value)` or `.Err(error)` doesn't work when the `Result` enum is imported from another module, even when the return type clearly specifies `Result[T, E]`:
+```kestrel
+import std.result.(Result)
+
+public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    .Ok(buf.count)  // Error: undefined name 'Ok'
+}
+```
+
+**Workaround:** Use static constructor methods instead of shorthand:
+```kestrel
+Result.ok(value: buf.count)
+Result.err(error: Error.last())
+```
+
+---
+
+### Integer literal type inference in match
+
+**Error:** `type mismatch: expected 'I64', found 'Int32'`
+
+**Cause:** Match patterns with integer literals default to `I64`, but matching against `Int32` fails:
+```kestrel
+public func description() -> String {
+    match self.code {  // self.code is Int32
+        1 => "operation not permitted",  // Error: 1 is I64
+        ...
+    }
+}
+```
+
+**Workaround:** Convert `Int32` to `Int64` before matching:
+```kestrel
+let code64 = Int64(from: self.code);
+match code64 {
+    1 => "operation not permitted",
+    ...
+}
+```
+
+---
+
+### `public import` not supported
+
+**Cause:** There's no `public import` or `pub use` equivalent to re-export symbols from submodules.
+
+**Impact:** Users must import directly from submodules (e.g., `import io.error.(Error)`) rather than from the parent module (`import io.(Error)`).
+
+**Workaround:** Document that users need to import from specific submodules.
+
+---
+
+### Module-level `public let` not supported
+
+**Error:** Parse error when using `public let` at module level
+
+**Cause:** Cannot declare constants at module level:
+```kestrel
+public let STDIN: Fd = 0  // Error
+```
+
+**Workaround:** Use functions returning constants:
+```kestrel
+public func STDIN() -> Fd { 0 }
+```
+
+---
+
+## General Notes
+
+### Blanket protocol extensions for operators
+
+**Cause:** The `Hasher` protocol exists but doesn't have `write` methods implemented, so types can't properly implement `Hashable`.
+
+**Impact:** Dictionary can't use proper hashing and falls back to linear search (O(1) lookups instead of O(1)).
+
+**Workaround:** Use linear search through entries instead of hash-based lookup. Correct but slow.

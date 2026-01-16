@@ -127,6 +127,12 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public func count() -> Int64 { self.len }
     public func capacity() -> Int64 { self.cap }
     public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
+    public func pointer() -> Pointer[T] { self.ptr }
+
+    // Get a slice view of the array
+    public func asSlice() -> Slice[T] {
+        Slice(pointer: self.ptr, count: self.len)
+    }
 
     // Grow capacity if needed
     private mutating func grow(minCapacity: Int64) {
