@@ -106,7 +106,7 @@ public struct File: Read, Write {
     }
 
     // Read implementation
-    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.read(self.fd, buf.pointer, buf.count);
         if n < 0 {
             return .Err(Error.last())
@@ -192,11 +192,11 @@ public func readFileString(path: String) -> Result[String, Error] {
 // Write string to file
 public func writeFileString(path: String, content: String) -> Result[(), Error] {
     var file = try File.create(path: path);
-    writeStr(writer: file, s: content)
+    writeStr(file, content)
 }
 
 // Append string to file
 public func appendFileString(path: String, content: String) -> Result[(), Error] {
     var file = try File.openAppend(path: path);
-    writeStr(writer: file, s: content)
+    writeStr(file, content)
 }
