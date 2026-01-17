@@ -308,6 +308,43 @@ pub struct MethodLookupKey {
     pub param_types: Vec<SignatureType>,
 }
 
+/// Key for duplicate callable detection.
+///
+/// In Kestrel, overloading is label-based only - two callables with the same
+/// name and labels are duplicates regardless of parameter/return types.
+///
+/// Examples:
+/// - `func foo(x: Int)` and `func foo(x: String)` → DUPLICATES (same name + labels)
+/// - `func foo(x: Int)` and `func foo(y: Int)` → Valid overloads (different labels)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DuplicateKey {
+    /// Name of the callable
+    pub name: String,
+    /// Labels for each parameter (None = unlabeled positional parameter)
+    pub labels: Vec<Option<String>>,
+}
+
+impl DuplicateKey {
+    /// Create a new duplicate key
+    pub fn new(name: String, labels: Vec<Option<String>>) -> Self {
+        Self { name, labels }
+    }
+
+    /// Format the key for display in error messages
+    pub fn display(&self) -> String {
+        let params: Vec<String> = self
+            .labels
+            .iter()
+            .map(|label| match label {
+                Some(l) => format!("{}:", l),
+                None => "_:".to_string(),
+            })
+            .collect();
+
+        format!("{}({})", self.name, params.join(", "))
+    }
+}
+
 impl CallableSignature {
     /// Create a new signature
     pub fn new(
@@ -466,6 +503,20 @@ impl CallableBehavior {
         let return_type = SignatureType::from_ty(&self.return_type);
 
         CallableSignature::new(name.to_string(), labels, param_types, return_type)
+    }
+
+    /// Generate a key for duplicate detection (name + labels only).
+    ///
+    /// In Kestrel, overloading is label-based - two callables with the same
+    /// name and labels are duplicates regardless of types.
+    pub fn duplicate_key(&self, name: &str) -> DuplicateKey {
+        let labels: Vec<Option<String>> = self
+            .parameters
+            .iter()
+            .map(|p| p.external_label().map(|s| s.to_string()))
+            .collect();
+
+        DuplicateKey::new(name.to_string(), labels)
     }
 
     /// Get the function type representation of this callable

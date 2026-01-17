@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
@@ -42,7 +43,10 @@ use kestrel_syntax_tree::utils::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
-use super::members::{resolve_delegating_init, resolve_member_call, substitute_callable_self};
+use super::members::{
+    filter_applicable_extensions, resolve_delegating_init, resolve_member_call,
+    substitute_callable_self,
+};
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
@@ -1155,13 +1159,31 @@ pub fn resolve_struct_instantiation(
         return Expression::error(span);
     }
 
-    // Check for explicit initializers
-    let explicit_inits: Vec<Arc<dyn Symbol<KestrelLanguage>>> = symbol
+    // Collect initializers from direct struct children
+    let mut explicit_inits: Vec<Arc<dyn Symbol<KestrelLanguage>>> = symbol
         .metadata()
         .children()
         .into_iter()
         .filter(|c| c.metadata().kind() == KestrelSymbolKind::Initializer)
         .collect();
+
+    // Also collect initializers from extensions
+    let container_id = symbol.metadata().id();
+    let extensions = ctx.model.query(ExtensionsFor {
+        target_id: container_id,
+    });
+
+    // Create struct type for extension filtering
+    let struct_ty = create_struct_type(&symbol, span.clone());
+    let applicable_extensions = filter_applicable_extensions(extensions, &struct_ty, ctx);
+
+    for extension in applicable_extensions {
+        for child in extension.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Initializer {
+                explicit_inits.push(child);
+            }
+        }
+    }
 
     if !explicit_inits.is_empty() {
         // Has explicit initializers - find matching one

@@ -28,7 +28,10 @@ impl Builder for InitializerBuilder {
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let parent = parent?;
         let parent_kind = parent.metadata().kind();
-        if parent_kind != KestrelSymbolKind::Struct && parent_kind != KestrelSymbolKind::Protocol {
+        if parent_kind != KestrelSymbolKind::Struct
+            && parent_kind != KestrelSymbolKind::Protocol
+            && parent_kind != KestrelSymbolKind::Extension
+        {
             return None;
         }
 

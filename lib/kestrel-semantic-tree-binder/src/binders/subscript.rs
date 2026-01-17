@@ -66,8 +66,9 @@ impl DeclarationBinder for SubscriptBinder {
         symbol.metadata().add_behavior(generics_behavior);
 
         // Resolve parameters from syntax
+        // Subscripts use implicit labels (parameter name becomes the external label)
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
-            syntax, &source, file_id, symbol_id, context, false,
+            syntax, &source, file_id, symbol_id, context, true,
         );
 
         // Resolve return type from syntax

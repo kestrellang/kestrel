@@ -199,6 +199,7 @@ fn resolve_initializer_body(
 ///
 /// Returns the concrete type of the containing struct with type parameters.
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
     use kestrel_semantic_tree::ty::Substitutions;
@@ -219,6 +220,11 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
+        }
+        KestrelSymbolKind::Extension => {
+            // For extension initializers, get the target struct type from ExtensionTargetBehavior
+            let target_behavior = parent.metadata().get_behavior::<ExtensionTargetBehavior>()?;
+            Some(target_behavior.target_type().clone())
         }
         _ => None,
     }

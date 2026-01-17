@@ -1564,7 +1564,7 @@ fn collect_protocol_static_methods(
 /// - `extend Box[Int]` only applies to `Box[Int]`
 /// - `extend Pair[T, Int]` applies to `Pair[String, Int]` but not `Pair[String, Bool]`
 /// - `extend Box[T] where T: Equatable` only applies to `Box[String]` if String: Equatable
-fn filter_applicable_extensions(
+pub(super) fn filter_applicable_extensions(
     extensions: Vec<Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>>,
     actual_ty: &Ty,
     ctx: &BodyResolutionContext,

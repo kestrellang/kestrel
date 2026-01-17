@@ -1,4 +1,10 @@
 //! Analyzer for extension method conflicts.
+//!
+//! Detects conflicts between struct methods and extension methods, and between
+//! methods in different extensions of the same struct.
+//!
+//! In Kestrel, overloading is label-based - methods are compared by (name, labels),
+//! not just name.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -6,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_model::{ExtensionMethods, StructMethods};
+use kestrel_semantic_tree::behavior::callable::{CallableBehavior, DuplicateKey};
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
@@ -19,17 +25,38 @@ use diagnostics::{DuplicateExtensionMethodError, StructExtensionMethodConflictEr
 
 pub struct ExtensionConflictAnalyzer {
     extensions_by_target: Mutex<HashMap<SymbolId, Vec<CollectedExtension>>>,
-    struct_methods: Mutex<HashMap<SymbolId, Vec<(String, Span)>>>,
+    struct_methods: Mutex<HashMap<SymbolId, Vec<(DuplicateKey, Span)>>>,
 }
 
 struct CollectedExtension {
+    #[allow(dead_code)]
     extension_id: SymbolId,
     #[allow(dead_code)]
     extension_span: Span,
-    methods: Vec<(String, Span)>,
+    methods: Vec<(DuplicateKey, Span)>,
     substitutions: Substitutions,
     #[allow(dead_code)]
     where_clause: WhereClause,
+}
+
+/// Collect methods with their DuplicateKey from a symbol's children.
+fn collect_methods_with_keys(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Vec<(DuplicateKey, Span)> {
+    symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|child| child.metadata().kind() == KestrelSymbolKind::Function)
+        .filter_map(|child| {
+            let name = child.metadata().name().value.clone();
+            let span = child.metadata().declaration_span().clone();
+            child
+                .metadata()
+                .get_behavior::<CallableBehavior>()
+                .map(|b| (b.duplicate_key(&name), span))
+        })
+        .collect()
 }
 
 impl ExtensionConflictAnalyzer {
@@ -69,26 +96,26 @@ impl Analyzer for ExtensionConflictAnalyzer {
             return;
         };
         let target_ty = target_beh.target_type();
-        let (target_id, substitutions) = match target_ty.kind() {
+        let (target_id, target_symbol, substitutions) = match target_ty.kind() {
             kestrel_semantic_tree::ty::TyKind::Struct {
                 symbol,
                 substitutions,
                 ..
-            } => (symbol.metadata().id(), substitutions),
+            } => (symbol.metadata().id(), symbol.clone(), substitutions),
             _ => return,
         };
 
         let extension_id = extension.metadata().id();
-        let methods = ctx.model.query(ExtensionMethods { extension_id });
+        // Collect methods with DuplicateKey directly from the extension symbol
+        let methods = collect_methods_with_keys(&(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>));
 
         {
             let mut struct_methods = self.struct_methods.lock().unwrap();
             if !struct_methods.contains_key(&target_id) {
+                // Collect methods with DuplicateKey directly from the struct symbol
                 struct_methods.insert(
                     target_id,
-                    ctx.model.query(StructMethods {
-                        struct_id: target_id,
-                    }),
+                    collect_methods_with_keys(&(target_symbol as Arc<dyn Symbol<KestrelLanguage>>)),
                 );
             }
         }
@@ -113,18 +140,17 @@ impl Analyzer for ExtensionConflictAnalyzer {
         let struct_methods = self.struct_methods.lock().unwrap();
 
         for (target_id, extensions) in extensions_by_target.iter() {
+            // Check struct method vs extension method conflicts
             if let Some(struct_method_list) = struct_methods.get(target_id) {
-                let struct_method_names: HashMap<&str, &Span> = struct_method_list
+                let struct_method_keys: HashMap<&DuplicateKey, &Span> = struct_method_list
                     .iter()
-                    .map(|(name, span)| (name.as_str(), span))
+                    .map(|(key, span)| (key, span))
                     .collect();
                 for ext in extensions {
-                    for (method_name, ext_method_span) in &ext.methods {
-                        if let Some(&struct_method_span) =
-                            struct_method_names.get(method_name.as_str())
-                        {
+                    for (method_key, ext_method_span) in &ext.methods {
+                        if let Some(&struct_method_span) = struct_method_keys.get(method_key) {
                             let error = StructExtensionMethodConflictError {
-                                method_name: method_name.clone(),
+                                method_name: method_key.display(),
                                 struct_method_span: struct_method_span.clone(),
                                 extension_method_span: ext_method_span.clone(),
                             };
@@ -144,12 +170,12 @@ impl Analyzer for ExtensionConflictAnalyzer {
                     let ext1 = &extensions[i];
                     let ext2 = &extensions[j];
 
-                    // Find common methods
+                    // Find common methods (by DuplicateKey - name + labels)
                     let mut common_methods = Vec::new();
-                    for (name1, span1) in &ext1.methods {
-                        for (name2, span2) in &ext2.methods {
-                            if name1 == name2 {
-                                common_methods.push((name1.clone(), span1.clone(), span2.clone()));
+                    for (key1, span1) in &ext1.methods {
+                        for (key2, span2) in &ext2.methods {
+                            if key1 == key2 {
+                                common_methods.push((key1.clone(), span1.clone(), span2.clone()));
                             }
                         }
                     }
@@ -177,9 +203,9 @@ impl Analyzer for ExtensionConflictAnalyzer {
                         };
 
                         if ambiguous {
-                            for (method_name, span1, span2) in common_methods {
+                            for (method_key, span1, span2) in common_methods {
                                 let error = DuplicateExtensionMethodError {
-                                    method_name,
+                                    method_name: method_key.display(),
                                     locations: vec![span1, span2],
                                 };
                                 ctx.report(error);

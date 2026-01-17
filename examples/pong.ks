@@ -60,14 +60,14 @@ struct Pong {
         self.scores.insert(.player2, 0);
     }
 
-    func getScore(player: Player) -> Int64 {
+    func getScore(player player: Player) -> Int64 {
         match self.scores.getValue(player) {
             .Some(s) => s,
             .None => 0
         }
     }
 
-    mutating func addScore(player: Player) {
+    mutating func addScore(player player: Player) {
         let current = self.getScore(player: player);
         self.scores.insert(player, current + 1);
     }

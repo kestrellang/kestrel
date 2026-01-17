@@ -499,3 +499,66 @@ struct Container[T] {
         .expect(HasError("does not initialize all fields"));
     }
 }
+
+mod extension_initializers {
+    use super::*;
+
+    #[test]
+    fn initializer_in_extension_can_be_called() {
+        // Initializers defined in extensions should be callable
+        Test::new(
+            r#"
+module Main
+
+public struct Foo {
+    var x: lang.i64
+    public init() { self.x = 0; }
+}
+
+extend Foo {
+    public init(value: lang.i64) {
+        self.x = value;
+    }
+}
+
+public func test() {
+    let f = Foo(value: 42);
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_initializers_in_extension() {
+        // Multiple initializers can be defined in extensions
+        Test::new(
+            r#"
+module Main
+
+public struct Point {
+    var x: lang.i64
+    var y: lang.i64
+}
+
+extend Point {
+    public init(x: lang.i64, y: lang.i64) {
+        self.x = x;
+        self.y = y;
+    }
+
+    public init(value: lang.i64) {
+        self.x = value;
+        self.y = value;
+    }
+}
+
+public func test() {
+    let p1 = Point(x: 1, y: 2);
+    let p2 = Point(value: 5);
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}

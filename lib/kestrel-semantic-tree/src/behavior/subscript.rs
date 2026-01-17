@@ -5,7 +5,7 @@
 
 use semantic_tree::behavior::Behavior;
 
-use crate::behavior::callable::{CallableParameter, ReceiverKind};
+use crate::behavior::callable::{CallableParameter, DuplicateKey, ReceiverKind};
 use crate::behavior::KestrelBehaviorKind;
 use crate::language::KestrelLanguage;
 use crate::ty::Ty;
@@ -119,6 +119,19 @@ impl SubscriptBehavior {
         }
 
         true
+    }
+
+    /// Generate a key for duplicate detection (name + labels only).
+    ///
+    /// Subscripts use "subscript" as their name and are distinguished by labels.
+    pub fn duplicate_key(&self) -> DuplicateKey {
+        let labels: Vec<Option<String>> = self
+            .parameters
+            .iter()
+            .map(|p| p.external_label().map(|s| s.to_string()))
+            .collect();
+
+        DuplicateKey::new("subscript".to_string(), labels)
     }
 }
 

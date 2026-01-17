@@ -9,18 +9,14 @@ use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_model::{ExtensionRegistry, SemanticModel, SymbolRegistry};
-use kestrel_semantic_tree::behavior::callable::CallableSignature;
 use kestrel_semantic_tree::builtins::BuiltinRegistry;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::declaration_binder::{BindingContext, DeclarationBinderRegistry};
-use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::maps::{SourceMap, SyntaxMap};
 
 /// Binder for resolving references in a semantic tree
@@ -102,10 +98,7 @@ impl SemanticBinder {
         // Pass 2: Resolve all bodies (all CallableBehaviors now exist)
         self.bind_bodies(&self.root.clone(), diagnostics);
 
-        // Post-binding pass: detect duplicate function signatures
-        self.check_duplicate_signatures(&self.root.clone(), diagnostics);
-
-        // Validation passes migrated to analyzers; run in compiler/test harness after binding
+        // Validation passes (including duplicate detection) run as analyzers after binding
 
         // Create SemanticModel with the shared registries
         SemanticModel::with_registries(
@@ -212,56 +205,4 @@ impl SemanticBinder {
         }
     }
 
-    /// Check for duplicate function signatures within each scope
-    fn check_duplicate_signatures(
-        &self,
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        diagnostics: &mut DiagnosticContext,
-    ) {
-        let kind = symbol.metadata().kind();
-
-        // Scopes that can contain functions: Module, Struct, SourceFile
-        let is_scope = matches!(
-            kind,
-            KestrelSymbolKind::Module | KestrelSymbolKind::Struct | KestrelSymbolKind::SourceFile
-        );
-
-        if is_scope {
-            let mut signatures: HashMap<CallableSignature, Vec<Arc<dyn Symbol<KestrelLanguage>>>> =
-                HashMap::new();
-
-            for child in symbol.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Function {
-                    if let Some(func_sym) = child.as_ref().downcast_ref::<FunctionSymbol>() {
-                        let sig = func_sym.signature();
-                        signatures.entry(sig).or_default().push(child.clone());
-                    }
-                }
-            }
-
-            // Report duplicates
-            for (sig, funcs) in signatures {
-                if funcs.len() > 1 {
-                    let first = &funcs[0];
-                    let first_span = first.metadata().declaration_span().clone();
-
-                    let duplicate_spans: Vec<Span> = funcs[1..]
-                        .iter()
-                        .map(|f| f.metadata().declaration_span().clone())
-                        .collect();
-
-                    diagnostics.throw(DuplicateFunctionSignatureError {
-                        signature: sig.display(),
-                        first_span,
-                        duplicate_spans,
-                    });
-                }
-            }
-        }
-
-        // Recursively check children
-        for child in symbol.metadata().children() {
-            self.check_duplicate_signatures(&child, diagnostics);
-        }
-    }
 }
