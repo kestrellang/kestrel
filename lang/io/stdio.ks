@@ -17,7 +17,7 @@ import io.write.(Write, writeStr, writeByte, writeLine)
 public struct Stdin: Read {
     public init() {}
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(Error.last())
@@ -78,31 +78,31 @@ public func stderr() -> Stderr {
 // Print string to stdout (no newline)
 public func print(s: String) -> Result[(), Error] {
     var out = stdout();
-    writeStr(writer: out, s: s)
+    writeStr(out, s)
 }
 
 // Print string to stdout with newline
 public func println(s: String) -> Result[(), Error] {
     var out = stdout();
-    writeLine(writer: out, s: s)
+    writeLine(out, s)
 }
 
 // Print empty line
 public func printlnEmpty() -> Result[(), Error] {
     var out = stdout();
-    writeByte(writer: out, byte: 10)
+    writeByte(out, 10)
 }
 
 // Print to stderr (no newline)
 public func eprint(s: String) -> Result[(), Error] {
     var err = stderr();
-    writeStr(writer: err, s: s)
+    writeStr(err, s)
 }
 
 // Print to stderr with newline
 public func eprintln(s: String) -> Result[(), Error] {
     var err = stderr();
-    writeLine(writer: err, s: s)
+    writeLine(err, s)
 }
 
 // Read line from stdin

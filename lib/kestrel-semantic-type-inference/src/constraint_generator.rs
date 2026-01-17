@@ -151,9 +151,37 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
             }
         }
 
-        PatternKind::Literal { .. } => {
-            // Literal patterns have concrete types - nothing more needed
-            // The type is set during pattern creation
+        PatternKind::Literal { value } => {
+            // For literal patterns with inference placeholders, add ExpressibleBy* constraints
+            // so the solver can unify with the scrutinee type.
+            //
+            // When the protocol is available: add a conformance constraint so the solver
+            // checks that the scrutinee type conforms to ExpressibleByIntLiteral (etc).
+            //
+            // When the protocol is NOT available (e.g., tests without prelude): don't add
+            // any constraint here. The match expression's equate constraint will unify
+            // the pattern's infer type directly with the scrutinee type, allowing primitive
+            // types like lang.i32 to match integer literal patterns.
+            use kestrel_semantic_tree::builtins::LanguageFeature;
+            use kestrel_semantic_tree::expr::LiteralValue;
+
+            let feature = match value {
+                LiteralValue::Integer(_) => Some(LanguageFeature::ExpressibleByIntLiteral),
+                LiteralValue::Float(_) => Some(LanguageFeature::ExpressibleByFloatLiteral),
+                LiteralValue::String(_) => Some(LanguageFeature::ExpressibleByStringLiteral),
+                LiteralValue::Bool(_) => Some(LanguageFeature::ExpressibleByBoolLiteral),
+                LiteralValue::Unit => None,
+            };
+
+            if let Some(feature) = feature {
+                if let Some(protocol_id) = ctx.oracle().builtin_protocol(feature) {
+                    // Protocol is registered - add conformance constraint
+                    let protocol_ref = ProtocolRef::new(protocol_id, pattern.span.clone());
+                    ctx.conforms(pattern.ty.id(), protocol_ref);
+                }
+                // If protocol not registered, don't add any constraint - the match
+                // expression's equate constraint will handle unification directly
+            }
         }
 
         PatternKind::EnumVariant {
@@ -854,11 +882,95 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             // If no value, block type should be unit (already set in AST)
         }
 
-        // Language intrinsics - process arguments
-        ExprKind::LangIntrinsic { arguments, .. } => {
+        // Language intrinsics - process arguments and generate parameter constraints
+        ExprKind::LangIntrinsic {
+            intrinsic,
+            arguments,
+        } => {
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
                 ctx.register_type(&arg.value.ty);
+            }
+
+            // Generate constraints between argument types and expected parameter types
+            // This enables type inference to propagate from the intrinsic's signature to arguments
+            use kestrel_semantic_tree::expr::LangIntrinsic;
+            match intrinsic {
+                // CastPtr expects lang.ptr[_] as input and returns lang.ptr[T]
+                // If the argument's pointee type is unknown (Ty::infer), we can infer it from target_ty
+                // This enables lang.cast_ptr[T](lang.ptr_null()) to work
+                LangIntrinsic::CastPtr { target_ty } => {
+                    if let Some(arg) = arguments.first() {
+                        // The argument should be Pointer[SomeType]
+                        // Extract the pointee type from the argument if it's a pointer
+                        if let TyKind::Pointer(arg_pointee) = arg.value.ty.kind() {
+                            // Register both types for inference
+                            ctx.register_type(arg_pointee);
+                            ctx.register_type(target_ty);
+
+                            // If arg_pointee is infer (from ptr_null), equate with target_ty
+                            // This allows ptr_null() to infer its type from the cast
+                            if matches!(arg_pointee.kind(), TyKind::Infer) {
+                                ctx.equate(arg_pointee.id(), target_ty.id(), arg.span.clone());
+                            }
+                        }
+                    }
+                }
+
+                // Other pointer intrinsics with type parameters
+                LangIntrinsic::PtrRead { pointee_ty } => {
+                    if let Some(arg) = arguments.first() {
+                        // Argument should be Pointer[T], equate with pointee_ty
+                        if let TyKind::Pointer(arg_pointee) = arg.value.ty.kind() {
+                            ctx.register_type(arg_pointee);
+                            ctx.register_type(pointee_ty);
+                            ctx.equate(arg_pointee.id(), pointee_ty.id(), arg.span.clone());
+                        }
+                    }
+                }
+
+                LangIntrinsic::PtrWrite { pointee_ty } => {
+                    if let Some(ptr_arg) = arguments.first() {
+                        // First argument should be Pointer[T]
+                        if let TyKind::Pointer(arg_pointee) = ptr_arg.value.ty.kind() {
+                            ctx.register_type(arg_pointee);
+                            ctx.register_type(pointee_ty);
+                            ctx.equate(arg_pointee.id(), pointee_ty.id(), ptr_arg.span.clone());
+                        }
+                    }
+                    if let Some(value_arg) = arguments.get(1) {
+                        // Second argument should be T
+                        ctx.register_type(pointee_ty);
+                        ctx.equate(value_arg.value.ty.id(), pointee_ty.id(), value_arg.span.clone());
+                    }
+                }
+
+                LangIntrinsic::PtrTo { pointee_ty } => {
+                    if let Some(arg) = arguments.first() {
+                        // Argument type should match pointee_ty
+                        ctx.register_type(pointee_ty);
+                        ctx.equate(arg.value.ty.id(), pointee_ty.id(), arg.span.clone());
+                    }
+                }
+
+                LangIntrinsic::PtrFromAddress { pointee_ty } => {
+                    // Argument is an integer, pointee_ty is the type parameter
+                    // Just register it for resolution
+                    ctx.register_type(pointee_ty);
+                }
+
+                LangIntrinsic::PtrNull { pointee_ty } => {
+                    // No arguments, but register pointee_ty for resolution
+                    ctx.register_type(pointee_ty);
+                }
+
+                LangIntrinsic::SizeOf { ty } | LangIntrinsic::AlignOf { ty } => {
+                    // No arguments, but register ty for resolution
+                    ctx.register_type(ty);
+                }
+
+                // Other intrinsics don't have type parameters that need constraint generation
+                _ => {}
             }
         }
 

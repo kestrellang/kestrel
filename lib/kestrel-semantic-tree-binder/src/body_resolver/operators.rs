@@ -317,6 +317,11 @@ fn desugar_binary_op(
     full_span: Span,
     _ctx: &mut BodyResolutionContext,
 ) -> Expression {
+    // If either operand has a poison type, propagate error without cascading diagnostics.
+    if lhs.ty.is_poison() || rhs.ty.is_poison() {
+        return Expression::error(full_span);
+    }
+
     let method_name = op.method_name();
 
     // Check for primitive method (known primitive types like Int, Float, Bool, String)
@@ -325,7 +330,7 @@ fn desugar_binary_op(
         return Expression::primitive_method_call(lhs, prim_method, vec![arg], full_span);
     }
 
-    // For non-primitive types (including Infer), create a DeferredMethodCall.
+    // For non-primitive types, create a DeferredMethodCall.
     // Type inference will resolve this to a concrete protocol method call.
     // All operators use Infer - type inference will determine the actual return type
     // from the resolved method (e.g., Bool for comparisons, Output associated type for arithmetic).
@@ -342,6 +347,11 @@ fn desugar_unary_op(
     full_span: Span,
     _ctx: &mut BodyResolutionContext,
 ) -> Expression {
+    // If operand has a poison type, propagate error without cascading diagnostics.
+    if operand.ty.is_poison() {
+        return Expression::error(full_span);
+    }
+
     let method_name = op.method_name();
 
     // Check for primitive method (known primitive types like Int, Float, Bool)
@@ -349,7 +359,7 @@ fn desugar_unary_op(
         return Expression::primitive_method_call(operand, prim_method, vec![], full_span);
     }
 
-    // For non-primitive types (including Infer), create a DeferredMethodCall.
+    // For non-primitive types, create a DeferredMethodCall.
     // Type inference will resolve this to a concrete protocol method call.
     // Use Infer so type inference determines the actual return type from the resolved method.
     let result_ty = Ty::infer(full_span.clone());

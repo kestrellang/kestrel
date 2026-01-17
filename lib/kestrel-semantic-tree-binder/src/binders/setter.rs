@@ -96,6 +96,15 @@ impl DeclarationBinder for SetterBinder {
             return;
         }
 
+        // Check if this setter belongs to a subscript
+        // If so, the SubscriptBinder will handle body binding (including parameters)
+        if let Some(parent) = symbol.metadata().parent()
+            && parent.metadata().kind() == KestrelSymbolKind::Subscript
+        {
+            // Skip - subscript setter bodies are handled by SubscriptBinder
+            return;
+        }
+
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
@@ -136,14 +145,14 @@ fn resolve_setter_body(
         .unwrap_or(false);
 
     // If this is an instance setter, inject `self` as the first local (mutable)
-    if has_receiver {
-        if let Some(self_type) = get_self_type(symbol) {
-            let decl_span = symbol.metadata().span().clone();
-            let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
+    if has_receiver
+        && let Some(self_type) = get_self_type(symbol)
+    {
+        let decl_span = symbol.metadata().span().clone();
+        let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
-            // Add self to local scope (mutable - setters modify self)
-            local_scope.bind("self".to_string(), self_type.clone(), true, self_span.clone());
-        }
+        // Add self to local scope (mutable - setters modify self)
+        local_scope.bind("self".to_string(), self_type.clone(), true, self_span.clone());
     }
 
     // Add the `newValue` parameter to local scope

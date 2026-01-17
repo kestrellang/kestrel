@@ -475,3 +475,41 @@ func test(cond: Bool) -> Int {
         .expect(Symbol::new("test").is(SymbolKind::Function));
     }
 }
+
+mod regression {
+    use super::*;
+
+    #[test]
+    fn never_type_unifies_with_concrete_types_in_if_else() {
+        // Regression test for: `lang.panic` return type `!` doesn't unify with other branch types
+        // Issue: When an if-else expression has a concrete type in one branch and `lang.panic`
+        // (which returns `!` never type) in the other, the compiler should use the concrete type
+        // as the result type (Never is a bottom type and should unify with anything).
+        Test::new(
+            r#"
+module Main
+
+// Test case: Never in else branch with i64
+public func test_panic_in_else(condition: lang.i1) -> lang.i64 {
+    if condition {
+        42
+    } else {
+        lang.panic("error")
+    }
+}
+
+// Test case: Never in then branch with i64
+public func test_panic_in_then(condition: lang.i1) -> lang.i64 {
+    if condition {
+        lang.panic("error")
+    } else {
+        42
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test_panic_in_else").is(SymbolKind::Function))
+        .expect(Symbol::new("test_panic_in_then").is(SymbolKind::Function));
+    }
+}

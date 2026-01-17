@@ -346,4 +346,47 @@ mod tests {
         assert_eq!(children[0].kind(), SyntaxKind::EnumCaseDeclaration);
         assert_eq!(children[1].kind(), SyntaxKind::InitializerDeclaration);
     }
+
+    #[test]
+    fn test_enum_with_computed_property() {
+        // Test multiline computed property in enum
+        let decl = parse(
+            "enum Optional[T] {
+                case Some(T)
+                case None
+                public var isSome: Bool {
+                    get {
+                        true
+                    }
+                }
+            }",
+        );
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::FieldDeclaration);
+    }
+
+    #[test]
+    fn test_enum_with_shorthand_computed_property() {
+        // Test shorthand computed property (just a block, no get/set)
+        let decl = parse(
+            "enum Optional[T] {
+                case Some(T)
+                case None
+                public var isSome: Bool {
+                    match self {
+                        .Some(_) => true,
+                        .None => false
+                    }
+                }
+            }",
+        );
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::EnumCaseDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::FieldDeclaration);
+    }
 }

@@ -219,7 +219,7 @@ impl TypeCheckAnalyzer {
     }
 
     fn check_if_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
-        if condition.ty.is_error() {
+        if condition.ty.is_poison() {
             return;
         }
 
@@ -258,7 +258,7 @@ impl TypeCheckAnalyzer {
         if then_ty.is_never() || else_ty.is_never() {
             return;
         }
-        if then_ty.is_error() || else_ty.is_error() {
+        if then_ty.is_poison() || else_ty.is_poison() {
             return;
         }
         if !self.is_assignable(&then_ty, &else_ty, ctx) {
@@ -281,7 +281,7 @@ impl TypeCheckAnalyzer {
     }
 
     fn check_while_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
-        if condition.ty.is_error() {
+        if condition.ty.is_poison() {
             return;
         }
 
@@ -341,11 +341,11 @@ impl TypeCheckAnalyzer {
         }
         let first = &elements[0];
         let expected_ty = &first.ty;
-        if expected_ty.is_error() {
+        if expected_ty.is_poison() {
             return;
         }
         for (i, elem) in elements.iter().enumerate().skip(1) {
-            if elem.ty.is_error() {
+            if elem.ty.is_poison() {
                 continue;
             }
             if !self.is_assignable(&elem.ty, expected_ty, ctx) {

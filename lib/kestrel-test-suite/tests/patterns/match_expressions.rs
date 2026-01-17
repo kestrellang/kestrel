@@ -851,3 +851,116 @@ func test(b: Bool) -> Int {
         .expect(Compiles);
     }
 }
+
+// ============================================================================
+// REGRESSION TESTS
+// ============================================================================
+
+mod regression {
+    use super::*;
+
+    /// Test that integer literals in match patterns inherit the scrutinee type (primitive types).
+    ///
+    /// Previously, integer literal patterns always defaulted to I64, causing
+    /// type mismatches when matching against other primitive integer types like lang.i32.
+    ///
+    /// Issue: Integer literal type inference in match (for primitive types)
+    /// Fix: Use expected_ty from scrutinee when resolving integer literal patterns
+    #[test]
+    fn integer_literal_pattern_inherits_primitive_type() {
+        // Note: This tests primitive types (lang.i32), not wrapper structs (Int32)
+        // For wrapper structs, ExpressibleByIntLiteral protocol would be needed
+        Test::new(
+            r#"
+module Main
+
+func classify(code: lang.i32) -> lang.i64 {
+    match code {
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        _ => 0
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test with lang.i8 to ensure the fix works for all primitive integer types.
+    #[test]
+    fn integer_literal_pattern_with_primitive_i8() {
+        Test::new(
+            r#"
+module Main
+
+func test(x: lang.i8) -> lang.i64 {
+    match x {
+        0 => 1,
+        1 => 2,
+        _ => 3
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test with lang.i16 to ensure the fix works for all primitive integer types.
+    #[test]
+    fn integer_literal_pattern_with_primitive_i16() {
+        Test::new(
+            r#"
+module Main
+
+func test(x: lang.i16) -> lang.i64 {
+    match x {
+        42 => 1,
+        _ => 0
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test that integer literals in match patterns work with wrapper struct types
+    /// that conform to ExpressibleByIntLiteral.
+    ///
+    /// This tests the full type inference path where the literal pattern's type
+    /// is inferred from the scrutinee type via the ExpressibleByIntLiteral protocol.
+    #[test]
+    fn integer_literal_pattern_with_wrapper_struct() {
+        Test::new(
+            r#"
+module Main
+
+@builtin(.ExpressibleByIntLiteral)
+protocol ExpressibleByIntLiteral {
+    init(intLiteral value: lang.i64)
+}
+
+struct MyInt: ExpressibleByIntLiteral {
+    var value: lang.i64
+
+    init(intLiteral value: lang.i64) {
+        self.value = value
+    }
+}
+
+func test_match(x: MyInt) -> lang.i64 {
+    match x {
+        0 => 100,
+        1 => 200,
+        _ => 300,
+    }
+}
+"#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+}

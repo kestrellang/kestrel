@@ -19,5 +19,6 @@ mod imports;
 mod protocol_method_linking;
 mod protocols;
 mod structs;
+mod subscripts;
 mod type_aliases;
 mod wacky_inference;

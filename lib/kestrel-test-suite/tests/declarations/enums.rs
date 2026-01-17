@@ -1175,3 +1175,145 @@ mod edge_cases {
         .expect(Fails);
     }
 }
+
+mod regression {
+    use super::*;
+
+    /// Regression test for: Inline tuple in `.Some()` fails type inference with generic functions
+    /// Issue: When passing `.Some((tuple))` to a generic function like `func[T](opt: Option[T])`,
+    /// the compiler failed to infer that T should be the tuple type. This happened because:
+    /// 1. The `infer_from_type` function didn't have a case for `TyKind::Enum` to match enum type arguments
+    /// 2. Type parameters that couldn't be inferred weren't getting Infer substitutions, leaving TypeParameter types
+    #[test]
+    fn implicit_member_with_tuple_in_generic_function() {
+        Test::new(
+            r#"module Test
+            public enum Option[T] {
+                case Some(value: T)
+                case None
+            }
+
+            // Generic function that takes Option[T]
+            public func process[T](opt: Option[T]) -> lang.i64 {
+                match opt {
+                    .Some(_) => 1,
+                    .None => 0
+                }
+            }
+
+            // Test: inline tuple in .Some() with generic function
+            public func test1() -> lang.i64 {
+                process(.Some((5, 10)))
+            }
+
+            // Test: identity function with implicit member
+            public func identity[T](x: Option[T]) -> Option[T] {
+                x
+            }
+
+            public func test2() -> Option[(lang.i64, lang.i64)] {
+                identity(.Some((5, 10)))
+            }
+
+            // Test: with more complex tuple types
+            public func test3() -> lang.i64 {
+                process(.Some((1, 2, 3)))
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// Regression test for: Enum cases inherit parent enum's visibility
+    /// Issue: Enum cases were hardcoded to have Internal visibility, making public enum cases
+    /// inaccessible when imported from another module. This caused name resolution errors like
+    /// "'Equal' is not a type" or "undefined name 'Equal'" when trying to use enum cases.
+    /// Root cause: EnumCaseBuilder hardcoded visibility to Internal instead of inheriting from parent.
+    /// Fix: Enum cases now get their visibility from the parent enum's VisibilityBehavior.
+    #[test]
+    fn enum_cases_inherit_parent_visibility() {
+        // Verify enum cases have same visibility as parent in single module
+        Test::new(
+            r#"module Test
+            public enum PublicEnum {
+                case PublicCase
+            }
+
+            private enum PrivateEnum {
+                case PrivateCase
+            }
+
+            internal enum InternalEnum {
+                case InternalCase
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("PublicEnum")
+                .is(SymbolKind::Enum)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("PublicEnum.PublicCase")
+                .is(SymbolKind::EnumCase)
+                .has(Behavior::Visibility(Visibility::Public)),
+        )
+        .expect(
+            Symbol::new("PrivateEnum")
+                .is(SymbolKind::Enum)
+                .has(Behavior::Visibility(Visibility::Private)),
+        )
+        .expect(
+            Symbol::new("PrivateEnum.PrivateCase")
+                .is(SymbolKind::EnumCase)
+                .has(Behavior::Visibility(Visibility::Private)),
+        )
+        .expect(
+            Symbol::new("InternalEnum")
+                .is(SymbolKind::Enum)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        )
+        .expect(
+            Symbol::new("InternalEnum.InternalCase")
+                .is(SymbolKind::EnumCase)
+                .has(Behavior::Visibility(Visibility::Internal)),
+        );
+    }
+
+    /// Regression test for: Public enum cases accessible across modules
+    /// This is part of the same fix - ensures that public enum cases can be imported and used
+    /// in other modules, which was the original symptom of the bug.
+    #[test]
+    fn public_enum_cases_accessible_across_modules() {
+        Test::with_files(&[
+            (
+                "ordering.ks",
+                r#"module Ordering
+                public enum Ordering {
+                    case Less
+                    case Equal
+                    case Greater
+                }
+            "#,
+            ),
+            (
+                "consumer.ks",
+                r#"module Consumer
+                import Ordering.(Ordering)
+
+                public func compare(a: lang.i64, b: lang.i64) -> Ordering {
+                    if a < b {
+                        Ordering.Less
+                    } else if a > b {
+                        Ordering.Greater
+                    } else {
+                        Ordering.Equal
+                    }
+                }
+            "#,
+            ),
+        ])
+        .expect(Compiles);
+    }
+}

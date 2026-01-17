@@ -555,3 +555,199 @@ mod string_intrinsics {
         .expect(Compiles);
     }
 }
+
+/// Regression tests for lang intrinsic type inference issues
+mod regression {
+    use super::*;
+
+    /// Regression test for: Type inference fails with untyped lang intrinsics
+    ///
+    /// Before the fix, `lang.cast_ptr[T](lang.ptr_null())` would fail with
+    /// "could not infer type for 1 placeholder(s)" because `ptr_null()` returned
+    /// `Pointer[Ty::infer()]` and this wasn't constrained by `cast_ptr`.
+    ///
+    /// The fix adds a constraint in the type inference constraint generator:
+    /// when `cast_ptr[T]` has a concrete target type T, the argument's pointee
+    /// type is equated with T, allowing `ptr_null()` to infer its type.
+    ///
+    /// Issue documented in: docs/contributing/compiler-issues.md
+    /// Fix in: lib/kestrel-semantic-type-inference/src/constraint_generator.rs
+    #[test]
+    fn cast_ptr_with_untyped_ptr_null() {
+        Test::new(
+            r#"module Test
+            func test() -> lang.ptr[lang.i64] {
+                lang.cast_ptr[lang.i64](lang.ptr_null())
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test that the workaround (explicit type argument) still works
+    #[test]
+    fn ptr_null_with_explicit_type_argument() {
+        Test::new(
+            r#"module Test
+            func test() -> lang.ptr[lang.i64] {
+                lang.ptr_null[lang.i64]()
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test with user-defined wrapper struct
+    #[test]
+    fn cast_ptr_in_generic_context() {
+        Test::new(
+            r#"module Test
+            public struct Pointer[T] {
+                var raw: lang.ptr[T]
+
+                public init(raw: lang.ptr[T]) {
+                    self.raw = raw;
+                }
+            }
+
+            public func testCastPtr[T]() -> Pointer[T] {
+                Pointer(raw: lang.cast_ptr[T](lang.ptr_null()))
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test that cast_ptr works with different primitive types
+    #[test]
+    fn cast_ptr_with_various_primitives() {
+        Test::new(
+            r#"module Test
+            func testI8() -> lang.ptr[lang.i8] {
+                lang.cast_ptr[lang.i8](lang.ptr_null())
+            }
+
+            func testI16() -> lang.ptr[lang.i16] {
+                lang.cast_ptr[lang.i16](lang.ptr_null())
+            }
+
+            func testI32() -> lang.ptr[lang.i32] {
+                lang.cast_ptr[lang.i32](lang.ptr_null())
+            }
+
+            func testF32() -> lang.ptr[lang.f32] {
+                lang.cast_ptr[lang.f32](lang.ptr_null())
+            }
+
+            func testF64() -> lang.ptr[lang.f64] {
+                lang.cast_ptr[lang.f64](lang.ptr_null())
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Regression test for: Pointer type casting between different concrete types fails
+    ///
+    /// Before the fix, `lang.cast_ptr[T](ptr)` where `ptr: lang.ptr[U]` and `T != U`
+    /// would fail with a type error because the constraint generator incorrectly
+    /// equated the source pointee type U with the target type T (creating `U == T`).
+    ///
+    /// This happened because the condition checked if target_ty was NOT infer:
+    /// ```rust
+    /// if !matches!(target_ty.kind(), TyKind::Infer) {
+    ///     ctx.equate(arg_pointee.id(), target_ty.id(), ...);
+    /// }
+    /// ```
+    ///
+    /// The fix changes it to only equate when the SOURCE is infer (for ptr_null):
+    /// ```rust
+    /// if matches!(arg_pointee.kind(), TyKind::Infer) {
+    ///     ctx.equate(arg_pointee.id(), target_ty.id(), ...);
+    /// }
+    /// ```
+    ///
+    /// This allows casting between different pointer types while still supporting
+    /// type inference for `lang.cast_ptr[T](lang.ptr_null())`.
+    #[test]
+    fn cast_ptr_between_different_concrete_types() {
+        Test::new(
+            r#"module Test
+            func castI32ToI8(p: lang.ptr[lang.i32]) -> lang.ptr[lang.i8] {
+                lang.cast_ptr[lang.i8](p)
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test casting from i8 pointer to other types (common for byte buffers)
+    #[test]
+    fn cast_ptr_from_i8_to_other_types() {
+        Test::new(
+            r#"module Test
+            func castI8ToI32(p: lang.ptr[lang.i8]) -> lang.ptr[lang.i32] {
+                lang.cast_ptr[lang.i32](p)
+            }
+
+            func castI8ToI64(p: lang.ptr[lang.i8]) -> lang.ptr[lang.i64] {
+                lang.cast_ptr[lang.i64](p)
+            }
+
+            func castI8ToF32(p: lang.ptr[lang.i8]) -> lang.ptr[lang.f32] {
+                lang.cast_ptr[lang.f32](p)
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test casting to generic pointer type parameter
+    #[test]
+    fn cast_ptr_to_generic_type() {
+        Test::new(
+            r#"module Test
+            func castToGeneric[T](p: lang.ptr[lang.i8]) -> lang.ptr[T] {
+                lang.cast_ptr[T](p)
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test casting from generic pointer type parameter
+    #[test]
+    fn cast_ptr_from_generic_type() {
+        Test::new(
+            r#"module Test
+            func castFromGeneric[T](p: lang.ptr[T]) -> lang.ptr[lang.i8] {
+                lang.cast_ptr[lang.i8](p)
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+
+    /// Test round-trip casting
+    #[test]
+    fn cast_ptr_round_trip() {
+        Test::new(
+            r#"module Test
+            func roundTrip(p: lang.ptr[lang.i32]) -> lang.ptr[lang.i32] {
+                var bytes = lang.cast_ptr[lang.i8](p);
+                lang.cast_ptr[lang.i32](bytes)
+            }
+        "#,
+        )
+        .without_prelude()
+        .expect(Compiles);
+    }
+}

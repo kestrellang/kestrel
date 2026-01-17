@@ -19,6 +19,7 @@ use super::data::{
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
+use crate::expr::emit_expr_variant;
 use crate::ty::emit_ty_variant;
 use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
 
@@ -395,6 +396,12 @@ pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) 
     // Emit computed property body if present
     if let Some(computed_body) = &data.computed_body {
         emit_property_accessors(sink, computed_body);
+    }
+
+    // Emit initializer if present
+    if let Some((equals_span, initializer_expr)) = data.initializer {
+        sink.add_token(SyntaxKind::Equals, equals_span);
+        emit_expr_variant(sink, &initializer_expr);
     }
 
     // Emit optional trailing semicolon

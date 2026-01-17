@@ -384,15 +384,15 @@ protocol Derived: Middle {
 module Main
 
 protocol A {
-    func a() -> Int
+    func a() -> lang.i64
 }
 
 protocol B: A {
-    func b() -> Int
+    func b() -> lang.i64
 }
 
 protocol C: A {
-    func c() -> Int
+    func c() -> lang.i64
 }
 "#,
         )

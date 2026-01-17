@@ -87,7 +87,7 @@ public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: W
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
     let slice = Slice(pointer: buf.pointer(), count: 1);
-    writeAll(writer: writer, from: slice)
+    writeAll(writer, from: slice)
 }
 
 // Write a string as UTF-8
@@ -110,6 +110,6 @@ public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Writ
 
 // Write string with newline
 public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write {
-    try writeStr(writer: writer, s: s);
-    writeByte(writer: writer, byte: 10)  // '\n'
+    try writeStr(writer, s);
+    writeByte(writer, 10)  // '\n'
 }

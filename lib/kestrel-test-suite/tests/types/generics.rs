@@ -1379,11 +1379,11 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol A {
-                func doA() -> Int
+                func doA() -> lang.i64
             }
             protocol B: A {}
             protocol C: A {}
-            func diamond[T](x: T) -> Int where T: B, T: C {
+            func diamond[T](x: T) -> lang.i64 where T: B, T: C {
                 return x.doA()
             }
             func main() {}

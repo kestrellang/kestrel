@@ -334,6 +334,7 @@ pub fn conformance_list_parser<'tokens>() -> impl Parser<
         .then(
             conformance_item_parser()
                 .separated_by(just(Token::Comma))
+                .allow_trailing()
                 .at_least(1)
                 .collect(),
         )

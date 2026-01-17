@@ -86,6 +86,15 @@ impl DeclarationBinder for GetterBinder {
             return;
         }
 
+        // Check if this getter belongs to a subscript
+        // If so, the SubscriptBinder will handle body binding (including parameters)
+        if let Some(parent) = symbol.metadata().parent()
+            && parent.metadata().kind() == KestrelSymbolKind::Subscript
+        {
+            // Skip - subscript getter bodies are handled by SubscriptBinder
+            return;
+        }
+
         let source = context.source_for_symbol(symbol);
         let file_id = context.file_id_for_symbol(symbol);
 
@@ -138,19 +147,19 @@ fn resolve_getter_body(
         .unwrap_or(false);
 
     // If this is an instance getter, inject `self` as the first local (immutable)
-    if has_receiver {
-        if let Some(self_type) = get_self_type(symbol) {
-            let decl_span = symbol.metadata().span().clone();
-            let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
+    if has_receiver
+        && let Some(self_type) = get_self_type(symbol)
+    {
+        let decl_span = symbol.metadata().span().clone();
+        let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
-            // Add self to local scope (immutable - getters only read, not modify)
-            local_scope.bind(
-                "self".to_string(),
-                self_type.clone(),
-                false,
-                self_span.clone(),
-            );
-        }
+        // Add self to local scope (immutable - getters only read, not modify)
+        local_scope.bind(
+            "self".to_string(),
+            self_type.clone(),
+            false,
+            self_span.clone(),
+        );
     }
 
     // Create body resolution context
@@ -172,36 +181,50 @@ fn resolve_getter_body(
 
 /// Get the type of `self` for a getter
 ///
-/// Returns the concrete type of the containing struct (grandparent of the getter).
-/// The hierarchy is: Struct -> Field -> Getter
+/// Returns the concrete type of the containing struct/enum (grandparent of the getter).
+/// The hierarchy is: Struct/Enum -> Field -> Getter
 fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
     use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
     use kestrel_semantic_tree::ty::Substitutions;
 
-    // Getter's parent is Field, Field's parent is Struct/Extension
+    // Getter's parent is Field, Field's parent is Struct/Enum/Extension
     let field = symbol.metadata().parent()?;
-    let struct_parent = field.metadata().parent()?;
-    let struct_span = struct_parent.metadata().span().clone();
+    let type_parent = field.metadata().parent()?;
+    let type_span = type_parent.metadata().span().clone();
 
-    match struct_parent.metadata().kind() {
+    match type_parent.metadata().kind() {
         KestrelSymbolKind::Struct => {
             // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&struct_parent).downcast_arc::<StructSymbol>().ok()?;
+            let struct_arc = Arc::clone(&type_parent).downcast_arc::<StructSymbol>().ok()?;
             let mut substitutions = Substitutions::new();
-            if let Some(generics) = struct_parent.metadata().get_behavior::<GenericsBehavior>() {
+            if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
                 for param in generics.type_parameters() {
                     let param_id = param.metadata().id();
-                    let param_ty = Ty::type_parameter(param.clone(), struct_span.clone());
+                    let param_ty = Ty::type_parameter(param.clone(), type_span.clone());
                     substitutions.insert(param_id, param_ty);
                 }
             }
-            Some(Ty::generic_struct(struct_arc, substitutions, struct_span))
+            Some(Ty::generic_struct(struct_arc, substitutions, type_span))
+        }
+        KestrelSymbolKind::Enum => {
+            // Create concrete enum type with type parameters mapping to themselves
+            let enum_arc = Arc::clone(&type_parent).downcast_arc::<EnumSymbol>().ok()?;
+            let mut substitutions = Substitutions::new();
+            if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
+                for param in generics.type_parameters() {
+                    let param_id = param.metadata().id();
+                    let param_ty = Ty::type_parameter(param.clone(), type_span.clone());
+                    substitutions.insert(param_id, param_ty);
+                }
+            }
+            Some(Ty::generic_enum(enum_arc, substitutions, type_span))
         }
         KestrelSymbolKind::Extension => {
             // For extension properties, use the target type
-            struct_parent
+            type_parent
                 .metadata()
                 .get_behavior::<ExtensionTargetBehavior>()
                 .map(|b| b.target_type().clone())

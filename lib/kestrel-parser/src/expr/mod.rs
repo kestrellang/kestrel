@@ -764,8 +764,11 @@ pub fn expr_parser<'tokens>()
 
         // Member access: .identifier or .identifier[T] or tuple index: .0, .1
         // Also allows .init for delegating initializers (self.init(...))
-        let member_access = skip_trivia()
-            .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
+        // NOTE: For postfix member access, we do NOT skip trivia before the dot.
+        // This prevents parsing ".foo" on a new line as a member access on the previous expression.
+        // The dot must immediately follow the expression (same line) for postfix chaining.
+        let member_access = just(Token::Dot)
+            .map_with(|_, e| to_kestrel_span(e.span()))
             .then(skip_trivia().ignore_then(select! {
                 Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
                 Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),

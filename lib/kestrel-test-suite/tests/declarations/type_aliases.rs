@@ -413,3 +413,95 @@ mod unresolved_types {
         .expect(HasError("cannot find type"));
     }
 }
+
+mod regression {
+    use super::*;
+
+    /// Regression test for: Type aliases don't work for member access
+    /// Issue: Type aliases like `type MyInt = Int64` could not be used to access
+    /// members or call constructors through the alias name.
+    #[test]
+    fn type_alias_static_method_access() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: lang.i64
+
+                init(c: lang.i64) {
+                    self.count = c;
+                }
+
+                static func zero() -> Counter {
+                    Counter(c: 0)
+                }
+            }
+
+            type C = Counter
+
+            func test() -> lang.i64 {
+                let c = C.zero();
+                c.count
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias));
+    }
+
+    /// Regression test for: Type aliases don't work for member access (init)
+    /// Issue: Calling init through a type alias failed.
+    #[test]
+    fn type_alias_init_call() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: lang.i64
+
+                init(c: lang.i64) {
+                    self.count = c;
+                }
+            }
+
+            type C = Counter
+
+            func test() -> lang.i64 {
+                let c = C(c: 42);
+                c.count
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias));
+    }
+
+    /// Regression test for: Type aliases don't expose methods
+    /// Issue: Type aliases didn't allow method calls through the alias, causing
+    /// "cannot access member on type" errors.
+    #[test]
+    fn type_alias_instance_method_call() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: lang.i64
+
+                init(c: lang.i64) {
+                    self.count = c;
+                }
+
+                func getCount() -> lang.i64 {
+                    self.count
+                }
+            }
+
+            type C = Counter
+
+            func test() -> lang.i64 {
+                let c: C = Counter(c: 42);
+                c.getCount()
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias));
+    }
+}

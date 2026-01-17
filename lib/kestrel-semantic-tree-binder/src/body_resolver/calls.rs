@@ -898,16 +898,22 @@ fn resolve_single_function_call(
                 let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
 
                 // Infer type arguments from argument types
-                let substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
+                let mut substitutions = infer_type_arguments(&type_params, &callable, &arg_types);
 
-                // Build inferred type args in order for constraint verification
+                // Build inferred type args, using Infer for parameters that couldn't be determined
+                // Also ensure substitutions contains all type parameters (even those mapped to Infer)
                 let inferred_args: Vec<Ty> = type_params
                     .iter()
                     .map(|tp| {
-                        substitutions
-                            .get(tp.metadata().id())
-                            .cloned()
-                            .unwrap_or_else(|| Ty::infer(span.clone()))
+                        let tp_id = tp.metadata().id();
+                        if let Some(inferred_ty) = substitutions.get(tp_id) {
+                            inferred_ty.clone()
+                        } else {
+                            // Create fresh inference variable for this type parameter
+                            let infer_ty = Ty::infer(span.clone());
+                            substitutions.insert(tp_id, infer_ty.clone());
+                            infer_ty
+                        }
                     })
                     .collect();
 
@@ -965,8 +971,16 @@ fn resolve_single_function_call(
                             arguments.iter().map(|a| a.value.ty.clone()).collect();
 
                         // Infer type arguments from argument types
-                        let substitutions =
+                        let mut substitutions =
                             infer_type_arguments(&type_params, &callable, &arg_types);
+
+                        // Ensure all type parameters are in substitutions (use Infer for unknown)
+                        for tp in type_params {
+                            let tp_id = tp.metadata().id();
+                            if !substitutions.contains(tp_id) {
+                                substitutions.insert(tp_id, Ty::infer(span.clone()));
+                            }
+                        }
 
                         // Apply substitution to return type
                         let return_ty = substitute_type(callable.return_type(), &substitutions);

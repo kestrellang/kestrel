@@ -349,7 +349,7 @@ fn resolve_tuple_pattern(
 fn resolve_literal_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
-    _expected_ty: Option<&Ty>,
+    expected_ty: Option<&Ty>,
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
@@ -360,7 +360,9 @@ fn resolve_literal_pattern(
             match token.kind() {
                 SyntaxKind::Integer => {
                     let value = parse_integer(text);
-                    let ty = Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span.clone());
+                    // Use inference placeholder - let type inference determine the actual type
+                    // based on the scrutinee type and ExpressibleByIntLiteral conformance
+                    let ty = Ty::infer(span.clone());
                     return Pattern::literal(LiteralValue::Integer(value), ty, span);
                 }
                 SyntaxKind::Float => {

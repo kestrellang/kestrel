@@ -1364,3 +1364,44 @@ func test() {
         .expect(Symbol::new("test").is(SymbolKind::Function));
     }
 }
+
+mod regression {
+    use super::*;
+
+    #[test]
+    fn implicit_member_after_while_not_parsed_as_member_access() {
+        // Regression test for: `while true` with unreachable code after loop causes issues
+        // Previously, `.None` on a newline after a while expression would be parsed
+        // as a member access on the while expression (which returns unit), causing
+        // "undefined name 'None'" error.
+        // Fixed by not skipping trivia before the dot in postfix member access,
+        // requiring the dot to be on the same line as the receiver.
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(value: T)
+    case None
+}
+
+func find(limit: lang.i64) -> Option[lang.i64] {
+    var x: lang.i64 = 0;
+
+    while true {
+        if x > limit {
+            return .Some(x)
+        }
+        x = x + 1;
+    }
+
+    // This is unreachable code (after an infinite loop),
+    // but should not cause a parse/binding error
+    .None
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("find").is(SymbolKind::Function));
+    }
+}

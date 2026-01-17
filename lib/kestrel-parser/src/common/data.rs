@@ -7,6 +7,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
+use crate::expr::ExprVariant;
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
@@ -161,6 +162,8 @@ pub struct FieldDeclarationData {
     pub ty: TyVariant,
     /// For computed properties: shorthand body OR accessors
     pub computed_body: Option<ComputedBodyData>,
+    /// For constant initialization: (equals_span, expression)
+    pub initializer: Option<(Span, ExprVariant)>,
     /// Optional trailing semicolon (for inline field declarations)
     pub semicolon: Option<Span>,
 }

@@ -1114,6 +1114,13 @@ impl Ty {
         is_unresolved_function => TyKind::UnresolvedFunction { .. },
     }
 
+    /// Check if this is a "poison" type that should suppress cascading errors.
+    /// Poison types include error types (from earlier errors) and unresolved inference variables.
+    /// When a type is poison, subsequent operations on it should not emit additional errors.
+    pub fn is_poison(&self) -> bool {
+        matches!(self.kind, TyKind::Error | TyKind::Infer)
+    }
+
     // === Accessor methods ===
 
     /// Get integer bit width if this is an integer type

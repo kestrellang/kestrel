@@ -22,6 +22,7 @@ use super::data::{
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
+use crate::expr::expr_parser;
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
@@ -536,12 +537,15 @@ fn computed_body_parser<'tokens>()
 
 /// Parser for a field declaration
 ///
-/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (ComputedBody)? (;)?`
+/// Syntax: `(@attr)* (visibility)? (static)? let/var name: Type (ComputedBody | Initializer)? (;)?`
 ///
 /// ComputedBody can be:
 /// - Shorthand: `{ expr }` - just a code block with an expression
 /// - Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
 /// - Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+///
+/// Initializer is:
+/// - `= expr` - for constant initialization (e.g., `let STDIN: i64 = 0`)
 ///
 /// This is the single source of truth for field declaration parsing.
 /// An optional trailing semicolon is allowed for inline field declarations.
@@ -555,6 +559,14 @@ pub fn field_declaration_parser_internal<'tokens>()
         .then(token(Token::Colon))
         .then(ty_parser())
         .then(computed_body_parser())
+        .then(
+            // Optional initializer: = expr
+            skip_trivia()
+                .ignore_then(token(Token::Equals))
+                .then(expr_parser())
+                .map(|(eq, expr)| (eq, expr))
+                .or_not(),
+        )
         .then(token(Token::Semicolon).or_not())
         .map(
             |(
@@ -562,14 +574,17 @@ pub fn field_declaration_parser_internal<'tokens>()
                     (
                         (
                             (
-                                (((attributes, visibility), is_static), (mutability_span, is_mutable)),
-                                name_span,
+                                (
+                                    (((attributes, visibility), is_static), (mutability_span, is_mutable)),
+                                    name_span,
+                                ),
+                                colon_span,
                             ),
-                            colon_span,
+                            ty,
                         ),
-                        ty,
+                        computed_body,
                     ),
-                    computed_body,
+                    initializer,
                 ),
                 semicolon,
             )| {
@@ -583,6 +598,7 @@ pub fn field_declaration_parser_internal<'tokens>()
                     colon_span,
                     ty,
                     computed_body,
+                    initializer,
                     semicolon,
                 }
             },

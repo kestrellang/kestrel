@@ -546,12 +546,26 @@ fn analyze_expression(
         }
         ExprKind::Match { scrutinee, arms } => {
             state = analyze_expression(scrutinee, state, false, ctx);
+
+            // Collect final state from each arm
+            let mut arm_states: Vec<InitState> = Vec::new();
             for arm in arms {
                 let mut arm_state = state.clone();
                 if let Some(guard) = &arm.guard {
                     arm_state = analyze_expression(guard, arm_state, false, ctx);
                 }
                 arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
+                arm_states.push(arm_state);
+            }
+
+            // Merge all arm states (similar to if-else merging)
+            if !arm_states.is_empty() {
+                let mut iter = arm_states.into_iter();
+                let mut merged = iter.next().unwrap();
+                for arm_state in iter {
+                    merged = merged.merge(arm_state);
+                }
+                state = merged;
             }
         }
         ExprKind::Block { statements, value } => {

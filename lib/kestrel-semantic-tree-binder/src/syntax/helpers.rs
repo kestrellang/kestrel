@@ -288,12 +288,16 @@ fn validate_no_conflicting_conformances(
 ///
 /// Exception: If the parent protocol has implicit conformance (like Copyable),
 /// we don't require explicit conformance since all types implicitly conform.
+///
+/// Exception: If all methods in the parent protocol have default implementations via
+/// protocol extensions, explicit conformance is not required.
 fn validate_parent_protocol_conformances(
     conformances: &[Ty],
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,
 ) {
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_model::queries::ProtocolRequiredMethods;
 
     // Only validate structs, not protocols
     // Protocol inheritance (protocol B: A) is different from struct conformance (struct S: A, B)
@@ -348,18 +352,28 @@ fn validate_parent_protocol_conformances(
                         }
 
                         // Check if the parent protocol is in our declared conformances
+                        // Skip this check if protocol has no required methods - conformance analyzer will handle
                         if !declared_protocol_ids.contains(&parent_id) {
-                            let child_name = protocol_symbol.metadata().name().value.clone();
-                            let parent_name = parent_protocol.metadata().name().value.clone();
-                            let struct_name = symbol.metadata().name().value.clone();
+                            // Use the ProtocolRequiredMethods query to check if there are actually required methods
+                            // If all methods have default implementations, we don't need explicit conformance
+                            let required_methods = ctx.model.query(ProtocolRequiredMethods {
+                                protocol_id: parent_id,
+                            });
 
-                            ctx.diagnostics
-                                .throw(MissingParentProtocolConformanceError {
-                                    span: symbol.metadata().span().clone(),
-                                    struct_name,
-                                    child_protocol: child_name,
-                                    parent_protocol: parent_name,
-                                });
+                            // Only report error if there are actually methods that need to be implemented
+                            if !required_methods.is_empty() {
+                                let child_name = protocol_symbol.metadata().name().value.clone();
+                                let parent_name = parent_protocol.metadata().name().value.clone();
+                                let struct_name = symbol.metadata().name().value.clone();
+
+                                ctx.diagnostics
+                                    .throw(MissingParentProtocolConformanceError {
+                                        span: symbol.metadata().span().clone(),
+                                        struct_name,
+                                        child_protocol: child_name,
+                                        parent_protocol: parent_name,
+                                    });
+                            }
                         }
                     }
                 }

@@ -11,6 +11,7 @@ use semantic_tree::symbol::Symbol;
 use kestrel_syntax_tree::utils::{extract_visibility, get_node_span, get_visibility_span};
 
 use crate::builder::Builder;
+use crate::builders::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use kestrel_semantic_tree::behavior::visibility::{Visibility, find_visibility_scope};
 
 /// Builder for initializer declarations.
@@ -61,6 +62,11 @@ impl Builder for InitializerBuilder {
         );
         let init_arc = Arc::new(init_symbol);
         let init_arc_dyn = init_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+        // Extract and register type parameters (e.g., init[T](value: T) where T: SomeProtocol)
+        let type_parameters =
+            extract_type_parameters(syntax, source, file_id, Some(init_arc_dyn.clone()));
+        add_type_params_as_children(&type_parameters, &init_arc_dyn);
 
         parent.metadata().add_child(&init_arc_dyn);
 

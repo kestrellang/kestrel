@@ -13,15 +13,15 @@ import io.error.(Error)
 public protocol Read {
     // Read bytes into buffer, return number of bytes read.
     // Returns 0 on EOF.
-    func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
+    mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
 }
 
 // Empty reader - always returns EOF
 public struct Empty: Read {
     public init() {}
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
-        Result.ok(value: 0)
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+        .Ok(0)
     }
 }
 
@@ -33,13 +33,13 @@ public struct Repeat: Read {
         self.byte = byte
     }
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         var i: Int64 = 0;
         while i < buf.count {
             buf.pointer.offset(by: i).write(self.byte);
             i = i + 1
         }
-        Result.ok(value: buf.count)
+        .Ok(buf.count)
     }
 }
 
@@ -53,10 +53,10 @@ public struct Cursor: Read {
         self.pos = 0;
     }
 
-    public func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let available = self.data.count() - self.pos;
         if available == 0 {
-            return Result.ok(value: 0)
+            return .Ok(0)
         }
 
         var n: Int64 = buf.count;
@@ -69,7 +69,7 @@ public struct Cursor: Read {
             i = i + 1
         }
         self.pos = self.pos + n;
-        Result.ok(value: n)
+        .Ok(n)
     }
 
     public func position() -> Int64 { self.pos }
@@ -95,9 +95,9 @@ public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Re
     let slice = Slice(pointer: buf.pointer(), count: 1);
     let n = try reader.read(into: slice);
     if n == 0 {
-        Result.ok(value: Optional.none())
+        .Ok(.None)
     } else {
-        Result.ok(value: Optional.some(value: buf.getUnchecked(0)))
+        .Ok(.Some(buf.getUnchecked(0)))
     }
 }
 
@@ -127,5 +127,5 @@ public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error
             total = total + n
         }
     }
-    Result.ok(value: total)
+    .Ok(total)
 }

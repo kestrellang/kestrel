@@ -611,9 +611,20 @@ fn check_duplicate_type_parameters(
 
     // Check for shadowing from outer scopes
     let outer_type_params = collect_outer_type_parameters(symbol);
+
+    // For static methods, we allow shadowing of type parameters from the containing struct/enum
+    // because static methods don't have access to the instance's type parameters.
+    let allow_parent_shadowing = is_static_method(symbol);
+
     for param in type_params {
         let name = &param.metadata().name().value;
         if let Some(outer_param) = outer_type_params.iter().find(|p| &p.metadata().name().value == name) {
+            // If this is a static method and the outer param is from the immediate parent (struct/enum),
+            // skip the shadowing error
+            if allow_parent_shadowing && is_from_immediate_parent(outer_param, symbol) {
+                continue;
+            }
+
             ctx.diagnostics.throw(ShadowedTypeParameterError {
                 name: name.clone(),
                 outer_span: outer_param.metadata().name().span.clone(),
@@ -644,4 +655,36 @@ fn collect_outer_type_parameters(
     }
 
     result
+}
+
+/// Check if the symbol is a static method.
+fn is_static_method(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+
+    if symbol.metadata().kind() != KestrelSymbolKind::Function {
+        return false;
+    }
+
+    if let Ok(func) = symbol.clone().downcast_arc::<FunctionSymbol>() {
+        func.is_static()
+    } else {
+        false
+    }
+}
+
+/// Check if a type parameter is from the immediate parent of the symbol.
+fn is_from_immediate_parent(
+    type_param: &Arc<TypeParameterSymbol>,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> bool {
+    let Some(parent) = symbol.metadata().parent() else {
+        return false;
+    };
+
+    // Check if the type parameter's parent is the same as symbol's parent
+    if let Some(tp_parent) = type_param.metadata().parent() {
+        tp_parent.metadata().id() == parent.metadata().id()
+    } else {
+        false
+    }
 }

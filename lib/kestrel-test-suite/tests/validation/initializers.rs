@@ -401,3 +401,101 @@ struct Id {
         .expect(HasError("more than once"));
     }
 }
+
+mod match_expressions {
+    use super::*;
+
+    #[test]
+    fn match_with_diverging_branch() {
+        // Regression test for: Match in init doesn't prove field initialization
+        // When one branch of a match diverges (e.g., panics) and the other initializes,
+        // the field should be considered initialized
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(T)
+    case None
+}
+
+struct Container[T] {
+    var ptr: lang.ptr[T]
+
+    init(maybeValue: Option[lang.ptr[T]]) {
+        match maybeValue {
+            .Some(rawPtr) => {
+                self.ptr = rawPtr;
+            },
+            .None => lang.panic("allocation failed")
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn match_all_arms_initialize() {
+        // When all arms of a match initialize the field, it should be considered initialized
+        Test::new(
+            r#"
+module Main
+
+enum Result[T, E] {
+    case Ok(T)
+    case Err(E)
+}
+
+struct Container[T] {
+    var value: T
+
+    init(result: Result[T, lang.i64]) {
+        match result {
+            .Ok(v) => {
+                self.value = v;
+            },
+            .Err(_) => {
+                self.value = lang.panic("failed");
+            }
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn match_not_all_arms_initialize() {
+        // When not all arms initialize the field, it should fail
+        Test::new(
+            r#"
+module Main
+
+enum Option[T] {
+    case Some(T)
+    case None
+}
+
+struct Container[T] {
+    var ptr: lang.ptr[T]
+
+    init(maybeValue: Option[lang.ptr[T]]) {
+        match maybeValue {
+            .Some(rawPtr) => {
+                self.ptr = rawPtr;
+            },
+            .None => {
+                // This branch doesn't initialize ptr and doesn't diverge
+            }
+        }
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("does not initialize all fields"));
+    }
+}

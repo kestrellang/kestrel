@@ -442,12 +442,12 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             }
         }
 
-        // Language intrinsics - apply solution to arguments
+        // Language intrinsics - apply solution to arguments and resolve intrinsic types
         ExprKind::LangIntrinsic {
             intrinsic,
             arguments,
         } => ExprKind::LangIntrinsic {
-            intrinsic: intrinsic.clone(),
+            intrinsic: resolve_intrinsic(intrinsic, solution, &resolved_ty),
             arguments: arguments
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
@@ -713,6 +713,130 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
         // Nominal types with substitutions would need recursive resolution too,
         // but for now just return the original type
         _ => ty.clone(),
+    }
+}
+
+/// Resolve embedded types within a LangIntrinsic, using the expression's resolved type.
+///
+/// Many lang intrinsics carry type information that may start as inference placeholders
+/// (e.g., `PtrNull { pointee_ty: Ty::infer() }`). After type inference, we need to
+/// resolve these placeholders to their concrete types. For intrinsics that return pointer
+/// types, we can extract the pointee type from the expression's resolved return type.
+fn resolve_intrinsic(
+    intrinsic: &kestrel_semantic_tree::expr::LangIntrinsic,
+    solution: &Solution,
+    expr_ty: &Ty,
+) -> kestrel_semantic_tree::expr::LangIntrinsic {
+    use kestrel_semantic_tree::expr::LangIntrinsic;
+
+    match intrinsic {
+        // Intrinsics that return Pointer[T] - extract T from the expression's type
+        LangIntrinsic::PtrNull { pointee_ty } => {
+            let resolved_pointee = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                // Extract pointee type from the expression's resolved pointer type
+                resolve_type(ptr_pointee, solution)
+            } else {
+                // Fallback: just resolve the embedded type
+                resolve_type(pointee_ty, solution)
+            };
+            LangIntrinsic::PtrNull {
+                pointee_ty: resolved_pointee,
+            }
+        }
+        LangIntrinsic::PtrFromAddress { pointee_ty } => {
+            let resolved_pointee = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                resolve_type(ptr_pointee, solution)
+            } else {
+                resolve_type(pointee_ty, solution)
+            };
+            LangIntrinsic::PtrFromAddress {
+                pointee_ty: resolved_pointee,
+            }
+        }
+        LangIntrinsic::PtrTo { pointee_ty } => {
+            let resolved_pointee = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                resolve_type(ptr_pointee, solution)
+            } else {
+                resolve_type(pointee_ty, solution)
+            };
+            LangIntrinsic::PtrTo {
+                pointee_ty: resolved_pointee,
+            }
+        }
+        LangIntrinsic::PtrRead { pointee_ty } => LangIntrinsic::PtrRead {
+            pointee_ty: resolve_type(pointee_ty, solution),
+        },
+        LangIntrinsic::PtrWrite { pointee_ty } => LangIntrinsic::PtrWrite {
+            pointee_ty: resolve_type(pointee_ty, solution),
+        },
+        LangIntrinsic::CastPtr { target_ty } => {
+            let resolved_target = if let TyKind::Pointer(ptr_pointee) = expr_ty.kind() {
+                resolve_type(ptr_pointee, solution)
+            } else {
+                resolve_type(target_ty, solution)
+            };
+            LangIntrinsic::CastPtr {
+                target_ty: resolved_target,
+            }
+        }
+        LangIntrinsic::SizeOf { ty } => LangIntrinsic::SizeOf {
+            ty: resolve_type(ty, solution),
+        },
+        LangIntrinsic::AlignOf { ty } => LangIntrinsic::AlignOf {
+            ty: resolve_type(ty, solution),
+        },
+
+        // Intrinsics without embedded types - just clone
+        LangIntrinsic::PanicUnwind => LangIntrinsic::PanicUnwind,
+        LangIntrinsic::Cast { from, to } => LangIntrinsic::Cast {
+            from: *from,
+            to: *to,
+        },
+        LangIntrinsic::IntBinary { primitive, op } => LangIntrinsic::IntBinary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::IntBinarySigned { primitive, op } => LangIntrinsic::IntBinarySigned {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::IntBinaryUnsigned { primitive, op } => LangIntrinsic::IntBinaryUnsigned {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::IntUnary { primitive, op } => LangIntrinsic::IntUnary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::FloatBinary { primitive, op } => LangIntrinsic::FloatBinary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::FloatUnary { primitive, op } => LangIntrinsic::FloatUnary {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::FloatConst { primitive, constant } => LangIntrinsic::FloatConst {
+            primitive: *primitive,
+            constant: *constant,
+        },
+        LangIntrinsic::FloatPred { primitive, pred } => LangIntrinsic::FloatPred {
+            primitive: *primitive,
+            pred: *pred,
+        },
+        LangIntrinsic::FloatMath { primitive, op } => LangIntrinsic::FloatMath {
+            primitive: *primitive,
+            op: *op,
+        },
+        LangIntrinsic::PtrToAddress => LangIntrinsic::PtrToAddress,
+        LangIntrinsic::PtrOffset => LangIntrinsic::PtrOffset,
+        LangIntrinsic::PtrIsNull => LangIntrinsic::PtrIsNull,
+        LangIntrinsic::I1Eq => LangIntrinsic::I1Eq,
+        LangIntrinsic::I1And => LangIntrinsic::I1And,
+        LangIntrinsic::I1Or => LangIntrinsic::I1Or,
+        LangIntrinsic::I1Not => LangIntrinsic::I1Not,
+        LangIntrinsic::AtomicAdd => LangIntrinsic::AtomicAdd,
+        LangIntrinsic::AtomicSub => LangIntrinsic::AtomicSub,
     }
 }
 

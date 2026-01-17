@@ -6,10 +6,11 @@ use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::queries::{ExtensionsFor, IsVisibleFrom, ResolveName, SymbolFor, VisibleChildrenByName};
+use crate::queries::{ExtensionsFor, IsVisibleFrom, ResolveName, ResolvedAliasedType, SymbolFor, VisibleChildrenByName};
 use crate::query::Query;
 use crate::resolution::{SymbolResolution, ValuePathResolution};
 
@@ -106,7 +107,14 @@ impl Query for ResolveValuePath {
             };
         }
 
-        let mut current_symbol = current_symbol;
+        // Special case: if first segment is a type alias, resolve through to the underlying type
+        // This allows `MyInt.init()` where `type MyInt = Int64`
+        let mut current_symbol = if current_symbol.metadata().kind() == KestrelSymbolKind::TypeAlias
+        {
+            resolve_through_type_alias(&current_symbol, model).unwrap_or(current_symbol)
+        } else {
+            current_symbol
+        };
 
         for (index, segment) in self.path.iter().enumerate().skip(1) {
             let mut matches = model.query(VisibleChildrenByName {
@@ -236,5 +244,29 @@ fn extract_value_from_symbols(
 
     ValuePathResolution::NotAValue {
         symbol_id: symbol.metadata().id(),
+    }
+}
+
+/// Resolve through a type alias to get the underlying struct/enum symbol.
+///
+/// Type aliases like `type MyInt = Int64` should allow member access like `MyInt.init()`.
+/// This function follows the alias chain and returns the underlying type's symbol.
+fn resolve_through_type_alias(
+    type_alias_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &SemanticModel,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    // Get the resolved type for this type alias
+    let resolved_ty = model.query(ResolvedAliasedType {
+        type_alias_id: type_alias_symbol.metadata().id(),
+    })?;
+
+    // Expand any nested type aliases
+    let expanded = resolved_ty.expand_aliases();
+
+    // Extract the underlying struct/enum symbol from the type
+    match expanded.kind() {
+        TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        TyKind::Enum { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        _ => None,
     }
 }

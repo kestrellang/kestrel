@@ -564,3 +564,120 @@ mod validation {
         .expect(HasError("does not implement method 'greet'"));
     }
 }
+
+mod regression {
+    use super::*;
+
+    /// Regression test for: Generic init with where clause not supported
+    /// Issue: Generic initializers with where clauses in protocols weren't getting their
+    /// type parameters registered as child symbols during semantic analysis, causing
+    /// "cannot find type 'I' in this scope" errors.
+    #[test]
+    fn generic_init_with_where_clause() {
+        Test::new(
+            r#"module Test
+            public protocol Iterator {
+                type Item
+            }
+
+            public protocol Collectable {
+                type Item
+
+                init[I](from iter: I) where I: Iterator, I.Item = Item
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Collectable").is(SymbolKind::Protocol));
+    }
+
+    /// Regression test for: Child protocol cannot redeclare parent's associated type
+    /// Issue: When a protocol inherits from another protocol and redeclares an associated type
+    /// with the same name, the compiler incorrectly treated this as a conflict error.
+    /// This should be allowed - children can refine/override parent associated types.
+    #[test]
+    fn child_protocol_can_redeclare_parent_associated_type() {
+        Test::new(
+            r#"module Test
+            public protocol _ExpressibleByArrayLiteral {
+                type Element
+            }
+
+            public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
+                type Element
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("_ExpressibleByArrayLiteral")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ChildCount(1)),
+        )
+        .expect(
+            Symbol::new("ExpressibleByArrayLiteral")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ChildCount(1))
+                .has(Behavior::ConformanceCount(1)),
+        );
+    }
+
+    /// Regression test for: Diamond inheritance should still error on conflicting associated types
+    /// This test ensures that the fix for allowing child protocols to redeclare parent's associated
+    /// types doesn't break the legitimate error case where two sibling protocols define the same
+    /// associated type (diamond inheritance conflict).
+    #[test]
+    fn diamond_inheritance_associated_type_conflict() {
+        Test::new(
+            r#"module Test
+            protocol A {
+                type Element
+            }
+
+            protocol B {
+                type Element
+            }
+
+            protocol C: A, B {
+            }
+        "#,
+        )
+        .expect(HasError("conflicting associated type 'Element'"));
+    }
+
+    /// Regression test for: Protocol extension default implementations not inherited
+    /// Issue: When a protocol extends another protocol and provides a default implementation
+    /// via `extend`, types conforming to the child protocol should automatically get the
+    /// default implementation without having to implement it themselves.
+    #[test]
+    fn protocol_extension_default_implementation() {
+        Test::new(
+            r#"module Test
+            public protocol Parent {
+                func parentMethod() -> lang.i64
+            }
+
+            // Provide default implementation in an extension
+            extend Parent {
+                public func parentMethod() -> lang.i64 {
+                    42
+                }
+            }
+
+            public protocol Child: Parent {
+                func childMethod() -> lang.i64
+            }
+
+            // MyStruct should only need to implement childMethod,
+            // not parentMethod (it has a default implementation)
+            public struct MyStruct: Child {
+                public func childMethod() -> lang.i64 {
+                    10
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("MyStruct").is(SymbolKind::Struct));
+    }
+}

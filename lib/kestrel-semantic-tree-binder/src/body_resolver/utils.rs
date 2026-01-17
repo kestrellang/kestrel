@@ -296,6 +296,16 @@ pub fn get_type_container(
         TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::Enum { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::Protocol { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        TyKind::TypeAlias { .. } => {
+            // Expand the type alias and recurse to get the container of the underlying type
+            let expanded = ty.expand_aliases();
+            // Avoid infinite recursion if expand_aliases returns the same type
+            if !matches!(expanded.kind(), TyKind::TypeAlias { .. }) {
+                get_type_container(&expanded, ctx)
+            } else {
+                None
+            }
+        }
         TyKind::SelfType => {
             // Resolve Self to the containing struct/protocol
             // Get the function symbol, then its parent (which should be the struct/protocol)
@@ -710,6 +720,28 @@ fn infer_from_type(
             }
         }
 
+        // For enum types with substitutions, match the inner type arguments
+        TyKind::Enum {
+            symbol: param_enum,
+            substitutions: param_subs,
+        } => {
+            if let TyKind::Enum {
+                symbol: arg_enum,
+                substitutions: arg_subs,
+            } = arg_ty.kind()
+            {
+                // Only if same enum
+                if param_enum.metadata().id() == arg_enum.metadata().id() {
+                    // Match substitutions
+                    for (id, param_sub_ty) in param_subs.iter() {
+                        if let Some(arg_sub_ty) = arg_subs.get(*id) {
+                            infer_from_type(param_sub_ty, arg_sub_ty, type_params, substitutions);
+                        }
+                    }
+                }
+            }
+        }
+
         // Other types don't contribute to inference
         _ => {}
     }
@@ -747,6 +779,11 @@ pub fn verify_type_argument_constraints(
     let mut all_satisfied = true;
 
     for (param, arg) in type_params.iter().zip(type_args.iter()) {
+        // Skip constraint checking for poison types to avoid cascading errors
+        if arg.is_poison() {
+            continue;
+        }
+
         let param_id = param.metadata().id();
         let bounds = where_clause.bounds_for(param_id);
 
