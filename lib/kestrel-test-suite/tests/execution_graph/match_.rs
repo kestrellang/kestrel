@@ -23,7 +23,7 @@ mod match_expressions {
             r#"
             module Main
 
-            func describe(n: Int) -> Int {
+            func describe(n: lang.i64) -> lang.i64 {
                 match n {
                     0 => 0,
                     1 => 1,
@@ -47,7 +47,7 @@ mod match_expressions {
             r#"
             module Main
 
-            func toInt(b: Bool) -> Int {
+            func toInt(b: lang.i1) -> lang.i64 {
                 match b {
                     true => 1,
                     false => 0
@@ -71,11 +71,11 @@ mod match_expressions {
             module Main
 
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
 
-            func unwrap(opt: Option) -> Int {
+            func unwrap(opt: Option) -> lang.i64 {
                 match opt {
                     .Some(v) => v,
                     .None => 0
@@ -104,7 +104,7 @@ mod match_expressions {
                 case Blue
             }
 
-            func isRed(c: Color) -> Bool {
+            func isRed(c: Color) -> lang.i1 {
                 match c {
                     .Red => true,
                     _ => false
@@ -141,7 +141,7 @@ mod if_let {
                 case None
             }
 
-            func unwrap(opt: Option[Int]) -> Int {
+            func unwrap(opt: Option[lang.i64]) -> lang.i64 {
                 if let .Some(v) = opt {
                     v
                 } else {
@@ -171,7 +171,7 @@ mod if_let {
                 case None
             }
 
-            func addIfBothSome(a: Option[Int], b: Option[Int]) -> Int {
+            func addIfBothSome(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
                 if let .Some(x) = a, let .Some(y) = b {
                     x + y
                 } else {
@@ -200,7 +200,7 @@ mod if_let {
                 case None
             }
 
-            func maybeDouble(opt: Option[Int]) -> Int {
+            func maybeDouble(opt: Option[lang.i64]) -> lang.i64 {
                 var result = 0;
                 if let .Some(v) = opt {
                     result = v * 2;
@@ -238,7 +238,7 @@ mod guard_let {
                 case None
             }
 
-            func process(opt: Option[Int]) -> Int {
+            func process(opt: Option[lang.i64]) -> lang.i64 {
                 guard let .Some(v) = opt else {
                     return 0
                 }
@@ -266,7 +266,7 @@ mod guard_let {
                 case None
             }
 
-            func process(a: Option[Int], b: Option[Int]) -> Int {
+            func process(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
                 guard let .Some(x) = a else {
                     return 0
                 }
@@ -307,24 +307,24 @@ mod while_let {
             }
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
-                init(start: Int) {
+                init(start: lang.i64) {
                     self.count = start;
                 }
                 
-                mutating func next() -> Option[Int] {
+                mutating func next() -> Option[lang.i64] {
                     if self.count > 0 {
                         let v = self.count;
                         self.count = self.count - 1;
-                        Option[Int].Some(value: v)
+                        Option[lang.i64].Some(value: v)
                     } else {
-                        Option[Int].None
+                        Option[lang.i64].None
                     }
                 }
             }
 
-            func sumAll() -> Int {
+            func sumAll() -> lang.i64 {
                 var counter = Counter(start: 5);
                 var sum = 0;
                 while let .Some(v) = counter.next() {
@@ -359,7 +359,7 @@ mod tuple_patterns {
             r#"
             module Main
 
-            func classify(pair: (Int, Int)) -> Int {
+            func classify(pair: (lang.i64, lang.i64)) -> lang.i64 {
                 match pair {
                     (0, 0) => 0,
                     (0, _) => 1,
@@ -384,7 +384,7 @@ mod tuple_patterns {
             r#"
             module Main
 
-            func sum(pair: (Int, Int)) -> Int {
+            func sum(pair: (lang.i64, lang.i64)) -> lang.i64 {
                 let (a, b) = pair;
                 a + b
             }
@@ -417,7 +417,7 @@ mod nested_patterns {
             module Main
 
             enum Inner {
-                case A(x: Int)
+                case A(x: lang.i64)
                 case B
             }
 
@@ -426,7 +426,7 @@ mod nested_patterns {
                 case Empty
             }
 
-            func extract(o: Outer) -> Int {
+            func extract(o: Outer) -> lang.i64 {
                 match o {
                     .Wrap(.A(x)) => x,
                     .Wrap(.B) => 0,
@@ -460,12 +460,12 @@ mod match_in_closures {
             module Main
 
             enum Option {
-                case Some(value: Int)
+                case Some(value: lang.i64)
                 case None
             }
 
-            func main() -> Int {
-                let unwrap: (Option) -> Int = { (opt: Option) in
+            func main() -> lang.i64 {
+                let unwrap: (Option) -> lang.i64 = { (opt: Option) in
                     match opt {
                         .Some(v) => v,
                         .None => 0
@@ -503,7 +503,7 @@ mod match_with_guards {
             r#"
             module Main
 
-            func classify(n: Int) -> Int {
+            func classify(n: lang.i64) -> lang.i64 {
                 match n {
                     x if x < 0 => 0 - 1,
                     x if x == 0 => 0,

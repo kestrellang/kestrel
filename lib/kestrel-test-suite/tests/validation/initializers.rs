@@ -18,8 +18,8 @@ mod basic_initialization {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -38,8 +38,8 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -58,7 +58,7 @@ struct Point {
 module Main
 
 struct Id {
-    let value: Int
+    let value: lang.i64
 
     init() {
         self.value = 1;
@@ -78,8 +78,8 @@ struct Id {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.y = self.x;
@@ -103,9 +103,9 @@ mod if_else_branches {
 module Main
 
 struct Point {
-    var x: Int
+    var x: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.x = 1;
         } else {
@@ -125,9 +125,9 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
+    var x: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.x = 1;
         }
@@ -147,9 +147,9 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
+    var x: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.x = 1;
             return;
@@ -169,9 +169,9 @@ struct Point {
 module Main
 
 struct Value {
-    var n: Int
+    var n: lang.i64
 
-    init(x: Int) {
+    init(x: lang.i64) {
         if x == 1 {
             self.n = 10;
         } else if x == 2 {
@@ -197,8 +197,8 @@ mod return_handling {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -218,8 +218,8 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
     init() {
         self.x = 0;
@@ -240,10 +240,10 @@ struct Point {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 
-    init(quick: Bool) {
+    init(quick: lang.i1) {
         if quick {
             self.x = 0;
             self.y = 0;
@@ -270,9 +270,9 @@ mod while_loops {
 module Main
 
 struct Counter {
-    var value: Int
+    var value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         while cond {
             self.value = 0;
         }
@@ -291,9 +291,9 @@ struct Counter {
 module Main
 
 struct Counter {
-    var value: Int
+    var value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         self.value = 0;
         while cond {
             self.value = self.value + 1;
@@ -316,7 +316,7 @@ mod loop_with_break {
 module Main
 
 struct Value {
-    var n: Int
+    var n: lang.i64
 
     init() {
         loop {
@@ -341,7 +341,7 @@ mod uninitialized_variables {
             r#"
 module Main
 func test() {
-    var x: Int;
+    var x: lang.i64;
     let y = x;
 }
 "#,
@@ -361,9 +361,9 @@ mod let_fields_in_branches {
 module Main
 
 struct Id {
-    let value: Int
+    let value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.value = 1;
         } else {
@@ -384,9 +384,9 @@ struct Id {
 module Main
 
 struct Id {
-    let value: Int
+    let value: lang.i64
 
-    init(cond: Bool) {
+    init(cond: lang.i1) {
         if cond {
             self.value = 1;
         } else {

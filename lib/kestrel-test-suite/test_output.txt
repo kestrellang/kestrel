@@ -460,7 +460,7 @@ test expressions::closures::basic_syntax::closure_three_params ... ok
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test() -> () -> Int {
+4 │ func test() -> () -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -500,7 +500,7 @@ test expressions::closures::captures::capture_multiple_variables ... ok
 error: function 'test' requires a body
   ┌─ test.ks:8:6
   │
-8 │ func test() -> Int {
+8 │ func test() -> lang.i64 {
   │      ^^^^ function declared without body
 
 test expressions::closures::edge_cases::closure_expression_with_semicolon_returns_unit ... ok
@@ -543,7 +543,7 @@ test expressions::closures::edge_cases::closure_with_only_statements ... ok
 error: function 'test' requires a body
   ┌─ test.ks:8:6
   │
-8 │ func test() -> (Int) -> Int {
+8 │ func test() -> (lang.i64) -> lang.i64 {
   │      ^^^^ function declared without body
 
 test expressions::closures::implicit_it::it_shadowed_in_nested_closure ... FAILED
@@ -561,7 +561,7 @@ error: could not infer type for 1 placeholder(s)
 test expressions::closures::implicit_it::it_used_zero_param_context_error ... FAILED
 test expressions::closures::implicit_it::it_with_single_param_context ... FAILED
 test expressions::closures::multi_statement::closure_with_let_binding ... ok
-error: type mismatch: expected `Bool`, found `I64`
+error: type mismatch: expected `lang.i1`, found `I64`
    ┌─ test.ks:5:5
    │  
  5 │ ╭     { (x) in
@@ -571,9 +571,9 @@ error: type mismatch: expected `Bool`, found `I64`
  9 │ │             0 - x
 10 │ │         }
 11 │ │     }
-   │ ╰─────^ expected `Bool`
+   │ ╰─────^ expected `lang.i1`
 
-error: type mismatch: expected `Bool`, found `I64`
+error: type mismatch: expected `lang.i1`, found `I64`
    ┌─ test.ks:5:5
    │  
  5 │ ╭     { (x) in
@@ -583,16 +583,16 @@ error: type mismatch: expected `Bool`, found `I64`
  9 │ │             0 - x
 10 │ │         }
 11 │ │     }
-   │ ╰─────^ expected `Bool`
+   │ ╰─────^ expected `lang.i1`
 
 error: could not infer type for 1 placeholder(s)
  = try adding explicit type annotations to help the compiler
 
-error: if condition must be `Bool`, found `_`
+error: if condition must be `lang.i1`, found `_`
   ┌─ test.ks:6:12
   │
 6 │         if x > 0 {
-  │            ^^^^^ expected `Bool`, found `_`
+  │            ^^^^^ expected `lang.i1`, found `_`
 
 error: could not infer type for 1 placeholder(s)
  = try adding explicit type annotations to help the compiler
@@ -602,14 +602,14 @@ test expressions::closures::generics::closure_with_generic_param_inferred ... FA
 error: function 'test' requires a body
   ┌─ test.ks:8:6
   │
-8 │ func test() -> (Int) -> Int {
+8 │ func test() -> (lang.i64) -> lang.i64 {
   │      ^^^^ function declared without body
 
 test expressions::closures::nested_closures::nested_closure_with_it_shadowing ... FAILED
 error: function 'test' requires a body
   ┌─ test.ks:8:6
   │
-8 │ func test() -> Int {
+8 │ func test() -> lang.i64 {
   │      ^^^^ function declared without body
 
 test expressions::closures::trailing_closure::trailing_closure_only_argument ... FAILED
@@ -624,7 +624,7 @@ test expressions::closures::nested_closures::nested_closure_captures_outer_param
 error: function 'test' requires a body
   ┌─ test.ks:8:6
   │
-8 │ func test() -> Int {
+8 │ func test() -> lang.i64 {
   │      ^^^^ function declared without body
 
 test expressions::closures::multi_statement::closure_with_var_binding ... ok
@@ -638,7 +638,7 @@ test expressions::closures::type_checking::closure_assigned_to_non_function_type
 error: function 'test' requires a body
   ┌─ test.ks:8:6
   │
-8 │ func test() -> Int {
+8 │ func test() -> lang.i64 {
   │      ^^^^ function declared without body
 
 error: could not infer type for 1 placeholder(s)
@@ -659,7 +659,7 @@ test expressions::closures::type_inference::infer_return_type_from_body ... ok
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(a: Bool, b: Bool) -> Int {
+4 │ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -670,7 +670,7 @@ error: could not infer type for 1 placeholder(s)
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test() -> Int {
+4 │ func test() -> lang.i64 {
   │   test expressions::control_flow::if_basic::if_with_complex_condition ... FAILED
    ^^^^ this function has a non-unit return type
   │
@@ -686,7 +686,7 @@ test expressions::closures::type_inference::infer_param_type_from_expected ... o
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test() -> Int {
+4 │ func test() -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -699,7 +699,7 @@ test expressions::control_flow::if_basic::if_without_else_compiles ... ok
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test() -> Int {
+4 │ func test() -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -711,7 +711,7 @@ test expressions::control_flow::if_scoping::outer_variable_visible_inside_if ...
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(a: Bool, b: Bool) -> Int {
+4 │ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -725,7 +725,7 @@ test expressions::control_flow::if_with_statements::if_block_with_side_effects .
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test() -> Int {
+4 │ func test() -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -736,7 +736,7 @@ error: could not infer type for 1 placeholder(s)
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test() -> Int {
+4 │ func test() -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -749,7 +749,7 @@ test expressions::control_flow::if_scoping::variable_visible_within_its_block ..
   │
 4
  │test expressions::control_flow::if_with_statements::if_block_with_multiple_statements ... FAILED
- func test() -> Int {
+ func test() -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -760,7 +760,7 @@ error: could not infer type for 1 placeholder(s)
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(x: Int) -> Int {
+4 │ func test(x: lang.i64) -> lang.i64 {
   │      ^test expressions::control_flow::if_scoping::shadowing_inside_if_block ... FAILED
 ^^^ this function has a non-unit return type
   │
@@ -779,7 +779,7 @@ test expressions::control_flow::never_type_propagation::if_as_expression_with_ne
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(x: Int) -> Int {
+4 │ func test(x: lang.i64) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -791,7 +791,7 @@ test expressions::control_flow::never_type_propagation::if_else_if_chain_all_ret
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(x: Int) -> Int {
+4 │ func test(x: lang.i64) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -803,7 +803,7 @@ error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6test expressions::control_flow::never_type_propagation::if_else_if_with_return ... FAILED
 
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -814,8 +814,8 @@ error: could not infer type for 1 placeholder(s)
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> test expressions::control_flow::never_type_propagation::if_with_return_in_else_branch ... FAILED
-Int {
+4 │ func test(cond: lang.i1) -> test expressions::control_flow::never_type_propagation::if_with_return_in_else_branch ... FAILED
+lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -834,7 +834,7 @@ test expressions::field_access::field_access::simple_field_access_with_struct_ve
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -846,7 +846,7 @@ test expressions::control_flow::never_type_propagation::if_with_return_in_then_b
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(a: Bool, b: Bool) -> Int {
+4 │ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1000,7 +1000,7 @@ test expressions::returns::return_nested::multiple_returns_in_function ... ok
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(x: Bool) -> Int {
+4 │ func test(x: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
 test expressions::returns::return_statement_like::return_with_semicolon_followed_by_code ... ok
   │
@@ -1012,7 +1012,7 @@ error: could not infer type for 1 placeholder(s)
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(a: Bool, b: Bool) -> Int {
+4 │ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1351,7 +1351,7 @@ error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
 test validation::exhaustive_return::basic_returns::function_with_return_compiles ... ok
-4 │ func test(a: Bool, b: Bool) -> Int {
+4 │ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1365,7 +1365,7 @@ test validation::exhaustive_return::complex_control_flow::nested_if_all_paths_re
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1378,7 +1378,7 @@ test validation::exhaustive_return::complex_control_flow::early_return_then_fall
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(x: Int) -> Int {
+4 │ func test(x: lang.i64) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1391,7 +1391,7 @@ test validation::exhaustive_return::if_else_branches::if_else_chain_all_return .
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1416,7 +1416,7 @@ test validation::initializers::basic_initialization::all_fields_initialized ... 
 error: initializer does not initialize all fields: 'x'
    ┌─ test.ks:7:5
    │  
- 7 │ ╭     init(cond: Bool) {
+ 7 │ ╭     init(cond: lang.i1) {
  8 │ │         if cond {
  9 │ │             self.x = 1;
 10 │ │         } else {
@@ -1437,7 +1437,7 @@ test validation::initializers::let_fields_in_branches::let_field_assigned_then_r
 error: initializer does not initialize all fields: 'value'
    ┌─ test.ks:7:5
    │  
- 7 │ ╭     init(cond: Bool) {
+ 7 │ ╭     init(cond: lang.i1) {
  8 │ │         if cond {
  9 │ │             self.value = 1;
 10 │ │         } else {
@@ -1453,7 +1453,7 @@ test validation::initializers::return_handling::early_return_in_branch_with_late
 error: initializer does not initialize all fields: 'n'
    ┌─ test.ks:7:5
    │  
- 7 │ ╭     init(x: Int) {test validation::initializers::let_fields_in_branches::let_field_assigned_in_both_branches ... FAILED
+ 7 │ ╭     init(x: lang.i64) {test validation::initializers::let_fields_in_branches::let_field_assigned_in_both_branches ... FAILED
 
  8 │ │    test validation::initializers::return_handling::return_after_all_initialized ... ok
      if x == 1 {
@@ -1533,7 +1533,7 @@ test validation::type_checking::assignment_types::assign_string_to_int_variable 
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1549,7 +1549,7 @@ error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
 4 │ func testtest validation::type_checking::call_argument_types::call_non_callable_struct ... ok
-(cond: Bool) -> Int {
+(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1561,8 +1561,8 @@ error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
 test validation::type_checking::assignment_types::assign_tuple_to_int_variable ... ok
-4 │ func test(a: Bool, test validation::type_checking::branch_types::if_else_branches_mismatch_bool_int ... FAILED
-b: Bool) -> Int {
+4 │ func test(a: lang.i1, test validation::type_checking::branch_types::if_else_branches_mismatch_bool_int ... FAILED
+b: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1575,7 +1575,7 @@ test validation::type_checking::call_argument_types::call_with_correct_args_ok .
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1589,7 +1589,7 @@ error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
 4 │ func test(cond: test validation::type_checking::call_argument_types::call_with_tuple_for_int ... ok
-Bool) -> Int {
+lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1629,7 +1629,7 @@ test validation::type_checking::never_type::break_propagates_never ... FAILED
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1645,7 +1645,7 @@ test validation::type_checking::return_types::implicit_return_wrong_type ... ok
 error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
-4 │ func test(cond: Bool) -> Int {
+4 │ func test(cond: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression
@@ -1660,7 +1660,7 @@ error: function 'test' does not return a value on all code paths
   ┌─ test.ks:4:6
   │
 test validation::type_checking::return_types::return_array_for_int ... ok
-4 │ func test(a: Bool, b: Bool, c: Bool) -> Int {
+4 │ func test(a: lang.i1, b: lang.i1, c: lang.i1) -> lang.i64 {
   │      ^^^^ this function has a non-unit return type
   │
   = all code paths must end with a return statement or a value expression

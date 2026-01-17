@@ -24,7 +24,7 @@ mod while_loops {
             r#"
             module Main
 
-            func countdown(n: Int) -> Int {
+            func countdown(n: lang.i64) -> lang.i64 {
                 var i = n;
                 while i > 0 {
                     i = i - 1;
@@ -50,7 +50,7 @@ mod while_loops {
             r#"
             module Main
 
-            func factorial(n: Int) -> Int {
+            func factorial(n: lang.i64) -> lang.i64 {
                 var result = 1;
                 var i = n;
                 while i > 1 {
@@ -79,7 +79,7 @@ mod while_loops {
             r#"
             module Main
 
-            func fibonacci(n: Int) -> Int {
+            func fibonacci(n: lang.i64) -> lang.i64 {
                 if n <= 1 {
                     n
                 } else {
@@ -121,7 +121,7 @@ mod infinite_loops {
             r#"
             module Main
 
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var i = 0;
                 loop {
                     i = i + 1;
@@ -157,7 +157,7 @@ mod break_continue {
             r#"
             module Main
 
-            func findFirst(limit: Int) -> Int {
+            func findFirst(limit: lang.i64) -> lang.i64 {
                 var i = 0;
                 while true {
                     if i >= limit {
@@ -185,7 +185,7 @@ mod break_continue {
             r#"
             module Main
 
-            func sumOdd(limit: Int) -> Int {
+            func sumOdd(limit: lang.i64) -> lang.i64 {
                 var sum = 0;
                 var i = 0;
                 while i < limit {
@@ -216,7 +216,7 @@ mod break_continue {
             r#"
             module Main
 
-            func sumUntil(limit: Int) -> Int {
+            func sumUntil(limit: lang.i64) -> lang.i64 {
                 var sum = 0;
                 var i = 0;
                 while true {
@@ -258,7 +258,7 @@ mod early_returns {
             r#"
             module Main
 
-            func classify(n: Int) -> Int {
+            func classify(n: lang.i64) -> lang.i64 {
                 if n < 0 {
                     return 0 - 1
                 }
@@ -290,7 +290,7 @@ mod early_returns {
             r#"
             module Main
 
-            func earlyReturn(x: Int) -> Int {
+            func earlyReturn(x: lang.i64) -> lang.i64 {
                 if x < 0 {
                     return 0
                 } else {
@@ -324,7 +324,7 @@ mod nested_control_flow {
             r#"
             module Main
 
-            func nested(x: Int, y: Int) -> Int {
+            func nested(x: lang.i64, y: lang.i64) -> lang.i64 {
                 if x > 0 {
                     if y > 0 {
                         1
@@ -356,7 +356,7 @@ mod nested_control_flow {
             r#"
             module Main
 
-            func loopInIf(x: Int) -> Int {
+            func loopInIf(x: lang.i64) -> lang.i64 {
                 if x > 0 {
                     var i = 0;
                     while i < x {
@@ -384,7 +384,7 @@ mod nested_control_flow {
             r#"
             module Main
 
-            func ifInLoop(n: Int) -> Int {
+            func ifInLoop(n: lang.i64) -> lang.i64 {
                 var count = 0;
                 var i = 0;
                 while i < n {
@@ -422,7 +422,7 @@ mod labeled_loops {
             r#"
             module Main
 
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var result = 0;
                 'outer: while true {
                     var i = 0;
@@ -453,7 +453,7 @@ mod labeled_loops {
             r#"
             module Main
 
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var result = 0;
                 var i = 0;
                 'outer: while i < 10 {
@@ -496,7 +496,7 @@ mod complex_control_flow {
             r#"
             module Main
 
-            func process(x: Int) -> Int {
+            func process(x: lang.i64) -> lang.i64 {
                 if x < 0 {
                     return 0 - x
                 }

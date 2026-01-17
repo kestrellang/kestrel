@@ -21,7 +21,7 @@ mod tuple_destructuring {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (a, b) = (1, 2);
     a + b
 }
@@ -36,7 +36,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let ((a, b), c) = ((1, 2), 3);
     a + b + c
 }
@@ -51,7 +51,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (a, _) = (1, 2);
     a
 }
@@ -66,8 +66,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let (a, b): (Int, Int) = (1, 2);
+func test() -> lang.i64 {
+    let (a, b): (lang.i64, lang.i64) = (1, 2);
     a + b
 }
 "#,
@@ -81,11 +81,11 @@ func test() -> Int {
             r#"
 module Main
 
-func pair() -> (Int, Int) {
+func pair() -> (lang.i64, lang.i64) {
     (1, 2)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (a, b) = pair();
     a + b
 }
@@ -100,7 +100,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     var (a, b) = (1, 2);
     a = 10;
     b = 20;
@@ -117,7 +117,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (var a, b) = (1, 2);
     a = 10;
     a + b
@@ -133,7 +133,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (var a, b) = (1, 2);
     b = 20;
     a + b
@@ -150,7 +150,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (a, b, c) = (1, 2);
     a + b + c
 }
@@ -174,11 +174,11 @@ mod struct_destructuring {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let p = Point(x: 1, y: 2);
     let Point { x, y } = p;
     x + y
@@ -195,11 +195,11 @@ func test() -> Int {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let p = Point(x: 1, y: 2);
     let Point { x: a, y: b } = p;
     a + b
@@ -216,11 +216,11 @@ func test() -> Int {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let p = Point(x: 1, y: 2);
     let Point { x, .. } = p;
     x
@@ -237,8 +237,8 @@ func test() -> Int {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 struct Line {
@@ -246,7 +246,7 @@ struct Line {
     var end: Point
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let line = Line(start: Point(x: 0, y: 0), end: Point(x: 10, y: 10));
     let Line { start: Point { x: x1, .. }, end: Point { x: x2, .. } } = line;
     x2 - x1
@@ -275,7 +275,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     let .Some(value) = opt;
     value
 }
@@ -291,7 +291,7 @@ func test(opt: Option[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     let 42 = x;
     42
 }
@@ -311,7 +311,7 @@ enum Wrapper[T] {
     case Value(inner: T)
 }
 
-func test(w: Wrapper[Int]) -> Int {
+func test(w: Wrapper[lang.i64]) -> lang.i64 {
     let .Value(inner) = w;
     inner
 }
@@ -326,7 +326,7 @@ func test(w: Wrapper[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     let _ = x;
     42
 }
@@ -341,7 +341,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     let y = x;
     y
 }
@@ -356,7 +356,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     let (a, b) = t;
     a + b
 }
@@ -371,7 +371,7 @@ func test(t: (Int, Int)) -> Int {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     let (0, b) = t;
     b
 }
@@ -395,7 +395,7 @@ mod type_inference {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let (a, b) = (1, "hello");
     a
 }
@@ -410,7 +410,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let ((a, b), c) = ((1, 2), 3);
     a + b + c
 }
@@ -425,8 +425,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let (a, b): (Int, Int) = (1, 2);
+func test() -> lang.i64 {
+    let (a, b): (lang.i64, lang.i64) = (1, 2);
     a + b
 }
 "#,
@@ -440,8 +440,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let (a, b): (Int, Int) = (1, "hello");
+func test() -> lang.i64 {
+    let (a, b): (lang.i64, lang.i64) = (1, "hello");
     a
 }
 "#,

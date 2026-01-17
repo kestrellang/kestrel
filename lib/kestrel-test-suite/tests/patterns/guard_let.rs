@@ -26,7 +26,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         return 0
     }
@@ -48,7 +48,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = a else {
         return 0
     }
@@ -73,7 +73,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[(Int, Int)]) -> Int {
+func test(opt: Option[(lang.i64, lang.i64)]) -> lang.i64 {
     guard let .Some((a, b)) = opt else {
         return 0
     }
@@ -103,7 +103,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         0
     }
@@ -126,7 +126,7 @@ enum Option[T] {
     case None
 }
 
-func test(opts: [Option[Int]]) -> Int {
+func test(opts: [Option[lang.i64]]) -> lang.i64 {
     var sum = 0;
     var i = 0;
     while i < 10 {
@@ -155,13 +155,13 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
     var i = 0;
     while i < 10 {
         i = i + 1;
         // Skip odd numbers using guard-let with continue
-        guard let .Some(value) = if i % 2 == 0 { Option[Int].Some(value: i) } else { Option[Int].None } else {
+        guard let .Some(value) = if i % 2 == 0 { Option[lang.i64].Some(value: i) } else { Option[lang.i64].None } else {
             continue
         }
         sum = sum + value;
@@ -192,7 +192,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         return 0
     }
@@ -214,7 +214,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = a else {
         return 0
     }
@@ -239,7 +239,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         return 0
     }
@@ -262,7 +262,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         return value
     }
@@ -293,7 +293,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = a, let .Some(y) = b else {
         return 0
     }
@@ -315,7 +315,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = opt, x > 0 else {
         return 0
     }
@@ -337,7 +337,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = a, let .Some(y) = b, x < y else {
         return 0
     }
@@ -367,7 +367,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = opt else {
         return 0
     }

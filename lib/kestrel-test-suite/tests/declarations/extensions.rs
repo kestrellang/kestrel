@@ -18,7 +18,7 @@ mod basic {
     fn empty_extension() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point { }
         "#,
         )
@@ -30,9 +30,9 @@ mod basic {
     fn extension_with_method() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func describe() -> String { return "a point"; }
+                func describe() -> lang.str { return "a point"; }
             }
         "#,
         )
@@ -44,11 +44,11 @@ mod basic {
     fn extension_method_accessible() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func sum() -> Int { return self.x + self.y; }
+                func sum() -> lang.i64 { return self.x + self.y; }
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
                 return p.sum();
             }
@@ -61,12 +61,12 @@ mod basic {
     fn extension_with_multiple_methods() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func sum() -> Int { return self.x + self.y; }
-                func product() -> Int { return self.x * self.y; }
+                func sum() -> lang.i64 { return self.x + self.y; }
+                func product() -> lang.i64 { return self.x * self.y; }
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
                 return p.sum() + p.product();
             }
@@ -79,14 +79,14 @@ mod basic {
     fn multiple_extensions_same_type() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func sum() -> Int { return self.x + self.y; }
+                func sum() -> lang.i64 { return self.x + self.y; }
             }
             extend Point {
-                func product() -> Int { return self.x * self.y; }
+                func product() -> lang.i64 { return self.x * self.y; }
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
                 return p.sum() + p.product();
             }
@@ -103,10 +103,10 @@ mod conformance {
     fn extension_adds_conformance() {
         Test::new(
             r#"module Test
-            protocol Describable { func describe() -> String }
-            struct Point { var x: Int; var y: Int }
+            protocol Describable { func describe() -> lang.str }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Describable {
-                func describe() -> String { return "a point"; }
+                func describe() -> lang.str { return "a point"; }
             }
         "#,
         )
@@ -117,13 +117,13 @@ mod conformance {
     fn extension_satisfies_protocol_method() {
         Test::new(
             r#"module Test
-            protocol Hashable { func hash() -> Int }
-            struct Point { var x: Int; var y: Int }
+            protocol Hashable { func hash() -> lang.i64 }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Hashable {
-                func hash() -> Int { return self.x + self.y; }
+                func hash() -> lang.i64 { return self.x + self.y; }
             }
-            func getHash[T](value: T) -> Int where T: Hashable { return value.hash(); }
-            func test() -> Int {
+            func getHash[T](value: T) -> lang.i64 where T: Hashable { return value.hash(); }
+            func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
                 return getHash(p);
             }
@@ -136,8 +136,8 @@ mod conformance {
     fn extension_missing_protocol_method() {
         Test::new(
             r#"module Test
-            protocol Describable { func describe() -> String }
-            struct Point { var x: Int; var y: Int }
+            protocol Describable { func describe() -> lang.str }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Describable { }
         "#,
         )
@@ -148,12 +148,12 @@ mod conformance {
     fn extension_multiple_conformances() {
         Test::new(
             r#"module Test
-            protocol Hashable { func hash() -> Int }
-            protocol Describable { func describe() -> String }
-            struct Point { var x: Int; var y: Int }
+            protocol Hashable { func hash() -> lang.i64 }
+            protocol Describable { func describe() -> lang.str }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Hashable, Describable {
-                func hash() -> Int { return self.x + self.y; }
-                func describe() -> String { return "point"; }
+                func hash() -> lang.i64 { return self.x + self.y; }
+                func describe() -> lang.str { return "point"; }
             }
         "#,
         )
@@ -164,12 +164,12 @@ mod conformance {
     fn extension_inherits_protocol_methods() {
         Test::new(
             r#"module Test
-            protocol Base { func base() -> Int }
-            protocol Child: Base { func child() -> Int }
-            struct Point { var x: Int; var y: Int }
+            protocol Base { func base() -> lang.i64 }
+            protocol Child: Base { func child() -> lang.i64 }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Child {
-                func base() -> Int { return self.x; }
-                func child() -> Int { return self.y; }
+                func base() -> lang.i64 { return self.x; }
+                func child() -> lang.i64 { return self.y; }
             }
         "#,
         )
@@ -186,11 +186,11 @@ mod conformance {
             }
             struct Maker { }
             extend Maker: Factory {
-                type Product = Int;
-                func make() -> Int { return 1; }
+                type Product = lang.i64;
+                func make() -> lang.i64 { return 1; }
             }
-            func useFactory[F](f: F) -> Int where F: Factory { return f.make(); }
-            func test() -> Int { return useFactory(Maker()); }
+            func useFactory[F](f: F) -> lang.i64 where F: Factory { return f.make(); }
+            func test() -> lang.i64 { return useFactory(Maker()); }
         "#,
         )
         .expect(Compiles);
@@ -206,7 +206,7 @@ mod conformance {
             }
             struct Maker { }
             extend Maker: Factory {
-                func make() -> Int { return 1; }
+                func make() -> lang.i64 { return 1; }
             }
         "#,
         )
@@ -217,10 +217,10 @@ mod conformance {
     fn separate_extensions_satisfy_conformance() {
         Test::new(
             r#"module Test
-            protocol Hashable { func hash() -> Int }
-            struct Point { var x: Int; var y: Int }
+            protocol Hashable { func hash() -> lang.i64 }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func hash() -> Int { return self.x + self.y; }
+                func hash() -> lang.i64 { return self.x + self.y; }
             }
             extend Point: Hashable { }
         "#,
@@ -234,7 +234,7 @@ mod conformance {
             r#"module Test
             struct Container[T] { let value: T }
             protocol Printable { func print() }
-            extend Container[Int]: Printable {
+            extend Container[lang.i64]: Printable {
                 func print() { }
             }
             func usePrintable(p: Printable) { p.print(); }
@@ -257,10 +257,10 @@ mod generics {
             r#"module Test
             struct Box[T] { var value: T }
             extend Box[T] {
-                func get() -> T { return self.value; }
+                func read() -> T { return self.value; }
             }
-            func test() -> Int {
-                let b = Box[Int](value: 42);
+            func test() -> lang.i64 {
+                let b = Box[lang.i64](value: 42);
                 return b.get();
             }
         "#,
@@ -273,11 +273,11 @@ mod generics {
         Test::new(
             r#"module Test
             struct Box[T] { var value: T }
-            extend Box[Int] {
-                func doubled() -> Int { return self.value * 2; }
+            extend Box[lang.i64] {
+                func doubled() -> lang.i64 { return self.value * 2; }
             }
-            func test() -> Int {
-                let b = Box[Int](value: 21);
+            func test() -> lang.i64 {
+                let b = Box[lang.i64](value: 21);
                 return b.doubled();
             }
         "#,
@@ -290,11 +290,11 @@ mod generics {
         Test::new(
             r#"module Test
             struct Box[T] { var value: T }
-            extend Box[Int] {
-                func doubled() -> Int { return self.value * 2; }
+            extend Box[lang.i64] {
+                func doubled() -> lang.i64 { return self.value * 2; }
             }
-            func test() -> Int {
-                let b = Box[String](value: "hello");
+            func test() -> lang.i64 {
+                let b = Box[lang.str](value: "hello");
                 return b.doubled();
             }
         "#,
@@ -307,11 +307,11 @@ mod generics {
         Test::new(
             r#"module Test
             struct Pair[T, U] { var first: T; var second: U }
-            extend Pair[T, Int] {
-                func getSecond() -> Int { return self.second; }
+            extend Pair[T, lang.i64] {
+                func getSecond() -> lang.i64 { return self.second; }
             }
-            func test() -> Int {
-                let p = Pair[String, Int](first: "hello", second: 42);
+            func test() -> lang.i64 {
+                let p = Pair[lang.str, lang.i64](first: "hello", second: 42);
                 return p.getSecond();
             }
         "#,
@@ -324,11 +324,11 @@ mod generics {
         Test::new(
             r#"module Test
             struct Pair[T, U] { var first: T; var second: U }
-            extend Pair[T, Int] {
-                func getSecond() -> Int { return self.second; }
+            extend Pair[T, lang.i64] {
+                func getSecond() -> lang.i64 { return self.second; }
             }
-            func test() -> String {
-                let p = Pair[String, String](first: "hello", second: "world");
+            func test() -> lang.str {
+                let p = Pair[lang.str, lang.str](first: "hello", second: "world");
                 return p.getSecond();
             }
         "#,
@@ -345,8 +345,8 @@ mod generics {
                 func getValue() -> T { return self.value; }
                 mutating func setValue(newValue: T) { self.value = newValue; }
             }
-            func test() -> Int {
-                var b = Box[Int](value: 10);
+            func test() -> lang.i64 {
+                var b = Box[lang.i64](value: 10);
                 b.setValue(20);
                 return b.getValue();
             }
@@ -364,8 +364,8 @@ mod generics {
                 func getFirst() -> T { return self.first; }
                 func getSecond() -> U { return self.second; }
             }
-            func test() -> Int {
-                let p = Pair[String, Int](first: "hello", second: 42);
+            func test() -> lang.i64 {
+                let p = Pair[lang.str, lang.i64](first: "hello", second: 42);
                 return p.getSecond();
             }
         "#,
@@ -383,17 +383,17 @@ mod specialization {
             r#"module Test
             struct Box[T] { var value: T }
             extend Box[T] {
-                func describe() -> String { return "generic box"; }
+                func describe() -> lang.str { return "generic box"; }
             }
-            extend Box[Int] {
-                func describe() -> String { return "int box"; }
+            extend Box[lang.i64] {
+                func describe() -> lang.str { return "lang.i64 box"; }
             }
-            func testGeneric() -> String {
-                let b = Box[String](value: "hello");
+            func testGeneric() -> lang.str {
+                let b = Box[lang.str](value: "hello");
                 return b.describe();
             }
-            func testSpecialized() -> String {
-                let b = Box[Int](value: 42);
+            func testSpecialized() -> lang.str {
+                let b = Box[lang.i64](value: 42);
                 return b.describe();
             }
         "#,
@@ -407,24 +407,24 @@ mod specialization {
             r#"module Test
             struct Pair[T, U] { var first: T; var second: U }
             extend Pair[T, U] {
-                func describe() -> String { return "generic pair"; }
+                func describe() -> lang.str { return "generic pair"; }
             }
-            extend Pair[T, Int] {
-                func describe() -> String { return "half specialized"; }
+            extend Pair[T, lang.i64] {
+                func describe() -> lang.str { return "half specialized"; }
             }
-            extend Pair[Int, Int] {
-                func describe() -> String { return "fully specialized"; }
+            extend Pair[lang.i64, lang.i64] {
+                func describe() -> lang.str { return "fully specialized"; }
             }
-            func test1() -> String {
-                let p = Pair[String, String](first: "a", second: "b");
+            func test1() -> lang.str {
+                let p = Pair[lang.str, lang.str](first: "a", second: "b");
                 return p.describe();
             }
-            func test2() -> String {
-                let p = Pair[String, Int](first: "a", second: 1);
+            func test2() -> lang.str {
+                let p = Pair[lang.str, lang.i64](first: "a", second: 1);
                 return p.describe();
             }
-            func test3() -> String {
-                let p = Pair[Int, Int](first: 1, second: 2);
+            func test3() -> lang.str {
+                let p = Pair[lang.i64, lang.i64](first: 1, second: 2);
                 return p.describe();
             }
         "#,
@@ -440,10 +440,10 @@ mod where_clause {
     fn extension_with_where_clause() {
         Test::new(
             r#"module Test
-            protocol Equatable { func equals(other: Self) -> Bool }
+            protocol Equatable { func equals(other: Self) -> lang.i1 }
             struct Box[T] { var value: T }
             extend Box[T] where T: Equatable {
-                func hasSameValue(other: Box[T]) -> Bool { return self.value.equals(other.value); }
+                func hasSameValue(other: Box[T]) -> lang.i1 { return self.value.equals(other.value); }
             }
         "#,
         )
@@ -454,13 +454,13 @@ mod where_clause {
     fn extension_where_clause_not_satisfied() {
         Test::new(
             r#"module Test
-            protocol Equatable { func equals(other: Self) -> Bool }
+            protocol Equatable { func equals(other: Self) -> lang.i1 }
             struct NotEquatable { }
             struct Box[T] { var value: T }
             extend Box[T] where T: Equatable {
-                func hasSameValue(other: Box[T]) -> Bool { return self.value.equals(other.value); }
+                func hasSameValue(other: Box[T]) -> lang.i1 { return self.value.equals(other.value); }
             }
-            func test() -> Bool {
+            func test() -> lang.i1 {
                 let b1 = Box[NotEquatable](value: NotEquatable());
                 let b2 = Box[NotEquatable](value: NotEquatable());
                 return b1.hasSameValue(b2);
@@ -474,10 +474,10 @@ mod where_clause {
     fn extension_inherits_struct_constraints() {
         Test::new(
             r#"module Test
-            protocol Comparable { func lessThan(other: Self) -> Bool }
+            protocol Comparable { func lessThan(other: Self) -> lang.i1 }
             struct SortedBox[T] where T: Comparable { var value: T }
             extend SortedBox[T] {
-                func isLessThan(other: SortedBox[T]) -> Bool { return self.value.lessThan(other.value); }
+                func isLessThan(other: SortedBox[T]) -> lang.i1 { return self.value.lessThan(other.value); }
             }
         "#,
         )
@@ -488,11 +488,11 @@ mod where_clause {
     fn extension_adds_additional_constraint() {
         Test::new(
             r#"module Test
-            protocol Comparable { func lessThan(other: Self) -> Bool }
-            protocol Hashable { func hash() -> Int }
+            protocol Comparable { func lessThan(other: Self) -> lang.i1 }
+            protocol Hashable { func hash() -> lang.i64 }
             struct SortedBox[T] where T: Comparable { var value: T }
             extend SortedBox[T] where T: Hashable {
-                func getHash() -> Int { return self.value.hash(); }
+                func getHash() -> lang.i64 { return self.value.hash(); }
             }
         "#,
         )
@@ -507,12 +507,12 @@ mod conflicts {
     fn duplicate_method_same_specificity_error() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func foo() -> Int { return 1; }
+                func foo() -> lang.i64 { return 1; }
             }
             extend Point {
-                func foo() -> Int { return 2; }
+                func foo() -> lang.i64 { return 2; }
             }
         "#,
         )
@@ -525,10 +525,10 @@ mod conflicts {
             r#"module Test
             struct Box[T] { var value: T }
             extend Box[T] {
-                func describe() -> String { return "generic"; }
+                func describe() -> lang.str { return "generic"; }
             }
-            extend Box[Int] {
-                func describe() -> String { return "int"; }
+            extend Box[lang.i64] {
+                func describe() -> lang.str { return "lang.i64"; }
             }
         "#,
         )
@@ -540,11 +540,11 @@ mod conflicts {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int; var y: Int
-                func sum() -> Int { return self.x + self.y; }
+                var x: lang.i64; var y: lang.i64
+                func sum() -> lang.i64 { return self.x + self.y; }
             }
             extend Point {
-                func sum() -> Int { return 0; }
+                func sum() -> lang.i64 { return 0; }
             }
         "#,
         )
@@ -569,8 +569,8 @@ mod errors {
     fn extend_primitive() {
         Test::new(
             r#"module Test
-            extend Int {
-                func doubled() -> Int { return self * 2; }
+            extend lang.i64 {
+                func doubled() -> lang.i64 { return self * 2; }
             }
         "#,
         )
@@ -581,7 +581,7 @@ mod errors {
     fn extend_type_alias() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             type MyPoint = Point;
             extend MyPoint { func foo() { } }
         "#,
@@ -621,9 +621,9 @@ mod visibility {
     fn public_extension_method() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                public func sum() -> Int { return self.x + self.y; }
+                public func sum() -> lang.i64 { return self.x + self.y; }
             }
         "#,
         )
@@ -634,10 +634,10 @@ mod visibility {
     fn private_extension_method() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                private func internalSum() -> Int { return self.x + self.y; }
-                func doubleSum() -> Int { return self.internalSum() * 2; }
+                private func internalSum() -> lang.i64 { return self.x + self.y; }
+                func doubleSum() -> lang.i64 { return self.internalSum() * 2; }
             }
         "#,
         )
@@ -652,7 +652,7 @@ mod self_type {
     fn extension_method_uses_self() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
                 func clone() -> Self { return Point(x: self.x, y: self.y); }
             }
@@ -669,7 +669,7 @@ mod self_type {
     fn extension_method_self_param() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
                 func add(other: Self) -> Self { return Point(x: self.x + other.x, y: self.y + other.y); }
             }
@@ -691,7 +691,7 @@ mod static_methods {
     fn extension_static_method() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
                 static func origin() -> Point { return Point(x: 0, y: 0); }
             }
@@ -706,10 +706,10 @@ mod static_methods {
         Test::new(
             r#"module Test
             struct Box[T] { var value: T }
-            extend Box[Int] {
-                static func zero() -> Box[Int] { return Box[Int](value: 0); }
+            extend Box[lang.i64] {
+                static func zero() -> Box[lang.i64] { return Box[lang.i64](value: 0); }
             }
-            func test() -> Box[Int] { return Box[Int].zero(); }
+            func test() -> Box[lang.i64] { return Box[lang.i64].zero(); }
         "#,
         )
         .expect(Compiles);
@@ -747,9 +747,9 @@ mod constraint_inference {
                 func map(s: Source)
             }
             struct Box[T] { var value: T }
-            extend Box[T] where T: Mapper, T.Source = Int {
-                func mapString(s: String) {
-                    // Should fail: T.Source is Int, but s is String
+            extend Box[T] where T: Mapper, T.Source = lang.i64 {
+                func mapString(s: lang.str) {
+                    // Should fail: T.Source is lang.i64, but s is String
                     self.value.map(s)
                 }
             }
@@ -772,7 +772,7 @@ mod future_features {
                 case Blue
             }
             extend Color {
-                func isRed() -> Bool { return true; }
+                func isRed() -> lang.i1 { return true; }
             }
         "#,
         )

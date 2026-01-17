@@ -150,27 +150,33 @@ impl SemanticModel {
     }
 
     /// Debug print the semantic model (symbol hierarchy).
-    pub fn print_semantic_model(&self) {
-        fn format_behavior(b: &dyn Behavior<KestrelLanguage>) -> String {
-            use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-            use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-            use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
-            use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
-            use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
-            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-            use kestrel_semantic_tree::behavior::valued::ValueBehavior;
-            use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-            use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
+    ///
+    /// If `full` is true, shows complete details including function body statements.
+    pub fn print_semantic_model(&self, full: bool) {
+        use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+        use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+        use kestrel_semantic_tree::behavior::executable::{
+            ExecutableBehavior, ResolvedExecutableBehavior,
+        };
+        use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
+        use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+        use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+        use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+        use kestrel_semantic_tree::behavior::valued::ValueBehavior;
+        use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+        use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 
+        /// Format a behavior for inline display (in the [...] brackets)
+        fn format_behavior_inline(b: &dyn Behavior<KestrelLanguage>) -> Option<String> {
             if let Some(vb) = b.downcast_ref::<VisibilityBehavior>() {
                 if let Some(vis) = vb.visibility() {
-                    return format!("Visibility({})", vis);
+                    return Some(format!("Visibility({})", vis));
                 }
-                return "Visibility".to_string();
+                return Some("Visibility".to_string());
             }
 
             if let Some(tb) = b.downcast_ref::<TypedBehavior>() {
-                return format!("Typed({})", tb.ty());
+                return Some(format!("Typed({})", tb.ty()));
             }
 
             if let Some(import_data) = b.downcast_ref::<ImportDataBehavior>() {
@@ -178,9 +184,9 @@ impl SemanticModel {
                 let items = import_data.items();
                 if items.is_empty() {
                     if let Some(alias) = import_data.alias() {
-                        return format!("Import({} as {})", path, alias);
+                        return Some(format!("Import({} as {})", path, alias));
                     }
-                    return format!("Import({})", path);
+                    return Some(format!("Import({})", path));
                 }
                 let item_strs: Vec<String> = items
                     .iter()
@@ -192,7 +198,7 @@ impl SemanticModel {
                         }
                     })
                     .collect();
-                return format!("Import({}.({}))", path, item_strs.join(", "));
+                return Some(format!("Import({}.({}))", path, item_strs.join(", ")));
             }
 
             if let Some(callable) = b.downcast_ref::<CallableBehavior>() {
@@ -204,55 +210,100 @@ impl SemanticModel {
                         format!("{}: {}", label, p.ty)
                     })
                     .collect();
-                return format!(
+                return Some(format!(
                     "Callable(({}) -> {})",
                     params.join(", "),
                     callable.return_type()
-                );
+                ));
             }
 
             if let Some(fd) = b.downcast_ref::<FunctionDataBehavior>() {
-                return format!(
+                return Some(format!(
                     "FunctionData(has_body={}, is_static={})",
                     fd.has_body(),
                     fd.is_static()
-                );
+                ));
             }
 
             if let Some(vb) = b.downcast_ref::<ValueBehavior>() {
-                return format!("Valued({})", vb.ty());
+                return Some(format!("Valued({})", vb.ty()));
             }
 
             if let Some(cb) = b.downcast_ref::<ConformancesBehavior>() {
                 let conformances: Vec<String> =
                     cb.conformances().iter().map(|t| t.to_string()).collect();
-                return format!("Conformances({})", conformances.join(", "));
+                return Some(format!("Conformances({})", conformances.join(", ")));
             }
 
+            if let Some(gb) = b.downcast_ref::<GenericsBehavior>() {
+                let params: Vec<String> = gb
+                    .type_parameters()
+                    .iter()
+                    .map(|tp| tp.metadata().name().value.clone())
+                    .collect();
+                if !params.is_empty() {
+                    return Some(format!("Generics[{}]", params.join(", ")));
+                }
+                return None;
+            }
+
+            // For ExecutableBehavior, return summary in non-full mode (handled separately in full mode)
             if let Some(eb) = b.downcast_ref::<ExecutableBehavior>() {
                 let stmt_count = eb.body().statements.len();
                 let has_yield = eb.body().yield_expr().is_some();
-                return format!("Executable(stmts={}, has_yield={})", stmt_count, has_yield);
+                return Some(format!("Executable(stmts={}, has_yield={})", stmt_count, has_yield));
+            }
+
+            if let Some(eb) = b.downcast_ref::<ResolvedExecutableBehavior>() {
+                let stmt_count = eb.body().statements.len();
+                let has_yield = eb.body().yield_expr().is_some();
+                return Some(format!(
+                    "ResolvedExecutable(stmts={}, has_yield={})",
+                    stmt_count, has_yield
+                ));
             }
 
             if let Some(ma) = b.downcast_ref::<MemberAccessBehavior>() {
-                return format!("MemberAccess({})", ma.member_name());
+                return Some(format!("MemberAccess({})", ma.member_name()));
             }
 
-            "Unknown".to_string()
+            None
         }
 
-        fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
+        fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize, full: bool) {
             let indent = "  ".repeat(level);
             let metadata = symbol.metadata();
 
             let behaviors = metadata.behaviors();
-            let behaviors_str = if !behaviors.is_empty() {
-                let behavior_strings: Vec<String> = behaviors
-                    .iter()
-                    .map(|b| format_behavior(b.as_ref()))
-                    .collect();
-                format!(" [{}]", behavior_strings.join(", "))
+
+            // Collect all behaviors for inline display
+            let inline_behaviors: Vec<String> = behaviors
+                .iter()
+                .filter_map(|b| format_behavior_inline(b.as_ref()))
+                .collect();
+
+            // In full mode, also extract the executable body for expanded display
+            // Returns (body, is_resolved) tuple
+            let executable_body: Option<(_, bool)> = if full {
+                // Prefer ResolvedExecutable over Executable if both exist
+                let resolved = behaviors.iter().find_map(|b| {
+                    b.downcast_ref::<ResolvedExecutableBehavior>()
+                        .map(|eb| (eb.body().clone(), true))
+                });
+                if resolved.is_some() {
+                    resolved
+                } else {
+                    behaviors.iter().find_map(|b| {
+                        b.downcast_ref::<ExecutableBehavior>()
+                            .map(|eb| (eb.body().clone(), false))
+                    })
+                }
+            } else {
+                None
+            };
+
+            let behaviors_str = if !inline_behaviors.is_empty() {
+                format!(" [{}]", inline_behaviors.join(", "))
             } else {
                 String::new()
             };
@@ -265,8 +316,76 @@ impl SemanticModel {
                 behaviors_str
             );
 
+            // In full mode, print the executable body as an indented block
+            if let Some((body, is_resolved)) = executable_body {
+                use kestrel_semantic_tree::expr::Expression;
+                use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+                use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
+                use kestrel_semantic_tree::expr::IfCondition;
+
+                /// Format an expression as (value: type)
+                fn format_expr_with_type(expr: &Expression) -> String {
+                    format!("({}: {})", expr.debug_compact(), expr.ty)
+                }
+
+                /// Format a statement with types shown
+                fn format_stmt_with_type(stmt: &Statement) -> String {
+                    match &stmt.kind {
+                        StatementKind::Binding { pattern, value } => {
+                            let keyword = match &pattern.kind {
+                                PatternKind::Local { mutability, .. } => {
+                                    if *mutability == Mutability::Mutable { "var" } else { "let" }
+                                }
+                                PatternKind::At { mutability, .. } => {
+                                    if *mutability == Mutability::Mutable { "var" } else { "let" }
+                                }
+                                _ => "let",
+                            };
+                            let name = pattern.name().unwrap_or("<error>");
+                            let ty = &pattern.ty;
+                            let value_str = value
+                                .as_ref()
+                                .map(|v| format!(" = {}", format_expr_with_type(v)))
+                                .unwrap_or_default();
+                            format!("{} {}: {}{};", keyword, name, ty, value_str)
+                        }
+                        StatementKind::Expr(expr) => {
+                            format!("{};", format_expr_with_type(expr))
+                        }
+                        StatementKind::GuardLet { conditions, .. } => {
+                            let conds: Vec<_> = conditions
+                                .iter()
+                                .map(|c| match c {
+                                    IfCondition::Let { pattern, value, .. } => {
+                                        let name = pattern.name().unwrap_or("<pattern>");
+                                        format!("let {}: {} = {}", name, pattern.ty, format_expr_with_type(value))
+                                    }
+                                    IfCondition::Expr(e) => format_expr_with_type(e),
+                                })
+                                .collect();
+                            format!("guard {} else {{ ... }}", conds.join(", "))
+                        }
+                        StatementKind::Deinit { name, .. } => {
+                            format!("deinit {};", name)
+                        }
+                    }
+                }
+
+                let body_indent = "  ".repeat(level + 1);
+                let label = if is_resolved { "ResolvedExecutable" } else { "Executable" };
+                println!("{}{} {{", body_indent, label);
+                let stmt_indent = "  ".repeat(level + 2);
+                for stmt in &body.statements {
+                    println!("{}{}", stmt_indent, format_stmt_with_type(stmt));
+                }
+                if let Some(yield_expr) = body.yield_expr() {
+                    println!("{}-> {}", stmt_indent, format_expr_with_type(yield_expr));
+                }
+                println!("{}}}", body_indent);
+            }
+
             for child in metadata.children() {
-                print_symbol(&child, level + 1);
+                print_symbol(&child, level + 1, full);
             }
         }
 
@@ -275,7 +394,7 @@ impl SemanticModel {
 
         println!("{} top-level symbols\n", children.len());
         for child in children {
-            print_symbol(&child, 0);
+            print_symbol(&child, 0, full);
         }
     }
 

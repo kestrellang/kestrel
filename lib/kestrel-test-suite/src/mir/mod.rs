@@ -12,7 +12,7 @@
 //! fn test_basic_function() {
 //!     Test::new(r#"
 //!         module Main
-//!         func add(a: Int, b: Int) -> Int { a + b }
+//!         func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
 //!     "#)
 //!     .expect(Compiles)
 //!     .expect(Mir::compiles())

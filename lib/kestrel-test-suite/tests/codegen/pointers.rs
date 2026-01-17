@@ -23,8 +23,8 @@ fn test_mutating_parameter_struct() {
 module Test
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func reset(mutating p: Point) {
@@ -32,7 +32,7 @@ func reset(mutating p: Point) {
     p.y = 0;
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var pt = Point(x: 0, y: 0);
     reset(pt);
     pt.x
@@ -54,15 +54,15 @@ fn test_borrow_parameter_struct() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func sum(p: Point) -> Int {
+func sum(p: Point) -> lang.i64 {
     p.x + p.y
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let pt = Point(x: 20, y: 22);
     sum(pt)
 }
@@ -83,15 +83,15 @@ fn test_method_borrow_self() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
     
-    func sum() -> Int {
+    func sum() -> lang.i64 {
         self.x + self.y
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let pt = Point(x: 20, y: 22);
     pt.sum()
 }
@@ -111,18 +111,18 @@ fn test_mutating_method() {
 module Test
 
 struct Counter {
-    var count: Int
+    var count: lang.i64
     
     mutating func increment() {
         self.count = self.count + 1;
     }
     
-    func get() -> Int {
+    func read() -> lang.i64 {
         self.count
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var c = Counter(count: 40);
     c.increment();
     c.increment();
@@ -144,18 +144,18 @@ fn test_mutating_through_nested_field() {
 module Test
 
 struct Inner {
-    var value: Int
+    var value: lang.i64
 }
 
 struct Outer {
     var inner: Inner
 }
 
-func setValue(mutating i: Inner, n: Int) {
+func setValue(mutating i: Inner, n: lang.i64) {
     i.value = n;
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var o = Outer(inner: Inner(value: 0));
     setValue(o.inner, 42);
     o.inner.value
@@ -179,7 +179,7 @@ func main() -> Int {
 // 3. Use load/store for all accesses to those locals
 //
 // For now, mutating parameters work correctly for STRUCT types (which are already
-// stack-allocated) but not for primitives (Int, Bool, Float, etc.).
+// stack-allocated) but not for primitives (lang.i64, lang.i1, lang.f64, etc.).
 
 #[test]
 #[ignore = "Requires stack allocation for address-taken locals"]
@@ -190,11 +190,11 @@ fn test_mutating_parameter_int() {
         r#"
 module Test
 
-func increment(mutating n: Int) {
+func increment(mutating n: lang.i64) {
     n = n + 1;
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 41;
     increment(x);
     x
@@ -215,11 +215,11 @@ fn test_multiple_mutating_calls() {
         r#"
 module Test
 
-func add(mutating n: Int, amount: Int) {
+func add(mutating n: lang.i64, amount: lang.i64) {
     n = n + amount;
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 0;
     add(x, 10);
     add(x, 20);
@@ -242,12 +242,12 @@ fn test_mutating_and_return() {
         r#"
 module Test
 
-func incrementAndGet(mutating n: Int) -> Int {
+func incrementAndGet(mutating n: lang.i64) -> lang.i64 {
     n = n + 1;
     n
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 41;
     incrementAndGet(x)
 }

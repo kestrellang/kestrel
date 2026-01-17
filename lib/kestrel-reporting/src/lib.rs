@@ -74,11 +74,11 @@ impl DiagnosticContext {
 
     /// Emit all diagnostics to stderr with color support.
     pub fn emit(&self) -> Result<(), codespan_reporting::files::Error> {
-        let writer = StandardStream::stderr(ColorChoice::Auto);
+        let writer = StandardStream::stderr(ColorChoice::Always);
         let config = codespan_reporting::term::Config::default();
 
         for diagnostic in &self.diagnostics {
-            term::emit_to_io_write(&mut writer.lock(), &config, &self.files, diagnostic)?;
+            term::emit_to_write_style(&mut writer.lock(), &config, &self.files, diagnostic)?;
         }
 
         Ok(())
@@ -92,7 +92,7 @@ impl DiagnosticContext {
         let config = codespan_reporting::term::Config::default();
 
         for diagnostic in &self.diagnostics {
-            term::emit_to_io_write(writer, &config, &self.files, diagnostic)?;
+            term::emit_to_write_style(writer, &config, &self.files, diagnostic)?;
         }
 
         Ok(())

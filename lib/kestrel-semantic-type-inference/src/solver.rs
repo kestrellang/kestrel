@@ -98,7 +98,7 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
         let default_ty = match feature {
             LanguageFeature::ExpressibleByIntLiteral => ctx.oracle().default_integer_type(span),
             LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
-            LanguageFeature::ExpressibleByStringLiteral => Ty::string(span),
+            LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
             LanguageFeature::ExpressibleByBoolLiteral => Ty::bool(span),
             _ => continue,
         };
@@ -942,6 +942,14 @@ fn resolve_member(
             for (arg_ty_id, param_ty) in arguments.iter().zip(resolution.parameters.iter()) {
                 ctx.register_type(param_ty);
                 ctx.equate(*arg_ty_id, param_ty.id(), span.clone());
+            }
+
+            // For Self-returning methods (like negate()), equate receiver with result.
+            // This enables bidirectional type inference: when the result type is constrained
+            // by context (e.g., Int16), that constraint propagates back to the receiver,
+            // allowing literals like `-32768` to infer correctly as Int16.
+            if resolution.returns_self {
+                ctx.equate(receiver, result, span.clone());
             }
 
             Ok(SolveResult::Solved)

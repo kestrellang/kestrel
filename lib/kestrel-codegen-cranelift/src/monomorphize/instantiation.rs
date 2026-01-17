@@ -16,12 +16,20 @@ pub struct FunctionInstantiation {
     /// The concrete type arguments.
     /// Empty for non-generic functions.
     pub type_args: Vec<Id<Ty>>,
+    /// The concrete type for `Self` (used for protocol extension methods).
+    /// None for functions that don't use Self type.
+    pub self_type: Option<Id<Ty>>,
 }
 
 impl FunctionInstantiation {
     /// Create a new function instantiation.
     pub fn new(func_id: Id<Function>, type_args: Vec<Id<Ty>>) -> Self {
-        Self { func_id, type_args }
+        Self { func_id, type_args, self_type: None }
+    }
+
+    /// Create a new function instantiation with a Self type.
+    pub fn with_self_type(func_id: Id<Function>, type_args: Vec<Id<Ty>>, self_type: Id<Ty>) -> Self {
+        Self { func_id, type_args, self_type: Some(self_type) }
     }
 
     /// Create an instantiation for a non-generic function.
@@ -29,6 +37,7 @@ impl FunctionInstantiation {
         Self {
             func_id,
             type_args: Vec::new(),
+            self_type: None,
         }
     }
 }

@@ -497,6 +497,30 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 base
             }
         }
+        ValuePathResolution::EnumCaseValue {
+            symbol_id,
+            ty,
+            resolved_index,
+        } => {
+            // This is an enum case value followed by more path segments
+            // e.g., `Player.player1.description()` where player1 is a case
+            // and description is a method on the enum type
+            let case_span = if resolved_index < path_with_spans.len() {
+                path_with_spans[resolved_index].1.clone()
+            } else {
+                first_span.clone()
+            };
+
+            // Create the enum case expression
+            let base = Expression::enum_case(symbol_id, ty, case_span);
+
+            // Resolve remaining segments as member accesses
+            if resolved_index + 1 < path_with_spans.len() {
+                resolve_member_chain(base, &path_with_spans[resolved_index + 1..], ctx)
+            } else {
+                base
+            }
+        }
     }
 }
 

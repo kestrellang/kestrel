@@ -16,8 +16,8 @@ mod parsing {
         // Default access mode is borrow (no keyword)
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func readPoint(p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func readPoint(p: Point) -> lang.i64 {
                 p.x
             }
         "#,
@@ -35,7 +35,7 @@ mod parsing {
         // mutating keyword before parameter name
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
                 p.y = 0;
@@ -55,8 +55,8 @@ mod parsing {
         // consuming keyword before parameter name
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
         "#,
@@ -74,7 +74,7 @@ mod parsing {
         // mutating with external label (access mode comes before label)
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating point p: Point) {
                 p.x = 0;
             }
@@ -93,8 +93,8 @@ mod parsing {
         // consuming with external label (access mode comes before label)
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func take(consuming point p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func take(consuming point p: Point) -> lang.i64 {
                 p.x
             }
         "#,
@@ -112,8 +112,8 @@ mod parsing {
         // Mix of access modes in one function
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func process(a: Point, mutating b: Point, consuming c: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func process(a: Point, mutating b: Point, consuming c: Point) -> lang.i64 {
                 b.x = a.x;
                 c.x
             }
@@ -132,7 +132,7 @@ mod parsing {
         // Cannot combine mutating and consuming
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func bad(mutating consuming p: Point) {}
         "#,
         )
@@ -151,11 +151,11 @@ mod borrow_mode {
     fn borrow_allows_read() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func readX(p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func readX(p: Point) -> lang.i64 {
                 p.x
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 1, y: 2);
                 readX(p)
             }
@@ -169,7 +169,7 @@ mod borrow_mode {
         // Cannot modify a borrowed parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func tryModify(p: Point) {
                 p.x = 10
             }
@@ -183,9 +183,9 @@ mod borrow_mode {
         // After passing to borrow, caller can still use the value
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func readX(p: Point) -> Int { p.x }
-            func test() -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func readX(p: Point) -> lang.i64 { p.x }
+            func test() -> lang.i64 {
                 let p = Point(x: 1, y: 2);
                 let _ = readX(p);
                 p.x
@@ -199,9 +199,9 @@ mod borrow_mode {
     fn borrow_accepts_let_binding() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func readX(p: Point) -> Int { p.x }
-            func test() -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func readX(p: Point) -> lang.i64 { p.x }
+            func test() -> lang.i64 {
                 let p = Point(x: 1, y: 2);
                 readX(p)
             }
@@ -214,9 +214,9 @@ mod borrow_mode {
     fn borrow_accepts_var_binding() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func readX(p: Point) -> Int { p.x }
-            func test() -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func readX(p: Point) -> lang.i64 { p.x }
+            func test() -> lang.i64 {
                 var p = Point(x: 1, y: 2);
                 readX(p)
             }
@@ -230,9 +230,9 @@ mod borrow_mode {
         // Temporaries can be borrowed
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func readX(p: Point) -> Int { p.x }
-            func test() -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func readX(p: Point) -> lang.i64 { p.x }
+            func test() -> lang.i64 {
                 readX(Point(x: 1, y: 2))
             }
         "#,
@@ -252,7 +252,7 @@ mod mutating_mode {
     fn mutating_allows_write() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
                 p.y = 0;
@@ -266,7 +266,7 @@ mod mutating_mode {
     fn mutating_allows_read() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func double(mutating p: Point) {
                 p.x = p.x * 2;
             }
@@ -280,7 +280,7 @@ mod mutating_mode {
         // Passing a var binding to mutating parameter should work
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
@@ -298,7 +298,7 @@ mod mutating_mode {
         // Cannot pass a let binding to mutating parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
@@ -316,7 +316,7 @@ mod mutating_mode {
         // Cannot pass a temporary to mutating parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
@@ -333,7 +333,7 @@ mod mutating_mode {
         // Can pass a mutable field to mutating parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Container { var point: Point }
             func reset(mutating p: Point) {
                 p.x = 0;
@@ -352,7 +352,7 @@ mod mutating_mode {
         // Cannot pass an immutable field to mutating parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Container { let point: Point }
             func reset(mutating p: Point) {
                 p.x = 0;
@@ -371,7 +371,7 @@ mod mutating_mode {
         // Cannot pass field of let binding to mutating parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Container { var point: Point }
             func reset(mutating p: Point) {
                 p.x = 0;
@@ -390,7 +390,7 @@ mod mutating_mode {
         // Can pass deeply nested mutable field
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Inner { var point: Point }
             struct Outer { var inner: Inner }
             func reset(mutating p: Point) {
@@ -410,7 +410,7 @@ mod mutating_mode {
         // Cannot pass if any field in chain is immutable
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Inner { var point: Point }
             struct Outer { let inner: Inner }
             func reset(mutating p: Point) {
@@ -430,11 +430,11 @@ mod mutating_mode {
         // Modifications through mutating parameter are visible to caller
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var p = Point(x: 1, y: 2);
                 reset(p);
                 p.x
@@ -449,7 +449,7 @@ mod mutating_mode {
         // Primitives can also be mutating parameters
         Test::new(
             r#"module Test
-            func increment(mutating n: Int) {
+            func increment(mutating n: lang.i64) {
                 n = n + 1;
             }
             func test() {
@@ -465,7 +465,7 @@ mod mutating_mode {
     fn mutating_primitive_with_let_fails() {
         Test::new(
             r#"module Test
-            func increment(mutating n: Int) {
+            func increment(mutating n: lang.i64) {
                 n = n + 1;
             }
             func test() {
@@ -489,8 +489,8 @@ mod consuming_mode {
     fn consuming_allows_read() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
         "#,
@@ -503,7 +503,7 @@ mod consuming_mode {
         // Consuming parameters are mutable inside the function body
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func transform(consuming p: Point) -> Point {
                 p.x = p.x * 2;
                 p.y = p.y * 2;
@@ -519,11 +519,11 @@ mod consuming_mode {
         // Can pass let binding to consuming (for Copyable types, a copy is made)
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 1, y: 2);
                 consume(p)
             }
@@ -536,11 +536,11 @@ mod consuming_mode {
     fn consuming_with_var_binding() {
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var p = Point(x: 1, y: 2);
                 consume(p)
             }
@@ -554,11 +554,11 @@ mod consuming_mode {
         // Temporaries can be consumed
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 consume(Point(x: 1, y: 2))
             }
         "#,
@@ -572,11 +572,11 @@ mod consuming_mode {
         // (because a copy was passed)
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 1, y: 2);
                 let _ = consume(p);
                 p.x
@@ -590,10 +590,10 @@ mod consuming_mode {
     fn consuming_primitive() {
         Test::new(
             r#"module Test
-            func take(consuming n: Int) -> Int {
+            func take(consuming n: lang.i64) -> lang.i64 {
                 n * 2
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let x = 5;
                 take(x)
             }
@@ -607,7 +607,7 @@ mod consuming_mode {
         // Consuming parameter can be reassigned
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func replace(consuming p: Point) -> Point {
                 p = Point(x: 0, y: 0);
                 p
@@ -631,7 +631,7 @@ mod method_interaction {
         // This tests forward references: reset is declared AFTER Shape
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Shape {
                 var origin: Point
                 
@@ -654,7 +654,7 @@ mod method_interaction {
         // This tests forward references: reset is declared AFTER Shape
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Shape {
                 var origin: Point
                 
@@ -675,15 +675,15 @@ mod method_interaction {
         // A consuming method can pass self.field to consuming parameter
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             struct Container {
                 var point: Point
                 
-                consuming func takePoint() -> Int {
+                consuming func takePoint() -> lang.i64 {
                     consume(self.point)
                 }
             }
-            func consume(consuming p: Point) -> Int {
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
         "#,
@@ -704,7 +704,7 @@ mod edge_cases {
         // Cannot pass function call result to mutating
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func makePoint() -> Point {
                 Point(x: 1, y: 2)
             }
@@ -724,11 +724,11 @@ mod edge_cases {
         // Cannot pass if expression result to mutating
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
-            func test(cond: Bool) {
+            func test(cond: lang.i1) {
                 reset(if cond { Point(x: 1, y: 2) } else { Point(x: 3, y: 4) })
             }
         "#,
@@ -741,7 +741,7 @@ mod edge_cases {
         // Can pass tuple field to mutating if tuple is mutable
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
@@ -759,7 +759,7 @@ mod edge_cases {
         // Cannot pass tuple field to mutating if tuple is immutable
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
@@ -795,11 +795,11 @@ mod mir_passing_modes {
         // Borrow parameters: reference is created before call, passed with Copy
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func process(p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func process(p: Point) -> lang.i64 {
                 p.x
             }
-            func caller() -> Int {
+            func caller() -> lang.i64 {
                 let pt = Point(x: 1, y: 2);
                 process(pt)
             }
@@ -826,14 +826,14 @@ mod mir_passing_modes {
         Test::new(
             r#"module Test
             struct Point { 
-                var x: Int
-                var y: Int 
+                var x: lang.i64
+                var y: lang.i64 
                 
-                func magnitude() -> Int {
+                func magnitude() -> lang.i64 {
                     self.x + self.y
                 }
             }
-            func caller() -> Int {
+            func caller() -> lang.i64 {
                 let pt = Point(x: 1, y: 2);
                 pt.magnitude()
             }
@@ -856,7 +856,7 @@ mod mir_passing_modes {
         // mutating parameters: RefMut created before call, passed with Copy
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
+            struct Point { var x: lang.i64; var y: lang.i64 }
             func reset(mutating p: Point) {
                 p.x = 0;
             }
@@ -887,11 +887,11 @@ mod mir_passing_modes {
         // consuming parameters pass value directly with Copy mode
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func consume(consuming p: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func consume(consuming p: Point) -> lang.i64 {
                 p.x
             }
-            func caller() -> Int {
+            func caller() -> lang.i64 {
                 let pt = Point(x: 1, y: 2);
                 consume(pt)
             }
@@ -915,12 +915,12 @@ mod mir_passing_modes {
         // consuming -> passed directly with Copy
         Test::new(
             r#"module Test
-            struct Point { var x: Int; var y: Int }
-            func process(a: Point, mutating b: Point, consuming c: Point) -> Int {
+            struct Point { var x: lang.i64; var y: lang.i64 }
+            func process(a: Point, mutating b: Point, consuming c: Point) -> lang.i64 {
                 b.x = a.x;
                 c.x
             }
-            func caller() -> Int {
+            func caller() -> lang.i64 {
                 let pt1 = Point(x: 1, y: 2);
                 var pt2 = Point(x: 3, y: 4);
                 let pt3 = Point(x: 5, y: 6);
@@ -953,8 +953,8 @@ mod mir_passing_modes {
         Test::new(
             r#"module Test
             struct Point { 
-                var x: Int
-                var y: Int 
+                var x: lang.i64
+                var y: lang.i64 
                 
                 func copyXTo(mutating other: Point) {
                     other.x = self.x;

@@ -20,7 +20,7 @@ mod while_basic {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         x = x + 1;
     }
@@ -38,8 +38,8 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     while x < 5 {
         x = x + 1;
     }
@@ -57,8 +57,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     while x < 5 {
         x = x + 1;
     }
@@ -79,7 +79,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) {
+func test(a: lang.i1, b: lang.i1) {
     while a and b {
         ()
     }
@@ -97,8 +97,8 @@ func test(a: Bool, b: Bool) {
 module Main
 
 func test() {
-    var i: Int = 0;
-    var j: Int = 0;
+    var i: lang.i64 = 0;
+    var j: lang.i64 = 0;
     while i < 10 {
         j = 0;
         while j < 10 {
@@ -140,8 +140,8 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     loop {
         x = x + 1;
         if x > 5 {
@@ -204,7 +204,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         x = x + 1;
         continue;
@@ -240,7 +240,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     loop {
         x = x + 1;
         if x > 10 {
@@ -351,7 +351,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     outer: while x < 100 {
         x = x + 1;
         while true {
@@ -431,7 +431,7 @@ module Main
 
 func test() {
     while true {
-        let x: Int = 42;
+        let x: lang.i64 = 42;
         break;
     }
     x
@@ -450,7 +450,7 @@ module Main
 
 func test() {
     loop {
-        let y: Int = 10;
+        let y: lang.i64 = 10;
         break;
     }
     y
@@ -468,7 +468,7 @@ func test() {
 module Main
 
 func test() {
-    let outer: Int = 10;
+    let outer: lang.i64 = 10;
     while outer > 0 {
         break;
     }
@@ -490,13 +490,13 @@ mod edge_cases {
 module Main
 
 func test() {
-    var a: Int = 0;
+    var a: lang.i64 = 0;
     while a < 10 {
-        var b: Int = 0;
+        var b: lang.i64 = 0;
         while b < 10 {
-            var c: Int = 0;
+            var c: lang.i64 = 0;
             while c < 10 {
-                var d: Int = 0;
+                var d: lang.i64 = 0;
                 loop {
                     d = d + 1;
                     if d > 5 {
@@ -523,7 +523,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         if x < 5 {
             loop {
@@ -546,7 +546,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     if true {
         while x < 10 {
             if x == 5 {
@@ -569,7 +569,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 0 {
     }
 }
@@ -603,7 +603,7 @@ func test() {
 module Main
 
 func test() {
-    var counter: Int = 0;
+    var counter: lang.i64 = 0;
     while counter < 10 {
         counter = counter + 1;
     }
@@ -620,7 +620,7 @@ func test() {
             r#"
 module Main
 
-func shouldContinue() -> Bool {
+func shouldContinue() -> lang.i1 {
     false
 }
 
@@ -641,11 +641,11 @@ func test() {
             r#"
 module Main
 
-func getValue() -> Int {
+func getValue() -> lang.i64 {
     5
 }
 
-func isValid(x: Int) -> Bool {
+func isValid(x: lang.i64) -> lang.i1 {
     x > 0
 }
 
@@ -666,7 +666,7 @@ func test() {
             r#"
 module Main
 
-func check() -> Bool {
+func check() -> lang.i1 {
     true
 }
 
@@ -688,7 +688,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while true {
         x = x + 1;
         break
@@ -707,7 +707,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         x = x + 1;
         continue
@@ -726,7 +726,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     loop {
         x = x + 1;
         if x == 5 {
@@ -750,7 +750,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 20 {
         x = x + 1;
         if x == 5 {
@@ -774,7 +774,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 20 {
         x = x + 1;
         if x == 5 {
@@ -845,9 +845,9 @@ mod error_cases {
 module Main
 
 func test() {
-    let x: Int = 1;
+    let x: lang.i64 = 1;
     break;
-    let y: Int = 2;
+    let y: lang.i64 = 2;
 }
 "#,
         )
@@ -862,9 +862,9 @@ func test() {
 module Main
 
 func test() {
-    let x: Int = 1;
+    let x: lang.i64 = 1;
     continue;
-    let y: Int = 2;
+    let y: lang.i64 = 2;
 }
 "#,
         )
@@ -938,7 +938,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     sibling: while x < 10 {
         x = x + 1;
     }
@@ -998,7 +998,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     myloop: while x < 10 {
         x = x + 1;
         continue myloooop;
@@ -1016,9 +1016,9 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     while true {
-        let counter: Int = 0;
+        let counter: lang.i64 = 0;
         break;
     }
     counter
@@ -1035,10 +1035,10 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     while true {
         loop {
-            let inner: Int = 42;
+            let inner: lang.i64 = 42;
             break;
         }
         inner
@@ -1056,10 +1056,10 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let x: Int = 1;
+func test() -> lang.i64 {
+    let x: lang.i64 = 1;
     while true {
-        let x: Int = 2;
+        let x: lang.i64 = 2;
         break;
     }
     x
@@ -1081,7 +1081,7 @@ mod complex_control_flow {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 100 {
         if x < 10 {
             x = x + 1;
@@ -1105,11 +1105,11 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     outer: while x < 100 {
-        var y: Int = 0;
+        var y: lang.i64 = 0;
         middle: loop {
-            var z: Int = 0;
+            var z: lang.i64 = 0;
             inner: while z < 10 {
                 z = z + 1;
                 if z == 5 {
@@ -1140,10 +1140,10 @@ func test() {
 module Main
 
 func test() {
-    var i: Int = 0;
+    var i: lang.i64 = 0;
     outer: loop {
         i = i + 1;
-        var j: Int = 0;
+        var j: lang.i64 = 0;
         while j < i {
             j = j + 1;
             if j == 3 {
@@ -1194,10 +1194,10 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 5 {
         loop {
-            var y: Int = 0;
+            var y: lang.i64 = 0;
             while y < 3 {
                 loop {
                     break;
@@ -1226,7 +1226,7 @@ mod statements_after_loops {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         while x < 5 {
             x = x + 1;
@@ -1247,7 +1247,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         loop {
             break;
@@ -1268,7 +1268,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 10 {
         if x < 5 {
             x = x + 2;
@@ -1289,7 +1289,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 100 {
         if x < 10 {
             x = x + 1;
@@ -1320,7 +1320,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     loop {
         while x < 5 {
             x = x + 1;
@@ -1344,7 +1344,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     while x < 100 {
         if true {
             while x < 10 {

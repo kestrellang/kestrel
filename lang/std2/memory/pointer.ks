@@ -25,11 +25,11 @@ public struct RawPointer: Equatable, FFISafe {
     }
 
     public var address: UInt64 {
-        lang.ptr_to_address(self.raw)
+        UInt64(intLiteral: lang.ptr_to_address(self.raw))
     }
 
     public var isNull: Bool {
-        lang.ptr_is_null(self.raw)
+        Bool(boolLiteral: lang.ptr_is_null(self.raw))
     }
 
     public func cast[T]() -> Pointer[T] {
@@ -70,11 +70,11 @@ public struct Pointer[T]: Equatable {
     }
 
     public var address: UInt64 {
-        lang.ptr_to_address(lang.cast_ptr[lang.i8](self._raw))
+        UInt64(intLiteral: lang.ptr_to_address(lang.cast_ptr[lang.i8](self._raw)))
     }
 
     public var isNull: Bool {
-        lang.ptr_is_null(lang.cast_ptr[lang.i8](self._raw))
+        Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[lang.i8](self._raw)))
     }
 
     public func read() -> T {

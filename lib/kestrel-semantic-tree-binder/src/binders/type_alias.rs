@@ -88,7 +88,8 @@ impl DeclarationBinder for TypeAliasBinder {
                 }
 
                 // Check for bounds on non-protocol type aliases (not allowed)
-                if alias_context != TypeAliasContext::Protocol && has_associated_type_bounds(syntax) {
+                if alias_context != TypeAliasContext::Protocol && has_associated_type_bounds(syntax)
+                {
                     context
                         .diagnostics
                         .throw(AssociatedTypeBoundsInWrongContextError {
@@ -98,7 +99,9 @@ impl DeclarationBinder for TypeAliasBinder {
                 }
 
                 // Validate associated type bindings in struct context
-                if alias_context == TypeAliasContext::Struct || alias_context == TypeAliasContext::Extension {
+                if alias_context == TypeAliasContext::Struct
+                    || alias_context == TypeAliasContext::Extension
+                {
                     if let Some(parent) = symbol.metadata().parent() {
                         validate_conformance_associated_type_binding(
                             syntax,
@@ -123,7 +126,9 @@ impl DeclarationBinder for TypeAliasBinder {
                     resolve_aliased_type_from_syntax(syntax, &source, file_id, symbol_id, context)
                 {
                     // Validate constraint satisfaction for struct bindings
-                    if alias_context == TypeAliasContext::Struct || alias_context == TypeAliasContext::Extension {
+                    if alias_context == TypeAliasContext::Struct
+                        || alias_context == TypeAliasContext::Extension
+                    {
                         if let Some(parent) = symbol.metadata().parent() {
                             validate_struct_binding_constraint_satisfaction(
                                 &resolved_type,
@@ -222,8 +227,9 @@ fn bind_associated_type(
     }
 
     // Resolve where clause if present (where Iter.Item = Item)
-    let generics =
-        crate::binders::utils::generics::resolve_generics(syntax, source, file_id, symbol_id, context);
+    let generics = crate::binders::utils::generics::resolve_generics(
+        syntax, source, file_id, symbol_id, context,
+    );
     if !generics.where_clause().constraints.is_empty() {
         symbol.metadata().add_behavior(generics);
     }
@@ -326,12 +332,12 @@ fn get_type_display_name(ty: &Ty) -> String {
     match ty.kind() {
         TyKind::Unit => "()".to_string(),
         TyKind::Never => "Never".to_string(),
-        TyKind::Int(_) => "Int".to_string(),
-        TyKind::Float(_) => "Float".to_string(),
-        TyKind::Bool => "Bool".to_string(),
-        TyKind::String => "String".to_string(),
+        TyKind::Int(_) => "lang.i*".to_string(),
+        TyKind::Float(_) => "lang.f*".to_string(),
+        TyKind::Bool => "lang.i1".to_string(),
+        TyKind::String => "lang.str".to_string(),
         TyKind::Tuple(_) => "tuple".to_string(),
-        TyKind::Array(_) => "array".to_string(),
+        TyKind::Array(_) => "lang.array[*]".to_string(),
         TyKind::Pointer(_) => "pointer".to_string(),
         TyKind::Function { .. } => "function".to_string(),
         TyKind::Error => "error".to_string(),

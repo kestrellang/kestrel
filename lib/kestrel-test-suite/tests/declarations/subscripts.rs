@@ -15,7 +15,7 @@ mod basic {
                     self.data = data
                 }
 
-                public subscript(index: Int) -> T {
+                public subscript(index: lang.i64) -> T {
                     get {
                         self.data
                     }
@@ -38,7 +38,7 @@ mod basic {
                     self.data = data
                 }
 
-                public subscript(index: Int) -> T {
+                public subscript(index: lang.i64) -> T {
                     get {
                         self.data
                     }
@@ -80,7 +80,7 @@ mod regression {
                     self.data = data
                 }
 
-                public subscript(dummy: Int) -> T {
+                public subscript(dummy: lang.i64) -> T {
                     get {
                         // Use dummy to ensure it's accessible
                         let _unused = dummy;
@@ -108,7 +108,7 @@ mod regression {
                     self.data2 = data;
                 }
 
-                public subscript(dummy: Int) -> T {
+                public subscript(dummy: lang.i64) -> T {
                     get {
                         // Use dummy to ensure it's accessible
                         let _unused = dummy;
@@ -139,7 +139,7 @@ mod regression {
                     self.data = data
                 }
 
-                public subscript(row: Int, col: Int) -> T {
+                public subscript(row: lang.i64, col: lang.i64) -> T {
                     get {
                         // Use row and col to ensure they're accessible
                         let _unused1 = row;

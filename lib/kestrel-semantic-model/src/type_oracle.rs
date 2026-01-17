@@ -76,10 +76,11 @@ impl TypeOracle for SemanticModel {
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     // Substitute type parameters and Self (Self = the type parameter)
-                                    let return_ty = callable
+                                    let raw_return_ty = callable
                                         .return_type()
-                                        .apply_substitutions(current_subs)
-                                        .substitute_self(receiver_ty);
+                                        .apply_substitutions(current_subs);
+                                    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                    let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                     let parameters: Vec<Ty> = callable
                                         .parameters()
                                         .iter()
@@ -93,6 +94,7 @@ impl TypeOracle for SemanticModel {
                                         symbol_id: member_id,
                                         substitutions: current_subs.clone(),
                                         parameters,
+                                        returns_self,
                                     });
                                 }
                             }
@@ -112,10 +114,11 @@ impl TypeOracle for SemanticModel {
                                         child.metadata().get_behavior::<CallableBehavior>()
                                     {
                                         // Substitute type parameters and Self (Self = the type parameter)
-                                        let return_ty = callable
+                                        let raw_return_ty = callable
                                             .return_type()
-                                            .apply_substitutions(current_subs)
-                                            .substitute_self(receiver_ty);
+                                            .apply_substitutions(current_subs);
+                                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                        let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                         let parameters: Vec<Ty> = callable
                                             .parameters()
                                             .iter()
@@ -129,6 +132,7 @@ impl TypeOracle for SemanticModel {
                                             symbol_id: member_id,
                                             substitutions: current_subs.clone(),
                                             parameters,
+                                            returns_self,
                                         });
                                     }
                                 }
@@ -245,10 +249,11 @@ impl TypeOracle for SemanticModel {
                 {
                     if callable.is_static() {
                         // Substitute both type parameters and Self with the receiver type
-                        let return_ty = callable
+                        let raw_return_ty = callable
                             .return_type()
-                            .apply_substitutions(&substitutions)
-                            .substitute_self(receiver_ty);
+                            .apply_substitutions(&substitutions);
+                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                        let return_ty = raw_return_ty.substitute_self(receiver_ty);
                         let parameters: Vec<Ty> = callable
                             .parameters()
                             .iter()
@@ -262,6 +267,7 @@ impl TypeOracle for SemanticModel {
                             symbol_id: member_id,
                             substitutions,
                             parameters,
+                            returns_self,
                         });
                     }
                 }
@@ -284,11 +290,14 @@ impl TypeOracle for SemanticModel {
                         .member_type()
                         .apply_substitutions(&substitutions)
                         .substitute_self(receiver_ty);
+                    // Resolve any qualified associated types (e.g., String.Output → String)
+                    let member_ty = resolve_all_associated_types(self, &member_ty);
                     return Ok(MemberResolution {
                         ty: member_ty,
                         symbol_id: member_id,
                         substitutions,
                         parameters: vec![], // field access has no parameters
+                        returns_self: false, // field access, not a method call
                     });
                 }
             }
@@ -299,16 +308,20 @@ impl TypeOracle for SemanticModel {
             if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
                 // For methods, return the return type and parameter types
                 // Substitute both type parameters and Self with the receiver type
-                let return_ty = callable
+                let raw_return_ty = callable
                     .return_type()
-                    .apply_substitutions(&substitutions)
-                    .substitute_self(receiver_ty);
+                    .apply_substitutions(&substitutions);
+                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                let return_ty = raw_return_ty.substitute_self(receiver_ty);
+                // Resolve any qualified associated types (e.g., String.Output → String)
+                let return_ty = resolve_all_associated_types(self, &return_ty);
                 let parameters: Vec<Ty> = callable
                     .parameters()
                     .iter()
                     .map(|p| {
-                        p.ty.apply_substitutions(&substitutions)
-                            .substitute_self(receiver_ty)
+                        let param_ty = p.ty.apply_substitutions(&substitutions)
+                            .substitute_self(receiver_ty);
+                        resolve_all_associated_types(self, &param_ty)
                     })
                     .collect();
                 return Ok(MemberResolution {
@@ -316,6 +329,7 @@ impl TypeOracle for SemanticModel {
                     symbol_id: member_id,
                     substitutions,
                     parameters,
+                    returns_self,
                 });
             }
         }
@@ -638,6 +652,23 @@ impl TypeOracle for SemanticModel {
         // Fall back to default Float64
         Ty::float(FloatBits::F64, span)
     }
+
+    fn default_string_type(&self, span: kestrel_span::Span) -> Ty {
+        use kestrel_semantic_tree::builtins::LanguageFeature;
+
+        // Try to look up the DefaultStringLiteralType type alias
+        if let Some(type_alias_id) = self
+            .builtin_registry()
+            .type_alias(LanguageFeature::DefaultStringLiteralType)
+        {
+            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
+                return resolved;
+            }
+        }
+
+        // Fall back to primitive string type
+        Ty::string(span)
+    }
 }
 
 // ============================================================================
@@ -714,6 +745,10 @@ impl TypeOracle for ContextualOracle<'_> {
     fn default_float_type(&self, span: kestrel_span::Span) -> Ty {
         self.model.default_float_type(span)
     }
+
+    fn default_string_type(&self, span: kestrel_span::Span) -> Ty {
+        self.model.default_string_type(span)
+    }
 }
 
 /// Resolve a member with optional context for extension bound lookup.
@@ -779,10 +814,11 @@ fn resolve_member_with_context(
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
                                 // Substitute type parameters and Self (Self = the type parameter)
-                                let return_ty = callable
+                                let raw_return_ty = callable
                                     .return_type()
-                                    .apply_substitutions(current_subs)
-                                    .substitute_self(receiver_ty);
+                                    .apply_substitutions(current_subs);
+                                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                 let parameters: Vec<Ty> = callable
                                     .parameters()
                                     .iter()
@@ -796,6 +832,7 @@ fn resolve_member_with_context(
                                     symbol_id: member_id,
                                     substitutions: current_subs.clone(),
                                     parameters,
+                                    returns_self,
                                 });
                             }
                         }
@@ -815,10 +852,11 @@ fn resolve_member_with_context(
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     // Substitute type parameters and Self (Self = the type parameter)
-                                    let return_ty = callable
+                                    let raw_return_ty = callable
                                         .return_type()
-                                        .apply_substitutions(current_subs)
-                                        .substitute_self(receiver_ty);
+                                        .apply_substitutions(current_subs);
+                                    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                    let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                     let parameters: Vec<Ty> = callable
                                         .parameters()
                                         .iter()
@@ -832,6 +870,7 @@ fn resolve_member_with_context(
                                         symbol_id: member_id,
                                         substitutions: current_subs.clone(),
                                         parameters,
+                                        returns_self,
                                     });
                                 }
                             }
@@ -1262,6 +1301,144 @@ fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
     }
 
     bounds
+}
+
+/// Resolve all qualified associated types in a type to their concrete definitions.
+///
+/// For example, if `String` conforms to `Addable` with `type Output = String`, then:
+/// - `String.Output` → `String`
+///
+/// This recursively walks the type structure, resolving any `AssociatedType` variants
+/// that have a container (qualified associated types like `T.Item`).
+fn resolve_all_associated_types(oracle: &impl TypeOracle, ty: &Ty) -> Ty {
+    resolve_all_associated_types_impl(oracle, ty, &mut std::collections::HashSet::new())
+}
+
+/// Internal helper with cycle detection via visited TyIds.
+fn resolve_all_associated_types_impl(
+    oracle: &impl TypeOracle,
+    ty: &Ty,
+    visited: &mut std::collections::HashSet<kestrel_semantic_tree::ty::TyId>,
+) -> Ty {
+    use kestrel_semantic_tree::ty::ParamInfo;
+
+    // Cycle detection: if we've already visited this type, return it as-is
+    let ty_id = ty.id();
+    if !visited.insert(ty_id) {
+        return ty.clone();
+    }
+
+    let result = match ty.kind() {
+        // The key case: qualified associated type (e.g., String.Output)
+        TyKind::AssociatedType { symbol, container: Some(container) } => {
+            // First resolve any associated types in the container itself
+            let resolved_container = resolve_all_associated_types_impl(oracle, container, visited);
+            let name = symbol.metadata().name().value.clone();
+
+            // Try to resolve the associated type using the oracle
+            if let Some(resolved) = oracle.resolve_associated_type(&resolved_container, &name) {
+                // Recursively resolve in case the result also has associated types
+                resolve_all_associated_types_impl(oracle, &resolved, visited)
+            } else {
+                // Can't resolve - return the type with the resolved container
+                Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone())
+            }
+        }
+
+        // Unqualified associated type (container: None) - leave as-is
+        // This shouldn't appear after substitute_self, but handle it gracefully
+        TyKind::AssociatedType { .. } => ty.clone(),
+
+        // Compound types - recurse into nested types
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| resolve_all_associated_types_impl(oracle, e, visited))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        }
+
+        TyKind::Array(element) => {
+            let new_element = resolve_all_associated_types_impl(oracle, element, visited);
+            Ty::array(new_element, ty.span().clone())
+        }
+
+        TyKind::Pointer(element) => {
+            let new_element = resolve_all_associated_types_impl(oracle, element, visited);
+            Ty::pointer(new_element, ty.span().clone())
+        }
+
+        TyKind::Function { params, return_type } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| resolve_all_associated_types_impl(oracle, p, visited))
+                .collect();
+            let new_return = resolve_all_associated_types_impl(oracle, return_type, visited);
+            Ty::function(new_params, new_return, ty.span().clone())
+        }
+
+        TyKind::Struct { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_all_associated_types_impl(oracle, sub_ty, visited));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        TyKind::Enum { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_all_associated_types_impl(oracle, sub_ty, visited));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        // Don't recurse into protocol substitutions - protocols may have cyclic inheritance
+        // and their substitutions shouldn't contain associated types that need resolution
+        TyKind::Protocol { .. } => ty.clone(),
+
+        TyKind::TypeAlias { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (id, sub_ty) in substitutions.iter() {
+                new_subs.insert(*id, resolve_all_associated_types_impl(oracle, sub_ty, visited));
+            }
+            Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        TyKind::UnresolvedFunction { param_info, return_type } => {
+            let new_return = resolve_all_associated_types_impl(oracle, return_type, visited);
+            let new_param_info = match param_info {
+                ParamInfo::Unconstrained => ParamInfo::Unconstrained,
+                ParamInfo::ImplicitIt { it_type } => ParamInfo::ImplicitIt {
+                    it_type: Box::new(resolve_all_associated_types_impl(oracle, it_type, visited)),
+                },
+                ParamInfo::Explicit { param_types } => ParamInfo::Explicit {
+                    param_types: param_types
+                        .iter()
+                        .map(|p| resolve_all_associated_types_impl(oracle, p, visited))
+                        .collect(),
+                },
+            };
+            Ty::unresolved_function(new_param_info, new_return, ty.span().clone())
+        }
+
+        // Primitive types and special types - no nested types to resolve
+        TyKind::Unit
+        | TyKind::Never
+        | TyKind::Int(_)
+        | TyKind::Float(_)
+        | TyKind::Bool
+        | TyKind::String
+        | TyKind::Error
+        | TyKind::SelfType
+        | TyKind::Infer
+        | TyKind::TypeParameter(_) => ty.clone(),
+    };
+
+    // Remove from visited after processing so we can visit the same type again
+    // from a different path (this is not truly cycle detection, but depth limiting)
+    visited.remove(&ty_id);
+    result
 }
 
 /// Get the where clause from a symbol that can have one.

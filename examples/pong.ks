@@ -3,7 +3,7 @@
 
 module Pong
 
-import io
+import io.stdio.(println, print)
 import io.error.(Error)
 import std.num.(Int64, Int32, UInt32)
 import std.collections.(Dictionary)
@@ -134,7 +134,7 @@ struct Pong {
 
     func render() -> Result[(), Error] {
         // ANSI: Move cursor to home position
-        try io.print(s: "\x1b[H");
+        /* try */ print( "\x1b[H");
 
         // Top border
         var topBorder = "+";
@@ -143,7 +143,7 @@ struct Pong {
             topBorder = topBorder + "-";
             i = i + 1;
         }
-        try io.println(s: topBorder + "+");
+        /* try */ println( topBorder + "+");
 
         // Game field
         var y: Int64 = 0;
@@ -162,21 +162,60 @@ struct Pong {
                 }
                 x = x + 1;
             }
-            try io.println(s: line + "|");
+            /* try */ println( line + "|");
             y = y + 1;
         }
 
-        try io.println(s: topBorder + "+");
+        /* try */ println( topBorder + "+");
 
         // Display scores
         let s1 = self.getScore(player: .player1);
         let s2 = self.getScore(player: .player2);
 
-        try io.println(s: " " + Player.player1.description() + ": " + s1.toString() + " | " + Player.player2.description() + ": " + s2.toString());
-        try io.println(s: " (Press Ctrl+C to exit)");
+        /* try */ println( " " + Player.player1.description() + ": " + intToString(s1) + " | " + Player.player2.description() + ": " + intToString(s2));
+        /* try */ println( " (Press Ctrl+C to exit)");
 
         .Ok(())
     }
+}
+
+// Convert Int64 to String
+func intToString(n: Int64) -> String {
+    if n == 0 {
+        return "0"
+    }
+
+    var num = n;
+    var negative = false;
+    if num < 0 {
+        negative = true;
+        num = 0 - num;
+    }
+
+    var result = "";
+    while num > 0 {
+        let digit = num % 10;
+        let ch = match digit {
+            0 => "0",
+            1 => "1",
+            2 => "2",
+            3 => "3",
+            4 => "4",
+            5 => "5",
+            6 => "6",
+            7 => "7",
+            8 => "8",
+            _ => "9",
+        };
+        result = ch + result;
+        num = num / 10;
+    }
+
+    if negative {
+        result = "-" + result;
+    }
+
+    result
 }
 
 // Import usleep from C for timing
@@ -185,8 +224,8 @@ func usleep(usec: UInt32) -> Int32
 
 func main() -> Result[(), Error] {
     // ANSI: Hide cursor and clear screen
-    try io.print(s: "\x1b[?25l");
-    try io.print(s: "\x1b[2J");
+    /* try */ print( "\x1b[?25l");
+    /* try */ print( "\x1b[2J");
 
     var game = Pong();
 
@@ -194,14 +233,14 @@ func main() -> Result[(), Error] {
     var frames: Int64 = 0;
     while frames < 500 {
         game.update();
-        try game.render();
+        /* try */ game.render();
         usleep(33333); // ~30 FPS
         frames = frames + 1;
     }
 
     // ANSI: Show cursor again
-    try io.print(s: "\x1b[?25h");
-    try io.println(s: "\nGame demo complete.");
+    /* try */ print("\x1b[?25h");
+    /* try */ println("\nGame demo complete.");
 
     .Ok(())
 }

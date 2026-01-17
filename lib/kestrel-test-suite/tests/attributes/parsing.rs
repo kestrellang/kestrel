@@ -66,7 +66,7 @@ mod simple_attributes {
             r#"module Test
             struct Foo {
                 @dummy
-                var x: Int
+                var x: lang.i64
             }
         "#,
         )

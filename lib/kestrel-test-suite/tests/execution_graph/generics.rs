@@ -69,8 +69,8 @@ mod generic_functions {
 
             func identity[T](x: T) -> T { x }
 
-            func main() -> Int {
-                identity[Int](42)
+            func main() -> lang.i64 {
+                identity[lang.i64](42)
             }
         "#,
         )
@@ -119,7 +119,7 @@ mod generic_structs {
             struct Box[T] {
                 let value: T
                 
-                func get() -> T {
+                func read() -> T {
                     self.value
                 }
             }
@@ -149,8 +149,8 @@ mod generic_structs {
                 let value: T
             }
 
-            func makeBox() -> Box[Int] {
-                Box[Int](value: 42)
+            func makeBox() -> Box[lang.i64] {
+                Box[lang.i64](value: 42)
             }
         "#,
         )
@@ -242,13 +242,13 @@ mod generic_methods {
             struct Box[T] {
                 let value: T
                 
-                func get() -> T {
+                func read() -> T {
                     self.value
                 }
             }
 
-            func main() -> Int {
-                let b = Box[Int](value: 42);
+            func main() -> lang.i64 {
+                let b = Box[lang.i64](value: 42);
                 b.get()
             }
         "#,
@@ -456,11 +456,11 @@ mod usage {
                 func getSecond() -> B { self.second }
             }
 
-            func main() -> Int {
-                let x = identity[Int](42);
-                let s = identity[Bool](true);
+            func main() -> lang.i64 {
+                let x = identity[lang.i64](42);
+                let s = identity[lang.i1](true);
                 
-                let p = Pair[Int, Int](first: 10, second: 20);
+                let p = Pair[lang.i64, lang.i64](first: 10, second: 20);
                 let a = p.getFirst();
                 let b = p.getSecond();
                 

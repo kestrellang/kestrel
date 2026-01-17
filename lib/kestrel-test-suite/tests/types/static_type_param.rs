@@ -43,9 +43,9 @@ mod basic_init {
         Test::new(
             r#"module Test
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
-            func make[T](v: Int) -> T where T: Factory {
+            func make[T](v: lang.i64) -> T where T: Factory {
                 return T(value: v)
             }
         "#,
@@ -59,9 +59,9 @@ mod basic_init {
         Test::new(
             r#"module Test
             protocol Factory {
-                init(x: Int, y: Int)
+                init(x: lang.i64, y: lang.i64)
             }
-            func make[T](a: Int, b: Int) -> T where T: Factory {
+            func make[T](a: lang.i64, b: lang.i64) -> T where T: Factory {
                 return T(x: a, y: b)
             }
         "#,
@@ -76,12 +76,12 @@ mod basic_init {
             r#"module Test
             protocol Factory {
                 init()
-                init(value: Int)
+                init(value: lang.i64)
             }
             func makeDefault[T]() -> T where T: Factory {
                 return T()
             }
-            func makeWithValue[T](v: Int) -> T where T: Factory {
+            func makeWithValue[T](v: lang.i64) -> T where T: Factory {
                 return T(value: v)
             }
         "#,
@@ -115,9 +115,9 @@ mod basic_static_method {
         Test::new(
             r#"module Test
             protocol Factory {
-                static func create(value value: Int) -> Self
+                static func create(value value: lang.i64) -> Self
             }
-            func make[T](v: Int) -> T where T: Factory {
+            func make[T](v: lang.i64) -> T where T: Factory {
                 return T.create(value: v)
             }
         "#,
@@ -131,9 +131,9 @@ mod basic_static_method {
         Test::new(
             r#"module Test
             protocol Describable {
-                static func typeName() -> String
+                static func typeName() -> lang.str
             }
-            func getName[T]() -> String where T: Describable {
+            func getName[T]() -> lang.str where T: Describable {
                 return T.typeName()
             }
         "#,
@@ -225,7 +225,7 @@ mod multiple_bounds {
                 init()
             }
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
             func make[T]() -> T where T: Creatable, T: Describable {
                 return T()
@@ -244,9 +244,9 @@ mod multiple_bounds {
                 static func create() -> Self
             }
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
-            func makeAndDescribe[T]() -> String where T: Factory, T: Describable {
+            func makeAndDescribe[T]() -> lang.str where T: Factory, T: Describable {
                 let item: T = T.create();
                 return item.describe()
             }
@@ -264,9 +264,9 @@ mod multiple_bounds {
                 static func create() -> Self
             }
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
-            func makeAndDescribe[T]() -> String where T: Factory and Describable {
+            func makeAndDescribe[T]() -> lang.str where T: Factory and Describable {
                 let item: T = T.create();
                 return item.describe()
             }
@@ -285,7 +285,7 @@ mod error_cases {
         Test::new(
             r#"module Test
             protocol Empty {
-                func doSomething() -> Int
+                func doSomething() -> lang.i64
             }
             func make[T]() -> T where T: Empty {
                 return T()
@@ -301,7 +301,7 @@ mod error_cases {
         Test::new(
             r#"module Test
             protocol Factory {
-                func instanceMethod() -> Int
+                func instanceMethod() -> lang.i64
             }
             func make[T]() -> T where T: Factory {
                 return T.create()
@@ -397,7 +397,7 @@ mod error_cases {
         Test::new(
             r#"module Test
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
             func make[T]() -> T where T: Factory {
                 return T(wrong: 1)
@@ -409,11 +409,11 @@ mod error_cases {
 
     #[test]
     fn wrong_argument_count() {
-        // T() when protocol expects T(value: Int)
+        // T() when protocol expects T(value: lang.i64)
         Test::new(
             r#"module Test
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
             func make[T]() -> T where T: Factory {
                 return T()
@@ -492,7 +492,7 @@ mod inherited_protocols {
                 init()
             }
             protocol Child: Base {
-                func extra() -> Int
+                func extra() -> lang.i64
             }
             func make[T]() -> T where T: Child {
                 return T()
@@ -511,7 +511,7 @@ mod inherited_protocols {
                 static func create() -> Self
             }
             protocol Child: Base {
-                func extra() -> Int
+                func extra() -> lang.i64
             }
             func make[T]() -> T where T: Child {
                 return T.create()
@@ -600,9 +600,9 @@ mod edge_cases {
         Test::new(
             r#"module Test
             protocol Counter {
-                static func count() -> Int
+                static func count() -> lang.i64
             }
-            func getCount[T]() -> Int where T: Counter {
+            func getCount[T]() -> lang.i64 where T: Counter {
                 return T.count()
             }
         "#,

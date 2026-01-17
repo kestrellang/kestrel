@@ -124,11 +124,10 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             segments.push(name.value.clone());
         }
 
-        // Fields, imports, type parameters don't typically form part of qualified names
-        // for items, but we include them for completeness
+        // Fields don't contribute to qualified names - they're containers for getters/setters
+        // which already include the field name in their synthetic name (e.g., "get:fieldName")
         KestrelSymbolKind::Field => {
-            let name = symbol.metadata().name();
-            segments.push(name.value.clone());
+            // Don't add field name - getter/setter will add "get:fieldName" or "set:fieldName"
         }
 
         KestrelSymbolKind::Import

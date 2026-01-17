@@ -31,7 +31,7 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
         "#,
         )
@@ -54,9 +54,9 @@ mod basic {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Self) -> Bool
-                func greaterThan(other: Self) -> Bool
-                func equals(other: Self) -> Bool
+                func lessThan(other: Self) -> lang.i1
+                func greaterThan(other: Self) -> lang.i1
+                func equals(other: Self) -> lang.i1
             }
         "#,
         )
@@ -226,7 +226,7 @@ mod inheritance {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
         "#,
         )
@@ -312,12 +312,12 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { true }
-                func equals(other: Int) -> Bool { false }
+                func lessThan(other: lang.i64) -> lang.i1 { true }
+                func equals(other: lang.i64) -> lang.i1 { false }
             }
         "#,
         )
@@ -345,11 +345,11 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { }
+                func lessThan(other: lang.i64) -> lang.i1 { }
             }
         "#,
         )
@@ -366,11 +366,11 @@ mod validation {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
             struct Circle: Drawable, Shape {
                 func draw() { }
-                func area() -> Int { 42 }
+                func area() -> lang.i64 { 42 }
             }
         "#,
         )
@@ -391,10 +391,10 @@ mod validation {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
             struct Circle: Shape {
-                func area() -> Int { }
+                func area() -> lang.i64 { }
             }
         "#,
         )
@@ -406,10 +406,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
             struct Point: Hashable {
-                func hash() -> String { }
+                func hash() -> lang.str { }
             }
         "#,
         )
@@ -421,10 +421,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Comparable {
-                func compare(other: Int) -> Bool
+                func compare(other: lang.i64) -> lang.i1
             }
             struct Number: Comparable {
-                func compare() -> Bool { }
+                func compare() -> lang.i1 { }
             }
         "#,
         )
@@ -529,10 +529,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Greetable {
-                func greet(with name: String)
+                func greet(with name: lang.str)
             }
             struct Person: Greetable {
-                func greet(with name: String) { }
+                func greet(with name: lang.str) { }
             }
         "#,
         )
@@ -554,10 +554,10 @@ mod validation {
         Test::new(
             r#"module Test
             protocol Greetable {
-                func greet(with name: String)
+                func greet(with name: lang.str)
             }
             struct Person: Greetable {
-                func greet(using name: String) { }
+                func greet(using name: lang.str) { }
             }
         "#,
         )

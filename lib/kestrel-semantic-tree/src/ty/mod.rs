@@ -79,7 +79,7 @@ impl fmt::Display for Ty {
             TyKind::Int(bits) => write!(f, "{:?}", bits),
             TyKind::Float(bits) => write!(f, "{:?}", bits),
             TyKind::Bool => f.write_str("lang.i1"),
-            TyKind::String => f.write_str("String"),
+            TyKind::String => f.write_str("lang.str"),
             TyKind::Tuple(elements) => {
                 f.write_char('(')?;
                 for (i, elem) in elements.iter().enumerate() {
@@ -90,7 +90,7 @@ impl fmt::Display for Ty {
                 }
                 f.write_char(')')
             }
-            TyKind::Array(elem) => write!(f, "[{}]", elem),
+            TyKind::Array(elem) => write!(f, "lang.array[{}]", elem),
             TyKind::Pointer(elem) => write!(f, "lang.ptr[{}]", elem),
             TyKind::Function {
                 params,
@@ -1118,7 +1118,7 @@ impl Ty {
     /// Poison types include error types (from earlier errors) and unresolved inference variables.
     /// When a type is poison, subsequent operations on it should not emit additional errors.
     pub fn is_poison(&self) -> bool {
-        matches!(self.kind, TyKind::Error | TyKind::Infer)
+        matches!(self.kind, TyKind::Error)
     }
 
     // === Accessor methods ===
@@ -1695,7 +1695,10 @@ mod tests {
 
         // Different element types
         let tuple3 = Ty::tuple(
-            vec![Ty::string(Span::new(0, 0..6)), Ty::bool(Span::new(0, 7..11))],
+            vec![
+                Ty::string(Span::new(0, 0..6)),
+                Ty::bool(Span::new(0, 7..11)),
+            ],
             Span::new(0, 0..12),
         );
         assert!(!tuple1.is_assignable_to(&tuple3));
@@ -1710,8 +1713,14 @@ mod tests {
 
     #[test]
     fn test_assignable_arrays() {
-        let arr1 = Ty::array(Ty::int(IntBits::I64, Span::new(0, 0..3)), Span::new(0, 0..5));
-        let arr2 = Ty::array(Ty::int(IntBits::I64, Span::new(0, 6..9)), Span::new(0, 6..11));
+        let arr1 = Ty::array(
+            Ty::int(IntBits::I64, Span::new(0, 0..3)),
+            Span::new(0, 0..5),
+        );
+        let arr2 = Ty::array(
+            Ty::int(IntBits::I64, Span::new(0, 6..9)),
+            Span::new(0, 6..11),
+        );
         assert!(arr1.is_assignable_to(&arr2));
 
         // Different element types

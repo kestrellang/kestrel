@@ -9,7 +9,7 @@ fn test_return_constant() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     42
 }
 "#,
@@ -27,7 +27,7 @@ fn test_add() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     let y = 32;
     x + y
@@ -47,7 +47,7 @@ fn test_subtract() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 50;
     let y = 8;
     x - y
@@ -67,7 +67,7 @@ fn test_multiply() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 6;
     let y = 7;
     x * y
@@ -87,7 +87,7 @@ fn test_divide() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 84;
     let y = 2;
     x / y
@@ -107,7 +107,7 @@ fn test_modulo() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 142;
     let y = 100;
     x % y
@@ -127,7 +127,7 @@ fn test_negation() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = -42;
     -x
 }
@@ -146,7 +146,7 @@ fn test_complex_expression() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = 10;
     let b = 3;
     let c = 2;
@@ -168,7 +168,7 @@ fn test_return_zero() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     0
 }
 "#,

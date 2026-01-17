@@ -13,7 +13,7 @@ fn test_simple_loop_with_break() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 0;
     loop {
         x = x + 1;
@@ -42,7 +42,7 @@ fn test_while_loop() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 0;
     while x < 42 {
         x = x + 1;
@@ -64,7 +64,7 @@ fn test_while_loop_condition_false() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 100;
     while x < 42 {
         x = x + 1;
@@ -87,7 +87,7 @@ fn test_while_loop_decrement() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 50;
     while x > 42 {
         x = x - 1;
@@ -113,7 +113,7 @@ fn test_nested_loops() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var sum = 0;
     var i = 0;
     while i < 6 {
@@ -142,7 +142,7 @@ fn test_nested_loops_with_break() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var sum = 0;
     var i = 0;
     while i < 10 {
@@ -180,7 +180,7 @@ fn test_continue() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var sum = 0;
     var i = 0;
     while i < 10 {
@@ -208,7 +208,7 @@ fn test_continue_in_loop() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var sum = 0;
     var i = 0;
     loop {
@@ -243,7 +243,7 @@ fn test_loop_with_early_return() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 0;
     loop {
         x = x + 1;
@@ -267,7 +267,7 @@ fn test_while_loop_with_early_return() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 0;
     while x < 100 {
         x = x + 1;
@@ -296,7 +296,7 @@ fn test_countdown_loop() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var countdown = 10;
     var result = 0;
     while countdown > 0 {
@@ -321,7 +321,7 @@ fn test_factorial_loop() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var n = 5;
     var result = 1;
     while n > 1 {
@@ -347,7 +347,7 @@ fn test_loop_multiple_breaks() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 0;
     loop {
         x = x + 1;
@@ -376,7 +376,7 @@ fn test_loop_zero_iterations() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     var x = 42;
     while false {
         x = 0;

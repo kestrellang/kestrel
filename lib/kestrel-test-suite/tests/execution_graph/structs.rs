@@ -25,8 +25,8 @@ mod struct_definitions {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
         "#,
         )
@@ -47,9 +47,8 @@ mod struct_definitions {
             module Main
 
             struct Person {
-                let name: String
-                let age: Int
-                let active: Bool
+                let name: lang.str                let age: lang.i64
+                let active: lang.i1
             }
         "#,
         )
@@ -72,7 +71,7 @@ mod struct_definitions {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
             }
         "#,
         )
@@ -115,8 +114,8 @@ mod struct_construction {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
             func makePoint() -> Point {
@@ -144,11 +143,11 @@ mod struct_construction {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
-            func main() -> Int {
+            func main() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
                 p.x + p.y
             }
@@ -171,7 +170,7 @@ mod struct_construction {
             module Main
 
             struct Inner {
-                let value: Int
+                let value: lang.i64
             }
 
             struct Outer {
@@ -209,11 +208,11 @@ mod field_access {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
-            func getX(p: Point) -> Int {
+            func getX(p: Point) -> lang.i64 {
                 p.x
             }
         "#,
@@ -236,7 +235,7 @@ mod field_access {
             module Main
 
             struct Inner {
-                let value: Int
+                let value: lang.i64
             }
 
             struct Middle {
@@ -247,7 +246,7 @@ mod field_access {
                 let middle: Middle
             }
 
-            func getValue(o: Outer) -> Int {
+            func getValue(o: Outer) -> lang.i64 {
                 o.middle.inner.value
             }
         "#,
@@ -269,12 +268,12 @@ mod field_access {
             r#"
             module Main
 
-            struct Inner { let value: Int }
+            struct Inner { let value: lang.i64 }
             struct Middle { let inner: Inner }
             struct Outer { let middle: Middle }
             struct Top { let outer: Outer }
 
-            func getValue(t: Top) -> Int {
+            func getValue(t: Top) -> lang.i64 {
                 t.outer.middle.inner.value
             }
         "#,
@@ -305,10 +304,10 @@ mod instance_methods {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
                 
-                func distanceSquared() -> Int {
+                func distanceSquared() -> lang.i64 {
                     self.x * self.x + self.y * self.y
                 }
             }
@@ -332,10 +331,10 @@ mod instance_methods {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
                 
-                func add(dx: Int, dy: Int) -> Point {
+                func add(dx: lang.i64, dy: lang.i64) -> Point {
                     Point(x: self.x + dx, y: self.y + dy)
                 }
             }
@@ -360,14 +359,14 @@ mod instance_methods {
             module Main
 
             struct Rectangle {
-                let width: Int
-                let height: Int
+                let width: lang.i64
+                let height: lang.i64
                 
-                func area() -> Int {
+                func area() -> lang.i64 {
                     self.width * self.height
                 }
                 
-                func perimeter() -> Int {
+                func perimeter() -> lang.i64 {
                     2 * (self.width + self.height)
                 }
             }
@@ -386,15 +385,15 @@ mod instance_methods {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
                 
-                func sum() -> Int {
+                func sum() -> lang.i64 {
                     self.x + self.y
                 }
             }
 
-            func main() -> Int {
+            func main() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
                 p.sum()
             }
@@ -421,7 +420,7 @@ mod mutating_methods {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
                 mutating func increment() {
                     self.count = self.count + 1;
@@ -447,9 +446,9 @@ mod mutating_methods {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
-                mutating func add(n: Int) {
+                mutating func add(n: lang.i64) {
                     self.count = self.count + n;
                 }
             }
@@ -472,18 +471,18 @@ mod mutating_methods {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
                 mutating func increment() {
                     self.count = self.count + 1;
                 }
 
-                func get() -> Int {
+                func read() -> lang.i64 {
                     self.count
                 }
             }
 
-            func main() -> Int {
+            func main() -> lang.i64 {
                 var c = Counter(count: 0);
                 c.increment();
                 c.increment();
@@ -517,7 +516,7 @@ mod initializers {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
                 init() {
                     self.count = 0;
@@ -544,9 +543,9 @@ mod initializers {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
-                init(start: Int) {
+                init(start: lang.i64) {
                     self.count = start;
                 }
             }
@@ -569,18 +568,18 @@ mod initializers {
             module Main
 
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
-                init(start: Int) {
+                init(start: lang.i64) {
                     self.count = start;
                 }
 
-                func get() -> Int {
+                func read() -> lang.i64 {
                     self.count
                 }
             }
 
-            func main() -> Int {
+            func main() -> lang.i64 {
                 let c = Counter(start: 42);
                 c.get()
             }
@@ -611,7 +610,7 @@ mod static_methods {
             module Main
 
             struct Math {
-                static func add(a: Int, b: Int) -> Int {
+                static func add(a: lang.i64, b: lang.i64) -> lang.i64 {
                     a + b
                 }
             }
@@ -635,12 +634,12 @@ mod static_methods {
             module Main
 
             struct Math {
-                static func add(a: Int, b: Int) -> Int {
+                static func add(a: lang.i64, b: lang.i64) -> lang.i64 {
                     a + b
                 }
             }
 
-            func main() -> Int {
+            func main() -> lang.i64 {
                 Math.add(3, 4)
             }
         "#,
@@ -657,8 +656,8 @@ mod static_methods {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
                 
                 static func origin() -> Point {
                     Point(x: 0, y: 0)
@@ -696,22 +695,22 @@ mod chained_methods {
             module Main
 
             struct Builder {
-                let value: Int
+                let value: lang.i64
                 
-                func add(n: Int) -> Builder {
+                func add(n: lang.i64) -> Builder {
                     Builder(value: self.value + n)
                 }
                 
-                func multiply(n: Int) -> Builder {
+                func multiply(n: lang.i64) -> Builder {
                     Builder(value: self.value * n)
                 }
                 
-                func build() -> Int {
+                func build() -> lang.i64 {
                     self.value
                 }
             }
 
-            func main() -> Int {
+            func main() -> lang.i64 {
                 Builder(value: 0).add(5).multiply(3).build()
             }
         "#,
@@ -742,14 +741,14 @@ mod struct_with_struct_fields {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
             struct Rectangle {
                 let origin: Point
-                let width: Int
-                let height: Int
+                let width: lang.i64
+                let height: lang.i64
             }
         "#,
         )
@@ -772,17 +771,17 @@ mod struct_with_struct_fields {
             module Main
 
             struct Point {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
             }
 
             struct Rectangle {
                 let origin: Point
-                let width: Int
-                let height: Int
+                let width: lang.i64
+                let height: lang.i64
             }
 
-            func getOriginX(r: Rectangle) -> Int {
+            func getOriginX(r: Rectangle) -> lang.i64 {
                 r.origin.x
             }
         "#,

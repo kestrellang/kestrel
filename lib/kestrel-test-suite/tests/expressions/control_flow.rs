@@ -36,7 +36,7 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if false {
         1
     }
@@ -54,7 +54,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if false {
         1
     }
@@ -79,7 +79,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if true {
         1
     } else {
@@ -98,7 +98,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     if x == 1 {
         10
     } else if x == 2 {
@@ -121,7 +121,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a and b {
         1
     } else {
@@ -140,7 +140,7 @@ func test(a: Bool, b: Bool) -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a {
         if b {
             1
@@ -167,9 +167,9 @@ mod if_scoping {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if true {
-        let x: Int = 42;
+        let x: lang.i64 = 42;
         x
     }
     x
@@ -186,11 +186,11 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if true {
         1
     } else {
-        let y: Int = 10;
+        let y: lang.i64 = 10;
         y
     }
     y
@@ -207,10 +207,10 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if true {
-        let x: Int = 5;
-        let y: Int = x + 1;
+        let x: lang.i64 = 5;
+        let y: lang.i64 = x + 1;
         y
     } else {
         0
@@ -228,8 +228,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let outer: Int = 10;
+func test() -> lang.i64 {
+    let outer: lang.i64 = 10;
     if true {
         outer + 5
     } else {
@@ -248,10 +248,10 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let x: Int = 100;
+func test() -> lang.i64 {
+    let x: lang.i64 = 100;
     if true {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
         x
     } else {
         x
@@ -273,11 +273,11 @@ mod if_with_statements {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     if true {
-        let a: Int = 1;
-        let b: Int = 2;
-        let c: Int = a + b;
+        let a: lang.i64 = 1;
+        let b: lang.i64 = 2;
+        let c: lang.i64 = a + b;
         c
     } else {
         0
@@ -297,7 +297,7 @@ func test() -> Int {
 module Main
 
 func test() {
-    var localX: Int = 0;
+    var localX: lang.i64 = 0;
     if true {
         localX = 10;
     }
@@ -314,12 +314,12 @@ mod never_type_propagation {
 
     #[test]
     fn if_with_return_in_else_branch() {
-        // The else branch returns Never, so the if expression type is Int
+        // The else branch returns Never, so the if expression type is lang.i64
         Test::new(
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         42
     } else {
@@ -334,12 +334,12 @@ func test(cond: Bool) -> Int {
 
     #[test]
     fn if_with_return_in_then_branch() {
-        // The then branch returns Never, so the if expression type is Int
+        // The then branch returns Never, so the if expression type is lang.i64
         Test::new(
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         return 0
     } else {
@@ -360,7 +360,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         return 1
     } else {
@@ -380,7 +380,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     if x == 1 {
         return 10
     } else if x == 2 {
@@ -402,7 +402,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     if x == 1 {
         return 10
     } else if x == 2 {
@@ -424,7 +424,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a {
         if b {
             return 1
@@ -448,8 +448,8 @@ func test(a: Bool, b: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
-    let x: Int = if cond { 42 } else { return 0 };
+func test(cond: lang.i1) -> lang.i64 {
+    let x: lang.i64 = if cond { 42 } else { return 0 };
     x
 }
 "#,
@@ -465,8 +465,8 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
-    let x: Int = if cond { return 0 } else { 42 };
+func test(cond: lang.i1) -> lang.i64 {
+    let x: lang.i64 = if cond { return 0 } else { 42 };
     x
 }
 "#,

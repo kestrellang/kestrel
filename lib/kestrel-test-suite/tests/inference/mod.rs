@@ -14,7 +14,7 @@ mod basic_inference {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let x = 42;
     x
 }
@@ -29,7 +29,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> String {
+func test() -> lang.str {
     let x = "hello";
     x
 }
@@ -44,7 +44,7 @@ func test() -> String {
             r#"
 module Main
 
-func test() -> Bool {
+func test() -> lang.i1 {
     let x = true;
     x
 }
@@ -59,8 +59,8 @@ func test() -> Bool {
             r#"
 module Main
 
-func test() -> Int {
-    let x: Int = 42;
+func test() -> lang.i64 {
+    let x: lang.i64 = 42;
     let y = x;
     y
 }
@@ -75,7 +75,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let a = 1;
     let b = a;
     let c = b;
@@ -96,7 +96,7 @@ mod inference_from_expressions {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let x = 1 + 2;
     x
 }
@@ -111,7 +111,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Bool {
+func test() -> lang.i1 {
     let x = 1 == 2;
     x
 }
@@ -126,9 +126,9 @@ func test() -> Bool {
             r#"
 module Main
 
-func getInt() -> Int { 42 }
+func getInt() -> lang.i64 { 42 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let x = getInt();
     x
 }
@@ -144,10 +144,10 @@ func test() -> Int {
 module Main
 
 struct Foo {
-    func bar() -> Int { 42 }
+    func bar() -> lang.i64 { 42 }
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let f = Foo();
     let x = f.bar();
     x
@@ -164,13 +164,13 @@ func test() -> Int {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func test() {
     let p = Point(x: 1, y: 2);
-    let x: Int = p.x;
+    let x: lang.i64 = p.x;
 }
 "#,
         )
@@ -191,7 +191,7 @@ struct Box[T] {
     var value: T
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let b = Box(value: 42);
     b.value
 }
@@ -212,7 +212,7 @@ struct Box[T] {
 
 func test() {
     let b = Box(value: 42);
-    let x: Int = b.value;
+    let x: lang.i64 = b.value;
 }
 "#,
         )
@@ -228,10 +228,10 @@ module Main
 struct Box[T] {
     var value: T
 
-    func get() -> T { self.value }
+    func read() -> T { self.value }
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let b = Box(value: 42);
     b.get()
 }
@@ -250,7 +250,7 @@ mod inference_in_control_flow {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     let x = if cond { 1 } else { 2 };
     x
 }
@@ -283,7 +283,7 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
     var i = 0;
     loop {
@@ -316,7 +316,7 @@ module Main
 
 func test() {
     let x = 42;
-    let y: String = x;
+    let y: lang.str = x;
 }
 "#,
         )
@@ -329,7 +329,7 @@ func test() {
             r#"
 module Main
 
-func test() -> String {
+func test() -> lang.str {
     let x = 42;
     x
 }
@@ -359,7 +359,7 @@ func test() {
             r#"
 module Main
 
-func takeString(s: String) {}
+func takeString(s: lang.str) {}
 
 func test() {
     let x = 42;
@@ -382,9 +382,9 @@ module Main
 
 func test() {
     let t = (1, "hello", true);
-    let x: Int = t.0;
-    let y: String = t.1;
-    let z: Bool = t.2;
+    let x: lang.i64 = t.0;
+    let y: lang.str = t.1;
+    let z: lang.i1 = t.2;
 }
 "#,
         )
@@ -400,7 +400,7 @@ module Main
 func test() {
     let t = ((1, 2), (3, 4));
     let inner = t.0;
-    let x: Int = inner.0;
+    let x: lang.i64 = inner.0;
 }
 "#,
         )
@@ -419,7 +419,7 @@ module Main
 
 func test() {
     let arr = [1, 2, 3];
-    let x: [Int] = arr;
+    let x: [lang.i64] = arr;
 }
 "#,
         )
@@ -434,7 +434,7 @@ module Main
 
 func test() {
     let arr = [1, 2, 3];
-    let x: [String] = arr;
+    let x: [lang.str] = arr;
 }
 "#,
         )
@@ -452,7 +452,7 @@ mod bidirectional_inference {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let x = 42;
     x
 }
@@ -469,9 +469,9 @@ func test() -> Int {
 module Main
 
 func test() {
-    let x: Int = 42;
+    let x: lang.i64 = 42;
     let y = x + 1;
-    let z: Int = y;
+    let z: lang.i64 = y;
 }
 "#,
         )
@@ -484,7 +484,7 @@ mod static_method_type_substitution {
 
     #[test]
     fn static_method_in_extension_substitutes_type_param() {
-        // When calling Box[Int].wrap(42), T should be substituted with Int
+        // When calling Box[lang.i64].wrap(42), T should be substituted with lang.i64
         Test::new(
             r#"
 module Main
@@ -499,8 +499,8 @@ extend Box[T] {
     }
 }
 
-func test() -> Box[Int] {
-    let b = Box[Int].wrap(42);
+func test() -> Box[lang.i64] {
+    let b = Box[lang.i64].wrap(42);
     b
 }
 "#,
@@ -524,8 +524,8 @@ extend Box[T] {
     }
 }
 
-func test() -> Int {
-    let b = Box[Int].wrap(42);
+func test() -> lang.i64 {
+    let b = Box[lang.i64].wrap(42);
     b.value
 }
 "#,
@@ -548,8 +548,8 @@ struct Factory[T] {
     }
 }
 
-func test() -> Factory[Int] {
-    Factory[Int].make(42)
+func test() -> Factory[lang.i64] {
+    Factory[lang.i64].make(42)
 }
 "#,
         )
@@ -570,8 +570,8 @@ struct Factory[T] {
     }
 }
 
-func test() -> Int {
-    let f = Factory[Int].make(42);
+func test() -> lang.i64 {
+    let f = Factory[lang.i64].make(42);
     f.product
 }
 "#,
@@ -596,7 +596,7 @@ extend Box[T] {
     }
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let b = Box.wrap(42);
     b.value
 }
@@ -626,8 +626,8 @@ extend Wrapper[T] {
     }
 }
 
-func test() -> Wrapper[String] {
-    let w = Wrapper[Int](inner: 42);
+func test() -> Wrapper[lang.str] {
+    let w = Wrapper[lang.i64](inner: 42);
     w.rewrap("hello")
 }
 "#,
@@ -651,8 +651,8 @@ extend Wrapper[T] {
     }
 }
 
-func test() -> Wrapper[Bool] {
-    let w = Wrapper[Int](inner: 42);
+func test() -> Wrapper[lang.i1] {
+    let w = Wrapper[lang.i64](inner: 42);
     let w2 = w.rewrap("hello");
     w2.rewrap(true)
 }

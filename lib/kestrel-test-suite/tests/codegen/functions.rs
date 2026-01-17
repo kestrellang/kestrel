@@ -9,11 +9,11 @@ fn test_call_simple_function() {
         r#"
 module Test
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     add(20, 22)
 }
 "#,
@@ -31,11 +31,11 @@ fn test_call_function_no_args() {
         r#"
 module Test
 
-func get_answer() -> Int {
+func get_answer() -> lang.i64 {
     42
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     get_answer()
 }
 "#,
@@ -53,15 +53,15 @@ fn test_call_function_chain() {
         r#"
 module Test
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     x * 2
 }
 
-func add_ten(x: Int) -> Int {
+func add_ten(x: lang.i64) -> lang.i64 {
     x + 10
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     add_ten(double(16))
 }
 "#,
@@ -83,7 +83,7 @@ module Test
 func do_nothing() {
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     do_nothing();
     42
 }
@@ -102,15 +102,15 @@ fn test_call_multiple_functions() {
         r#"
 module Test
 
-func mul(a: Int, b: Int) -> Int {
+func mul(a: lang.i64, b: lang.i64) -> lang.i64 {
     a * b
 }
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     add(mul(6, 7), 0)
 }
 "#,
@@ -128,11 +128,11 @@ fn test_call_with_local_variables() {
         r#"
 module Test
 
-func square(x: Int) -> Int {
+func square(x: lang.i64) -> lang.i64 {
     x * x
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = 6;
     let b = square(a);
     b + 6
@@ -153,11 +153,11 @@ fn test_nested_function_calls() {
         r#"
 module Test
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     add(add(10, 12), add(10, 10))
 }
 "#,
@@ -176,7 +176,7 @@ fn test_recursive_factorial() {
         r#"
 module Test
 
-func factorial(n: Int) -> Int {
+func factorial(n: lang.i64) -> lang.i64 {
     if n <= 1 {
         1
     } else {
@@ -184,7 +184,7 @@ func factorial(n: Int) -> Int {
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     factorial(5)
 }
 "#,

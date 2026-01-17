@@ -44,8 +44,8 @@ public struct Int64:
 
     public static var zero: Int64 { Int64(intLiteral: 0) }
     public static var one: Int64 { Int64(intLiteral: 1) }
-    public static var minValue: Int64 { Int64(intLiteral: -9223372036854775808) }
-    public static var maxValue: Int64 { Int64(intLiteral: 9223372036854775807) }
+    public static var minValue: Int64 { -9223372036854775808 }
+    public static var maxValue: Int64 { 9223372036854775807 }
     // public static var bitWidth: Int { 64 }
 
     public init(intLiteral value: lang.i64) {

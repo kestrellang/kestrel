@@ -14,23 +14,23 @@ mod arithmetic_operators {
             r#"
 module Main
 
-func sum() -> Int {
+func sum() -> lang.i64 {
     1 + 2
 }
 
-func diff() -> Int {
+func diff() -> lang.i64 {
     5 - 3
 }
 
-func product() -> Int {
+func product() -> lang.i64 {
     4 * 5
 }
 
-func quotient() -> Int {
+func quotient() -> lang.i64 {
     10 / 2
 }
 
-func remainder() -> Int {
+func remainder() -> lang.i64 {
     10 % 3
 }
 "#,
@@ -69,11 +69,11 @@ func remainder() -> Int {
             r#"
 module Main
 
-func sum() -> Float {
+func sum() -> lang.f64 {
     1.5 + 2.5
 }
 
-func product() -> Float {
+func product() -> lang.f64 {
     2.0 * 3.0
 }
 "#,
@@ -93,27 +93,27 @@ mod comparison_operators {
             r#"
 module Main
 
-func isEqual() -> Bool {
+func isEqual() -> lang.i1 {
     1 == 1
 }
 
-func isNotEqual() -> Bool {
+func isNotEqual() -> lang.i1 {
     1 != 2
 }
 
-func isLess() -> Bool {
+func isLess() -> lang.i1 {
     1 < 2
 }
 
-func isGreater() -> Bool {
+func isGreater() -> lang.i1 {
     2 > 1
 }
 
-func isLessOrEqual() -> Bool {
+func isLessOrEqual() -> lang.i1 {
     1 <= 2
 }
 
-func isGreaterOrEqual() -> Bool {
+func isGreaterOrEqual() -> lang.i1 {
     2 >= 1
 }
 "#,
@@ -161,15 +161,15 @@ mod logical_operators {
             r#"
 module Main
 
-func bothTrue() -> Bool {
+func bothTrue() -> lang.i1 {
     true and true
 }
 
-func eitherTrue() -> Bool {
+func eitherTrue() -> lang.i1 {
     true or false
 }
 
-func negate() -> Bool {
+func negate() -> lang.i1 {
     not true
 }
 "#,
@@ -202,23 +202,23 @@ mod bitwise_operators {
             r#"
 module Main
 
-func bitwiseAnd() -> Int {
+func bitwiseAnd() -> lang.i64 {
     5 & 3
 }
 
-func bitwiseOr() -> Int {
+func bitwiseOr() -> lang.i64 {
     5 | 3
 }
 
-func bitwiseXor() -> Int {
+func bitwiseXor() -> lang.i64 {
     5 ^ 3
 }
 
-func shiftLeft() -> Int {
+func shiftLeft() -> lang.i64 {
     1 << 3
 }
 
-func shiftRight() -> Int {
+func shiftRight() -> lang.i64 {
     8 >> 2
 }
 "#,
@@ -261,15 +261,15 @@ mod unary_operators {
             r#"
 module Main
 
-func negateInt() -> Int {
+func negateInt() -> lang.i64 {
     -42
 }
 
-func negateFloat() -> Float {
+func negateFloat() -> lang.f64 {
     -3.14
 }
 
-func invert() -> Int {
+func invert() -> lang.i64 {
     !42
 }
 "#,
@@ -303,7 +303,7 @@ mod precedence {
             r#"
 module Main
 
-func compute() -> Int {
+func compute() -> lang.i64 {
     1 + 2 * 3
 }
 "#,
@@ -323,7 +323,7 @@ func compute() -> Int {
             r#"
 module Main
 
-func compute() -> Int {
+func compute() -> lang.i64 {
     10 - 6 / 2
 }
 "#,
@@ -343,7 +343,7 @@ func compute() -> Int {
             r#"
 module Main
 
-func check() -> Bool {
+func check() -> lang.i1 {
     1 < 2 and 3 > 2
 }
 "#,
@@ -363,7 +363,7 @@ func check() -> Bool {
             r#"
 module Main
 
-func check() -> Bool {
+func check() -> lang.i1 {
     true and false or true
 }
 "#,
@@ -384,7 +384,7 @@ func check() -> Bool {
             r#"
 module Main
 
-func compute() -> Int {
+func compute() -> lang.i64 {
     1 << 2 + 3
 }
 "#,
@@ -404,7 +404,7 @@ func compute() -> Int {
             r#"
 module Main
 
-func compute() -> Bool {
+func compute() -> lang.i1 {
     1 + 2 * 3 < 10 and 5 - 1 > 2
 }
 "#,
@@ -429,11 +429,11 @@ mod associativity {
             r#"
 module Main
 
-func subtract() -> Int {
+func subtract() -> lang.i64 {
     10 - 3 - 2
 }
 
-func divide() -> Int {
+func divide() -> lang.i64 {
     24 / 4 / 2
 }
 "#,
@@ -458,7 +458,7 @@ func divide() -> Int {
             r#"
 module Main
 
-func check() -> Bool {
+func check() -> lang.i1 {
     1 < 2
 }
 "#,
@@ -482,23 +482,23 @@ mod edge_cases {
             r#"
 module Main
 
-func deeplyNested() -> Int {
+func deeplyNested() -> lang.i64 {
     1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
 }
 
-func mixedPrecedence() -> Bool {
+func mixedPrecedence() -> lang.i1 {
     1 << 2 * 3 + 4 < 100 and true or false
 }
 
-func parenthesized() -> Int {
+func parenthesized() -> lang.i64 {
     (1 + 2) * 3
 }
 
-func deeplyGrouped() -> Int {
+func deeplyGrouped() -> lang.i64 {
     ((1 + 2) * (3 + 4))
 }
 
-func comparisonInLogical() -> Bool {
+func comparisonInLogical() -> lang.i1 {
     (1 < 2) and (3 > 2)
 }
 "#,
@@ -538,15 +538,15 @@ func comparisonInLogical() -> Bool {
             r#"
 module Main
 
-func unaryInBinary() -> Int {
+func unaryInBinary() -> lang.i64 {
     -1 + -2 * -3
 }
 
-func doubleNegation() -> Int {
+func doubleNegation() -> lang.i64 {
     --5
 }
 
-func doubleLogicalNot() -> Bool {
+func doubleLogicalNot() -> lang.i1 {
     not not true
 }
 "#,
@@ -580,22 +580,22 @@ mod type_errors {
     #[test]
     fn invalid_operator_type_combinations() {
         // Should fail: incompatible operand types for operators
-        // String + Int: can't add String + Int (no add method on String that takes Int)
-        // 1 and 2: can't use 'and' on Int (no logicalAnd method on Int)
-        // true & false: can't use bitwise & on Bool (no bitAnd method on Bool)
+        // String + lang.i64: can't add String + lang.i64 (no add method on String that takes lang.i64)
+        // 1 and 2: can't use 'and' on lang.i64 (no logicalAnd method on lang.i64)
+        // true & false: can't use bitwise & on lang.i1 (no bitAnd method on lang.i1)
         Test::new(
             r#"
 module Main
 
-func stringPlusInt() -> Int {
+func stringPlusInt() -> lang.i64 {
     "hello" + 5
 }
 
-func logicalAndOnInt() -> Int {
+func logicalAndOnInt() -> lang.i64 {
     1 and 2
 }
 
-func bitwiseAndOnBool() -> Bool {
+func bitwiseAndOnBool() -> lang.i1 {
     true & false
 }
 "#,
@@ -620,21 +620,21 @@ mod combined_with_variables {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
 struct Values {
-    let a: Int
-    let b: Int
-    let c: Int
+    let a: lang.i64
+    let b: lang.i64
+    let c: lang.i64
 }
 
-func add(p: Point) -> Int {
+func add(p: Point) -> lang.i64 {
     p.x + p.y
 }
 
-func compute(v: Values) -> Int {
+func compute(v: Values) -> lang.i64 {
     v.a * v.b + v.c
 }
 "#,
@@ -668,11 +668,11 @@ func compute(v: Values) -> Int {
             r#"
 module Main
 
-func add(x: Int, y: Int) -> Int {
+func add(x: lang.i64, y: lang.i64) -> lang.i64 {
     x + y
 }
 
-func compute(a: Int, b: Int, c: Int) -> Int {
+func compute(a: lang.i64, b: lang.i64, c: lang.i64) -> lang.i64 {
     a * b + c
 }
 "#,

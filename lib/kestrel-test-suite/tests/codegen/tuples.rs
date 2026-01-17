@@ -9,7 +9,7 @@ fn test_tuple_construction() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let t = (42, 0);
     t.0
 }
@@ -25,7 +25,7 @@ fn test_tuple_second_element() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let t = (0, 42);
     t.1
 }
@@ -41,7 +41,7 @@ fn test_tuple_multiple_elements() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let t = (10, 20, 12);
     t.0 + t.1 + t.2
 }
@@ -57,7 +57,7 @@ fn test_tuple_mixed_types() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let t = (true, 42);
     t.1
 }
@@ -75,7 +75,7 @@ fn test_nested_tuple() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let t = ((40, 2), 0);
     let inner = t.0;
     inner.0 + inner.1
@@ -92,11 +92,11 @@ fn test_tuple_from_function() {
         r#"
 module Test
 
-func make_pair(a: Int, b: Int) -> (Int, Int) {
+func make_pair(a: lang.i64, b: lang.i64) -> (lang.i64, lang.i64) {
     (a, b)
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let t = make_pair(20, 22);
     t.0 + t.1
 }

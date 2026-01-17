@@ -22,7 +22,7 @@ mod basic_syntax {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0
@@ -45,7 +45,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Green => 2,
@@ -69,7 +69,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => {
             let x = 1;
@@ -93,7 +93,7 @@ func test(c: Color) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0
@@ -110,7 +110,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => 0,
@@ -127,7 +127,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     let result = match b {
         true => 42,
         false => 0
@@ -145,7 +145,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     return match b {
         true => 1,
         false => 0
@@ -162,7 +162,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     match a {
         true => match b {
             true => 1,
@@ -195,7 +195,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value) => value,
         .None => 0
@@ -217,7 +217,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value: v) => v,
         .None => 0
@@ -239,7 +239,7 @@ enum Result[T, E] {
     case Err(error: E)
 }
 
-func test(r: Result[Int, String]) -> Int {
+func test(r: Result[lang.i64, lang.str]) -> lang.i64 {
     match r {
         .Ok(value) => value,
         .Err(error) => 0
@@ -261,7 +261,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Bool {
+func test(opt: Option[lang.i64]) -> lang.i1 {
     match opt {
         .Some(_) => true,
         .None => false
@@ -283,7 +283,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Option[Int]]) -> Int {
+func test(opt: Option[Option[lang.i64]]) -> lang.i64 {
     match opt {
         .Some(value: .Some(inner)) => inner,
         .Some(value: .None) => 0,
@@ -315,7 +315,7 @@ enum Color {
     case Blue
 }
 
-func test(c: Color) -> String {
+func test(c: Color) -> lang.str {
     match c {
         .Red or .Green => "warm-ish",
         .Blue => "cool"
@@ -341,7 +341,7 @@ enum Color {
     case Purple
 }
 
-func test(c: Color) -> String {
+func test(c: Color) -> lang.str {
     match c {
         .Red or .Orange or .Yellow => "warm",
         .Green or .Blue or .Purple => "cool"
@@ -359,12 +359,12 @@ func test(c: Color) -> String {
 module Main
 
 enum Expr {
-    case Add(left: Int, right: Int)
-    case Sub(left: Int, right: Int)
-    case Mul(left: Int, right: Int)
+    case Add(left: lang.i64, right: lang.i64)
+    case Sub(left: lang.i64, right: lang.i64)
+    case Mul(left: lang.i64, right: lang.i64)
 }
 
-func test(e: Expr) -> Int {
+func test(e: Expr) -> lang.i64 {
     match e {
         .Add(left, right) or .Sub(left, right) => left + right,
         .Mul(left, right) => left * right
@@ -386,7 +386,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(value) or .None => value,
         _ => 0
@@ -409,7 +409,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> String {
+func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
         .Some(value: 1 or 2 or 3) => "small",
         .Some(_) => "large",
@@ -440,7 +440,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> String {
+func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
         .Some(n) if n > 0 => "positive",
         .Some(n) if n < 0 => "negative",
@@ -459,7 +459,7 @@ func test(opt: Option[Int]) -> String {
             r#"
 module Main
 
-func test(x: Int) -> String {
+func test(x: lang.i64) -> lang.str {
     match x {
         n if n > 100 => "big",
         n if n > 10 => "medium",
@@ -477,7 +477,7 @@ func test(x: Int) -> String {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     match x {
         n if n => n,
         _ => 0
@@ -486,7 +486,7 @@ func test(x: Int) -> Int {
 "#,
         )
         .expect(Fails)
-        .expect(HasError("Bool"));
+        .expect(HasError("lang.i1"));
     }
 
     #[test]
@@ -496,11 +496,11 @@ func test(x: Int) -> Int {
 module Main
 
 enum Value {
-    case A(n: Int)
-    case B(n: Int)
+    case A(n: lang.i64)
+    case B(n: lang.i64)
 }
 
-func test(v: Value) -> String {
+func test(v: Value) -> lang.str {
     match v {
         .A(n) or .B(n) if n > 0 => "positive",
         _ => "other"
@@ -525,7 +525,7 @@ mod type_inference {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     let x = match b {
         true => 1,
         false => 0
@@ -543,7 +543,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => 1,
         false => "zero"
@@ -588,7 +588,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(x) => x + 1,
         .None => 0
@@ -613,7 +613,7 @@ mod never_type {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => return 42,
         false => 0
@@ -630,7 +630,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     match b {
         true => return 1,
         false => return 0
@@ -647,7 +647,7 @@ func test(b: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     var result = 0;
     loop {
         match true {
@@ -681,7 +681,7 @@ enum Color {
     case Green
 }
 
-func test(c: Color) -> Int {
+func test(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Blue => 2
@@ -699,7 +699,7 @@ func test(c: Color) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     match x {
         "hello" => 1,
         _ => 0
@@ -717,7 +717,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     match t {
         (x, x) => x
     }
@@ -734,7 +734,7 @@ func test(t: (Int, Int)) -> Int {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     match t {
         (a, b, c) => a + b + c
     }
@@ -756,7 +756,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(a, b) => a + b,
         .None => 0
@@ -773,7 +773,7 @@ func test(opt: Option[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Float) -> Int {
+func test(x: lang.f64) -> lang.i64 {
     match x {
         3.14 => 1,
         _ => 0
@@ -804,7 +804,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
         .Some(x) => x,
         .None => x
@@ -822,7 +822,7 @@ func test(opt: Option[Int]) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     let y = 100;
     match x {
         y => y + 1
@@ -839,7 +839,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(b: Bool) -> Int {
+func test(b: lang.i1) -> lang.i64 {
     let multiplier = 10;
     match b {
         true => multiplier * 2,

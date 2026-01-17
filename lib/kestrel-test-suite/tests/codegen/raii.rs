@@ -19,10 +19,10 @@ fn test_simple_struct_no_deinit() {
 module Test
 
 struct Resource {
-    let value: Int
+    let value: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let r = Resource(value: 42);
     r.value
 }
@@ -39,11 +39,11 @@ fn test_struct_field_access_after_creation() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let p = Point(x: 10, y: 20);
     p.x + p.y
 }
@@ -60,10 +60,10 @@ fn test_struct_in_if_branch() {
 module Test
 
 struct Resource {
-    let value: Int
+    let value: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let cond = true;
     var result = 0;
     if cond {
@@ -85,10 +85,10 @@ fn test_struct_in_both_branches() {
 module Test
 
 struct Resource {
-    let value: Int
+    let value: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let cond = true;
     var result = 0;
     if cond {
@@ -113,15 +113,15 @@ fn test_nested_structs_no_deinit() {
 module Test
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 }
 
 struct Outer {
     let inner: Inner
-    let extra: Int
+    let extra: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let o = Outer(inner: Inner(value: 10), extra: 5);
     o.inner.value + o.extra
 }
@@ -148,7 +148,7 @@ fn test_deinit_method_called() {
 module Test
 
 struct Resource {
-    let id: Int
+    let id: lang.i64
     
     deinit {
         // Cleanup would happen here
@@ -156,7 +156,7 @@ struct Resource {
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let r = Resource(id: 42);
     r.id
 }
@@ -176,7 +176,7 @@ fn test_nested_struct_deinit_order() {
 module Test
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
     
     deinit {
         // Inner deinit
@@ -192,7 +192,7 @@ struct Outer {
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let o = Outer(first: Inner(value: 1), second: Inner(value: 2));
     o.first.value + o.second.value
 }
@@ -213,10 +213,10 @@ fn test_struct_not_moved() {
 module Test
 
 struct Resource {
-    let value: Int
+    let value: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let r = Resource(value: 42);
     let x = r.value;  // Copy field, don't move r
     x
@@ -234,10 +234,10 @@ fn test_loop_with_struct() {
 module Test
 
 struct Resource {
-    let value: Int
+    let value: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     var sum = 0;
     var i = 0;
     while i < 3 {
@@ -260,10 +260,10 @@ fn test_early_return_with_struct() {
 module Test
 
 struct Resource {
-    let value: Int
+    let value: lang.i64
 }
 
-func test_early_return(x: Int) -> Int {
+func test_early_return(x: lang.i64) -> lang.i64 {
     let r = Resource(value: x);
     if x > 50 {
         return r.value + 1;
@@ -271,7 +271,7 @@ func test_early_return(x: Int) -> Int {
     r.value
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     test_early_return(60)
 }
 "#,

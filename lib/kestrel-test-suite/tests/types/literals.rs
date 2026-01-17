@@ -7,7 +7,7 @@ mod integers {
     fn integer_decimal() {
         Test::new(
             r#"module Test
-            func test() -> Int { 42 }
+            func test() -> lang.i64 { 42 }
         "#,
         )
         .expect(Compiles)
@@ -23,13 +23,13 @@ mod integers {
         // Test that various integer literal formats all work
         Test::new(
             r#"module Test
-            func decimal() -> Int { 42 }
-            func hex_lower() -> Int { 0xff }
-            func hex_upper() -> Int { 0XAB }
-            func binary() -> Int { 0b1010 }
-            func octal() -> Int { 0o755 }
-            func zero() -> Int { 0 }
-            func large() -> Int { 9223372036854775807 }
+            func decimal() -> lang.i64 { 42 }
+            func hex_lower() -> lang.i64 { 0xff }
+            func hex_upper() -> lang.i64 { 0XAB }
+            func binary() -> lang.i64 { 0b1010 }
+            func octal() -> lang.i64 { 0o755 }
+            func zero() -> lang.i64 { 0 }
+            func large() -> lang.i64 { 9223372036854775807 }
         "#,
         )
         .expect(Compiles)
@@ -50,8 +50,8 @@ mod floats {
     fn float_basic_forms() {
         Test::new(
             r#"module Test
-            func simple() -> Float { 3.14 }
-            func zero() -> Float { 0.0 }
+            func simple() -> lang.f64 { 3.14 }
+            func zero() -> lang.f64 { 0.0 }
         "#,
         )
         .expect(Compiles)
@@ -64,9 +64,9 @@ mod floats {
         // Test scientific notation with various exponent formats
         Test::new(
             r#"module Test
-            func lowercase_positive() -> Float { 1.0e10 }
-            func uppercase_negative() -> Float { 2.5E-3 }
-            func explicit_positive() -> Float { 1.0e+5 }
+            func lowercase_positive() -> lang.f64 { 1.0e10 }
+            func uppercase_negative() -> lang.f64 { 2.5E-3 }
+            func explicit_positive() -> lang.f64 { 1.0e+5 }
         "#,
         )
         .expect(Compiles)
@@ -83,9 +83,9 @@ mod strings {
     fn string_basic_forms() {
         Test::new(
             r#"module Test
-            func simple() -> String { "hello" }
-            func empty() -> String { "" }
-            func with_spaces() -> String { "hello world" }
+            func simple() -> lang.str { "hello" }
+            func empty() -> lang.str { "" }
+            func with_spaces() -> lang.str { "hello world" }
         "#,
         )
         .expect(Compiles)
@@ -99,10 +99,10 @@ mod strings {
         // Test common escape sequences
         Test::new(
             r#"module Test
-            func newline() -> String { "hello\nworld" }
-            func tab() -> String { "hello\tworld" }
-            func quote() -> String { "say \"hello\"" }
-            func backslash() -> String { "path\\to\\file" }
+            func newline() -> lang.str { "hello\nworld" }
+            func tab() -> lang.str { "hello\tworld" }
+            func quote() -> lang.str { "say \"hello\"" }
+            func backslash() -> lang.str { "path\\to\\file" }
         "#,
         )
         .expect(Compiles)
@@ -120,8 +120,8 @@ mod booleans {
     fn boolean_literals() {
         Test::new(
             r#"module Test
-            func true_value() -> Bool { true }
-            func false_value() -> Bool { false }
+            func true_value() -> lang.i1 { true }
+            func false_value() -> lang.i1 { false }
         "#,
         )
         .expect(Compiles)
@@ -137,9 +137,9 @@ mod arrays {
     fn array_basic_forms() {
         Test::new(
             r#"module Test
-            func empty() -> [Int] { [] }
-            func single() -> [Int] { [1] }
-            func multiple() -> [Int] { [1, 2, 3] }
+            func empty() -> [lang.i64] { [] }
+            func single() -> [lang.i64] { [1] }
+            func multiple() -> [lang.i64] { [1, 2, 3] }
         "#,
         )
         .expect(Compiles)
@@ -152,8 +152,8 @@ mod arrays {
     fn array_trailing_comma_and_nesting() {
         Test::new(
             r#"module Test
-            func trailing() -> [Int] { [1, 2, 3,] }
-            func nested() -> [[Int]] { [[1, 2], [3, 4]] }
+            func trailing() -> [lang.i64] { [1, 2, 3,] }
+            func nested() -> [[lang.i64]] { [[1, 2], [3, 4]] }
         "#,
         )
         .expect(Compiles)
@@ -166,8 +166,8 @@ mod arrays {
         // Test arrays containing strings and booleans
         Test::new(
             r#"module Test
-            func of_strings() -> [String] { ["hello", "world"] }
-            func of_booleans() -> [Bool] { [true, false, true] }
+            func of_strings() -> [lang.str] { ["hello", "world"] }
+            func of_booleans() -> [lang.i1] { [true, false, true] }
         "#,
         )
         .expect(Compiles)
@@ -195,9 +195,9 @@ mod tuples {
         // Test single element (with trailing comma) and multi-element tuples
         Test::new(
             r#"module Test
-            func single() -> (Int,) { (1,) }
-            func two_elements() -> (Int, Int) { (1, 2) }
-            func multiple() -> (Int, Int, Int) { (1, 2, 3) }
+            func single() -> (lang.i64,) { (1,) }
+            func two_elements() -> (lang.i64, lang.i64) { (1, 2) }
+            func multiple() -> (lang.i64, lang.i64, lang.i64) { (1, 2, 3) }
         "#,
         )
         .expect(Compiles)
@@ -210,8 +210,8 @@ mod tuples {
     fn tuple_trailing_comma_and_nesting() {
         Test::new(
             r#"module Test
-            func trailing() -> (Int, Int, Int) { (1, 2, 3,) }
-            func nested() -> ((Int, Int), (Int, Int)) { ((1, 2), (3, 4)) }
+            func trailing() -> (lang.i64, lang.i64, lang.i64) { (1, 2, 3,) }
+            func nested() -> ((lang.i64, lang.i64), (lang.i64, lang.i64)) { ((1, 2), (3, 4)) }
         "#,
         )
         .expect(Compiles)
@@ -223,8 +223,8 @@ mod tuples {
     fn tuple_complex_content() {
         Test::new(
             r#"module Test
-            func mixed_types() -> (Int, String, Bool) { (1, "hello", true) }
-            func of_arrays() -> ([Int], [Int]) { ([1, 2], [3, 4]) }
+            func mixed_types() -> (lang.i64, lang.str, lang.i1) { (1, "hello", true) }
+            func of_arrays() -> ([lang.i64], [lang.i64]) { ([1, 2], [3, 4]) }
         "#,
         )
         .expect(Compiles)
@@ -241,9 +241,9 @@ mod grouping {
         // Single element without trailing comma is grouping (not a tuple)
         Test::new(
             r#"module Test
-            func integer() -> Int { (42) }
-            func string() -> String { ("hello") }
-            func array() -> [Int] { ([1, 2, 3]) }
+            func integer() -> lang.i64 { (42) }
+            func string() -> lang.str { ("hello") }
+            func array() -> [lang.i64] { ([1, 2, 3]) }
         "#,
         )
         .expect(Compiles)
@@ -256,7 +256,7 @@ mod grouping {
     fn grouping_nested() {
         Test::new(
             r#"module Test
-            func nested() -> Int { ((42)) }
+            func nested() -> lang.i64 { ((42)) }
         "#,
         )
         .expect(Compiles)
@@ -287,8 +287,8 @@ mod complex {
         // Test deeply nested and complex combinations of containers
         Test::new(
             r#"module Test
-            func array_of_tuples() -> [(Int, Int)] { [(1, 2), (3, 4)] }
-            func deeply_nested() -> [[(Int,)]] { [[(1,)]] }
+            func array_of_tuples() -> [(lang.i64, lang.i64)] { [(1, 2), (3, 4)] }
+            func deeply_nested() -> [[(lang.i64,)]] { [[(1,)]] }
         "#,
         )
         .expect(Compiles)
@@ -301,12 +301,12 @@ mod complex {
         // Comprehensive test that functions can contain all literal types
         Test::new(
             r#"module Test
-            func integer() -> Int { 42 }
-            func floating() -> Float { 3.14 }
-            func text() -> String { "hello" }
-            func boolean() -> Bool { true }
-            func sequence() -> [Int] { [1, 2, 3] }
-            func pair() -> (Int, Int) { (1, 2) }
+            func integer() -> lang.i64 { 42 }
+            func floating() -> lang.f64 { 3.14 }
+            func text() -> lang.str { "hello" }
+            func boolean() -> lang.i1 { true }
+            func sequence() -> [lang.i64] { [1, 2, 3] }
+            func pair() -> (lang.i64, lang.i64) { (1, 2) }
         "#,
         )
         .expect(Compiles)

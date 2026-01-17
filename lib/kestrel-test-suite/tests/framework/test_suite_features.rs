@@ -90,9 +90,9 @@ mod field_count_behavior {
         Test::new(
             r#"module Test
             struct Point {
-                let x: Int
-                let y: Int
-                var z: Float
+                let x: lang.i64
+                let y: lang.i64
+                var z: lang.f64
             }
         "#,
         )
@@ -109,7 +109,7 @@ mod function_behaviors {
         Test::new(
             r#"module Test
             struct Math {
-                static func add(a: Int, b: Int) -> Int { a + b }
+                static func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
             }
         "#,
         )
@@ -129,8 +129,8 @@ mod function_behaviors {
         Test::new(
             r#"module Test
             struct Counter {
-                var value: Int
-                func getValue() -> Int { self.value }
+                var value: lang.i64
+                func getValue() -> lang.i64 { self.value }
             }
         "#,
         )
@@ -266,7 +266,7 @@ mod child_count_behavior {
         Test::new(
             r#"module Test
             struct Widget {
-                let id: Int
+                let id: lang.i64
                 func display() {}
             }
         "#,
@@ -288,7 +288,7 @@ mod prelude {
             import Prelude
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -310,7 +310,7 @@ mod prelude {
             import Prelude
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -326,7 +326,7 @@ mod prelude {
             import Prelude
 
             struct Data: Cloneable {
-                var value: Int
+                var value: lang.i64
 
                 func clone() -> Data {
                     Data(value: self.value)
@@ -351,7 +351,7 @@ mod prelude {
             protocol Copyable {}
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )
@@ -368,7 +368,7 @@ mod prelude {
             import Prelude
 
             struct Handle: not Copyable {
-                var fd: Int
+                var fd: lang.i64
             }
         "#,
         )

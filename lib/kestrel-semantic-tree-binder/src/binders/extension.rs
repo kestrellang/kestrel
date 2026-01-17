@@ -389,10 +389,10 @@ fn collect_referenced_type_params(type_args: &[Ty]) -> Vec<Arc<TypeParameterSymb
 /// Format a TyKind for error messages
 fn format_type_kind(kind: &TyKind) -> String {
     match kind {
-        TyKind::Int { .. } => "Int".to_string(),
-        TyKind::Float { .. } => "Float".to_string(),
-        TyKind::Bool => "Bool".to_string(),
-        TyKind::String => "String".to_string(),
+        TyKind::Int { .. } => "lang.i*".to_string(),
+        TyKind::Float { .. } => "lang.f*".to_string(),
+        TyKind::Bool => "lang.i1".to_string(),
+        TyKind::String => "lang.str".to_string(),
         TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),

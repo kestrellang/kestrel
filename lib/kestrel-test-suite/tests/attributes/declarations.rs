@@ -87,7 +87,7 @@ mod protocol_declarations {
             r#"module Test
             @dummy
             protocol Container[T] {
-                func get() -> T
+                func read() -> T
             }
         "#,
         )
@@ -113,8 +113,8 @@ mod struct_declarations {
             r#"module Test
             @dummy
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
         "#,
         )
@@ -133,10 +133,10 @@ mod struct_declarations {
             r#"module Test
             @dummy
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
                 
-                func magnitude() -> Int {
+                func magnitude() -> lang.i64 {
                     self.x + self.y
                 }
             }
@@ -155,7 +155,7 @@ mod struct_declarations {
             
             @dummy
             struct Point: Printable {
-                var x: Int
+                var x: lang.i64
             }
         "#,
         )
@@ -192,7 +192,7 @@ mod struct_declarations {
             struct Outer {
                 @dummy
                 struct Inner {
-                    var x: Int
+                    var x: lang.i64
                 }
             }
         "#,
@@ -235,8 +235,8 @@ mod enum_declarations {
             r#"module Test
             @dummy
             enum Result {
-                case Success(value: Int)
-                case Failure(message: String)
+                case Success(value: lang.i64)
+                case Failure(message: lang.str)
             }
         "#,
         )
@@ -250,7 +250,7 @@ mod enum_declarations {
             r#"module Test
             @dummy
             indirect enum Tree {
-                case Leaf(value: Int)
+                case Leaf(value: lang.i64)
                 case Node(left: Tree, right: Tree)
             }
         "#,
@@ -328,7 +328,7 @@ mod function_declarations {
         Test::new(
             r#"module Test
             @dummy
-            func add(a: Int, b: Int) -> Int {
+            func add(a: lang.i64, b: lang.i64) -> lang.i64 {
                 a + b
             }
         "#,
@@ -364,10 +364,10 @@ mod function_declarations {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
+                var x: lang.i64
                 
                 @dummy
-                func getX() -> Int {
+                func getX() -> lang.i64 {
                     self.x
                 }
             }
@@ -386,7 +386,7 @@ mod function_declarations {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
+                var x: lang.i64
                 
                 @dummy
                 static func origin() -> Point {
@@ -408,7 +408,7 @@ mod function_declarations {
         Test::new(
             r#"module Test
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
                 @dummy
                 mutating func increment() {
@@ -426,10 +426,10 @@ mod function_declarations {
         Test::new(
             r#"module Test
             struct Resource {
-                var data: Int
+                var data: lang.i64
                 
                 @dummy
-                consuming func take() -> Int {
+                consuming func take() -> lang.i64 {
                     self.data
                 }
             }
@@ -471,7 +471,7 @@ mod field_declarations {
             r#"module Test
             struct Point {
                 @dummy
-                var x: Int
+                var x: lang.i64
             }
         "#,
         )
@@ -489,7 +489,7 @@ mod field_declarations {
             r#"module Test
             struct Point {
                 @dummy
-                let x: Int
+                let x: lang.i64
             }
         "#,
         )
@@ -503,9 +503,9 @@ mod field_declarations {
             r#"module Test
             struct Point {
                 @dummy
-                var x: Int
+                var x: lang.i64
                 @dummy
-                var y: Int
+                var y: lang.i64
             }
         "#,
         )
@@ -520,7 +520,7 @@ mod field_declarations {
             r#"module Test
             struct Config {
                 @dummy(default: 42)
-                var timeout: Int
+                var timeout: lang.i64
             }
         "#,
         )
@@ -538,7 +538,7 @@ mod field_declarations {
             r#"module Test
             struct Point {
                 @dummy
-                public var x: Int
+                public var x: lang.i64
             }
         "#,
         )
@@ -556,7 +556,7 @@ mod field_declarations {
             r#"module Test
             struct Constants {
                 @dummy
-                static let pi: Float
+                static let pi: lang.f64
             }
         "#,
         )
@@ -577,10 +577,10 @@ mod initializer_declarations {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
+                var x: lang.i64
                 
                 @dummy
-                init(x: Int) {
+                init(x: lang.i64) {
                     self.x = x;
                 }
             }
@@ -599,11 +599,11 @@ mod initializer_declarations {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
                 
                 @dummy
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -623,10 +623,10 @@ mod initializer_declarations {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
+                var x: lang.i64
                 
                 @dummy
-                public init(x: Int) {
+                public init(x: lang.i64) {
                     self.x = x;
                 }
             }
@@ -691,8 +691,8 @@ mod enum_case_declarations {
             r#"module Test
             enum Result {
                 @dummy
-                case Success(value: Int)
-                case Failure(message: String)
+                case Success(value: lang.i64)
+                case Failure(message: lang.str)
             }
         "#,
         )

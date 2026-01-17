@@ -9,13 +9,13 @@ mod assignment_expressions {
 
     #[test]
     fn basic_assignment_to_var() {
-        // Basic assignment to a mutable variable with int literals
+        // Basic assignment to a mutable variable with lang.i64 literals
         Test::new(
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     x = 5;
     x
 }
@@ -37,10 +37,10 @@ func test() -> Int {
             r#"
 module Main
 
-func getValue() -> Int { 42 }
+func getValue() -> lang.i64 { 42 }
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     x = getValue();
     x
 }
@@ -68,8 +68,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> [Int] {
-    var arr: [Int] = [];
+func test() -> [lang.i64] {
+    var arr: [lang.i64] = [];
     arr = [1, 2, 3];
     arr
 }
@@ -91,8 +91,8 @@ func test() -> [Int] {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     x = 1;
     x = 2;
     x = 3;
@@ -116,8 +116,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test(value: Int) -> Int {
-    var x: Int = 0;
+func test(value: lang.i64) -> lang.i64 {
+    var x: lang.i64 = 0;
     x = value;
     x
 }
@@ -139,8 +139,8 @@ func test(value: Int) -> Int {
             r#"
 module Main
 
-func test() -> String {
-    var msg: String = "";
+func test() -> lang.str {
+    var msg: lang.str = "";
     msg = "hello";
     msg
 }
@@ -162,12 +162,12 @@ func test() -> String {
             r#"
 module Main
 
-func test() -> Int {
-    var num: Int = 0;
+func test() -> lang.i64 {
+    var num: lang.i64 = 0;
     num = 42;
-    var text: String = "";
+    var text: lang.str = "";
     text = "assigned";
-    var items: [Int] = [];
+    var items: [lang.i64] = [];
     items = [1, 2];
     num
 }

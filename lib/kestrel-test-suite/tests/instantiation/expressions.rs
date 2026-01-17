@@ -714,7 +714,7 @@ mod nested_expressions {
         assert_eq!(g2.span, Span::new(0, 1..7));
 
         let g3 = Expression::grouping(g2, Span::new(0, 0..8));
-        // All groupings should preserve the Int type
+        // All groupings should preserve the lang.i64 type
         assert!(g3.ty.is_int());
         assert_eq!(g3.span, Span::new(0, 0..8));
         assert!(matches!(g3.kind, ExprKind::Grouping(_)));
@@ -730,10 +730,10 @@ mod integration {
     fn functions_with_varied_literal_return_types() {
         Test::new(
             r#"module Test
-            func answer() -> Int { 42 }
-            func greeting() -> String { "hello" }
+            func answer() -> lang.i64 { 42 }
+            func greeting() -> lang.str { "hello" }
             func nothing() { () }
-            func flag() -> Bool { true }
+            func flag() -> lang.i1 { true }
         "#,
         )
         .expect(Compiles)
@@ -763,9 +763,9 @@ mod integration {
     fn functions_with_aggregate_expressions() {
         Test::new(
             r#"module Test
-            func pair() -> (Int, Int) { (1, 2) }
-            func numbers() -> [Int] { [1, 2, 3] }
-            func complex() -> [(Int, Int)] { [(1, 2), (3, 4)] }
+            func pair() -> (lang.i64, lang.i64) { (1, 2) }
+            func numbers() -> [lang.i64] { [1, 2, 3] }
+            func complex() -> [(lang.i64, lang.i64)] { [(1, 2), (3, 4)] }
         "#,
         )
         .expect(Compiles)
@@ -779,7 +779,7 @@ mod integration {
         Test::new(
             r#"module Test
             struct Point {
-                func origin() -> (Int, Int) { (0, 0) }
+                func origin() -> (lang.i64, lang.i64) { (0, 0) }
             }
         "#,
         )

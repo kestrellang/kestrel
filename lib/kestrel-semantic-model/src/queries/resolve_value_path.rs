@@ -159,6 +159,25 @@ impl Query for ResolveValuePath {
                 }
             }
 
+            // If current_symbol is an EnumCase and we can't find a child, return EnumCaseValue.
+            // Enum cases are values, not namespaces - remaining segments should be member accesses.
+            // This handles cases like `Player.player1.description()` where `player1` is an enum case
+            // and `description()` is a method call on that value.
+            if matches.is_empty()
+                && current_symbol.metadata().kind() == KestrelSymbolKind::EnumCase
+            {
+                // Get the type of the enum case (which is the parent enum type)
+                if let Some(value_beh) = current_symbol.metadata().get_behavior::<ValueBehavior>() {
+                    return ValuePathResolution::EnumCaseValue {
+                        symbol_id: current_symbol.metadata().id(),
+                        ty: value_beh.ty().clone(),
+                        // index-1 because we're in segment at `index`, but current_symbol
+                        // was resolved in the previous iteration (or from first segment)
+                        resolved_index: index - 1,
+                    };
+                }
+            }
+
             // Last segment: handle overloads
             if index == self.path.len() - 1 {
                 return extract_value_from_symbols(&matches, segment, index);

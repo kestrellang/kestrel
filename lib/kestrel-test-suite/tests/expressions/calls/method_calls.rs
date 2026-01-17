@@ -18,10 +18,10 @@ mod self_parameter {
 module Main
 
 struct Counter {
-    let value: Int
-    var mutableValue: Int
+    let value: lang.i64
+    var mutableValue: lang.i64
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         42
     }
 
@@ -29,7 +29,7 @@ struct Counter {
         ()
     }
 
-    consuming func consume() -> Int {
+    consuming func consume() -> lang.i64 {
         self.value
     }
 }
@@ -66,11 +66,11 @@ struct Counter {
 module Main
 
 struct Factory {
-    static func create() -> Int {
+    static func create() -> lang.i64 {
         42
     }
 
-    func build() -> Int {
+    func build() -> lang.i64 {
         42
     }
 }
@@ -98,7 +98,7 @@ struct Factory {
 module Main
 
 protocol Lifecycle {
-    func query() -> String
+    func query() -> lang.str
     mutating func reset() -> ()
     consuming func finalize() -> ()
 }
@@ -122,19 +122,19 @@ protocol Lifecycle {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
-    var z: Int
+    let x: lang.i64
+    let y: lang.i64
+    var z: lang.i64
 
-    func getX() -> Int {
+    func getX() -> lang.i64 {
         self.x
     }
 
-    func getY() -> Int {
+    func getY() -> lang.i64 {
         self.y
     }
 
-    mutating func getZ() -> Int {
+    mutating func getZ() -> lang.i64 {
         self.z
     }
 }
@@ -159,9 +159,9 @@ struct Point {
 module Main
 
 struct Calculator {
-    let value: Int
+    let value: lang.i64
 
-    static func compute() -> Int {
+    static func compute() -> lang.i64 {
         self.value
     }
 }
@@ -178,10 +178,10 @@ struct Calculator {
 module Main
 
 struct Point {
-    let x: Int
+    let x: lang.i64
 }
 
-func freeFunc() -> Int {
+func freeFunc() -> lang.i64 {
     self.x
 }
 "#,
@@ -200,22 +200,22 @@ func freeFunc() -> Int {
 module Main
 
 struct Calculator {
-    let base: Int
+    let base: lang.i64
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         42
     }
 
-    func add(x: Int) -> Int {
+    func add(x: lang.i64) -> lang.i64 {
         42
     }
 
-    func multiply(x: Int, y: Int) -> Int {
+    func multiply(x: lang.i64, y: lang.i64) -> lang.i64 {
         42
     }
 }
 
-func test(c: Calculator) -> Int {
+func test(c: Calculator) -> lang.i64 {
     c.multiply(5, 6)
 }
 "#,
@@ -248,9 +248,9 @@ func test(c: Calculator) -> Int {
 module Main
 
 struct Builder {
-    let value: Int
+    let value: lang.i64
 
-    func build() -> Int {
+    func build() -> lang.i64 {
         42
     }
 }
@@ -262,19 +262,19 @@ struct Factory {
         self.builder
     }
 
-    func buildResult() -> Int {
+    func buildResult() -> lang.i64 {
         self.getBuilder().build()
     }
 }
 
 struct Calculator {
-    let value: Int
+    let value: lang.i64
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         42
     }
 
-    func getDoubleValue() -> Int {
+    func getDoubleValue() -> lang.i64 {
         self.getValue()
     }
 }
@@ -298,26 +298,26 @@ struct Calculator {
 module Main
 
 struct Counter {
-    let value: Int
+    let value: lang.i64
 
-    static func zero() -> Int {
+    static func zero() -> lang.i64 {
         0
     }
 
-    static func max(a: Int, b: Int) -> Int {
+    static func max(a: lang.i64, b: lang.i64) -> lang.i64 {
         42
     }
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         self.value
     }
 
-    func increment() -> Int {
+    func increment() -> lang.i64 {
         42
     }
 }
 
-func test(c: Counter) -> Int {
+func test(c: Counter) -> lang.i64 {
     c.increment()
 }
 "#,
@@ -358,9 +358,9 @@ func test(c: Counter) -> Int {
 module Main
 
 struct Counter {
-    var value: Int
+    var value: lang.i64
 
-    mutating func getValue() -> Int {
+    mutating func getValue() -> lang.i64 {
         self.value
     }
 
@@ -370,18 +370,18 @@ struct Counter {
 }
 
 struct Container {
-    let item: Int
+    let item: lang.i64
 
-    consuming func getItem() -> Int {
+    consuming func getItem() -> lang.i64 {
         self.item
     }
 
-    consuming func take() -> Int {
+    consuming func take() -> lang.i64 {
         42
     }
 }
 
-func test(c: Counter, k: Container) -> Int {
+func test(c: Counter, k: Container) -> lang.i64 {
     k.take()
 }
 "#,
@@ -406,7 +406,7 @@ module Main
 struct Container[T] {
     let item: T
 
-    func isEmpty() -> Bool {
+    func isEmpty() -> lang.i1 {
         false
     }
 }
@@ -418,7 +418,7 @@ struct Wrapper[T] {
         self.value
     }
 
-    func isEqual(other: T) -> Bool {
+    func isEqual(other: T) -> lang.i1 {
         false
     }
 }
@@ -468,33 +468,33 @@ struct Outer {
 }
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         self.value
     }
 }
 
 struct Builder {
-    let value: Int
+    let value: lang.i64
 
-    func withValue(v: Int) -> Builder {
+    func withValue(v: lang.i64) -> Builder {
         self
     }
 }
 
 struct Point {
-    let x: Int
+    let x: lang.i64
 
-    func getX() -> Int {
+    func getX() -> lang.i64 {
         self.x
     }
 
-    func printX() -> Int {
+    func printX() -> lang.i64 {
         self.x
     }
 
-    func copyX() -> Int {
+    func copyX() -> lang.i64 {
         self.x
     }
 }
@@ -530,7 +530,7 @@ mod primitive_methods {
             r#"
 module Main
 
-func test(x: Int) -> () {
+func test(x: lang.i64) -> () {
     let f = x.toString;
     x.notAMethod
 }
@@ -556,31 +556,30 @@ mod method_calls {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 
-    func origin() -> Bool {
+    func origin() -> lang.i1 {
         false
     }
 }
 
 struct Calculator {
-    let base: Int
+    let base: lang.i64
 
-    func add(x: Int, y: Int) -> Int {
+    func add(x: lang.i64, y: lang.i64) -> lang.i64 {
         42
     }
 }
 
 struct Formatter {
-    let prefix: String
-
-    func format(with value: Int) -> String {
+    let prefix: lang.str
+    func format(with value: lang.i64) -> lang.str {
         "formatted"
     }
 }
 
-func test(p: Point, c: Calculator, f: Formatter) -> Int {
+func test(p: Point, c: Calculator, f: Formatter) -> lang.i64 {
     c.add(1, 2)
 }
 "#,
@@ -614,7 +613,7 @@ func test(p: Point, c: Calculator, f: Formatter) -> Int {
 module Main
 
 struct Builder {
-    let value: Int
+    let value: lang.i64
 
     func step1() -> Builder {
         self
@@ -624,7 +623,7 @@ struct Builder {
         self
     }
 
-    func build() -> Int {
+    func build() -> lang.i64 {
         self.value
     }
 }
@@ -638,14 +637,14 @@ struct Container {
 }
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         self.value
     }
 }
 
-func test(b: Builder, c: Container) -> Int {
+func test(b: Builder, c: Container) -> lang.i64 {
     b.step1().step2().build()
 }
 "#,
@@ -669,22 +668,22 @@ func test(b: Builder, c: Container) -> Int {
 module Main
 
 struct Factory {
-    static func defaultValue() -> Int {
+    static func defaultValue() -> lang.i64 {
         0
     }
 }
 
 struct MathUtils {
-    static func max(a: Int, b: Int) -> Int {
+    static func max(a: lang.i64, b: lang.i64) -> lang.i64 {
         42
     }
 
-    static func min(a: Int, b: Int) -> Int {
+    static func min(a: lang.i64, b: lang.i64) -> lang.i64 {
         0
     }
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     MathUtils.max(10, 20)
 }
 "#,
@@ -721,28 +720,28 @@ func test() -> Int {
 module Main
 
 struct Point {
-    let x: Int
+    let x: lang.i64
 }
 
 struct A {
-    func methodA() -> Int {
+    func methodA() -> lang.i64 {
         42
     }
 }
 
 struct B {
-    let value: Int
+    let value: lang.i64
 }
 
 struct Counter {
-    let value: Int
+    let value: lang.i64
 
-    func getValue() -> Int {
+    func getValue() -> lang.i64 {
         42
     }
 }
 
-func test(p: Point, b: B) -> Int {
+func test(p: Point, b: B) -> lang.i64 {
     p.nonExistent()
     b.methodA()
     Counter.getValue()
@@ -762,22 +761,22 @@ func test(p: Point, b: B) -> Int {
 module Main
 
 struct Widget {
-    let id: Int
+    let id: lang.i64
 
-    public func getId() -> Int {
+    public func getId() -> lang.i64 {
         self.id
     }
 
-    private func internalId() -> Int {
+    private func internalId() -> lang.i64 {
         self.id
     }
 
-    func getInternalId() -> Int {
+    func getInternalId() -> lang.i64 {
         self.internalId()
     }
 }
 
-func test(w: Widget) -> Int {
+func test(w: Widget) -> lang.i64 {
     w.getId()
 }
 "#,

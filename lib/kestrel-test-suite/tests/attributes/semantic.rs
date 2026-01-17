@@ -82,7 +82,7 @@ mod behavior_attachment {
             r#"module Test
             struct Foo {
                 @dummy
-                var x: Int
+                var x: lang.i64
             }
         "#,
         )
@@ -99,9 +99,9 @@ mod behavior_attachment {
         Test::new(
             r#"module Test
             struct Foo {
-                var x: Int
+                var x: lang.i64
                 @dummy
-                init(x: Int) {
+                init(x: lang.i64) {
                     self.x = x;
                 }
             }
@@ -436,7 +436,7 @@ mod declaration_combinations {
         Test::new(
             r#"module Test
             struct Counter {
-                var count: Int
+                var count: lang.i64
                 
                 @dummy
                 mutating func increment() {
@@ -477,7 +477,7 @@ mod declaration_combinations {
             r#"module Test
             @dummy
             indirect enum Tree {
-                case Leaf(value: Int)
+                case Leaf(value: lang.i64)
                 case Node(left: Tree, right: Tree)
             }
         "#,

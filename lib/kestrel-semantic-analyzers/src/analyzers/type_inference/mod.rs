@@ -118,8 +118,12 @@ impl Analyzer for TypeInferenceAnalyzer {
     ) {
         let kind = symbol.metadata().kind();
 
-        // Only process functions and initializers
-        if kind != KestrelSymbolKind::Function && kind != KestrelSymbolKind::Initializer {
+        // Only process functions, initializers, getters, and setters
+        if kind != KestrelSymbolKind::Function
+            && kind != KestrelSymbolKind::Initializer
+            && kind != KestrelSymbolKind::Getter
+            && kind != KestrelSymbolKind::Setter
+        {
             return;
         }
 

@@ -38,7 +38,7 @@ mod basic_protocol {
             module Test
 
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
         "#,
         )
@@ -58,8 +58,8 @@ mod basic_protocol {
             module Test
 
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
         "#,
         )
@@ -144,7 +144,7 @@ mod associated_types {
             module Test
 
             protocol Parser {
-                type Output = String;
+                type Output = lang.str;
             }
         "#,
         )
@@ -182,7 +182,7 @@ mod generic_protocol {
             module Test
 
             protocol Container[T] {
-                func get() -> T
+                func read() -> T
             }
         "#,
         )
@@ -226,7 +226,7 @@ mod self_type {
             module Test
 
             protocol Equatable {
-                func eq(other: Self) -> Bool
+                func eq(other: Self) -> lang.i1
             }
         "#,
         )
@@ -282,7 +282,7 @@ mod receiver_kinds {
             module Test
 
             protocol Factory {
-                static func create() -> Int
+                static func create() -> lang.i64
             }
         "#,
         )
@@ -373,7 +373,7 @@ mod protocol_inheritance {
                 func draw()
             }
             protocol Shape: Drawable {
-                func area() -> Int
+                func area() -> lang.i64
             }
         "#,
         )
@@ -418,13 +418,13 @@ mod witness_from_struct {
             module Test
 
             protocol Comparable {
-                func lessThan(other: Int) -> Bool
-                func equals(other: Int) -> Bool
+                func lessThan(other: lang.i64) -> lang.i1
+                func equals(other: lang.i64) -> lang.i1
             }
 
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { true }
-                func equals(other: Int) -> Bool { false }
+                func lessThan(other: lang.i64) -> lang.i1 { true }
+                func equals(other: lang.i64) -> lang.i1 { false }
             }
         "#,
         )
@@ -450,8 +450,8 @@ mod witness_from_struct {
             }
 
             struct IntIterator: Iterator {
-                type Item = Int;
-                func next() -> Int { 0 }
+                type Item = lang.i64;
+                func next() -> lang.i64 { 0 }
             }
         "#,
         )
@@ -506,13 +506,13 @@ mod witness_from_extension {
             module Test
 
             protocol Hashable {
-                func hash() -> Int
+                func hash() -> lang.i64
             }
 
             struct Point { }
 
             extend Point: Hashable {
-                func hash() -> Int { 42 }
+                func hash() -> lang.i64 { 42 }
             }
         "#,
         )
@@ -556,11 +556,11 @@ mod generic_witness {
             module Test
 
             protocol Getter {
-                func get() -> Int
+                func read() -> lang.i64
             }
 
             struct Box[T]: Getter {
-                func get() -> Int { 42 }
+                func read() -> lang.i64 { 42 }
             }
         "#,
         )
@@ -720,10 +720,10 @@ mod witness_method_calls {
             module Test
 
             protocol Factory {
-                init(value: Int)
+                init(value: lang.i64)
             }
 
-            func make[T](v: Int) -> T where T: Factory {
+            func make[T](v: lang.i64) -> T where T: Factory {
                 return T(value: v)
             }
         "#,
@@ -745,10 +745,10 @@ mod witness_method_calls {
             module Test
 
             protocol Processor {
-                func process(x: Int, y: Int) -> Int
+                func process(x: lang.i64, y: lang.i64) -> lang.i64
             }
 
-            func run[T](proc: T, a: Int, b: Int) -> Int where T: Processor {
+            func run[T](proc: T, a: lang.i64, b: lang.i64) -> lang.i64 where T: Processor {
                 return proc.process(a, b)
             }
         "#,
@@ -801,10 +801,10 @@ mod witness_method_calls {
             module Test
 
             protocol Convertible {
-                static func fromInt(value: Int) -> Self
+                static func fromInt(value: lang.i64) -> Self
             }
 
-            func convert[T](n: Int) -> T where T: Convertible {
+            func convert[T](n: lang.i64) -> T where T: Convertible {
                 return T.fromInt(n)
             }
         "#,

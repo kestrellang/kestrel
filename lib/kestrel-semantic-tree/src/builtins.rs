@@ -37,6 +37,7 @@ pub enum LanguageFeature {
     // Type alias builtins - default literal types
     DefaultIntegerLiteralType,
     DefaultFloatLiteralType,
+    DefaultStringLiteralType,
 
     // Operator protocols - arithmetic
     AddOperatorProtocol,
@@ -123,6 +124,7 @@ impl LanguageFeature {
             "FFISafe" => Some(Self::FFISafe),
             "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
             "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
+            "DefaultStringLiteralType" => Some(Self::DefaultStringLiteralType),
             // Operator protocols - arithmetic
             "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
             "AddOperatorMethod" => Some(Self::AddOperatorMethod),
@@ -203,6 +205,7 @@ impl LanguageFeature {
             Self::FFISafe => "FFISafe",
             Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
             Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
+            Self::DefaultStringLiteralType => "DefaultStringLiteralType",
             // Operator protocols - arithmetic
             Self::AddOperatorProtocol => "AddOperatorProtocol",
             Self::AddOperatorMethod => "AddOperatorMethod",
@@ -389,6 +392,10 @@ impl LanguageFeature {
                 kind: BuiltinKind::TypeAlias,
             },
             Self::DefaultFloatLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultStringLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
             },

@@ -17,7 +17,7 @@ mod basic_resolution {
     fn lang_ptr_int_in_type_alias() {
         Test::new(
             r#"module Test
-            type IntPtr = lang.ptr[Int];
+            type IntPtr = lang.ptr[lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -28,7 +28,7 @@ mod basic_resolution {
     fn lang_ptr_string_in_type_alias() {
         Test::new(
             r#"module Test
-            type StringPtr = lang.ptr[String];
+            type StringPtr = lang.ptr[lang.str];
         "#,
         )
         .expect(Compiles)
@@ -39,7 +39,7 @@ mod basic_resolution {
     fn lang_ptr_bool_in_type_alias() {
         Test::new(
             r#"module Test
-            type BoolPtr = lang.ptr[Bool];
+            type BoolPtr = lang.ptr[lang.i1];
         "#,
         )
         .expect(Compiles)
@@ -51,7 +51,7 @@ mod basic_resolution {
         Test::new(
             r#"module Test
             struct Wrapper {
-                let ptr: lang.ptr[Int]
+                let ptr: lang.ptr[lang.i64]
             }
         "#,
         )
@@ -67,7 +67,7 @@ mod basic_resolution {
     fn lang_ptr_as_function_parameter() {
         Test::new(
             r#"module Test
-            func usePtr(p: lang.ptr[Int]) {}
+            func usePtr(p: lang.ptr[lang.i64]) {}
         "#,
         )
         .expect(Compiles)
@@ -86,9 +86,9 @@ mod basic_resolution {
         Test::new(
             r#"module Test
             struct MultiPtr {
-                let intPtr: lang.ptr[Int]
-                let strPtr: lang.ptr[String]
-                let boolPtr: lang.ptr[Bool]
+                let intPtr: lang.ptr[lang.i64]
+                let strPtr: lang.ptr[lang.str]
+                let boolPtr: lang.ptr[lang.i1]
             }
         "#,
         )
@@ -118,7 +118,7 @@ mod type_argument_validation {
     fn lang_ptr_too_many_type_args_error() {
         Test::new(
             r#"module Test
-            type Bad = lang.ptr[Int, String];
+            type Bad = lang.ptr[lang.i64, lang.str];
         "#,
         )
         .expect(HasError("too many type arguments"));
@@ -138,7 +138,7 @@ mod type_argument_validation {
     fn lang_ptr_three_type_args_error() {
         Test::new(
             r#"module Test
-            type Bad = lang.ptr[Int, String, Bool];
+            type Bad = lang.ptr[lang.i64, lang.str, lang.i1];
         "#,
         )
         .expect(HasError("too many type arguments"));
@@ -152,7 +152,7 @@ mod nested_and_complex_types {
     fn nested_pointer() {
         Test::new(
             r#"module Test
-            type PtrToPtr = lang.ptr[lang.ptr[Int]];
+            type PtrToPtr = lang.ptr[lang.ptr[lang.i64]];
         "#,
         )
         .expect(Compiles);
@@ -162,7 +162,7 @@ mod nested_and_complex_types {
     fn triple_nested_pointer() {
         Test::new(
             r#"module Test
-            type PtrPtrPtr = lang.ptr[lang.ptr[lang.ptr[Int]]];
+            type PtrPtrPtr = lang.ptr[lang.ptr[lang.ptr[lang.i64]]];
         "#,
         )
         .expect(Compiles);
@@ -172,7 +172,7 @@ mod nested_and_complex_types {
     fn pointer_to_tuple() {
         Test::new(
             r#"module Test
-            type TuplePtr = lang.ptr[(Int, String)];
+            type TuplePtr = lang.ptr[(lang.i64, lang.str)];
         "#,
         )
         .expect(Compiles);
@@ -182,7 +182,7 @@ mod nested_and_complex_types {
     fn pointer_to_array() {
         Test::new(
             r#"module Test
-            type ArrayPtr = lang.ptr[[Int]];
+            type ArrayPtr = lang.ptr[[lang.i64]];
         "#,
         )
         .expect(Compiles);
@@ -192,7 +192,7 @@ mod nested_and_complex_types {
     fn pointer_to_user_struct() {
         Test::new(
             r#"module Test
-            struct Point { let x: Int; let y: Int }
+            struct Point { let x: lang.i64; let y: lang.i64 }
             type PointPtr = lang.ptr[Point];
         "#,
         )
@@ -204,7 +204,7 @@ mod nested_and_complex_types {
         Test::new(
             r#"module Test
             struct Box[T] { let value: T }
-            type BoxPtr = lang.ptr[Box[Int]];
+            type BoxPtr = lang.ptr[Box[lang.i64]];
         "#,
         )
         .expect(Compiles);
@@ -214,7 +214,7 @@ mod nested_and_complex_types {
     fn pointer_in_tuple() {
         Test::new(
             r#"module Test
-            type PtrPair = (lang.ptr[Int], lang.ptr[String]);
+            type PtrPair = (lang.ptr[lang.i64], lang.ptr[lang.str]);
         "#,
         )
         .expect(Compiles);
@@ -224,7 +224,7 @@ mod nested_and_complex_types {
     fn pointer_in_array() {
         Test::new(
             r#"module Test
-            type PtrArray = [lang.ptr[Int]];
+            type PtrArray = [lang.ptr[lang.i64]];
         "#,
         )
         .expect(Compiles);
@@ -236,7 +236,7 @@ mod nested_and_complex_types {
         Test::new(
             r#"module Test
             struct Node {
-                let value: Int
+                let value: lang.i64
                 let next: lang.ptr[Node]
             }
         "#,
@@ -323,7 +323,7 @@ mod mir_lowering {
         Test::new(
             r#"module Test
             struct Wrapper {
-                let ptr: lang.ptr[Int]
+                let ptr: lang.ptr[lang.i64]
             }
         "#,
         )
@@ -337,7 +337,7 @@ mod mir_lowering {
         Test::new(
             r#"module Test
             struct BoolWrapper {
-                let ptr: lang.ptr[Bool]
+                let ptr: lang.ptr[lang.i1]
             }
         "#,
         )
@@ -351,7 +351,7 @@ mod mir_lowering {
         Test::new(
             r#"module Test
             struct StrWrapper {
-                let ptr: lang.ptr[String]
+                let ptr: lang.ptr[lang.str]
             }
         "#,
         )
@@ -365,7 +365,7 @@ mod mir_lowering {
         Test::new(
             r#"module Test
             struct DoublePtr {
-                let ptr: lang.ptr[lang.ptr[Int]]
+                let ptr: lang.ptr[lang.ptr[lang.i64]]
             }
         "#,
         )
@@ -380,7 +380,7 @@ mod mir_lowering {
     fn pointer_to_struct_lowers_correctly() {
         Test::new(
             r#"module Test
-            struct Point { let x: Int; let y: Int }
+            struct Point { let x: lang.i64; let y: lang.i64 }
             struct Wrapper {
                 let ptr: lang.ptr[Point]
             }
@@ -399,7 +399,7 @@ mod mir_lowering {
         Test::new(
             r#"module Test
             struct TupleWrapper {
-                let ptr: lang.ptr[(Int, Bool)]
+                let ptr: lang.ptr[(lang.i64, lang.i1)]
             }
         "#,
         )
@@ -413,15 +413,15 @@ mod mir_lowering {
 
     #[test]
     fn pointer_to_array_type_requires_resolution() {
-        // NOTE: [Int] as a type annotation is not yet resolved to a concrete
-        // struct type like Array[Int, GlobalAllocator]. This test verifies
+        // NOTE: [lang.i64] as a type annotation is not yet resolved to a concrete
+        // struct type like Array[lang.i64, GlobalAllocator]. This test verifies
         // that MIR lowering correctly fails for unresolved array types.
         // Once array type resolution is implemented, this test should be
         // updated to verify the correct MIR structure.
         Test::new(
             r#"module Test
             struct ArrayWrapper {
-                let ptr: lang.ptr[[Int]]
+                let ptr: lang.ptr[[lang.i64]]
             }
         "#,
         )
@@ -451,7 +451,7 @@ mod mir_lowering {
     fn function_with_pointer_param() {
         Test::new(
             r#"module Test
-            func usePtr(p: lang.ptr[Int]) {}
+            func usePtr(p: lang.ptr[lang.i64]) {}
         "#,
         )
         .expect(Compiles)
@@ -471,9 +471,9 @@ mod mir_lowering {
         Test::new(
             r#"module Test
             struct MultiPtr {
-                let a: lang.ptr[Int]
-                let b: lang.ptr[Bool]
-                let c: lang.ptr[String]
+                let a: lang.ptr[lang.i64]
+                let b: lang.ptr[lang.i1]
+                let c: lang.ptr[lang.str]
             }
         "#,
         )
@@ -499,7 +499,7 @@ mod string_intrinsics {
     fn string_unsafe_ptr_compiles() {
         Test::new(
             r#"module Test
-            func getPtr(s: String) -> lang.ptr[I8] {
+            func getPtr(s: lang.str) -> lang.ptr[I8] {
                 s.unsafePtr()
             }
         "#,
@@ -515,7 +515,7 @@ mod string_intrinsics {
             struct Holder {
                 let ptr: lang.ptr[I8]
             }
-            func wrap(s: String) -> Holder {
+            func wrap(s: lang.str) -> Holder {
                 Holder(ptr: s.unsafePtr())
             }
         "#,
@@ -529,7 +529,7 @@ mod string_intrinsics {
         // Ensure we didn't break the existing length() method
         Test::new(
             r#"module Test
-            func len(s: String) -> Int {
+            func len(s: lang.str) -> lang.i64 {
                 s.length()
             }
         "#,
@@ -544,9 +544,9 @@ mod string_intrinsics {
             r#"module Test
             struct StringView {
                 let ptr: lang.ptr[I8]
-                let len: Int
+                let len: lang.i64
             }
-            func makeView(s: String) -> StringView {
+            func makeView(s: lang.str) -> StringView {
                 StringView(ptr: s.unsafePtr(), len: s.length())
             }
         "#,

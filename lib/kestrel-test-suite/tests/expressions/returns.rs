@@ -33,7 +33,7 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return 42
 }
 "#,
@@ -48,7 +48,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     return x + 1
 }
 "#,
@@ -63,7 +63,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test() -> String {
+func test() -> lang.str {
     return "hello"
 }
 "#,
@@ -78,7 +78,7 @@ func test() -> String {
             r#"
 module Main
 
-func test() -> Bool {
+func test() -> lang.i1 {
     return true
 }
 "#,
@@ -97,7 +97,7 @@ mod return_in_control_flow {
             r#"
 module Main
 
-func test(x: Bool) -> Int {
+func test(x: lang.i1) -> lang.i64 {
     if x {
         return 1
     }
@@ -115,7 +115,7 @@ func test(x: Bool) -> Int {
             r#"
 module Main
 
-func test(x: Bool) -> Int {
+func test(x: lang.i1) -> lang.i64 {
     if x {
         return 1
     } else {
@@ -134,8 +134,8 @@ func test(x: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     while x < 10 {
         if x == 5 {
             return x
@@ -156,8 +156,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    var x: Int = 0;
+func test() -> lang.i64 {
+    var x: lang.i64 = 0;
     loop {
         if x == 10 {
             return x
@@ -182,7 +182,7 @@ mod return_statement_like {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return 42
 }
 "#,
@@ -198,9 +198,9 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return 42;
-    let x: Int = 1;
+    let x: lang.i64 = 1;
     x
 }
 "#,
@@ -219,11 +219,11 @@ mod return_with_complex_expressions {
             r#"
 module Main
 
-func helper() -> Int {
+func helper() -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     return helper()
 }
 "#,
@@ -238,7 +238,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(a: Int, b: Int) -> Int {
+func test(a: lang.i64, b: lang.i64) -> lang.i64 {
     return a * b + 1
 }
 "#,
@@ -253,8 +253,8 @@ func test(a: Int, b: Int) -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let x: Int = 42;
+func test() -> lang.i64 {
+    let x: lang.i64 = 42;
     return x
 }
 "#,
@@ -269,7 +269,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return (1 + 2) * 3
 }
 "#,
@@ -288,7 +288,7 @@ mod return_nested {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a {
         if b {
             return 1
@@ -311,10 +311,10 @@ func test(a: Bool, b: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    var i: Int = 0;
+func test() -> lang.i64 {
+    var i: lang.i64 = 0;
     while i < 10 {
-        var j: Int = 0;
+        var j: lang.i64 = 0;
         while j < 10 {
             if i * j == 25 {
                 return i + j
@@ -337,7 +337,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     if x < 0 {
         return -1
     }

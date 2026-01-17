@@ -10,7 +10,7 @@ fn test_string_literal() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let s = "hello";
     42
 }
@@ -29,7 +29,7 @@ fn test_empty_string() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let s = "";
     42
 }
@@ -48,7 +48,7 @@ fn test_multiple_strings() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = "hello";
     let b = "world";
     42
@@ -69,7 +69,7 @@ fn test_duplicate_strings() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = "same";
     let b = "same";
     42

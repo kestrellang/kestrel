@@ -26,7 +26,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(value) = opt {
         value
     } else {
@@ -49,7 +49,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) {
+func test(opt: Option[lang.i64]) {
     if let .Some(value) = opt {
         let _ = value;
     }
@@ -70,7 +70,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a {
         x
     } else if let .Some(y) = b {
@@ -95,7 +95,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Option[Int]]) -> Int {
+func test(opt: Option[Option[lang.i64]]) -> lang.i64 {
     if let .Some(inner) = opt {
         if let .Some(value) = inner {
             value
@@ -130,7 +130,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b {
         x + y
     } else {
@@ -153,7 +153,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = opt, x > 0 {
         x
     } else {
@@ -176,7 +176,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b, x < y {
         y - x
     } else {
@@ -199,7 +199,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int], c: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64], c: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b, let .Some(z) = c {
         x + y + z
     } else {
@@ -230,7 +230,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(value) = opt {
         value
     } else {
@@ -254,7 +254,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(value) = opt {
         value
     } else {
@@ -279,7 +279,7 @@ enum Option[T] {
     case None
 }
 
-func test(a: Option[Int], b: Option[Int]) -> Int {
+func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b {
         x + y
     } else {
@@ -305,7 +305,7 @@ mod warnings {
             r#"
 module Main
 
-func test(t: (Int, Int)) -> Int {
+func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     if let (a, b) = t {
         a + b
     } else {
@@ -323,7 +323,7 @@ func test(t: (Int, Int)) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     if let y = x {
         y
     } else {
@@ -354,7 +354,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = opt {
         x + 1
     } else {
@@ -377,7 +377,7 @@ enum Option[T] {
     case None
 }
 
-func test(opt: Option[Int]) -> Int {
+func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = opt {
         x
     } else {

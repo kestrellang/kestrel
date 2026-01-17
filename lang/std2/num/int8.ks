@@ -44,8 +44,8 @@ public struct Int8:
 
     public static var zero: Int8 { Int8(intLiteral: 0) }
     public static var one: Int8 { Int8(intLiteral: 1) }
-    public static var minValue: Int8 { Int8(intLiteral: -128) }
-    public static var maxValue: Int8 { Int8(intLiteral: 127) }
+    public static var minValue: Int8 { -128 }
+    public static var maxValue: Int8 { 127 }
     // public static var bitWidth: Int { 8 }
 
     public init(intLiteral value: lang.i64) {

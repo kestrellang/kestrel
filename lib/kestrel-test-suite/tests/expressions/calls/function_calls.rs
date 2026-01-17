@@ -18,11 +18,11 @@ mod function_calls {
             r#"
 module Main
 
-func getNumber() -> Int {
+func getNumber() -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     getNumber()
 }
 "#,
@@ -47,11 +47,11 @@ func test() -> Int {
             r#"
 module Main
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     double(21)
 }
 "#,
@@ -71,11 +71,11 @@ func test() -> Int {
             r#"
 module Main
 
-func add(x: Int, y: Int) -> Int {
+func add(x: lang.i64, y: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     add(1, 2)
 }
 "#,
@@ -95,11 +95,11 @@ func test() -> Int {
             r#"
 module Main
 
-func combine(a: Int, b: Int, c: Int) -> Int {
+func combine(a: lang.i64, b: lang.i64, c: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     combine(1, 2, 3)
 }
 "#,
@@ -121,11 +121,11 @@ func test() -> Int {
             r#"
 module Main
 
-func greet(with name: String) -> String {
+func greet(with name: lang.str) -> lang.str {
     name
 }
 
-func test() -> String {
+func test() -> lang.str {
     greet(with: "world")
 }
 "#,
@@ -145,11 +145,11 @@ func test() -> String {
             r#"
 module Main
 
-func createPoint(x xVal: Int, y yVal: Int) -> Int {
+func createPoint(x xVal: lang.i64, y yVal: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     createPoint(x: 10, y: 20)
 }
 "#,
@@ -169,11 +169,11 @@ func test() -> Int {
             r#"
 module Main
 
-func format(value: Int, with prefix: String) -> String {
+func format(value: lang.i64, with prefix: lang.str) -> lang.str {
     prefix
 }
 
-func test() -> String {
+func test() -> lang.str {
     format(42, with: "Result: ")
 }
 "#,
@@ -193,11 +193,11 @@ func test() -> String {
             r#"
 module Main
 
-func build(first x: Int, second y: Int, third z: Int) -> Int {
+func build(first x: lang.i64, second y: lang.i64, third z: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     build(first: 1, second: 2, third: 3)
 }
 "#,
@@ -219,15 +219,15 @@ func test() -> Int {
             r#"
 module Main
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     42
 }
 
-func add(x: Int, y: Int) -> Int {
+func add(x: lang.i64, y: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     add(double(1), double(2))
 }
 "#,
@@ -252,11 +252,11 @@ func test() -> Int {
             r#"
 module Main
 
-func id(x: Int) -> Int {
+func id(x: lang.i64) -> lang.i64 {
     x
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     id(id(id(id(42))))
 }
 "#,
@@ -276,15 +276,15 @@ func test() -> Int {
             r#"
 module Main
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     42
 }
 
-func format(value: Int, with prefix: String) -> String {
+func format(value: lang.i64, with prefix: lang.str) -> lang.str {
     prefix
 }
 
-func test() -> String {
+func test() -> lang.str {
     format(double(5), with: "Result: ")
 }
 "#,
@@ -311,12 +311,12 @@ func test() -> String {
             r#"
 module Main
 
-func getString() -> String {
+func getString() -> lang.str {
     "hello"
 }
 
-func test() -> String {
-    let s: String = getString();
+func test() -> lang.str {
+    let s: lang.str = getString();
     s
 }
 "#,
@@ -364,11 +364,11 @@ func test() -> () {
             r#"
 module Main
 
-func add(x: Int, y: Int) -> Int {
+func add(x: lang.i64, y: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     add(1)
 }
 "#,
@@ -383,11 +383,11 @@ func test() -> Int {
             r#"
 module Main
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     42
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     double(1, 2)
 }
 "#,
@@ -402,7 +402,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     undefined()
 }
 "#,
@@ -417,11 +417,11 @@ func test() -> Int {
             r#"
 module Main
 
-func greet(with name: String) -> String {
+func greet(with name: lang.str) -> lang.str {
     name
 }
 
-func test() -> String {
+func test() -> lang.str {
     greet(using: "world")
 }
 "#,
@@ -436,11 +436,11 @@ func test() -> String {
             r#"
 module Main
 
-func format(value: Int, with prefix: String) -> String {
+func format(value: lang.i64, with prefix: lang.str) -> lang.str {
     prefix
 }
 
-func test() -> String {
+func test() -> lang.str {
     format(42, "Result: ")
 }
 "#,

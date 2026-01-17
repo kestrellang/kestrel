@@ -14,7 +14,7 @@ mod function_body {
 
     #[test]
     fn function_without_body_errors() {
-        Test::new("module Test\nfunc missingBody() -> Int").expect(HasError("requires a body"));
+        Test::new("module Test\nfunc missingBody() -> lang.i64").expect(HasError("requires a body"));
     }
 
     #[test]
@@ -23,7 +23,7 @@ mod function_body {
         Test::new(
             r#"module Test
             func valid() { }
-            func invalid() -> Int
+            func invalid() -> lang.i64
         "#,
         )
         .expect(HasError("'invalid' requires a body"))
@@ -66,8 +66,8 @@ mod protocol_methods {
         Test::new(
             r#"module Test
             protocol Hashable {
-                func hash() -> Int
-                func equals(other to: Int) -> Bool
+                func hash() -> lang.i64
+                func equals(other to: lang.i64) -> lang.i1
             }
         "#,
         )
@@ -197,7 +197,7 @@ mod duplicate_symbol {
         Test::new(
             r#"module Test
             func process() { }
-            func process(x: Int) { }
+            func process(x: lang.i64) { }
         "#,
         )
         .expect(Compiles)
@@ -208,8 +208,8 @@ mod duplicate_symbol {
     fn duplicate_type_alias_errors() {
         Test::new(
             r#"module Test
-            type Alias = Int;
-            type Alias = String;
+            type Alias = lang.i64;
+            type Alias = lang.str;
         "#,
         )
         .expect(HasError("duplicate definition of type alias 'Alias'"));
@@ -220,8 +220,7 @@ mod duplicate_symbol {
         Test::new(
             r#"module Test
             struct Record {
-                let name: String
-                let name: Int
+                let name: lang.str                let name: lang.i64
             }
         "#,
         )
@@ -233,11 +232,10 @@ mod duplicate_symbol {
         Test::new(
             r#"module Test
             struct First {
-                let value: Int
+                let value: lang.i64
             }
             struct Second {
-                let value: String
-            }
+                let value: lang.str            }
         "#,
         )
         .expect(Compiles)

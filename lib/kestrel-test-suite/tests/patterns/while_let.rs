@@ -26,15 +26,15 @@ enum Option[T] {
 }
 
 struct Iterator {
-    var current: Int
-    var max: Int
+    var current: lang.i64
+    var max: lang.i64
 }
 
-func next(iter: Iterator) -> Option[Int] {
+func next(iter: Iterator) -> Option[lang.i64] {
     if iter.current < iter.max {
-        Option[Int].Some(value: iter.current)
+        Option[lang.i64].Some(value: iter.current)
     } else {
-        Option[Int].None
+        Option[lang.i64].None
     }
 }
 
@@ -60,9 +60,9 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
-    var current: Option[Int] = .Some(value: 5);
+    var current: Option[lang.i64] = .Some(value: 5);
     while let .Some(n) = current {
         sum = sum + n;
         if n > 0 {
@@ -97,9 +97,9 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var result = 0;
-    var opt: Option[Int] = .Some(value: 42);
+    var opt: Option[lang.i64] = .Some(value: 42);
     while let .Some(value) = opt {
         result = value;
         opt = .None;
@@ -122,8 +122,8 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
-    var opt: Option[Int] = .None;
+func test() -> lang.i64 {
+    var opt: Option[lang.i64] = .None;
     while let .Some(value) = opt {
         opt = .None;
     }
@@ -146,10 +146,10 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
     let multiplier = 2;
-    var opt: Option[Int] = .Some(value: 5);
+    var opt: Option[lang.i64] = .Some(value: 5);
     while let .Some(value) = opt {
         sum = sum + (value * multiplier);
         if value > 0 {
@@ -184,9 +184,9 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var count = 0;
-    var opt: Option[Int] = .Some(value: 100);
+    var opt: Option[lang.i64] = .Some(value: 100);
     while let .Some(value) = opt {
         count = count + 1;
         if count > 5 {
@@ -212,15 +212,15 @@ enum Option[T] {
     case None
 }
 
-func getOption(n: Int) -> Option[Int] {
+func getOption(n: lang.i64) -> Option[lang.i64] {
     if n > 0 {
-        Option[Int].Some(value: n)
+        Option[lang.i64].Some(value: n)
     } else {
-        Option[Int].None
+        Option[lang.i64].None
     }
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
     var n = 10;
     while let .Some(value) = getOption(n) {
@@ -248,8 +248,8 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
-    var opt: Option[Int] = .Some(value: 42);
+func test() -> lang.i64 {
+    var opt: Option[lang.i64] = .Some(value: 42);
     while let .Some(value) = opt {
         if value > 40 {
             return value
@@ -274,11 +274,11 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
-    var outer: Option[Int] = .Some(value: 3);
+    var outer: Option[lang.i64] = .Some(value: 3);
     while let .Some(i) = outer {
-        var inner: Option[Int] = .Some(value: i);
+        var inner: Option[lang.i64] = .Some(value: i);
         while let .Some(j) = inner {
             sum = sum + j;
             if j > 0 {
@@ -320,11 +320,11 @@ enum Option[T] {
 }
 
 func test() {
-    var a: Option[Int] = Option.Some(value: 1);
-    var b: Option[Int] = Option.Some(value: 2);
+    var a: Option[lang.i64] = Option.Some(value: 1);
+    var b: Option[lang.i64] = Option.Some(value: 2);
     while let .Some(x) = a, let .Some(y) = b {
         let _ = x + y;
-        a = Option[Int].None;
+        a = Option[lang.i64].None;
     }
 }
 "#,
@@ -344,7 +344,7 @@ enum Option[T] {
 }
 
 func test() {
-    var opt: Option[Int] = Option.Some(value: 5);
+    var opt: Option[lang.i64] = Option.Some(value: 5);
     while let .Some(x) = opt, x > 0 {
         opt = Option.Some(value: x - 1);
     }
@@ -366,8 +366,8 @@ enum Option[T] {
 }
 
 func test() {
-    var a: Option[Int] = Option.Some(value: 10);
-    var b: Option[Int] = Option.Some(value: 5);
+    var a: Option[lang.i64] = Option.Some(value: 10);
+    var b: Option[lang.i64] = Option.Some(value: 5);
     while let .Some(x) = a, let .Some(y) = b, x > y {
         let _ = x - y;
         a = Option.Some(value: x - 1);
@@ -397,9 +397,9 @@ enum Option[T] {
     case None
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     var sum = 0;
-    var opt: Option[Int] = .Some(value: 10);
+    var opt: Option[lang.i64] = .Some(value: 10);
     while let .Some(n) = opt {
         sum = sum + n;
         if n > 0 {

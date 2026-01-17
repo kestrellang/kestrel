@@ -76,7 +76,7 @@ struct C {
 module Main
 
 struct A {
-    let pair: (Int, B)
+    let pair: (lang.i64, B)
 }
 
 struct B {
@@ -115,7 +115,7 @@ struct Node {
 module Main
 
 struct TreeNode {
-    let value: Int
+    let value: lang.i64
     let children: [TreeNode]
 }
 "#,
@@ -136,8 +136,8 @@ struct TreeNode {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
 struct Line {
@@ -178,7 +178,7 @@ struct Triangle {
 module Main
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 }
 
 struct Middle {
@@ -221,7 +221,7 @@ mod constraint_cycles {
 module Main
 
 protocol Container[T] {
-    func get() -> T
+    func read() -> T
 }
 
 func swap[T, U](a: T, b: U) -> () where T: Container[U], U: Container[T] {
@@ -240,11 +240,11 @@ func swap[T, U](a: T, b: U) -> () where T: Container[U], U: Container[T] {
 module Main
 
 protocol Printable {
-    func print() -> String
+    func print() -> lang.str
 }
 
 protocol Comparable {
-    func compare() -> Int
+    func compare() -> lang.i64
 }
 
 func process[T, U](a: T, b: U) -> () where T: Printable, U: Comparable {
@@ -265,7 +265,7 @@ func process[T, U](a: T, b: U) -> () where T: Printable, U: Comparable {
 module Main
 
 protocol Hashable {
-    func hash() -> Int
+    func hash() -> lang.i64
 }
 
 struct Set[T] where T: Hashable {
@@ -289,7 +289,7 @@ mod protocol_inheritance_cycles {
 module Main
 
 protocol Recursive: Recursive {
-    func method() -> Int
+    func method() -> lang.i64
 }
 "#,
         )
@@ -304,11 +304,11 @@ protocol Recursive: Recursive {
 module Main
 
 protocol A: B {
-    func methodA() -> Int
+    func methodA() -> lang.i64
 }
 
 protocol B: A {
-    func methodB() -> Int
+    func methodB() -> lang.i64
 }
 "#,
         )
@@ -323,15 +323,15 @@ protocol B: A {
 module Main
 
 protocol A: B {
-    func a() -> Int
+    func a() -> lang.i64
 }
 
 protocol B: C {
-    func b() -> Int
+    func b() -> lang.i64
 }
 
 protocol C: A {
-    func c() -> Int
+    func c() -> lang.i64
 }
 "#,
         )
@@ -346,15 +346,15 @@ protocol C: A {
 module Main
 
 protocol Base {
-    func base() -> Int
+    func base() -> lang.i64
 }
 
 protocol Middle: Base {
-    func middle() -> Int
+    func middle() -> lang.i64
 }
 
 protocol Derived: Middle {
-    func derived() -> Int
+    func derived() -> lang.i64
 }
 "#,
         )

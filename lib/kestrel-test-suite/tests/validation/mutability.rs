@@ -11,8 +11,8 @@ mod local_variables {
     fn assign_to_var_succeeds() {
         Test::new(
             r#"module Test
-            func test() -> Int {
-                var x: Int = 5;
+            func test() -> lang.i64 {
+                var x: lang.i64 = 5;
                 x = 10;
                 x
             }
@@ -31,8 +31,8 @@ mod local_variables {
     fn assign_to_let_fails() {
         Test::new(
             r#"module Test
-            func test() -> Int {
-                let x: Int = 5;
+            func test() -> lang.i64 {
+                let x: lang.i64 = 5;
                 x = 10;
                 x
             }
@@ -46,7 +46,7 @@ mod local_variables {
         // Parameters are immutable by default
         Test::new(
             r#"module Test
-            func test(x: Int) -> Int {
+            func test(x: lang.i64) -> lang.i64 {
                 x = 10;
                 x
             }
@@ -59,8 +59,8 @@ mod local_variables {
     fn multiple_assignments_to_var() {
         Test::new(
             r#"module Test
-            func test() -> Int {
-                var x: Int = 1;
+            func test() -> lang.i64 {
+                var x: lang.i64 = 1;
                 x = 2;
                 x = 3;
                 x = 4;
@@ -85,10 +85,10 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var p = Point(x: 1, y: 2);
                 p.x = 10;
                 p.x
@@ -109,10 +109,10 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Point {
-                let x: Int
-                var y: Int
+                let x: lang.i64
+                var y: lang.i64
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var p = Point(x: 1, y: 2);
                 p.x = 10;
                 p.x
@@ -133,10 +133,10 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let p = Point(x: 1, y: 2);
                 p.x = 10;
                 p.x
@@ -157,12 +157,12 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Inner {
-                var value: Int
+                var value: lang.i64
             }
             struct Outer {
                 var inner: Inner
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var o = Outer(inner: Inner(value: 1));
                 o.inner.value = 10;
                 o.inner.value
@@ -188,12 +188,12 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Inner {
-                let value: Int
+                let value: lang.i64
             }
             struct Outer {
                 var inner: Inner
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var o = Outer(inner: Inner(value: 1));
                 o.inner.value = 10;
                 o.inner.value
@@ -219,12 +219,12 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Inner {
-                var value: Int
+                var value: lang.i64
             }
             struct Outer {
                 let inner: Inner
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 var o = Outer(inner: Inner(value: 1));
                 o.inner.value = 10;
                 o.inner.value
@@ -250,12 +250,12 @@ mod field_access {
         Test::new(
             r#"module Test
             struct Inner {
-                var value: Int
+                var value: lang.i64
             }
             struct Outer {
                 var inner: Inner
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 let o = Outer(inner: Inner(value: 1));
                 o.inner.value = 10;
                 o.inner.value
@@ -285,12 +285,11 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Mixed {
-                let id: Int
-                let name: String
-                var value: Int
-                var count: Int
+                let id: lang.i64
+                let name: lang.str                var value: lang.i64
+                var count: lang.i64
 
-                init(id: Int, name: String, value: Int, count: Int) {
+                init(id: lang.i64, name: lang.str, value: lang.i64, count: lang.i64) {
                     self.id = id;
                     self.name = name;
                     self.value = value;
@@ -308,10 +307,10 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Immutable {
-                let x: Int
-                let y: Int
+                let x: lang.i64
+                let y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -327,10 +326,10 @@ mod initializers {
         Test::new(
             r#"module Test
             struct Mutable {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
 
-                init(x: Int, y: Int) {
+                init(x: lang.i64, y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -348,7 +347,7 @@ mod invalid_targets {
     fn assign_to_literal_fails() {
         Test::new(
             r#"module Test
-            func test() -> Int {
+            func test() -> lang.i64 {
                 5 = 10;
                 0
             }
@@ -366,8 +365,8 @@ mod invalid_targets {
     fn assign_to_function_call_result_fails() {
         Test::new(
             r#"module Test
-            func getValue() -> Int { 5 }
-            func test() -> Int {
+            func getValue() -> lang.i64 { 5 }
+            func test() -> lang.i64 {
                 getValue() = 10;
                 0
             }
@@ -391,10 +390,10 @@ mod invalid_targets {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
+                var x: lang.i64
+                var y: lang.i64
             }
-            func test() -> Int {
+            func test() -> lang.i64 {
                 Point(x: 1, y: 2) = Point(x: 3, y: 4);
                 0
             }
@@ -412,7 +411,7 @@ mod invalid_targets {
     fn assign_to_binary_expression_fails() {
         Test::new(
             r#"module Test
-            func test() -> Int {
+            func test() -> lang.i64 {
                 (5 + 10) = 20;
                 0
             }
@@ -432,7 +431,7 @@ mod assignment_validation {
             r#"
 module Main
 struct S {
-    let x: Int
+    let x: lang.i64
 }
 func test() {
     var s = S(x: 1);
@@ -450,7 +449,7 @@ func test() {
             r#"
 module Main
 struct S {
-    var x: Int
+    var x: lang.i64
 }
 func test() {
     let s = S(x: 1);

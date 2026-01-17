@@ -21,6 +21,11 @@ pub struct MemberResolution {
     /// Used to create constraints between argument types and parameter types
     /// during type inference, enabling proper type inference for literals.
     pub parameters: Vec<Ty>,
+    /// True if the method's return type was `Self` before substitution.
+    /// Used to enable bidirectional type inference: when a method returns Self,
+    /// the expected result type can propagate back to constrain the receiver type.
+    /// This enables patterns like `-32768` to infer as Int16 when context expects Int16.
+    pub returns_self: bool,
 }
 
 /// Error when member resolution fails.
@@ -144,5 +149,15 @@ pub trait TypeOracle {
     /// Returns Float64 by default.
     fn default_float_type(&self, span: Span) -> Ty {
         Ty::float(FloatBits::F64, span)
+    }
+
+    /// Get the default type for string literals when type is ambiguous.
+    ///
+    /// Returns the `String` struct type if available in the stdlib,
+    /// otherwise falls back to the primitive string type.
+    fn default_string_type(&self, span: Span) -> Ty {
+        // Default implementation uses primitive string type.
+        // Implementations with access to stdlib can override to return the String struct.
+        Ty::string(span)
     }
 }

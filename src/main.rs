@@ -18,9 +18,9 @@ struct Cli {
     #[arg(global = true)]
     files: Vec<String>,
 
-    /// Show semantic tree after analysis
-    #[arg(long, global = true)]
-    tree: bool,
+    /// Show semantic tree after analysis (use --tree=full for detailed output)
+    #[arg(long, global = true, value_name = "MODE", num_args = 0..=1, default_missing_value = "summary")]
+    tree: Option<String>,
 
     /// Show symbol table after analysis
     #[arg(long, global = true)]
@@ -109,7 +109,7 @@ fn get_target_config(target: Option<&str>) -> Result<TargetConfig, ExitCode> {
 
 fn run_check(
     files: &[String],
-    show_tree: bool,
+    show_tree: Option<&str>,
     show_symbols: bool,
     show_execution_graph: bool,
     verbose: bool,
@@ -139,9 +139,10 @@ fn run_check(
     let compilation = builder.build();
 
     // Show results
-    if show_tree {
+    if let Some(mode) = show_tree {
         if let Some(model) = compilation.semantic_model() {
-            model.print_semantic_model();
+            let full = mode == "full";
+            model.print_semantic_model(full);
         }
     }
 
@@ -380,12 +381,12 @@ fn main() -> ExitCode {
     match cli.command {
         Some(Commands::Check { files }) => run_check(
             &files,
-            cli.tree,
+            cli.tree.as_deref(),
             cli.symbols,
             cli.execution_graph,
             cli.verbose,
         ),
-        Some(Commands::Parse { files }) => run_parse(&files, cli.tree),
+        Some(Commands::Parse { files }) => run_parse(&files, cli.tree.is_some()),
         Some(Commands::Run {
             file,
             libraries,
@@ -429,7 +430,7 @@ fn main() -> ExitCode {
             } else {
                 run_check(
                     &cli.files,
-                    cli.tree,
+                    cli.tree.as_deref(),
                     cli.symbols,
                     cli.execution_graph,
                     cli.verbose,

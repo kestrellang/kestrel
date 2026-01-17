@@ -224,7 +224,7 @@ mod negative {
             struct MyInt: FFISafe {}
 
             struct NotFFISafe {
-                let value: Int
+                let value: lang.i64
             }
 
             @extern(.C)
@@ -244,7 +244,7 @@ mod negative {
             struct MyInt: FFISafe {}
 
             struct NotFFISafe {
-                let value: Int
+                let value: lang.i64
             }
 
             @extern(.C)
@@ -294,7 +294,7 @@ mod negative {
             import Prelude
 
             struct NotFFISafe {
-                let value: Int
+                let value: lang.i64
             }
 
             struct BadStruct: FFISafe {

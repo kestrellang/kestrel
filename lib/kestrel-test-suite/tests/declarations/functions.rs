@@ -17,7 +17,7 @@ mod basic {
 
     #[test]
     fn function_with_return_type() {
-        Test::new("module Test\nfunc getValue() -> Int { 42 }")
+        Test::new("module Test\nfunc getValue() -> lang.i64 { 42 }")
             .expect(Compiles)
             .expect(
                 Symbol::new("getValue")
@@ -29,7 +29,7 @@ mod basic {
 
     #[test]
     fn function_with_parameters() {
-        Test::new("module Test\nfunc add(a: Int, b: Int) -> Int { a + b }")
+        Test::new("module Test\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }")
             .expect(Compiles)
             .expect(
                 Symbol::new("add")
@@ -91,8 +91,8 @@ mod overloading {
         Test::new(
             r#"module Test
             func process() { }
-            func process(x: Int) { }
-            func process(x: Int, y: Int) { }
+            func process(x: lang.i64) { }
+            func process(x: lang.i64, y: lang.i64) { }
         "#,
         )
         .expect(Compiles)
@@ -103,8 +103,8 @@ mod overloading {
     fn overload_by_parameter_type() {
         Test::new(
             r#"module Test
-            func convert(x: Int) -> String { "int" }
-            func convert(x: Float) -> String { "float" }
+            func convert(x: lang.i64) -> lang.str { "lang.i64" }
+            func convert(x: lang.f64) -> lang.str { "float" }
         "#,
         )
         .expect(Compiles)
@@ -116,8 +116,8 @@ mod overloading {
     fn overload_by_label() {
         Test::new(
             r#"module Test
-            func send(to recipient: String) { }
-            func send(from sender: String) { }
+            func send(to recipient: lang.str) { }
+            func send(from sender: lang.str) { }
         "#,
         )
         .expect(Compiles)
@@ -153,9 +153,9 @@ mod in_structs {
         Test::new(
             r#"module Test
             struct Calculator {
-                func add(a: Int, b: Int) -> Int { a + b }
-                func subtract(a: Int, b: Int) -> Int { a - b }
-                func multiply(a: Int, b: Int) -> Int { a * b }
+                func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
+                func subtract(a: lang.i64, b: lang.i64) -> lang.i64 { a - b }
+                func multiply(a: lang.i64, b: lang.i64) -> lang.i64 { a * b }
             }
         "#,
         )

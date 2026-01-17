@@ -15,11 +15,11 @@ mod field_access {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func getX(p: Point) -> Int {
+func getX(p: Point) -> lang.i64 {
     p.x
 }
 "#,
@@ -44,8 +44,8 @@ func getX(p: Point) -> Int {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
 struct Line {
@@ -53,7 +53,7 @@ struct Line {
     let end: Point
 }
 
-func getStartX(line: Line) -> Int {
+func getStartX(line: Line) -> lang.i64 {
     line.start.x
 }
 "#,
@@ -83,15 +83,15 @@ func getStartX(line: Line) -> Int {
 module Main
 
 struct Point {
-    public let x: Int
-    public let y: Int
+    public let x: lang.i64
+    public let y: lang.i64
 }
 
-func getX(p: Point) -> Int {
+func getX(p: Point) -> lang.i64 {
     p.x
 }
 
-func getY(p: Point) -> Int {
+func getY(p: Point) -> lang.i64 {
     p.y
 }
 "#,
@@ -106,12 +106,12 @@ func getY(p: Point) -> Int {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func example(p: Point) -> Int {
-    let val: Int = p.x;
+func example(p: Point) -> lang.i64 {
+    let val: lang.i64 = p.x;
     val
 }
 "#,
@@ -136,11 +136,11 @@ func example(p: Point) -> Int {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func getZ(p: Point) -> Int {
+func getZ(p: Point) -> lang.i64 {
     p.z
 }
 "#,
@@ -154,7 +154,7 @@ func getZ(p: Point) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     x.foo
 }
 "#,
@@ -169,10 +169,10 @@ func test(x: Int) -> Int {
 module Main
 
 struct Secret {
-    private let hidden: Int
+    private let hidden: lang.i64
 }
 
-func peek(s: Secret) -> Int {
+func peek(s: Secret) -> lang.i64 {
     s.hidden
 }
 "#,
@@ -187,11 +187,11 @@ func peek(s: Secret) -> Int {
 module Main
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func sum(p: Point) -> Int {
+func sum(p: Point) -> lang.i64 {
     p.x + p.y
 }
 "#,
@@ -208,5 +208,4 @@ func sum(p: Point) -> Int {
                 .has(Behavior::ParameterCount(1)),
         );
     }
-
 }

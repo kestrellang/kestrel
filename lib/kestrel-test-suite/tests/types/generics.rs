@@ -61,7 +61,7 @@ mod basic_parsing {
         Test::new(
             r#"module Test
             protocol Container[T] {
-                func get() -> ()
+                func read() -> ()
             }
         "#,
         )
@@ -106,7 +106,7 @@ mod defaults {
 
     #[test]
     fn type_param_with_default() {
-        Test::new("module Test\nstruct Map[K, V = String] {}")
+        Test::new("module Test\nstruct Map[K, V = lang.str] {}")
             .expect(Compiles)
             .expect(
                 Symbol::new("Map")
@@ -118,7 +118,7 @@ mod defaults {
 
     #[test]
     fn all_params_with_defaults() {
-        Test::new("module Test\nstruct Wrapper[T = Int] {}")
+        Test::new("module Test\nstruct Wrapper[T = lang.i64] {}")
             .expect(Compiles)
             .expect(
                 Symbol::new("Wrapper")
@@ -133,8 +133,8 @@ mod defaults {
         // Even with defaults, an explicit type argument list must provide full arity.
         Test::new(
             r#"module Test
-            struct Map[K, V = String] { }
-            type IntMap = Map[Int];
+            struct Map[K, V = lang.str] { }
+            type IntMap = Map[lang.i64];
         "#,
         )
         .expect(HasError("too few type arguments"));
@@ -145,8 +145,8 @@ mod defaults {
         // Can still provide explicit value for defaulted parameter
         Test::new(
             r#"module Test
-            struct Map[K, V = String] { }
-            type IntToInt = Map[Int, Int];
+            struct Map[K, V = lang.str] { }
+            type IntToInt = Map[lang.i64, lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -158,9 +158,9 @@ mod defaults {
     fn multiple_defaults() {
         Test::new(
             r#"module Test
-            struct Config[A, B = Int, C = String] { }
-            type SimpleConfig = Config[Bool];
-            type CustomConfig = Config[Bool, Float];
+            struct Config[A, B = lang.i64, C = lang.str] { }
+            type SimpleConfig = Config[lang.i1];
+            type CustomConfig = Config[lang.i1, lang.f64];
         "#,
         )
         .expect(HasError("too few type arguments"));
@@ -184,14 +184,14 @@ mod validation {
 
     #[test]
     fn default_ordering_error() {
-        Test::new("module Test\nstruct Bad[T = Int, U] {}")
+        Test::new("module Test\nstruct Bad[T = lang.i64, U] {}")
             .expect(HasError("with default must come after"));
     }
 
     #[test]
     fn default_ordering_valid() {
         // This should compile - defaults come after non-defaults
-        Test::new("module Test\nstruct Good[T, U = Int] {}")
+        Test::new("module Test\nstruct Good[T, U = lang.i64] {}")
             .expect(Compiles)
             .expect(Symbol::new("Good").has(Behavior::TypeParamCount(2)));
     }
@@ -304,7 +304,7 @@ mod where_clause {
         // Test that where clause with type alias instead of protocol produces error
         Test::new(
             r#"module Test
-            type MyAlias = Int;
+            type MyAlias = lang.i64;
             struct Container[T] where T: MyAlias { }
         "#,
         )
@@ -460,11 +460,11 @@ mod instantiation {
 
     #[test]
     fn nested_generic_types() {
-        // Test nested generic type usage: Box[Box[Int]]
+        // Test nested generic type usage: Box[Box[lang.i64]]
         Test::new(
             r#"module Test
             struct Box[T] { }
-            type NestedBox = Box[Box[Int]];
+            type NestedBox = Box[Box[lang.i64]];
         "#,
         )
         .expect(Compiles)
@@ -482,7 +482,7 @@ mod instantiation {
         Test::new(
             r#"module Test
             struct Map[K, V] { }
-            type StringToInt = Map[String, Int];
+            type StringToInt = Map[lang.str, lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -581,7 +581,7 @@ mod arity_errors {
         Test::new(
             r#"module Test
             struct Map[K, V] { }
-            type Bad = Map[Int];
+            type Bad = Map[lang.i64];
         "#,
         )
         .expect(HasError("too few type arguments"));
@@ -593,7 +593,7 @@ mod arity_errors {
         Test::new(
             r#"module Test
             struct Box[T] { }
-            type Bad = Box[Int, String];
+            type Bad = Box[lang.i64, lang.str];
         "#,
         )
         .expect(HasError("too many type arguments"));
@@ -617,8 +617,8 @@ mod arity_errors {
         // Even with defaults, an explicit type argument list must provide full arity.
         Test::new(
             r#"module Test
-            struct Map[K, V = String] { }
-            type IntToInt = Map[Int, Int];
+            struct Map[K, V = lang.str] { }
+            type IntToInt = Map[lang.i64, lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -634,7 +634,7 @@ mod arity_errors {
     fn raw_reference_infers_all_type_arguments_even_with_defaults() {
         Test::new(
             r#"module Test
-            struct Map[K, V = String] { }
+            struct Map[K, V = lang.str] { }
             type Inferred = Map;
         "#,
         )
@@ -644,11 +644,11 @@ mod arity_errors {
 
     #[test]
     fn too_few_even_with_defaults() {
-        // Triple[A, B, C = Int] requires at least 2 type arguments
+        // Triple[A, B, C = lang.i64] requires at least 2 type arguments
         Test::new(
             r#"module Test
-            struct Triple[A, B, C = Int] { }
-            type Bad = Triple[Int];
+            struct Triple[A, B, C = lang.i64] { }
+            type Bad = Triple[lang.i64];
         "#,
         )
         .expect(HasError("too few type arguments"));
@@ -663,7 +663,7 @@ mod non_generic_errors {
         Test::new(
             r#"module Test
             struct Plain { }
-            type Bad = Plain[Int];
+            type Bad = Plain[lang.i64];
         "#,
         )
         .expect(HasError("does not accept type arguments"));
@@ -673,8 +673,8 @@ mod non_generic_errors {
     fn type_args_on_non_generic_type_alias() {
         Test::new(
             r#"module Test
-            type Simple = Int;
-            type Bad = Simple[String];
+            type Simple = lang.i64;
+            type Bad = Simple[lang.str];
         "#,
         )
         .expect(HasError("does not accept type arguments"));
@@ -684,7 +684,7 @@ mod non_generic_errors {
     fn type_args_on_primitive() {
         Test::new(
             r#"module Test
-            type Bad = Int[String];
+            type Bad = lang.i64[lang.str];
         "#,
         )
         .expect(HasError("does not accept type arguments"));
@@ -752,11 +752,11 @@ mod type_alias_resolution {
 
     #[test]
     fn identity_type_alias_instantiated() {
-        // Using Identity[Int] should work
+        // Using Identity[lang.i64] should work
         Test::new(
             r#"module Test
             type Identity[T] = T;
-            type IntAlias = Identity[Int];
+            type IntAlias = Identity[lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -774,7 +774,7 @@ mod type_alias_resolution {
         Test::new(
             r#"module Test
             type Pair[T] = (T, T);
-            type IntPair = Pair[Int];
+            type IntPair = Pair[lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -793,7 +793,7 @@ mod type_alias_resolution {
             r#"module Test
             struct Box[T] { }
             type Boxed[T] = Box[T];
-            type BoxedInt = Boxed[Int];
+            type BoxedInt = Boxed[lang.i64];
         "#,
         )
         .expect(Compiles)
@@ -816,7 +816,7 @@ mod type_alias_resolution {
         Test::new(
             r#"module Test
             type Transformer[A, B] = (A) -> B;
-            type IntToString = Transformer[Int, String];
+            type IntToString = Transformer[lang.i64, lang.str];
         "#,
         )
         .expect(Compiles)
@@ -860,7 +860,7 @@ mod type_alias_resolution {
     fn type_param_in_nested_tuple() {
         Test::new(
             r#"module Test
-            type Nested[T] = ((T, Int), (String, T));
+            type Nested[T] = ((T, lang.i64), (lang.str, T));
         "#,
         )
         .expect(Compiles)
@@ -1139,7 +1139,7 @@ mod edge_cases {
         Test::new(
             r#"module Test
             struct Box[T] { }
-            type Deep = Box[Box[Box[Box[Int]]]];
+            type Deep = Box[Box[Box[Box[lang.i64]]]];
         "#,
         )
         .expect(Compiles)
@@ -1158,8 +1158,8 @@ mod edge_cases {
             struct Option[T] {
                 let value: T
             }
-            type OptionalInt = Option[Int];
-            type OptionalOptional = Option[Option[String]];
+            type OptionalInt = Option[lang.i64];
+            type OptionalOptional = Option[Option[lang.str]];
         "#,
         )
         .expect(Compiles)
@@ -1298,12 +1298,12 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Equatable {
-                func equals(other: Self) -> Bool
+                func equals(other: Self) -> lang.i1
             }
             protocol Comparable: Equatable {
-                func lessThan(other: Self) -> Bool
+                func lessThan(other: Self) -> lang.i1
             }
-            func checkEqual[T](a: T, b: T) -> Bool where T: Comparable {
+            func checkEqual[T](a: T, b: T) -> lang.i1 where T: Comparable {
                 return a.equals(b)
             }
         "#,
@@ -1317,12 +1317,12 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol P1 {
-                func doIt() -> Int
+                func doIt() -> lang.i64
             }
             protocol P2 {
-                func doIt() -> Int
+                func doIt() -> lang.i64
             }
-            func ambig[T](x: T) -> Int where T: P1, T: P2 {
+            func ambig[T](x: T) -> lang.i64 where T: P1, T: P2 {
                 return x.doIt()
             }
             func main() {}
@@ -1337,7 +1337,7 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Container[T] {
-                func get() -> T
+                func read() -> T
             }
             func extract[C, T](c: C) -> T where C: Container[T] {
                 return c.get()
@@ -1354,13 +1354,13 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             struct Point {
-                var x: Int
-                var y: Int
-                func getX() -> Int {
+                var x: lang.i64
+                var y: lang.i64
+                func getX() -> lang.i64 {
                     return x
                 }
             }
-            func usePoint(p: Point) -> Int {
+            func usePoint(p: Point) -> lang.i64 {
                 return p.getX()
             }
         "#,
@@ -1436,9 +1436,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Describable {
-                func describe() -> String
+                func describe() -> lang.str
             }
-            func getDescription[T](x: T) -> String where T: Describable {
+            func getDescription[T](x: T) -> lang.str where T: Describable {
                 return x.describe()
             }
             func main() {}
@@ -1471,14 +1471,14 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol A {
-                func doA() -> Int
+                func doA() -> lang.i64
             }
             protocol B {
-                func doB() -> Int
+                func doB() -> lang.i64
             }
-            func both[T](x: T) -> Int where T: A and B {
-                let a: Int = x.doA();
-                let b: Int = x.doB();
+            func both[T](x: T) -> lang.i64 where T: A and B {
+                let a: lang.i64 = x.doA();
+                let b: lang.i64 = x.doB();
                 return a
             }
             func main() {}
@@ -1493,12 +1493,12 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol A {
-                func same() -> Int
+                func same() -> lang.i64
             }
             protocol B {
-                func same() -> Int
+                func same() -> lang.i64
             }
-            func ambig[T](x: T) -> Int where T: A and B {
+            func ambig[T](x: T) -> lang.i64 where T: A and B {
                 return x.same()
             }
             func main() {}
@@ -1513,9 +1513,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Printable {
-                func print() -> String
+                func print() -> lang.str
             }
-            func outer[T](x: T) -> String where T: Printable {
+            func outer[T](x: T) -> lang.str where T: Printable {
                 return x.print()
             }
             func main() {}
@@ -1530,12 +1530,12 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol A {
-                func methodA() -> Int
+                func methodA() -> lang.i64
             }
             protocol B {
-                func methodB() -> Int
+                func methodB() -> lang.i64
             }
-            func wrong[T](x: T) -> Int where T: A, T: B {
+            func wrong[T](x: T) -> lang.i64 where T: A, T: B {
                 return x.methodC()
             }
             func main() {}
@@ -1584,15 +1584,15 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol A {
-                func common() -> Int
+                func common() -> lang.i64
             }
             protocol B {
-                func common() -> Int
+                func common() -> lang.i64
             }
             protocol C {
-                func common() -> Int
+                func common() -> lang.i64
             }
-            func threeWay[T](x: T) -> Int where T: A, T: B, T: C {
+            func threeWay[T](x: T) -> lang.i64 where T: A, T: B, T: C {
                 return x.common()
             }
             func main() {}
@@ -1607,15 +1607,15 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Base {
-                func baseMethod() -> Int
+                func baseMethod() -> lang.i64
             }
             protocol Child1: Base {
-                func child1Method() -> Int
+                func child1Method() -> lang.i64
             }
             protocol Child2: Base {
-                func child2Method() -> Int
+                func child2Method() -> lang.i64
             }
-            func useBase[T](x: T) -> Int where T: Child1, T: Child2 {
+            func useBase[T](x: T) -> lang.i64 where T: Child1, T: Child2 {
                 return x.baseMethod()
             }
             func main() {}
@@ -1631,9 +1631,9 @@ mod constraint_enforcement {
             r#"module Test
             protocol Empty {}
             protocol HasMethod {
-                func doIt() -> Int
+                func doIt() -> lang.i64
             }
-            func useEmpty[T](x: T) -> Int where T: Empty, T: HasMethod {
+            func useEmpty[T](x: T) -> lang.i64 where T: Empty, T: HasMethod {
                 return x.doIt()
             }
             func main() {}
@@ -1669,7 +1669,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let y: Int = identity[Int](42);
+                let y: lang.i64 = identity[lang.i64](42);
             }
         "#,
         )
@@ -1683,7 +1683,7 @@ mod constraint_enforcement {
             r#"module Test
             func pair[A, B](a: A, b: B) -> A { return a }
             func main() {
-                let x: Int = pair[Int, String](1, "hello");
+                let x: lang.i64 = pair[lang.i64, lang.str](1, "hello");
             }
         "#,
         )
@@ -1717,7 +1717,7 @@ mod constraint_enforcement {
             r#"module Test
             func wrap[T](x: T) -> T { return x }
             func main() {
-                let x: Int = wrap[Int](wrap[Int](42));
+                let x: lang.i64 = wrap[lang.i64](wrap[lang.i64](42));
             }
         "#,
         )
@@ -1751,11 +1751,11 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Valuable {
-                func value() -> Int
+                func value() -> lang.i64
             }
-            func sumValues[T](a: T, b: T) -> Int where T: Valuable {
-                let x: Int = a.value();
-                let y: Int = b.value();
+            func sumValues[T](a: T, b: T) -> lang.i64 where T: Valuable {
+                let x: lang.i64 = a.value();
+                let y: lang.i64 = b.value();
                 return x
             }
             func main() {}
@@ -1770,9 +1770,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Unused {
-                func unused() -> Int
+                func unused() -> lang.i64
             }
-            func ignoreConstraint[T](x: Int) -> Int where T: Unused {
+            func ignoreConstraint[T](x: lang.i64) -> lang.i64 where T: Unused {
                 return x
             }
             func main() {}
@@ -1787,9 +1787,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Calculator {
-                func calculate(left: Int, right: Int) -> Int
+                func calculate(left: lang.i64, right: lang.i64) -> lang.i64
             }
-            func doCalc[T](calc: T) -> Int where T: Calculator {
+            func doCalc[T](calc: T) -> lang.i64 where T: Calculator {
                 return calc.calculate(1, 2)
             }
             func main() {}
@@ -1804,9 +1804,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Calculator {
-                func calculate(left left: Int, right right: Int) -> Int
+                func calculate(left left: lang.i64, right right: lang.i64) -> lang.i64
             }
-            func doCalc[T](calc: T) -> Int where T: Calculator {
+            func doCalc[T](calc: T) -> lang.i64 where T: Calculator {
                 return calc.calculate(left: 1, right: 2)
             }
             func main() {}
@@ -1821,9 +1821,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Calculator {
-                func calculate(left left: Int, right right: Int) -> Int
+                func calculate(left left: lang.i64, right right: lang.i64) -> lang.i64
             }
-            func doCalc[T](calc: T) -> Int where T: Calculator {
+            func doCalc[T](calc: T) -> lang.i64 where T: Calculator {
                 return calc.calculate(a: 1, b: 2)
             }
             func main() {}
@@ -1842,7 +1842,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let y: Int = identity[Int, String](42);
+                let y: lang.i64 = identity[lang.i64, lang.str](42);
             }
         "#,
         )
@@ -1854,9 +1854,9 @@ mod constraint_enforcement {
         // Type args on non-generic function should error
         Test::new(
             r#"module Test
-            func foo(x: Int) -> Int { return x }
+            func foo(x: lang.i64) -> lang.i64 { return x }
             func main() {
-                let y: Int = foo[Int](42);
+                let y: lang.i64 = foo[lang.i64](42);
             }
         "#,
         )
@@ -1865,12 +1865,12 @@ mod constraint_enforcement {
 
     #[test]
     fn explicit_type_arg_conflicts_with_inferred() {
-        // identity[String](42) - 42 is Int but T=String
+        // identity[lang.str](42) - 42 is lang.i64 but T=String
         Test::new(
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let y: Int = identity[String](42);
+                let y: lang.i64 = identity[lang.str](42);
             }
         "#,
         )
@@ -1879,13 +1879,13 @@ mod constraint_enforcement {
 
     #[test]
     fn explicit_type_arg_return_type_mismatch() {
-        // identity[String] returns String, but assigned to Int
+        // identity[lang.str] returns String, but assigned to lang.i64
         Test::new(
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let f = identity[String];
-                let x: Int = f("hello");
+                let f = identity[lang.str];
+                let x: lang.i64 = f("hello");
             }
         "#,
         )
@@ -1894,14 +1894,14 @@ mod constraint_enforcement {
 
     #[test]
     fn generic_struct_init_wrong_field_type() {
-        // Box[Int] initialized with String value
+        // Box[lang.i64] initialized with String value
         Test::new(
             r#"module Test
             struct Box[T] {
                 let value: T
             }
             func main() {
-                let b: Box[Int] = Box[Int](value: "hello");
+                let b: Box[lang.i64] = Box[lang.i64](value: "hello");
             }
         "#,
         )
@@ -1915,7 +1915,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let y: Int = identity[](42);
+                let y: lang.i64 = identity[](42);
             }
         "#,
         )
@@ -1929,7 +1929,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let y: Int = identity[DoesNotExist](42);
+                let y: lang.i64 = identity[DoesNotExist](42);
             }
         "#,
         )
@@ -1938,12 +1938,12 @@ mod constraint_enforcement {
 
     #[test]
     fn explicit_type_args_on_variable() {
-        // x[Int] where x is just an Int variable
+        // x[lang.i64] where x is just an lang.i64 variable
         Test::new(
             r#"module Test
             func main() {
-                let x: Int = 42;
-                let y = x[Int];
+                let x: lang.i64 = 42;
+                let y = x[lang.i64];
             }
         "#,
         )
@@ -1952,12 +1952,12 @@ mod constraint_enforcement {
 
     #[test]
     fn explicit_type_arg_not_substituted() {
-        // identity[Int](1) + identity[Int](2) should work, but types show as T
+        // identity[lang.i64](1) + identity[lang.i64](2) should work, but types show as T
         Test::new(
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let x: Int = identity[Int](1) + identity[Int](2);
+                let x: lang.i64 = identity[lang.i64](1) + identity[lang.i64](2);
             }
         "#,
         )
@@ -1971,7 +1971,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let x: (Int, Int) = identity[(Int, Int)]((1, 2));
+                let x: (lang.i64, lang.i64) = identity[(lang.i64, lang.i64)]((1, 2));
             }
         "#,
         )
@@ -1984,9 +1984,9 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             func identity[T](x: T) -> T { return x }
-            func myFunc(x: Int) -> Int { return x }
+            func myFunc(x: lang.i64) -> lang.i64 { return x }
             func main() {
-                let f: (Int) -> Int = identity[(Int) -> Int](myFunc);
+                let f: (lang.i64) -> lang.i64 = identity[(lang.i64) -> lang.i64](myFunc);
             }
         "#,
         )
@@ -1995,7 +1995,7 @@ mod constraint_enforcement {
 
     #[test]
     fn explicit_type_arg_return_type_assigned_wrong() {
-        // wrap[Int] returns Box[Int] but assigned to Box[String]
+        // wrap[lang.i64] returns Box[lang.i64] but assigned to Box[lang.str]
         Test::new(
             r#"module Test
             struct Box[T] {
@@ -2003,7 +2003,7 @@ mod constraint_enforcement {
             }
             func wrap[T](x: T) -> Box[T] { return Box[T](value: x) }
             func main() {
-                let b: Box[String] = wrap[Int](42);
+                let b: Box[lang.str] = wrap[lang.i64](42);
             }
         "#,
         )
@@ -2017,7 +2017,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let arr: [Int] = identity[[Int]]([1, 2, 3]);
+                let arr: [lang.i64] = identity[[lang.i64]]([1, 2, 3]);
             }
         "#,
         )
@@ -2031,7 +2031,7 @@ mod constraint_enforcement {
             r#"module Test
             func pair[A, B](a: A, b: B) -> A { return a }
             func main() {
-                let x: Int = pair[Int](1, "hello");
+                let x: lang.i64 = pair[lang.i64](1, "hello");
             }
         "#,
         )
@@ -2044,10 +2044,10 @@ mod constraint_enforcement {
         Test::new(
             r#"module Test
             protocol Mapper {
-                func map[U](x: Int) -> U
+                func map[U](x: lang.i64) -> U
             }
-            func apply[T](x: T) -> Int where T: Mapper {
-                return x.map[Int](1)
+            func apply[T](x: T) -> lang.i64 where T: Mapper {
+                return x.map[lang.i64](1)
             }
             func main() {}
         "#,

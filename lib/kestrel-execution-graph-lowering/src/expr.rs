@@ -1609,8 +1609,11 @@ fn lower_array_literal_init_call(
 /// ExpressibleBy* protocols), generates an init call like:
 ///   Int64.init(intLiteral: <immediate value>)
 fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expression) -> Value {
+    // Expand type aliases before matching - type aliases should be transparent
+    let ty = expr.ty.expand_aliases();
+
     // Check the resolved type of the literal expression
-    match expr.ty.kind() {
+    match ty.kind() {
         // Primitive types - return immediate directly
         TyKind::Int(_) => {
             let LiteralValue::Integer(n) = lit else {
@@ -1655,9 +1658,23 @@ fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expressio
         }
 
         // Other types - this shouldn't happen for literals
-        _ => {
+        other => {
+            // Note: Don't use {:?} on TyKind as it can cause infinite recursion
+            // due to circular symbol references in the Debug impl
+            let type_desc = match other {
+                TyKind::Enum { .. } => "enum",
+                TyKind::Protocol { .. } => "protocol",
+                TyKind::TypeParameter { .. } => "type parameter",
+                TyKind::Tuple { .. } => "tuple",
+                TyKind::Function { .. } => "function",
+                TyKind::Pointer { .. } => "pointer",
+                TyKind::TypeAlias { .. } => "type alias",
+                TyKind::SelfType { .. } => "Self",
+                TyKind::AssociatedType { .. } => "associated type",
+                _ => "unknown",
+            };
             ctx.emit_error(LoweringError::internal(
-                format!("unexpected type for literal: {:?}", expr.ty.kind()),
+                format!("unexpected type for literal: {}", type_desc),
                 Some(expr.span.clone()),
             ));
             Value::Immediate(Immediate::error())
@@ -2386,6 +2403,13 @@ fn lower_call(
             let is_assoc_type_call = matches!(receiver.ty.kind(), TyKind::AssociatedType { .. });
             let is_static_assoc_type_call = matches!(receiver.kind, ExprKind::AssociatedTypeRef);
 
+            // Check if this is a call on Self type in a protocol context (needs witness method lookup)
+            let is_self_type_call = matches!(receiver.ty.kind(), TyKind::SelfType);
+
+            // Check if this is a call on a protocol type (protocol extension methods)
+            // When inside a protocol extension, `self` has type `Protocol` which also needs witness dispatch
+            let is_protocol_type_call = matches!(receiver.ty.kind(), TyKind::Protocol { .. });
+
             // Determine if this is an instance method call (has receiver value)
             let is_instance = !(is_static_type_param_call || is_static_assoc_type_call);
 
@@ -2425,47 +2449,79 @@ fn lower_call(
                         // Mark moved args before the call (call_args is consumed)
                         mark_moved_args(ctx, &call_args);
 
-                        // Check if this is a witness method call (method on type parameter or associated type)
-                        if is_type_param_call
+                        use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
+
+                        // Find the protocol that defines this method.
+                        // Priority: 1) ImplementsBehavior, 2) Protocol parent, 3) Extension conformances
+                        let protocol_symbol = if let Some(implements) =
+                            sym.metadata().get_behavior::<ImplementsBehavior>()
+                        {
+                            // Method explicitly implements a protocol method
+                            ctx.model.query(SymbolFor { id: implements.protocol() })
+                        } else if let Some(parent) = sym.metadata().parent() {
+                            if parent.metadata().kind() == KestrelSymbolKind::Protocol {
+                                // Method is defined directly in a protocol
+                                Some(parent)
+                            } else if parent.metadata().kind() == KestrelSymbolKind::Extension {
+                                // Method is in an extension - find which protocol conformance it belongs to
+                                find_protocol_for_extension_method(&parent, &method_name)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        // Check if receiver is a builtin primitive type (these use primitive methods, not witnesses)
+                        let is_builtin_type = matches!(
+                            receiver.ty.kind(),
+                            TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String
+                        );
+
+                        // Check if this requires witness dispatch:
+                        // 1. Receiver type requires witness dispatch (type parameter, associated type, Self, or protocol type)
+                        // 2. Method comes from a protocol extension on a non-builtin type
+                        let needs_witness_dispatch = (is_type_param_call
                             || is_static_type_param_call
                             || is_assoc_type_call
                             || is_static_assoc_type_call
-                        {
-                            // Get the protocol from the method's parent
-                            if let Some(parent) = sym.metadata().parent() {
-                                if parent.metadata().kind() == KestrelSymbolKind::Protocol {
-                                    let protocol_name = qualified_name_for_symbol(ctx, &parent);
-                                    let for_type = lower_type(ctx, &receiver.ty);
-                                    let mir_callee = Callee::witness(
-                                        protocol_name,
-                                        method_name.clone(),
-                                        for_type,
-                                    );
-                                    ctx.emit_call_with_modes(
-                                        result_place.clone(),
-                                        mir_callee,
-                                        call_args,
-                                    );
+                            || is_self_type_call
+                            || is_protocol_type_call)
+                            || (protocol_symbol.is_some() && !is_builtin_type);
+
+                        if needs_witness_dispatch {
+                            if let Some(protocol_sym) = protocol_symbol {
+                                let protocol_name = qualified_name_for_symbol(ctx, &protocol_sym);
+                                // For protocol type calls (inside protocol extensions), use Self type
+                                // which will be substituted with the concrete type at monomorphization
+                                let for_type = if is_protocol_type_call {
+                                    ctx.mir.ty_self()
                                 } else {
-                                    // Method's parent is not a protocol - shouldn't happen
-                                    ctx.emit_error(LoweringError::internal(
-                                        format!(
-                                            "method '{}' parent is not a protocol",
-                                            method_name
-                                        ),
-                                        Some(expr.span.clone()),
-                                    ));
-                                    return Value::Immediate(Immediate::error());
-                                }
+                                    lower_type(ctx, &receiver.ty)
+                                };
+                                let mir_callee = Callee::witness(
+                                    protocol_name,
+                                    method_name.clone(),
+                                    for_type,
+                                );
+                                ctx.emit_call_with_modes(
+                                    result_place.clone(),
+                                    mir_callee,
+                                    call_args,
+                                );
                             } else {
+                                // Receiver type requires witness dispatch but method doesn't implement a protocol - shouldn't happen
                                 ctx.emit_error(LoweringError::internal(
-                                    format!("method '{}' has no parent", method_name),
+                                    format!(
+                                        "method '{}' on generic/protocol type doesn't implement a protocol method",
+                                        method_name
+                                    ),
                                     Some(expr.span.clone()),
                                 ));
                                 return Value::Immediate(Immediate::error());
                             }
                         } else {
-                            // Regular direct method call
+                            // Regular direct method call (concrete type, non-protocol method)
                             let func_name = qualified_name_for_symbol(ctx, &sym);
                             let type_args = get_ordered_type_args(ctx, &sym);
                             let mir_callee = if type_args.is_empty() {
@@ -3004,12 +3060,19 @@ fn lower_getter_call(
     // Build the qualified name for the getter
     let getter_name = qualified_name_for_symbol(ctx, &getter_symbol);
 
+    // Get type arguments from the receiver's type for generic types
+    let type_args = extract_type_args_from_receiver(ctx, &object.ty);
+
     // Look up CallableBehavior to get receiver access mode
     let callable_beh = getter_symbol.metadata().get_behavior::<CallableBehavior>();
 
     if is_static {
         // Static computed property - no receiver
-        let mir_callee = Callee::direct(getter_name);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(getter_name)
+        } else {
+            Callee::direct_generic(getter_name, type_args)
+        };
         ctx.emit_call_with_modes(result_place.clone(), mir_callee, vec![]);
     } else {
         // Instance computed property - pass receiver
@@ -3049,11 +3112,58 @@ fn lower_getter_call(
         };
 
         mark_moved_args(ctx, &call_args);
-        let mir_callee = Callee::direct(getter_name);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(getter_name)
+        } else {
+            Callee::direct_generic(getter_name, type_args)
+        };
         ctx.emit_call_with_modes(result_place.clone(), mir_callee, call_args);
     }
 
     Value::Place(result_place)
+}
+
+/// Extract type arguments from a receiver's type.
+///
+/// For generic types like `Slice<Int>`, this extracts the type arguments `[Int]`
+/// in the order the type parameters are declared on the type.
+fn extract_type_args_from_receiver(
+    ctx: &mut LoweringContext,
+    receiver_ty: &Ty,
+) -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    // Get the type's substitutions and the parent type's parameter order
+    let (type_params, substitutions) = if let Some((struct_sym, subs)) = receiver_ty.as_struct_with_subs() {
+        // Get type parameters from struct
+        let params: Vec<_> = if let Some(generics) = struct_sym.metadata().get_behavior::<GenericsBehavior>() {
+            generics.type_parameters().iter().map(|p| p.metadata().id()).collect()
+        } else {
+            vec![]
+        };
+        (params, subs)
+    } else if let Some((enum_sym, subs)) = receiver_ty.as_enum_with_subs() {
+        // Get type parameters from enum
+        let params: Vec<_> = if let Some(generics) = enum_sym.metadata().get_behavior::<GenericsBehavior>() {
+            generics.type_parameters().iter().map(|p| p.metadata().id()).collect()
+        } else {
+            vec![]
+        };
+        (params, subs)
+    } else {
+        return vec![];
+    };
+
+    // Get types in the correct order based on type parameter declaration order
+    if let Some(ordered_types) = substitutions.types_in_order(&type_params) {
+        ordered_types
+            .into_iter()
+            .map(|ty| lower_type(ctx, ty))
+            .collect()
+    } else {
+        vec![]
+    }
 }
 
 /// Lower a setter call for a computed property assignment.
@@ -3131,6 +3241,9 @@ fn lower_setter_call(
     // Build the qualified name for the setter
     let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
 
+    // Get type arguments from the receiver's type for generic types
+    let type_args = extract_type_args_from_receiver(ctx, &object.ty);
+
     // Look up CallableBehavior to get parameter access modes
     let callable_beh = setter_symbol.metadata().get_behavior::<CallableBehavior>();
 
@@ -3161,7 +3274,11 @@ fn lower_setter_call(
         };
 
         mark_moved_args(ctx, &call_args);
-        let mir_callee = Callee::direct(setter_name);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(setter_name)
+        } else {
+            Callee::direct_generic(setter_name, type_args)
+        };
         ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
     } else {
         // Instance computed property - pass receiver and new value
@@ -3231,7 +3348,11 @@ fn lower_setter_call(
         };
 
         mark_moved_args(ctx, &call_args);
-        let mir_callee = Callee::direct(setter_name);
+        let mir_callee = if type_args.is_empty() {
+            Callee::direct(setter_name)
+        } else {
+            Callee::direct_generic(setter_name, type_args)
+        };
         ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
     }
 
@@ -4979,4 +5100,39 @@ fn determine_cast_kind(
 
     // Default: truncate (should not happen with valid casts)
     CastKind::IntTruncate
+}
+
+/// Find the protocol that an extension method belongs to.
+///
+/// When an extension adds conformances (e.g., `extend Comparable: Less[Self]`),
+/// the methods in that extension implement protocol methods. This function
+/// finds the protocol that contains a method with the given name.
+fn find_protocol_for_extension_method(
+    extension: &std::sync::Arc<
+        dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>,
+    >,
+    method_name: &str,
+) -> Option<std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>> {
+    use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+
+    // Get the conformances added by this extension
+    let conformances = extension.metadata().get_behavior::<ConformancesBehavior>()?;
+
+    // Search through each protocol conformance
+    for protocol_ty in conformances.conformances() {
+        if let TyKind::Protocol { symbol, .. } = protocol_ty.kind() {
+            // Check if this protocol has a method with the given name
+            for child in symbol.metadata().children() {
+                if child.metadata().kind() == KestrelSymbolKind::Function
+                    && child.metadata().name().value == method_name
+                {
+                    return Some(symbol.clone() as std::sync::Arc<dyn Symbol<KestrelLanguage>>);
+                }
+            }
+        }
+    }
+
+    None
 }

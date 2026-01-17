@@ -13,7 +13,7 @@ mod return_types {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return "hello"
 }
 "#,
@@ -27,7 +27,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> String {
+func test() -> lang.str {
     return 42
 }
 "#,
@@ -41,7 +41,7 @@ func test() -> String {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return true
 }
 "#,
@@ -55,7 +55,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return
 }
 "#,
@@ -83,7 +83,7 @@ func test() {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return ()
 }
 "#,
@@ -97,8 +97,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    "not an int"
+func test() -> lang.i64 {
+    "not an lang.i64"
 }
 "#,
         )
@@ -111,7 +111,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return (1, 2)
 }
 "#,
@@ -125,7 +125,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return [1, 2, 3]
 }
 "#,
@@ -139,7 +139,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     return 42
 }
 "#,
@@ -158,7 +158,7 @@ mod assignment_types {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     x = "hello"
 }
 "#,
@@ -173,7 +173,7 @@ func test() {
 module Main
 
 func test() {
-    var x: String = "hello";
+    var x: lang.str = "hello";
     x = true
 }
 "#,
@@ -188,7 +188,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Bool = true;
+    var x: lang.i1 = true;
     x = 42
 }
 "#,
@@ -203,7 +203,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     x = (1, 2)
 }
 "#,
@@ -218,7 +218,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Int = 0;
+    var x: lang.i64 = 0;
     x = 42
 }
 "#,
@@ -233,13 +233,13 @@ func test() {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func test() {
     var p: Point = Point(x: 0, y: 0);
-    p.x = "not an int"
+    p.x = "not an lang.i64"
 }
 "#,
         )
@@ -257,7 +257,7 @@ mod variable_binding_types {
 module Main
 
 func test() {
-    let x: Int = "hello";
+    let x: lang.i64 = "hello";
 }
 "#,
         )
@@ -271,7 +271,7 @@ func test() {
 module Main
 
 func test() {
-    let x: String = false;
+    let x: lang.str = false;
 }
 "#,
         )
@@ -285,7 +285,7 @@ func test() {
 module Main
 
 func test() {
-    var x: Bool = 123;
+    var x: lang.i1 = 123;
 }
 "#,
         )
@@ -299,7 +299,7 @@ func test() {
 module Main
 
 func test() {
-    let x: Int = (1, 2, 3);
+    let x: lang.i64 = (1, 2, 3);
 }
 "#,
         )
@@ -313,7 +313,7 @@ func test() {
 module Main
 
 func test() {
-    let x: Int = [1, 2, 3];
+    let x: lang.i64 = [1, 2, 3];
 }
 "#,
         )
@@ -327,9 +327,9 @@ func test() {
 module Main
 
 func test() {
-    let x: Int = 42;
-    let y: String = "hello";
-    let z: Bool = true;
+    let x: lang.i64 = 42;
+    let y: lang.str = "hello";
+    let z: lang.i1 = true;
 }
 "#,
         )
@@ -348,7 +348,7 @@ module Main
 
 func test() {
     if 42 {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -364,7 +364,7 @@ module Main
 
 func test() {
     if "hello" {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -380,7 +380,7 @@ module Main
 
 func test() {
     while 42 {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -396,7 +396,7 @@ module Main
 
 func test() {
     while "hello" {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -412,9 +412,9 @@ func test() {
 module Main
 
 func test() {
-    let t: (Bool, Bool) = (true, false);
+    let t: (lang.i1, lang.i1) = (true, false);
     if t {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -432,7 +432,7 @@ module Main
 func test() {
     let u: () = ();
     if u {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -448,7 +448,7 @@ module Main
 
 func test() {
     if true {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -464,7 +464,7 @@ module Main
 
 func test() {
     while false {
-        let x: Int = 1;
+        let x: lang.i64 = 1;
     }
 }
 "#,
@@ -479,9 +479,9 @@ func test() {
 module Main
 
 func test() {
-    let x: Int = 5;
+    let x: lang.i64 = 5;
     if x == 5 {
-        let y: Int = 1;
+        let y: lang.i64 = 1;
     }
 }
 "#,
@@ -499,7 +499,7 @@ mod branch_types {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         42
     } else {
@@ -517,7 +517,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         true
     } else {
@@ -535,7 +535,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         (1, 2)
     } else {
@@ -553,7 +553,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(x: Int) -> Int {
+func test(x: lang.i64) -> lang.i64 {
     if x == 1 {
         10
     } else if x == 2 {
@@ -573,7 +573,7 @@ func test(x: Int) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         42
     } else {
@@ -592,9 +592,9 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) {
+func test(cond: lang.i1) {
     if cond {
-        let x: Int = 42;
+        let x: lang.i64 = 42;
     }
 }
 "#,
@@ -608,7 +608,7 @@ func test(cond: Bool) {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a {
         if b {
             42
@@ -634,7 +634,7 @@ mod call_argument_types {
             r#"
 module Main
 
-func greet(name: String) {}
+func greet(name: lang.str) {}
 
 func test() {
     greet(42)
@@ -650,7 +650,7 @@ func test() {
             r#"
 module Main
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
@@ -668,7 +668,7 @@ func test() {
             r#"
 module Main
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
@@ -686,7 +686,7 @@ func test() {
             r#"
 module Main
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     x + x
 }
 
@@ -704,11 +704,11 @@ func test() {
             r#"
 module Main
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     add(1, 2)
 }
 "#,
@@ -754,9 +754,9 @@ func test() {
 module Main
 
 struct Calculator {
-    var value: Int
+    var value: lang.i64
 
-    func add(x: Int) -> Int {
+    func add(x: lang.i64) -> lang.i64 {
         self.value + x
     }
 }
@@ -781,8 +781,8 @@ mod struct_init_types {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func test() {
@@ -800,8 +800,8 @@ func test() {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func test() {
@@ -819,8 +819,8 @@ func test() {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func test() {
@@ -838,8 +838,8 @@ func test() {
 module Main
 
 struct Point {
-    var x: Int
-    var y: Int
+    var x: lang.i64
+    var y: lang.i64
 }
 
 func test() {
@@ -857,8 +857,8 @@ func test() {
 module Main
 
 struct Config {
-    var count: Int
-    var enabled: Bool
+    var count: lang.i64
+    var enabled: lang.i1
 }
 
 func test() {
@@ -880,7 +880,7 @@ mod array_element_types {
 module Main
 
 func test() {
-    let arr: [Int] = [1, "two", 3];
+    let arr: [lang.i64] = [1, "two", 3];
 }
 "#,
         )
@@ -894,7 +894,7 @@ func test() {
 module Main
 
 func test() {
-    let arr: [Int] = [1, 2, true];
+    let arr: [lang.i64] = [1, 2, true];
 }
 "#,
         )
@@ -908,7 +908,7 @@ func test() {
 module Main
 
 func test() {
-    let arr: [String] = ["hello", 42];
+    let arr: [lang.str] = ["hello", 42];
 }
 "#,
         )
@@ -922,9 +922,9 @@ func test() {
 module Main
 
 func test() {
-    let ints: [Int] = [1, 2, 3];
-    let strings: [String] = ["a", "b", "c"];
-    let bools: [Bool] = [true, false, true];
+    let ints: [lang.i64] = [1, 2, 3];
+    let strings: [lang.str] = ["a", "b", "c"];
+    let bools: [lang.i1] = [true, false, true];
 }
 "#,
         )
@@ -938,7 +938,7 @@ func test() {
 module Main
 
 func test() {
-    let arr: [Int] = [42];
+    let arr: [lang.i64] = [42];
 }
 "#,
         )
@@ -953,7 +953,7 @@ func test() {
 module Main
 
 func test() {
-    let arr: [Int] = [1, "two", true, 4.0];
+    let arr: [lang.i64] = [1, "two", true, 4.0];
 }
 "#,
         )
@@ -971,7 +971,7 @@ mod never_type {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         42
     } else {
@@ -989,7 +989,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test(cond: Bool) -> Int {
+func test(cond: lang.i1) -> lang.i64 {
     if cond {
         return 1
     } else {
@@ -1007,7 +1007,7 @@ func test(cond: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     loop {
         if true {
             break
@@ -1037,8 +1037,8 @@ mod struct_types {
             r#"
 module Main
 
-struct Point { var x: Int; var y: Int }
-struct Size { var width: Int; var height: Int }
+struct Point { var x: lang.i64; var y: lang.i64 }
+struct Size { var width: lang.i64; var height: lang.i64 }
 
 func test() {
     var p: Point = Point(x: 0, y: 0);
@@ -1056,8 +1056,8 @@ func test() {
             r#"
 module Main
 
-struct Point { var x: Int; var y: Int }
-struct Size { var width: Int; var height: Int }
+struct Point { var x: lang.i64; var y: lang.i64 }
+struct Size { var width: lang.i64; var height: lang.i64 }
 
 func makePoint() -> Point {
     Size(width: 10, height: 20)
@@ -1073,8 +1073,8 @@ func makePoint() -> Point {
             r#"
 module Main
 
-struct Point { var x: Int; var y: Int }
-struct Size { var width: Int; var height: Int }
+struct Point { var x: lang.i64; var y: lang.i64 }
+struct Size { var width: lang.i64; var height: lang.i64 }
 
 func usePoint(p: Point) {}
 
@@ -1092,7 +1092,7 @@ func test() {
             r#"
 module Main
 
-struct Point { var x: Int; var y: Int }
+struct Point { var x: lang.i64; var y: lang.i64 }
 
 func test() {
     var p1: Point = Point(x: 0, y: 0);
@@ -1115,7 +1115,7 @@ mod tuple_types {
 module Main
 
 func test() {
-    let t: (Int, Int) = (1, 2, 3);
+    let t: (lang.i64, lang.i64) = (1, 2, 3);
 }
 "#,
         )
@@ -1129,7 +1129,7 @@ func test() {
 module Main
 
 func test() {
-    let t: (Int, String) = (1, 2);
+    let t: (lang.i64, lang.str) = (1, 2);
 }
 "#,
         )
@@ -1143,7 +1143,7 @@ func test() {
 module Main
 
 func test() {
-    let t: (Int, String, Bool) = (42, "hello", true);
+    let t: (lang.i64, lang.str, lang.i1) = (42, "hello", true);
 }
 "#,
         )
@@ -1166,7 +1166,7 @@ mod function_types {
             r#"
 module Main
 
-func identity(x: Int) -> Int { x }
+func identity(x: lang.i64) -> lang.i64 { x }
 "#,
         )
         .expect(Compiles);
@@ -1182,7 +1182,7 @@ mod edge_cases {
             r#"
 module Main
 
-func test(a: Bool, b: Bool, c: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1, c: lang.i1) -> lang.i64 {
     if a {
         if b {
             if c {
@@ -1209,8 +1209,8 @@ func test(a: Bool, b: Bool, c: Bool) -> Int {
 module Main
 
 func test() {
-    var x: Int = 0;
-    var y: String = "hello";
+    var x: lang.i64 = 0;
+    var y: lang.str = "hello";
     x = 42;
     y = x
 }
@@ -1225,7 +1225,7 @@ func test() {
             r#"
 module Main
 
-func test(a: Bool, b: Bool) -> Int {
+func test(a: lang.i1, b: lang.i1) -> lang.i64 {
     if a {
         if b {
             return "wrong"
@@ -1246,9 +1246,9 @@ func test(a: Bool, b: Bool) -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     while true {
-        return "not an int"
+        return "not an lang.i64"
     }
     0
 }
@@ -1263,9 +1263,9 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     loop {
-        return "not an int"
+        return "not an lang.i64"
     }
 }
 "#,
@@ -1280,9 +1280,9 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let x: Int = "wrong1";
-    let y: String = 42;
+func test() -> lang.i64 {
+    let x: lang.i64 = "wrong1";
+    let y: lang.str = 42;
     return true
 }
 "#,
@@ -1301,11 +1301,11 @@ mod type_alias {
             r#"
 module Main
 
-type MyInt = Int;
+type MyInt = lang.i64;
 
 func test() {
     let x: MyInt = 42;
-    let y: Int = x;
+    let y: lang.i64 = x;
 }
 "#,
         )
@@ -1318,10 +1318,10 @@ func test() {
             r#"
 module Main
 
-type MyInt = Int;
+type MyInt = lang.i64;
 
 func test() {
-    let x: MyInt = "not an int";
+    let x: MyInt = "not an lang.i64";
 }
 "#,
         )
@@ -1334,12 +1334,12 @@ func test() {
             r#"
 module Main
 
-type MyInt = Int;
+type MyInt = lang.i64;
 type YourInt = MyInt;
 
 func test() {
     let x: YourInt = 42;
-    let y: Int = x;
+    let y: lang.i64 = x;
 }
 "#,
         )
@@ -1358,9 +1358,9 @@ module Main
 
 func test() {
     let t = (1, "hello", true);
-    let x: Int = t.0;
-    let y: String = t.1;
-    let z: Bool = t.2;
+    let x: lang.i64 = t.0;
+    let y: lang.str = t.1;
+    let z: lang.i1 = t.2;
 }
 "#,
         )
@@ -1375,7 +1375,7 @@ module Main
 
 func test() {
     let t = (1, "hello");
-    let x: String = t.0;
+    let x: lang.str = t.0;
 }
 "#,
         )
@@ -1423,9 +1423,9 @@ module Main
 func test() {
     let t = ((1, 2), (3, 4));
     let inner = t.0;
-    let x: Int = inner.1;
+    let x: lang.i64 = inner.1;
     let inner2 = t.1;
-    let y: Int = inner2.0;
+    let y: lang.i64 = inner2.0;
 }
 "#,
         )
@@ -1469,13 +1469,13 @@ func test() {
             r#"
 module Main
 
-func getTuple() -> (Int, String) {
+func getTuple() -> (lang.i64, lang.str) {
     return (42, "hello");
 }
 
 func test() {
-    let x: Int = getTuple().0;
-    let y: String = getTuple().1;
+    let x: lang.i64 = getTuple().0;
+    let y: lang.str = getTuple().1;
 }
 "#,
         )
@@ -1490,7 +1490,7 @@ module Main
 
 func test() {
     let t = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-    let x: Int = t.9;
+    let x: lang.i64 = t.9;
 }
 "#,
         )

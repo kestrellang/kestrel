@@ -493,6 +493,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.id,
                 expr.span.clone(),
             );
+
+            // For zero-argument methods on literals (receiver type is Infer), speculatively
+            // equate receiver with result. This enables bidirectional type inference for
+            // Self-returning operators like negate(), bitwiseNot(), etc.
+            // When the expected result type is known (e.g., Int16), this constraint propagates
+            // that type back to the receiver (the literal), preventing default literal inference.
+            if arguments.is_empty() && matches!(receiver.ty.kind(), TyKind::Infer) {
+                ctx.equate(receiver.ty.id(), expr.ty.id(), expr.span.clone());
+            }
         }
 
         ExprKind::ImplicitStructInit { arguments, .. } => {

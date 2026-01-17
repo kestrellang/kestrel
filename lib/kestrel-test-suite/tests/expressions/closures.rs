@@ -24,7 +24,7 @@ mod basic_syntax {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     { 42 }
 }
 "#,
@@ -39,7 +39,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     { () in 42 }
 }
 "#,
@@ -54,8 +54,8 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
-    { (x: Int) in x }
+func test() -> (lang.i64) -> lang.i64 {
+    { (x: lang.i64) in x }
 }
 "#,
         )
@@ -69,7 +69,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in x }
 }
 "#,
@@ -84,8 +84,8 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int, Int) -> Int {
-    { (x: Int, y: Int) in x + y }
+func test() -> (lang.i64, lang.i64) -> lang.i64 {
+    { (x: lang.i64, y: lang.i64) in x + y }
 }
 "#,
         )
@@ -99,7 +99,7 @@ func test() -> (Int, Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int, Int) -> Int {
+func test() -> (lang.i64, lang.i64) -> lang.i64 {
     { (x, y) in x + y }
 }
 "#,
@@ -114,8 +114,8 @@ func test() -> (Int, Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int, String) -> Int {
-    { (x: Int, y) in x }
+func test() -> (lang.i64, lang.str) -> lang.i64 {
+    { (x: lang.i64, y) in x }
 }
 "#,
         )
@@ -129,7 +129,7 @@ func test() -> (Int, String) -> Int {
             r#"
 module Main
 
-func test() -> (Int, Int, Int) -> Int {
+func test() -> (lang.i64, lang.i64, lang.i64) -> lang.i64 {
     { (a, b, c) in a + b + c }
 }
 "#,
@@ -152,7 +152,7 @@ mod implicit_it {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { it * 2 }
 }
 "#,
@@ -167,7 +167,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     { 42 }
 }
 "#,
@@ -182,7 +182,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> (Int, Int) -> Int {
+func test() -> (lang.i64, lang.i64) -> lang.i64 {
     { 42 }
 }
 "#,
@@ -197,7 +197,7 @@ func test() -> (Int, Int) -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     { it }
 }
 "#,
@@ -212,7 +212,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> (Int, Int) -> Int {
+func test() -> (lang.i64, lang.i64) -> lang.i64 {
     { it }
 }
 "#,
@@ -227,7 +227,7 @@ func test() -> (Int, Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in it }
 }
 "#,
@@ -242,11 +242,11 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func apply(f: (Int) -> Int) -> Int {
+func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
     f(10)
 }
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     {
         let outer = it;
         apply({ it + outer })
@@ -272,7 +272,7 @@ mod multi_statement {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in
         let y = x * 2;
         y
@@ -290,7 +290,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int, Int) -> Int {
+func test() -> (lang.i64, lang.i64) -> lang.i64 {
     { (x, y) in
         let sum = x + y;
         let doubled = sum * 2;
@@ -310,7 +310,7 @@ func test() -> (Int, Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in
         var acc = 0;
         acc = acc + x;
@@ -330,7 +330,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in
         if x > 0 {
             x
@@ -351,7 +351,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (n) in
         var i = 0;
         var sum = 0;
@@ -382,7 +382,7 @@ mod captures {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     let x = 10;
     { x + 1 }
 }
@@ -398,7 +398,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     var x = 10;
     { x + 1 }
 }
@@ -414,7 +414,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     let a = 1;
     let b = 2;
     let c = 3;
@@ -432,7 +432,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test(multiplier: Int) -> (Int) -> Int {
+func test(multiplier: lang.i64) -> (lang.i64) -> lang.i64 {
     { it * multiplier }
 }
 "#,
@@ -447,7 +447,7 @@ func test(multiplier: Int) -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     let outer = 100;
     if true {
         let inner = 10;
@@ -468,7 +468,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     var x = 10;
     {
         x = 20;
@@ -488,7 +488,7 @@ func test() -> () -> Int {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     var x = 10;
     let f = { x };
     x = 20;
@@ -514,7 +514,7 @@ mod param_mutability {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in
         x = 10;
         x
@@ -540,11 +540,11 @@ mod trailing_closure {
             r#"
 module Main
 
-func apply(f: () -> Int) -> Int {
+func apply(f: () -> lang.i64) -> lang.i64 {
     f()
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     apply { 42 }
 }
 "#,
@@ -559,11 +559,11 @@ func test() -> Int {
             r#"
 module Main
 
-func fold(initial: Int, f: (Int, Int) -> Int) -> Int {
+func fold(initial: lang.i64, f: (lang.i64, lang.i64) -> lang.i64) -> lang.i64 {
     f(initial, 10)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     fold(0) { (acc, n) in acc + n }
 }
 "#,
@@ -578,11 +578,11 @@ func test() -> Int {
             r#"
 module Main
 
-func combine(a: Int, b: Int, f: (Int) -> Int) -> Int {
+func combine(a: lang.i64, b: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
     f(a + b)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     combine(1, 2) { it * 2 }
 }
 "#,
@@ -597,11 +597,11 @@ func test() -> Int {
             r#"
 module Main
 
-func apply(f: (Int) -> Int) -> Int {
+func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
     f(10)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     apply({ it * 2 })
 }
 "#,
@@ -624,7 +624,7 @@ mod type_inference {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x) in x + 1 }
 }
 "#,
@@ -639,8 +639,8 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
-    { (x: Int) in x * 2 }
+func test() -> (lang.i64) -> lang.i64 {
+    { (x: lang.i64) in x * 2 }
 }
 "#,
         )
@@ -654,11 +654,11 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func transform(x: Int, f: (Int) -> Int) -> Int {
+func transform(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
     f(x)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     transform(5, { it * 2 })
 }
 "#,
@@ -674,7 +674,7 @@ func test() -> Int {
 module Main
 
 func test() {
-    let f: (Int, Int) -> Int = { (a, b) in a + b };
+    let f: (lang.i64, lang.i64) -> lang.i64 = { (a, b) in a + b };
 }
 "#,
         )
@@ -726,7 +726,7 @@ mod type_checking {
             r#"
 module Main
 
-func test() -> (Int, Int) -> Int {
+func test() -> (lang.i64, lang.i64) -> lang.i64 {
     { (x) in x }
 }
 "#,
@@ -741,7 +741,7 @@ func test() -> (Int, Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (x, y) in x + y }
 }
 "#,
@@ -756,7 +756,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> String {
+func test() -> (lang.i64) -> lang.str {
     { (x) in x * 2 }
 }
 "#,
@@ -771,8 +771,8 @@ func test() -> (Int) -> String {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
-    { (x: String) in 42 }
+func test() -> (lang.i64) -> lang.i64 {
+    { (x: lang.str) in 42 }
 }
 "#,
         )
@@ -787,7 +787,7 @@ func test() -> (Int) -> Int {
 module Main
 
 func test() {
-    let x: Int = { 42 };
+    let x: lang.i64 = { 42 };
 }
 "#,
         )
@@ -809,7 +809,7 @@ mod immediate_invocation {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     { 42 }()
 }
 "#,
@@ -824,8 +824,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    { (x: Int, y: Int) in x + y }(10, 20)
+func test() -> lang.i64 {
+    { (x: lang.i64, y: lang.i64) in x + y }(10, 20)
 }
 "#,
         )
@@ -839,7 +839,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
+func test() -> lang.i64 {
     let result = {
         let a = 10;
         let b = 20;
@@ -859,8 +859,8 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    { (x: Int) in x }(1, 2)
+func test() -> lang.i64 {
+    { (x: lang.i64) in x }(1, 2)
 }
 "#,
         )
@@ -882,8 +882,8 @@ mod closures_as_values {
             r#"
 module Main
 
-func test() -> Int {
-    let f: (Int) -> Int = { it * 2 };
+func test() -> lang.i64 {
+    let f: (lang.i64) -> lang.i64 = { it * 2 };
     f(21)
 }
 "#,
@@ -898,11 +898,11 @@ func test() -> Int {
             r#"
 module Main
 
-func apply(x: Int, f: (Int) -> Int) -> Int {
+func apply(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
     f(x)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     apply(10, { it + 1 })
 }
 "#,
@@ -917,11 +917,11 @@ func test() -> Int {
             r#"
 module Main
 
-func makeAdder(n: Int) -> (Int) -> Int {
+func makeAdder(n: lang.i64) -> (lang.i64) -> lang.i64 {
     { it + n }
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let add5 = makeAdder(5);
     add5(10)
 }
@@ -938,10 +938,10 @@ func test() -> Int {
 module Main
 
 struct Callback {
-    let action: () -> Int
+    let action: () -> lang.i64
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     let cb = Callback(action: { 42 });
     (cb.action)()
 }
@@ -961,8 +961,8 @@ struct Handler[T] {
     let handle: (T) -> T
 }
 
-func test() -> Int {
-    let h = Handler[Int](handle: { it * 2 });
+func test() -> lang.i64 {
+    let h = Handler[lang.i64](handle: { it * 2 });
     (h.handle)(21)
 }
 "#,
@@ -985,7 +985,7 @@ mod nested_closures {
             r#"
 module Main
 
-func test() -> (Int) -> (Int) -> Int {
+func test() -> (lang.i64) -> (lang.i64) -> lang.i64 {
     { (x) in { (y) in x + y } }
 }
 "#,
@@ -1000,8 +1000,8 @@ func test() -> (Int) -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> Int {
-    let f: (Int) -> (Int) -> Int = { (x) in { (y) in x + y } };
+func test() -> lang.i64 {
+    let f: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in { (y) in x + y } };
     let add10 = f(10);
     add10(5)
 }
@@ -1017,7 +1017,7 @@ func test() -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> (Int) -> (Int) -> Int {
+func test() -> (lang.i64) -> (lang.i64) -> (lang.i64) -> lang.i64 {
     { (a) in { (b) in { (c) in a + b + c } } }
 }
 "#,
@@ -1032,11 +1032,11 @@ func test() -> (Int) -> (Int) -> (Int) -> Int {
             r#"
 module Main
 
-func apply(f: (Int) -> Int) -> Int {
+func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
     f(5)
 }
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     {
         let outer = it;
         apply({ it + outer })
@@ -1066,7 +1066,7 @@ func identity[T](x: T, f: (T) -> T) -> T {
     f(x)
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     identity(10, { it })
 }
 "#,
@@ -1085,7 +1085,7 @@ func transform[T, U](x: T, f: (T) -> U) -> U {
     f(x)
 }
 
-func test() -> String {
+func test() -> lang.str {
     transform(42, { (n) in "hello" })
 }
 "#,
@@ -1123,11 +1123,11 @@ func test() -> () -> () {
             r#"
 module Main
 
-func earlyReturn(f: () -> Int) -> Int {
+func earlyReturn(f: () -> lang.i64) -> lang.i64 {
     f()
 }
 
-func test() -> Int {
+func test() -> lang.i64 {
     earlyReturn({
         return 42
     })
@@ -1177,7 +1177,7 @@ func test() -> () -> () {
             r#"
 module Main
 
-func test() -> () -> Int {
+func test() -> () -> lang.i64 {
     { 42 }
 }
 "#,
@@ -1207,7 +1207,7 @@ func test() -> () -> () {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     { (it) in it * 2 }
 }
 "#,
@@ -1222,7 +1222,7 @@ func test() -> (Int) -> Int {
             r#"
 module Main
 
-func test() -> (Int) -> Int {
+func test() -> (lang.i64) -> lang.i64 {
     {
         let it = 100;
         it

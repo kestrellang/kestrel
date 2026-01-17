@@ -9,15 +9,15 @@ fn test_function_as_value() {
         r#"
 module Test
 
-func add_one(x: Int) -> Int {
+func add_one(x: lang.i64) -> lang.i64 {
     x + 1
 }
 
-func apply(f: (Int) -> Int, x: Int) -> Int {
+func apply(f: (lang.i64) -> lang.i64, x: lang.i64) -> lang.i64 {
     f(x)
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     apply(add_one, 41)
 }
 "#,
@@ -31,16 +31,16 @@ func main() -> Int {
 #[test]
 #[ignore]
 fn test_function_pointer_call() {
-    // Test just returning the function address as an int (to verify func_addr works)
+    // Test just returning the function address as an lang.i64 (to verify func_addr works)
     let result = compile_and_run(
         r#"
 module Test
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     x * 2
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     double(21)
 }
 "#,
@@ -55,11 +55,11 @@ func main() -> Int {
         r#"
 module Test
 
-func double(x: Int) -> Int {
+func double(x: lang.i64) -> lang.i64 {
     x * 2
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let f = double;
     f(21)
 }
@@ -79,14 +79,14 @@ fn test_function_pointer_in_struct() {
 module Test
 
 struct Handler {
-    var func: (Int) -> Int;
+    var func: (lang.i64) -> lang.i64;
 }
 
-func triple(x: Int) -> Int {
+func triple(x: lang.i64) -> lang.i64 {
     x * 3
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let h = Handler (func: triple);
     (h.func)(14)
 }
@@ -105,15 +105,15 @@ fn test_function_returning_function() {
         r#"
 module Test
 
-func add_one(x: Int) -> Int {
+func add_one(x: lang.i64) -> lang.i64 {
     x + 1
 }
 
-func mul_two(x: Int) -> Int {
+func mul_two(x: lang.i64) -> lang.i64 {
     x * 2
 }
 
-func choose(flag: Bool) -> (Int) -> Int {
+func choose(flag: lang.i1) -> (lang.i64) -> lang.i64 {
     if flag {
         mul_two
     } else {
@@ -121,7 +121,7 @@ func choose(flag: Bool) -> (Int) -> Int {
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let f = choose(true);
     f(21)
 }
@@ -140,15 +140,15 @@ fn test_function_pointer_no_args() {
         r#"
 module Test
 
-func get_answer() -> Int {
+func get_answer() -> lang.i64 {
     42
 }
 
-func call_it(f: () -> Int) -> Int {
+func call_it(f: () -> lang.i64) -> lang.i64 {
     f()
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     call_it(get_answer)
 }
 "#,
@@ -166,15 +166,15 @@ fn test_function_pointer_multiple_args() {
         r#"
 module Test
 
-func add(a: Int, b: Int) -> Int {
+func add(a: lang.i64, b: lang.i64) -> lang.i64 {
     a + b
 }
 
-func apply_binary(f: (Int, Int) -> Int, x: Int, y: Int) -> Int {
+func apply_binary(f: (lang.i64, lang.i64) -> lang.i64, x: lang.i64, y: lang.i64) -> lang.i64 {
     f(x, y)
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     apply_binary(add, 20, 22)
 }
 "#,

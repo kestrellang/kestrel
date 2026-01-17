@@ -44,8 +44,8 @@ public struct Int16:
 
     public static var zero: Int16 { Int16(intLiteral: 0) }
     public static var one: Int16 { Int16(intLiteral: 1) }
-    public static var minValue: Int16 { Int16(intLiteral: -32768) }
-    public static var maxValue: Int16 { Int16(intLiteral: 32767) }
+    public static var minValue: Int16 { -32768 }
+    public static var maxValue: Int16 { 32767 }
     // public static var bitWidth: Int { 16 }
 
     public init(intLiteral value: lang.i64) {

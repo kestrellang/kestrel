@@ -13,7 +13,7 @@ fn test_if_else_true_branch() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if true {
         42
     } else {
@@ -35,7 +35,7 @@ fn test_if_else_false_branch() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if false {
         0
     } else {
@@ -57,7 +57,7 @@ fn test_if_else_with_comparison() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     if x > 5 {
         42
@@ -84,7 +84,7 @@ fn test_equal_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 5;
     if x == 5 {
         42
@@ -107,7 +107,7 @@ fn test_equal_false() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 5;
     if x == 10 {
         0
@@ -130,7 +130,7 @@ fn test_not_equal_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 5;
     if x != 10 {
         42
@@ -153,7 +153,7 @@ fn test_less_than_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 3;
     if x < 5 {
         42
@@ -176,7 +176,7 @@ fn test_less_than_false() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     if x < 5 {
         0
@@ -199,7 +199,7 @@ fn test_greater_than_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     if x > 5 {
         42
@@ -222,7 +222,7 @@ fn test_less_than_or_equal_equal() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 5;
     if x <= 5 {
         42
@@ -245,7 +245,7 @@ fn test_less_than_or_equal_less() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 3;
     if x <= 5 {
         42
@@ -268,7 +268,7 @@ fn test_greater_than_or_equal_equal() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 5;
     if x >= 5 {
         42
@@ -291,7 +291,7 @@ fn test_greater_than_or_equal_greater() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     if x >= 5 {
         42
@@ -318,7 +318,7 @@ fn test_bool_and_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if true and true {
         42
     } else {
@@ -340,7 +340,7 @@ fn test_bool_and_false() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if true and false {
         0
     } else {
@@ -362,7 +362,7 @@ fn test_bool_or_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if false or true {
         42
     } else {
@@ -384,7 +384,7 @@ fn test_bool_or_false() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if false or false {
         0
     } else {
@@ -406,7 +406,7 @@ fn test_bool_not_true() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if not false {
         42
     } else {
@@ -428,7 +428,7 @@ fn test_bool_not_false() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     if not true {
         0
     } else {
@@ -454,7 +454,7 @@ fn test_nested_if_else() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     if x > 5 {
         if x > 15 {
@@ -481,7 +481,7 @@ fn test_if_else_chain() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     if x < 5 {
         0
@@ -510,7 +510,7 @@ fn test_comparison_in_expression() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = 5;
     let b = 10;
     if a < b and b > 5 {
@@ -534,7 +534,7 @@ fn test_variable_from_branch() {
         r#"
 module Test
 
-func main() -> Int {
+func main() -> lang.i64 {
     let x = 10;
     let y = if x > 5 { 40 } else { 0 };
     y + 2

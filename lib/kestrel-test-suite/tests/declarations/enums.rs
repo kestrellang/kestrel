@@ -162,7 +162,7 @@ mod associated_values {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
                 case Point
             }
         "#,
@@ -176,8 +176,8 @@ mod associated_values {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
-                case Circle(radius: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
+                case Circle(radius: lang.f64)
             }
         "#,
         )
@@ -190,9 +190,9 @@ mod associated_values {
         Test::new(
             r#"module Test
             enum Data {
-                case Number(value: Int)
-                case Text(value: String)
-                case Flag(value: Bool)
+                case Number(value: lang.i64)
+                case Text(value: lang.str)
+                case Flag(value: lang.i1)
             }
         "#,
         )
@@ -206,9 +206,9 @@ mod associated_values {
             r#"module Test
             enum Status {
                 case Pending
-                case InProgress(percentage: Int)
+                case InProgress(percentage: lang.i64)
                 case Completed
-                case Failed(reason: String)
+                case Failed(reason: lang.str)
             }
         "#,
         )
@@ -301,7 +301,7 @@ mod generic_enums {
     fn generic_with_type_parameter_defaults() {
         Test::new(
             r#"module Test
-            enum Result[T, E = String] {
+            enum Result[T, E = lang.str] {
                 case Ok(value: T)
                 case Error(error: E)
             }
@@ -363,7 +363,7 @@ mod recursive_enums {
         Test::new(
             r#"module Test
             enum Tree {
-                case Leaf(value: Int)
+                case Leaf(value: lang.i64)
                 case Node(left: Tree, right: Tree)
             }
         "#,
@@ -390,7 +390,7 @@ mod recursive_enums {
             r#"module Test
             enum Simple {
                 case A
-                case B(value: Int)
+                case B(value: lang.i64)
             }
         "#,
         )
@@ -426,7 +426,7 @@ mod future_features {
                 case Node(value: T, next: LinkedList[T])
                 case Empty
 
-                func length() -> Int { return 0; }
+                func length() -> lang.i64 { return 0; }
                 static func createEmpty() -> LinkedList[T] { return .Empty; }
             }
         "#,
@@ -439,12 +439,12 @@ mod future_features {
         Test::new(
             r#"module Test
             protocol Named {
-                func name() -> String
+                func name() -> lang.str
             }
             enum State: Named {
                 case Active
                 case Inactive
-                func name() -> String { return "State"; }
+                func name() -> lang.str { return "State"; }
             }
         "#,
         )
@@ -480,8 +480,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
-                case Rectangle(width: Float, height: Float)
+                case Circle(radius: lang.f64)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func getShape() -> Shape {
@@ -502,7 +502,7 @@ mod instantiation {
                 case None
             }
 
-            func getSome() -> Option[Int] {
+            func getSome() -> Option[lang.i64] {
                 Option.Some(value: 42)
             }
         "#,
@@ -539,8 +539,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
-                case Rectangle(width: Float, height: Float)
+                case Circle(radius: lang.f64)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() {
@@ -618,8 +618,8 @@ mod instantiation {
         Test::new(
             r#"module Test
             enum Event {
-                case Click(x: Int, y: Int)
-                case Scroll(delta: Float)
+                case Click(x: lang.i64, y: lang.i64)
+                case Scroll(delta: lang.f64)
             }
 
             func createEvent() -> Event {
@@ -641,7 +641,7 @@ mod instantiation {
             }
 
             func test() {
-                let x = Option[Int].None;
+                let x = Option[lang.i64].None;
             }
         "#,
         )
@@ -715,7 +715,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -731,7 +731,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -747,7 +747,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() -> Shape {
@@ -763,7 +763,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() -> Shape {
@@ -779,7 +779,7 @@ mod error_missing_wrong_label {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func draw(shape: Shape) { }
@@ -839,7 +839,7 @@ mod error_cannot_infer_shorthand {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() {
@@ -859,7 +859,7 @@ mod error_type_mismatch {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -875,7 +875,7 @@ mod error_type_mismatch {
         Test::new(
             r#"module Test
             enum Event {
-                case Click(x: Int, y: Int)
+                case Click(x: lang.i64, y: lang.i64)
             }
 
             func test() -> Event {
@@ -895,7 +895,7 @@ mod error_type_mismatch {
                 case None
             }
 
-            func test() -> Option[Int] {
+            func test() -> Option[lang.i64] {
                 Option.Some(value: "hello")
             }
         "#,
@@ -912,7 +912,7 @@ mod error_wrong_arity {
         Test::new(
             r#"module Test
             enum Shape {
-                case Rectangle(width: Float, height: Float)
+                case Rectangle(width: lang.f64, height: lang.f64)
             }
 
             func test() -> Shape {
@@ -928,7 +928,7 @@ mod error_wrong_arity {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
+                case Circle(radius: lang.f64)
             }
 
             func test() -> Shape {
@@ -961,7 +961,7 @@ mod error_wrong_arity {
         Test::new(
             r#"module Test
             enum Point {
-                case Location(x: Int, y: Int)
+                case Location(x: lang.i64, y: lang.i64)
             }
 
             func test() -> Point {
@@ -994,8 +994,8 @@ mod error_duplicate_case_name {
         Test::new(
             r#"module Test
             enum Shape {
-                case Circle(radius: Float)
-                case Circle(diameter: Float)
+                case Circle(radius: lang.f64)
+                case Circle(diameter: lang.f64)
             }
         "#,
         )
@@ -1008,7 +1008,7 @@ mod error_duplicate_case_name {
             r#"module Test
             enum Status {
                 case Active
-                case Active(reason: String)
+                case Active(reason: lang.str)
             }
         "#,
         )
@@ -1024,7 +1024,7 @@ mod error_duplicate_label {
         Test::new(
             r#"module Test
             enum Bad {
-                case Foo(x: Int, x: String)
+                case Foo(x: lang.i64, x: lang.str)
             }
         "#,
         )
@@ -1036,7 +1036,7 @@ mod error_duplicate_label {
         Test::new(
             r#"module Test
             enum Point {
-                case Location(x: Int, x: Int)
+                case Location(x: lang.i64, x: lang.i64)
             }
         "#,
         )
@@ -1048,7 +1048,7 @@ mod error_duplicate_label {
         Test::new(
             r#"module Test
             enum Bad {
-                case Triple(a: Int, b: String, a: Bool)
+                case Triple(a: lang.i64, b: lang.str, a: lang.i1)
             }
         "#,
         )
@@ -1167,7 +1167,7 @@ mod edge_cases {
     fn case_keyword_not_valid_as_identifier() {
         Test::new(
             r#"module Test
-            func case() -> Int {
+            func case() -> lang.i64 {
                 42
             }
         "#,

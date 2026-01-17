@@ -10,11 +10,11 @@ fn test_struct_construction() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let p = Point(x: 42, y: 0);
     p.x
 }
@@ -34,11 +34,11 @@ fn test_struct_field_access() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let p = Point(x: 10, y: 32);
     p.x + p.y
 }
@@ -58,12 +58,12 @@ fn test_struct_multiple_fields() {
 module Test
 
 struct Data {
-    let a: Int
-    let b: Int
-    let c: Int
+    let a: lang.i64
+    let b: lang.i64
+    let c: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let d = Data(a: 10, b: 20, c: 12);
     d.a + d.b + d.c
 }
@@ -83,15 +83,15 @@ fn test_struct_pass_to_function() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func sum_point(p: Point) -> Int {
+func sum_point(p: Point) -> lang.i64 {
     p.x + p.y
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let p = Point(x: 20, y: 22);
     sum_point(p)
 }
@@ -111,15 +111,15 @@ fn test_struct_return_from_function() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func make_point(x: Int, y: Int) -> Point {
+func make_point(x: lang.i64, y: lang.i64) -> Point {
     Point(x: x, y: y)
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let p = make_point(10, 32);
     p.x + p.y
 }
@@ -140,15 +140,15 @@ fn test_nested_struct_extra() {
 module Test
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 }
 
 struct Outer {
     let inner: Inner
-    let extra: Int
+    let extra: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let o = Outer(inner: Inner(value: 40), extra: 42);
     o.extra
 }
@@ -169,15 +169,15 @@ fn test_nested_struct_inner_value() {
 module Test
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 }
 
 struct Outer {
     let inner: Inner
-    let extra: Int
+    let extra: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let o = Outer(inner: Inner(value: 42), extra: 0);
     o.inner.value
 }
@@ -197,15 +197,15 @@ fn test_nested_struct() {
 module Test
 
 struct Inner {
-    let value: Int
+    let value: lang.i64
 }
 
 struct Outer {
     let inner: Inner
-    let extra: Int
+    let extra: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let o = Outer(inner: Inner(value: 40), extra: 2);
     o.inner.value + o.extra
 }
@@ -225,11 +225,11 @@ fn test_struct_second_field() {
 module Test
 
 struct Point {
-    let x: Int
-    let y: Int
+    let x: lang.i64
+    let y: lang.i64
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let p = Point(x: 0, y: 42);
     p.y
 }

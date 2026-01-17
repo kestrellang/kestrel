@@ -15,7 +15,7 @@ enum Color {
     case Blue
 }
 
-func color_value(c: Color) -> Int {
+func color_value(c: Color) -> lang.i64 {
     match c {
         .Red => 1,
         .Green => 2,
@@ -23,7 +23,7 @@ func color_value(c: Color) -> Int {
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     color_value(Color.Blue)
 }
 "#,
@@ -42,18 +42,18 @@ fn test_enum_with_payload() {
 module Test
 
 enum Option {
-    case Some(value: Int)
+    case Some(value: lang.i64)
     case None
 }
 
-func unwrap_or(opt: Option, default: Int) -> Int {
+func unwrap_or(opt: Option, default: lang.i64) -> lang.i64 {
     match opt {
         .Some(value: v) => v,
         .None => default
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let some = Option.Some(value: 42);
     unwrap_or(some, 0)
 }
@@ -73,18 +73,18 @@ fn test_enum_none_case() {
 module Test
 
 enum Option {
-    case Some(value: Int)
+    case Some(value: lang.i64)
     case None
 }
 
-func unwrap_or(opt: Option, default: Int) -> Int {
+func unwrap_or(opt: Option, default: lang.i64) -> lang.i64 {
     match opt {
         .Some(value: v) => v,
         .None => default
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let none = Option.None;
     unwrap_or(none, 42)
 }
@@ -104,18 +104,18 @@ fn test_enum_multiple_payloads() {
 module Test
 
 enum Result {
-    case Ok(value: Int)
-    case Err(code: Int)
+    case Ok(value: lang.i64)
+    case Err(code: lang.i64)
 }
 
-func handle(r: Result) -> Int {
+func handle(r: Result) -> lang.i64 {
     match r {
         .Ok(value: v) => v,
         .Err(code: c) => c + 100
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let ok = Result.Ok(value: 42);
     handle(ok)
 }
@@ -135,18 +135,18 @@ fn test_enum_err_case() {
 module Test
 
 enum Result {
-    case Ok(value: Int)
-    case Err(code: Int)
+    case Ok(value: lang.i64)
+    case Err(code: lang.i64)
 }
 
-func handle(r: Result) -> Int {
+func handle(r: Result) -> lang.i64 {
     match r {
         .Ok(value: v) => v,
         .Err(code: c) => c + 100
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let err = Result.Err(code: 10);
     handle(err)
 }
@@ -167,11 +167,11 @@ fn test_enum_nested_match() {
 module Test
 
 enum Option {
-    case Some(value: Int)
+    case Some(value: lang.i64)
     case None
 }
 
-func add_options(a: Option, b: Option) -> Int {
+func add_options(a: Option, b: Option) -> lang.i64 {
     match a {
         .Some(value: x) => {
             match b {
@@ -188,7 +188,7 @@ func add_options(a: Option, b: Option) -> Int {
     }
 }
 
-func main() -> Int {
+func main() -> lang.i64 {
     let a = Option.Some(value: 20);
     let b = Option.Some(value: 22);
     add_options(a, b)
