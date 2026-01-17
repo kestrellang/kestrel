@@ -45,11 +45,11 @@ public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
 }
 
 // Bridge: default implementation satisfies _ExpressibleByArrayLiteral
-extend ExpressibleByArrayLiteral {
-    public init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64) {
-        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
-    }
-}
+//extend ExpressibleByArrayLiteral {
+//    public init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64) {
+//        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
+//    }
+//}
 
 // Dictionary literal protocol
 // Note: Requires tuple type [(Key, Value)] which may not be fully supported

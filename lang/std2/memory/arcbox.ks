@@ -2,7 +2,7 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable)
+import std.core.(Bool, Cloneable, Copyable)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)

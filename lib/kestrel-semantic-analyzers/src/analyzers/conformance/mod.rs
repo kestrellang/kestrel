@@ -6,7 +6,8 @@ use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::{
     AssociatedTypeBindingsForStruct, ConformancesForSymbol, ExtensionsFor, PropertyRequirement,
-    ProtocolAssociatedTypesWithDefaults, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
+    ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,
+    ProtocolMethodsWithDefiner, ProtocolRequiredInitializers, ProtocolRequiredMethods,
     ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
 };
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
@@ -16,6 +17,7 @@ use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
@@ -114,6 +116,11 @@ impl Analyzer for ConformanceAnalyzer {
         // Link protocol methods for all structs
         for (dyn_sym, struct_sym) in &self.structs {
             link_protocol_methods_for_struct(struct_sym, dyn_sym, ctx.model, ctx);
+        }
+
+        // Link protocol initializers for all structs
+        for (dyn_sym, struct_sym) in &self.structs {
+            link_protocol_initializers_for_struct(struct_sym, dyn_sym, ctx.model, ctx);
         }
     }
 }
@@ -561,11 +568,13 @@ fn link_protocol_methods_for_struct(
         Arc<FunctionSymbol>,
         CallableSignature,
         HashMap<String, SignatureType>,
+        SignatureType, // conformance_signature
     )> = Vec::new();
     for conformance_ty in &conformances {
         if let Some((conforming_protocol, bindings)) =
             resolve_protocol_type_for_link(conformance_ty, struct_dyn, struct_name, model)
         {
+            let conformance_sig = SignatureType::from_ty(conformance_ty);
             let methods = model.query(ProtocolMethodsWithDefiner {
                 protocol_id: conforming_protocol.metadata().id(),
             });
@@ -577,6 +586,7 @@ fn link_protocol_methods_for_struct(
                     method,
                     substituted_sig,
                     bindings.clone(),
+                    conformance_sig.clone(),
                 ));
             }
         }
@@ -597,8 +607,8 @@ fn link_protocol_methods_for_struct(
         let method_name = &struct_method.metadata().name().value;
         let method_span = struct_method.metadata().declaration_span().clone();
 
-        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>)> = Vec::new();
-        for (protocol, protocol_method, substituted_sig, _bindings) in &protocol_methods {
+        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, SignatureType)> = Vec::new();
+        for (protocol, protocol_method, substituted_sig, _bindings, conformance_sig) in &protocol_methods {
             if &struct_sig == substituted_sig {
                 let struct_receiver = struct_method
                     .metadata()
@@ -609,7 +619,7 @@ fn link_protocol_methods_for_struct(
                     .get_behavior::<CallableBehavior>()
                     .and_then(|cb| cb.receiver());
                 if struct_receiver == protocol_receiver {
-                    matches.push((protocol.clone(), protocol_method.clone()));
+                    matches.push((protocol.clone(), protocol_method.clone(), conformance_sig.clone()));
                 } else {
                     let protocol_name = protocol.metadata().name().value.clone();
                     ctx.report(ProtocolMethodReceiverMismatchError {
@@ -627,12 +637,18 @@ fn link_protocol_methods_for_struct(
         // This handles the case where a struct explicitly conforms to both A and B,
         // where B: A. The method `a()` from protocol A will appear twice (once from
         // direct conformance to A, once through B's inheritance), but it's the same method.
-        matches.dedup_by_key(|(_, method)| method.metadata().id());
+        // Note: different instantiations of generic protocols (e.g., Conv[Int8] vs Conv[Int32])
+        // have different substituted signatures, so the struct method only matches ONE of them,
+        // meaning they won't both appear in `matches` for the same struct method.
+        matches.sort_by_key(|(_, method, _)| method.metadata().id().raw());
+        matches.dedup_by(|(_, method_a, _), (_, method_b, _)| {
+            method_a.metadata().id() == method_b.metadata().id()
+        });
 
         if matches.len() > 1 {
             let protocol_names: Vec<String> = matches
                 .iter()
-                .map(|(p, _)| p.metadata().name().value.clone())
+                .map(|(p, _, _)| p.metadata().name().value.clone())
                 .collect();
             ctx.report(AmbiguousProtocolMethodError {
                 span: method_span,
@@ -640,10 +656,11 @@ fn link_protocol_methods_for_struct(
                 protocols: protocol_names,
             });
         } else if matches.len() == 1 {
-            let (protocol, protocol_method) = &matches[0];
-            let implements = kestrel_semantic_tree::behavior::implements::ImplementsBehavior::new(
+            let (protocol, protocol_method, conformance_sig) = &matches[0];
+            let implements = kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
                 protocol.metadata().id(),
                 protocol_method.metadata().id(),
+                conformance_sig.clone(),
             );
             struct_method.metadata().add_behavior(implements);
         }
@@ -838,6 +855,134 @@ fn check_property_requirements(
                     }
                 }
             }
+        }
+    }
+}
+
+fn collect_initializers_from_symbol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Vec<Arc<InitializerSymbol>> {
+    symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|child| child.metadata().kind() == KestrelSymbolKind::Initializer)
+        .filter_map(|child| child.into_any_arc().downcast::<InitializerSymbol>().ok())
+        .collect()
+}
+
+/// Link protocol initializers to struct initializers (attach ImplementsBehavior).
+///
+/// This is similar to `link_protocol_methods_for_struct` but for initializers.
+/// It allows initializers with the same labels but different types to coexist
+/// if they implement different protocol requirements.
+fn link_protocol_initializers_for_struct(
+    struct_sym: &Arc<StructSymbol>,
+    struct_dyn: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    let struct_name = &struct_sym.metadata().name().value;
+    let struct_id = struct_sym.metadata().id();
+
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: struct_dyn.metadata().id(),
+    });
+    let extensions = model.query(ExtensionsFor {
+        target_id: struct_id,
+    });
+    for extension in &extensions {
+        let ext_confs = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        conformances.extend(ext_confs);
+    }
+    if conformances.is_empty() {
+        return;
+    }
+
+    // Collect protocol initializer requirements with their defining protocols
+    let mut protocol_initializers: Vec<(
+        Arc<ProtocolSymbol>,
+        Arc<InitializerSymbol>,
+        CallableSignature,
+        HashMap<String, SignatureType>,
+        SignatureType, // conformance_signature
+    )> = Vec::new();
+    for conformance_ty in &conformances {
+        if let Some((conforming_protocol, bindings)) =
+            resolve_protocol_type_for_link(conformance_ty, struct_dyn, struct_name, model)
+        {
+            let conformance_sig = SignatureType::from_ty(conformance_ty);
+            let initializers = model.query(ProtocolInitializersWithDefiner {
+                protocol_id: conforming_protocol.metadata().id(),
+            });
+            for (defining_protocol, init) in initializers {
+                let sig: CallableSignature = init.signature();
+                let substituted_sig = substitute_signature(&sig, &bindings);
+                protocol_initializers.push((
+                    defining_protocol,
+                    init,
+                    substituted_sig,
+                    bindings.clone(),
+                    conformance_sig.clone(),
+                ));
+            }
+        }
+    }
+
+    // Collect all initializers from struct and extensions
+    let mut all_initializers = collect_initializers_from_symbol(struct_dyn);
+    let extensions = model.query(ExtensionsFor {
+        target_id: struct_id,
+    });
+    for extension in extensions {
+        let extension_inits =
+            collect_initializers_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        all_initializers.extend(extension_inits);
+    }
+
+    // Match struct initializers to protocol initializers
+    for struct_init in &all_initializers {
+        let struct_sig = struct_init.signature();
+        let init_span = struct_init.metadata().declaration_span().clone();
+
+        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<InitializerSymbol>, SignatureType)> = Vec::new();
+        for (protocol, protocol_init, substituted_sig, _bindings, conformance_sig) in &protocol_initializers {
+            if &struct_sig == substituted_sig {
+                // Initializers always have "initializing" receiver, so no receiver check needed
+                matches.push((protocol.clone(), protocol_init.clone(), conformance_sig.clone()));
+            }
+        }
+
+        // Deduplicate matches by protocol initializer ID.
+        // This handles the case where a struct explicitly conforms to both A and B,
+        // where B: A. The init from protocol A will appear twice but it's the same init.
+        // Note: different instantiations of generic protocols (e.g., Conv[Int8] vs Conv[Int32])
+        // have different substituted signatures, so the struct init only matches ONE of them.
+        matches.sort_by_key(|(_, init, _)| init.metadata().id().raw());
+        matches.dedup_by(|(_, init_a, _), (_, init_b, _)| {
+            init_a.metadata().id() == init_b.metadata().id()
+        });
+
+        if matches.len() > 1 {
+            let protocol_names: Vec<String> = matches
+                .iter()
+                .map(|(p, _, _)| p.metadata().name().value.clone())
+                .collect();
+            ctx.report(AmbiguousProtocolMethodError {
+                span: init_span,
+                method_name: "init".to_string(),
+                protocols: protocol_names,
+            });
+        } else if matches.len() == 1 {
+            let (protocol, protocol_init, conformance_sig) = &matches[0];
+            let implements = kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
+                protocol.metadata().id(),
+                protocol_init.metadata().id(),
+                conformance_sig.clone(),
+            );
+            struct_init.metadata().add_behavior(implements);
         }
     }
 }

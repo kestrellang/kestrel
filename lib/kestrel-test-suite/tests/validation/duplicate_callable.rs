@@ -241,3 +241,89 @@ mod valid_overloads {
         .expect(Compiles);
     }
 }
+
+mod protocol_conformance {
+    use super::*;
+
+    #[test]
+    fn same_label_same_protocol_conformance_is_duplicate() {
+        // Two inits with same signature that don't implement different protocols
+        // ARE duplicates even if they have different implementations
+        Test::new(
+            r#"module Test
+            struct Wrapper {
+                let value: ()
+
+                init(from value: ()) { self.value = value }
+                init(from value: ()) { self.value = () }
+            }
+        "#,
+        )
+        .expect(HasError("duplicate initializer signature"));
+    }
+
+    #[test]
+    fn different_arity_with_same_label_start_is_valid() {
+        // Two inits with same first label but different arity are valid overloads
+        // (arity-based overloading, not protocol-based)
+        Test::new(
+            r#"module Test
+            struct Widget {
+                let x: ()
+
+                init(value: ()) { x = value }
+                init(value: (), extra: ()) { x = value }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn two_protocols_same_method_label_different_types() {
+        // Two different protocols each require a method with the same label
+        // A struct implementing both can have methods with same label but different types
+        Test::new(
+            r#"module Test
+            protocol Alpha {
+                func process(value: ()) -> ()
+            }
+
+            protocol Beta {
+                func process(value: ((), ())) -> ()
+            }
+
+            struct Handler: Alpha, Beta {
+                func process(value: ()) -> () { () }
+                func process(value: ((), ())) -> () { () }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn two_protocols_same_init_label_different_types() {
+        // Two different protocols each require an init with the same label
+        // A struct implementing both can have inits with same label but different types
+        Test::new(
+            r#"module Test
+            protocol Alpha {
+                init(value: ())
+            }
+
+            protocol Beta {
+                init(value: ((), ()))
+            }
+
+            struct Widget: Alpha, Beta {
+                let x: ()
+
+                init(value: ()) { x = value }
+                init(value: ((), ())) { x = () }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}

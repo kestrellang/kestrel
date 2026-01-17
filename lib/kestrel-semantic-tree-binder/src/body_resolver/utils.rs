@@ -11,6 +11,7 @@ use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
+use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -968,5 +969,122 @@ pub fn replace_unsubstituted_type_params(ty: &Ty, span: &Span) -> Ty {
 
         // Other types - return as-is
         _ => ty.clone(),
+    }
+}
+
+// =============================================================================
+// Type-Directed Conformance Helpers
+// =============================================================================
+
+/// Get the ImplementsBehavior from a symbol if it has one.
+///
+/// This behavior links a struct method/initializer to the protocol method it implements.
+pub fn get_implements_behavior(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<ImplementsBehavior> {
+    for behavior in symbol.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::Implements {
+            if let Some(implements) = behavior.as_ref().downcast_ref::<ImplementsBehavior>() {
+                return Some(implements.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Find all conformances for a specific protocol from a list of conformances.
+///
+/// Returns conformances where the protocol symbol ID matches the given protocol ID.
+/// For example, given conformances `[Convertible[Int8], Equatable, Convertible[Int32]]`
+/// and protocol ID for `Convertible`, returns `[Convertible[Int8], Convertible[Int32]]`.
+pub fn find_conformances_for_protocol(conformances: &[Ty], protocol_id: SymbolId) -> Vec<&Ty> {
+    conformances
+        .iter()
+        .filter(|ty| {
+            if let TyKind::Protocol { symbol, .. } = ty.kind() {
+                symbol.metadata().id() == protocol_id
+            } else {
+                false
+            }
+        })
+        .collect()
+}
+
+/// Get the type argument at a specific index from a protocol conformance.
+///
+/// For a conformance like `Convertible[Int32]`, this extracts the `Int32` type argument.
+/// The index refers to the position of the type parameter in the protocol definition.
+///
+/// Returns `None` if:
+/// - The type is not a protocol
+/// - The protocol has no type parameters
+/// - The index is out of bounds
+pub fn get_conformance_type_arg(conformance_ty: &Ty, param_index: usize) -> Option<Ty> {
+    if let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = conformance_ty.kind()
+    {
+        // Get the protocol's type parameters to find the ID at the given index
+        let type_params = symbol.type_parameters();
+        let param = type_params.get(param_index)?;
+        let param_id = param.metadata().id();
+
+        // Look up the substituted type for this parameter
+        substitutions.get(param_id).cloned()
+    } else {
+        None
+    }
+}
+
+/// Find the best matching initializer using type-directed selection.
+///
+/// When multiple initializers match by label/arity (e.g., multiple `init(from:)` from
+/// different `Convertible[X]` conformances), this function selects the one whose
+/// parameter type matches the actual argument type.
+///
+/// # Arguments
+/// * `candidates` - Initializers that match by label/arity
+/// * `arg_types` - The actual argument types being passed
+/// * `_struct_symbol` - The struct being instantiated (reserved for future use)
+///
+/// # Returns
+/// The index of the best matching initializer, or `None` if:
+/// - No type-directed match is found (falls back to first match)
+/// - Multiple exact matches exist (ambiguity - should report error)
+pub fn find_type_directed_match(
+    candidates: &[(usize, &Arc<dyn Symbol<KestrelLanguage>>, CallableBehavior)],
+    arg_types: &[Ty],
+    _struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<usize> {
+    // Skip if no arguments to match on
+    if arg_types.is_empty() {
+        return None;
+    }
+
+    let mut matches: Vec<usize> = Vec::new();
+
+    for (candidate_idx, (_, _init_sym, callable)) in candidates.iter().enumerate() {
+        let params = callable.parameters();
+        if params.is_empty() {
+            continue;
+        }
+
+        // Check if the first parameter type matches the first argument type
+        // This is a simple direct type comparison - if the init's parameter type
+        // is assignable from the argument type, it's a match
+        let param_ty = &params[0].ty;
+
+        if arg_types[0].is_assignable_to(param_ty) {
+            // Push the index within candidates, not the original index
+            matches.push(candidate_idx);
+        }
+    }
+
+    // Return the single match, or None if zero or multiple matches
+    if matches.len() == 1 {
+        Some(matches[0])
+    } else {
+        None // Either no matches (fall back to first) or ambiguous (should error)
     }
 }

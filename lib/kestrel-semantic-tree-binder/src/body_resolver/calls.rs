@@ -8,7 +8,7 @@ use std::sync::Arc;
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::{IsVisibleFrom, SemanticModel, SymbolFor};
-use kestrel_semantic_tree::behavior::callable::ParameterAccessMode;
+use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ParameterAccessMode};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::subscript::SubscriptBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
@@ -49,10 +49,10 @@ use super::members::{
 };
 use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
-    get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
-    infer_type_arguments, is_expression_kind, matches_signature, replace_unsubstituted_type_params,
-    substitute_self, substitute_type, validate_not_standalone_type_param,
-    verify_type_argument_constraints,
+    find_type_directed_match, get_callable_behavior, get_type_container,
+    get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind, matches_signature,
+    replace_unsubstituted_type_params, substitute_self, substitute_type,
+    validate_not_standalone_type_param, verify_type_argument_constraints,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
@@ -1220,63 +1220,81 @@ fn resolve_explicit_init_call(
     struct_symbol: Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    // Find matching initializer by arity and labels
-    for init_sym in initializers {
+    // Collect all matching initializers by arity and labels
+    let mut candidates: Vec<(usize, &Arc<dyn Symbol<KestrelLanguage>>, CallableBehavior)> = Vec::new();
+    for (idx, init_sym) in initializers.iter().enumerate() {
         if let Some(callable) = get_callable_behavior(init_sym) {
             if matches_signature(&callable, arguments.len(), arg_labels) {
-                // Found matching initializer
-                // The return type is the actual struct type
-                // Create a struct type from the struct symbol
-                // If explicit type arguments are provided, use them; otherwise infer
-                let struct_ty = if let Some(ref type_args) = explicit_type_args {
-                    create_struct_type_with_type_args(&struct_symbol, type_args, span.clone(), ctx)
-                } else {
-                    create_struct_type(&struct_symbol, span.clone())
-                };
-
-                // For explicit init, create a Call expression
-                // Initializers are not mutable lvalues
-                let init_id = init_sym.metadata().id();
-
-                // Get substitutions from the struct type to apply to initializer parameters.
-                // This maps the struct's type parameters (e.g., Slice's T) to the instantiation
-                // type arguments (e.g., inference placeholders or explicit type args).
-                let struct_subs = match struct_ty.kind() {
-                    TyKind::Struct { substitutions, .. } => substitutions.clone(),
-                    _ => Substitutions::new(),
-                };
-
-                // Build the function type for the initializer, applying struct substitutions
-                // to parameter types so that Slice.init(pointer: Pointer[T], ...) becomes
-                // Slice.init(pointer: Pointer[Infer], ...) when T is an inference placeholder.
-                //
-                // We also need to replace any type parameters that aren't in the substitution
-                // map with inference placeholders - this handles cases where the callable's
-                // parameter types use different TypeParameter symbols than the struct's.
-                let param_tys: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| {
-                        let ty = p.ty.apply_substitutions(&struct_subs);
-                        // If the type is still a TypeParameter after substitution,
-                        // replace it with an inference placeholder
-                        replace_unsubstituted_type_params(&ty, &span)
-                    })
-                    .collect();
-                let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
-
-                let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
-                // Use generic_call to store the struct substitutions so that CallableParamTypesForCall
-                // can apply them when type-checking arguments
-                return Expression::generic_call(
-                    init_ref,
-                    arguments,
-                    struct_subs,
-                    struct_ty,
-                    span,
-                );
+                candidates.push((idx, init_sym, callable));
             }
         }
+    }
+
+    // If multiple candidates, try type-directed conformance selection
+    let selected_idx = if candidates.len() > 1 {
+        // Extract argument types for type-directed selection
+        let arg_types: Vec<Ty> = arguments.iter().map(|arg| arg.value.ty.clone()).collect();
+
+        // Try to find a match based on conformance type arguments
+        find_type_directed_match(&candidates, &arg_types, &struct_symbol)
+            .unwrap_or(0) // Fall back to first match if no type-directed match
+    } else {
+        0
+    };
+
+    // Select the initializer
+    if let Some((_, init_sym, callable)) = candidates.get(selected_idx) {
+        // Found matching initializer
+        // The return type is the actual struct type
+        // Create a struct type from the struct symbol
+        // If explicit type arguments are provided, use them; otherwise infer
+        let struct_ty = if let Some(ref type_args) = explicit_type_args {
+            create_struct_type_with_type_args(&struct_symbol, type_args, span.clone(), ctx)
+        } else {
+            create_struct_type(&struct_symbol, span.clone())
+        };
+
+        // For explicit init, create a Call expression
+        // Initializers are not mutable lvalues
+        let init_id = init_sym.metadata().id();
+
+        // Get substitutions from the struct type to apply to initializer parameters.
+        // This maps the struct's type parameters (e.g., Slice's T) to the instantiation
+        // type arguments (e.g., inference placeholders or explicit type args).
+        let struct_subs = match struct_ty.kind() {
+            TyKind::Struct { substitutions, .. } => substitutions.clone(),
+            _ => Substitutions::new(),
+        };
+
+        // Build the function type for the initializer, applying struct substitutions
+        // to parameter types so that Slice.init(pointer: Pointer[T], ...) becomes
+        // Slice.init(pointer: Pointer[Infer], ...) when T is an inference placeholder.
+        //
+        // We also need to replace any type parameters that aren't in the substitution
+        // map with inference placeholders - this handles cases where the callable's
+        // parameter types use different TypeParameter symbols than the struct's.
+        let param_tys: Vec<Ty> = callable
+            .parameters()
+            .iter()
+            .map(|p| {
+                let ty = p.ty.apply_substitutions(&struct_subs);
+                // If the type is still a TypeParameter after substitution,
+                // replace it with an inference placeholder
+                replace_unsubstituted_type_params(&ty, &span)
+            })
+            .collect();
+        let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
+
+        let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
+        // Use generic_call to store the struct substitutions so that CallableParamTypesForCall
+        // can apply them when type-checking arguments
+        return Expression::generic_call(
+            init_ref,
+            arguments,
+            struct_subs,
+            struct_ty,
+            span,
+        );
     }
 
     // No matching initializer found - report error

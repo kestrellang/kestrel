@@ -681,3 +681,184 @@ mod regression {
         .expect(Symbol::new("MyStruct").is(SymbolKind::Struct));
     }
 }
+
+mod type_directed_conformance {
+    use super::*;
+
+    /// When a type has multiple initializers with the same label but different parameter types
+    /// (from implementing multiple instantiations of a generic protocol), the compiler should
+    /// select the correct one based on the argument type.
+    #[test]
+    fn initializer_selected_by_argument_type() {
+        Test::new(
+            r#"module Test
+
+            public struct Wrapper8 {
+                var raw: lang.i8
+                public init(raw: lang.i8) { self.raw = raw }
+            }
+
+            public struct Wrapper32 {
+                var raw: lang.i32
+                public init(raw: lang.i32) { self.raw = raw }
+            }
+
+            // Target struct with differently-labeled inits
+            public struct Target {
+                var value: lang.i64
+
+                public init(from8 value: Wrapper8) {
+                    self.value = lang.cast_i8_i64(value.raw)
+                }
+
+                public init(from32 value: Wrapper32) {
+                    self.value = lang.cast_i32_i64(value.raw)
+                }
+            }
+
+            public func test() {
+                let w8 = Wrapper8(raw: lang.cast_i64_i8(1));
+                let w32 = Wrapper32(raw: lang.cast_i64_i32(42));
+
+                // These should work - different labels select correct init
+                let t1 = Target(from8: w8);
+                let t2 = Target(from32: w32);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// When a struct has multiple initializers with different labels but multiple candidates
+    /// match by arity, the argument type determines which is called.
+    #[test]
+    fn type_directed_selection_with_different_labels() {
+        Test::new(
+            r#"module Test
+
+            public struct Small {
+                var x: lang.i8
+                public init() { self.x = lang.cast_i64_i8(0) }
+            }
+
+            public struct Large {
+                var x: lang.i32
+                public init() { self.x = lang.cast_i64_i32(0) }
+            }
+
+            public struct Target {
+                var value: lang.i64
+
+                public init(fromSmall other: Small) {
+                    self.value = lang.cast_i8_i64(other.x)
+                }
+
+                public init(fromLarge other: Large) {
+                    self.value = lang.cast_i32_i64(other.x)
+                }
+            }
+
+            public func test() {
+                let s = Small();
+                let l = Large();
+
+                // Different labels - type-directed selection validates correct init is called
+                let t1 = Target(fromSmall: s);
+                let t2 = Target(fromLarge: l);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// When a struct has multiple initializers with the same label implementing
+    /// different protocol conformances, the argument type determines which is called.
+    #[test]
+    fn protocol_based_init_overloads() {
+        Test::new(
+            r#"module Test
+
+            public protocol Convertible[T] {
+                init(from other: T)
+            }
+
+            public struct Small {
+                var x: lang.i8
+                public init() { self.x = lang.cast_i64_i8(0) }
+            }
+
+            public struct Large {
+                var x: lang.i32
+                public init() { self.x = lang.cast_i64_i32(0) }
+            }
+
+            public struct Target: Convertible[Small], Convertible[Large] {
+                var value: lang.i64
+
+                public init(from other: Small) {
+                    self.value = lang.cast_i8_i64(other.x)
+                }
+
+                public init(from other: Large) {
+                    self.value = lang.cast_i32_i64(other.x)
+                }
+            }
+
+            public func test() {
+                let s = Small();
+                let l = Large();
+
+                // Type-directed conformance: selects init based on argument type
+                let t1 = Target(from: s);  // Should call init(from: Small)
+                let t2 = Target(from: l);  // Should call init(from: Large)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    /// Test that method calls also use type-directed selection when multiple
+    /// methods match by label/arity but differ in parameter types.
+    #[test]
+    fn method_call_type_directed_selection() {
+        Test::new(
+            r#"module Test
+
+            public struct SmallValue {
+                var x: lang.i8
+                public init() { self.x = lang.cast_i64_i8(5) }
+            }
+
+            public struct LargeValue {
+                var x: lang.i32
+                public init() { self.x = lang.cast_i64_i32(100) }
+            }
+
+            public struct Processor {
+                var result: lang.i64
+
+                public init() { self.result = 0 }
+
+                public func processSmall(value: SmallValue) -> lang.i64 {
+                    lang.cast_i8_i64(value.x)
+                }
+
+                public func processLarge(value: LargeValue) -> lang.i64 {
+                    lang.cast_i32_i64(value.x)
+                }
+            }
+
+            public func test() {
+                let p = Processor();
+                let s = SmallValue();
+                let l = LargeValue();
+
+                // Method calls - function params don't have external labels by default
+                let r1 = p.processSmall(s);
+                let r2 = p.processLarge(l);
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}

@@ -1,6 +1,7 @@
 use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::SymbolId;
 
+use crate::behavior::callable::SignatureType;
 use crate::behavior::KestrelBehaviorKind;
 use crate::language::KestrelLanguage;
 
@@ -25,6 +26,11 @@ use crate::language::KestrelLanguage;
 ///     func draw() { }  // This method gets ImplementsBehavior(Drawable, draw)
 /// }
 /// ```
+///
+/// For generic protocols like `Convertible[T]`, different instantiations create
+/// different conformances. The `conformance_signature` field stores the full
+/// instantiated protocol type (e.g., "Convertible[Int8]") to distinguish between
+/// implementing `Convertible[Int8].init(from:)` vs `Convertible[Int32].init(from:)`.
 #[derive(Debug, Clone)]
 pub struct ImplementsBehavior {
     /// The protocol that defines the method being implemented
@@ -32,6 +38,10 @@ pub struct ImplementsBehavior {
 
     /// The protocol method being implemented
     protocol_method: SymbolId,
+
+    /// The full conformance signature (e.g., "Convertible[Int8]").
+    /// This distinguishes between different instantiations of the same generic protocol.
+    conformance_signature: SignatureType,
 }
 
 impl Behavior<KestrelLanguage> for ImplementsBehavior {
@@ -46,6 +56,20 @@ impl ImplementsBehavior {
         ImplementsBehavior {
             protocol,
             protocol_method,
+            conformance_signature: SignatureType::Unit, // Legacy default
+        }
+    }
+
+    /// Create a new ImplementsBehavior with full conformance signature
+    pub fn with_conformance(
+        protocol: SymbolId,
+        protocol_method: SymbolId,
+        conformance_signature: SignatureType,
+    ) -> Self {
+        ImplementsBehavior {
+            protocol,
+            protocol_method,
+            conformance_signature,
         }
     }
 
@@ -57,5 +81,11 @@ impl ImplementsBehavior {
     /// Get the protocol method symbol ID
     pub fn protocol_method(&self) -> SymbolId {
         self.protocol_method
+    }
+
+    /// Get the full conformance signature.
+    /// This distinguishes between different instantiations of generic protocols.
+    pub fn conformance_signature(&self) -> &SignatureType {
+        &self.conformance_signature
     }
 }

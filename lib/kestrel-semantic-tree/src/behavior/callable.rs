@@ -251,8 +251,22 @@ impl SignatureType {
             TyKind::Enum { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }
-            TyKind::Protocol { symbol, .. } => {
-                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
+            TyKind::Protocol {
+                symbol,
+                substitutions,
+            } => {
+                // Include type arguments in the signature to distinguish
+                // Conv[Int8] from Conv[Int32]
+                let mut parts = vec![symbol.metadata().name().value.clone()];
+                // Add type arguments in order of the protocol's type parameters
+                for type_param in symbol.type_parameters() {
+                    if let Some(sub_ty) = substitutions.get(type_param.metadata().id()) {
+                        // Recursively convert the substitution type
+                        let sub_sig = SignatureType::from_ty(sub_ty);
+                        parts.push(format!("{:?}", sub_sig));
+                    }
+                }
+                SignatureType::Named(parts)
             }
             TyKind::TypeAlias { symbol, .. } => {
                 // For type aliases, use the alias name

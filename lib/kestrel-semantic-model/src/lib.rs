@@ -22,11 +22,11 @@ pub use queries::{
     ConformancesForSymbol, DeclaredName, DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods,
     ExtensionsFor, FunctionsInSymbol, GenericsData, GenericsDataFor, HasBody, ImportsInScope,
     InferenceResultFor, InheritedProtocolMember, IsInsideAny, IsVisibleFrom, LocalName,
-    PropertyRequirement, ProtocolAssociatedTypesWithDefaults, ProtocolMethodsWithDefiner,
-    ProtocolRequiredMethods, ProtocolRequiredProperties, ResolveModulePath, ResolveName,
-    ResolveTypePath, ResolveValuePath, ResolvedAliasedType, ScopeFor, StructFieldInfo,
-    StructFieldTypeInfo, StructFieldTypes, StructFields, StructMethods, SymbolFor, VisibleChildren,
-    VisibleChildrenByName,
+    PropertyRequirement, ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,
+    ProtocolMethodsWithDefiner, ProtocolRequiredInitializers, ProtocolRequiredMethods,
+    ProtocolRequiredProperties, ResolveModulePath, ResolveName, ResolveTypePath, ResolveValuePath,
+    ResolvedAliasedType, ScopeFor, StructFieldInfo, StructFieldTypeInfo, StructFieldTypes,
+    StructFields, StructMethods, SymbolFor, VisibleChildren, VisibleChildrenByName,
 };
 pub use query::Query;
 pub use registry::SymbolRegistry;

@@ -3,12 +3,12 @@
 module std.memory
 
 import std.result.(Optional)
-import std.core.(Bool, NonCopyable)
+import std.core.(Bool, Copyable)
 import std.num.(Int64)
 import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
 import std.ffi.(memcpy, memmove, memset)
 
-public struct Buffer[T, A]: NonCopyable where A: Allocator {
+public struct Buffer[T, A]: not Copyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int64
     private var allocator: A

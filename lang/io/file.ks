@@ -7,7 +7,7 @@ import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
-import std.core.(Bool)
+import std.core.(Bool, Copyable)
 import io.libc
 import io.error.(Error)
 import io.read.(Read, readAll)
@@ -21,7 +21,7 @@ public enum Seek {
 }
 
 // File - owned file handle
-public struct File: Read, Write {
+public struct File: Read, Write, not Copyable {
     var fd: libc.Fd
 
     // Private: create from raw fd

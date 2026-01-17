@@ -5,6 +5,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
@@ -83,11 +84,17 @@ impl Query for ResolveName {
                 };
             }
 
-            // Check type parameters for extensions
+            // Check type parameters and associated types for extensions
             // Extensions reference type parameters from their target type
+            // Protocol extensions also access associated types from target protocol
             if let Some(symbol) = model.query(SymbolFor { id }) {
                 if symbol.metadata().kind() == KestrelSymbolKind::Extension {
                     if let Some(result) = find_in_extension_type_params(&symbol, &self.name) {
+                        return result;
+                    }
+                    if let Some(result) =
+                        find_in_protocol_extension_associated_types(&symbol, &self.name)
+                    {
                         return result;
                     }
                 }
@@ -130,4 +137,27 @@ fn find_in_extension_type_params(
     }
 
     None
+}
+
+/// Find an associated type in a protocol extension's target protocol.
+///
+/// Protocol extensions can access associated types from the target protocol
+/// (including inherited ones) in method signatures and bodies.
+fn find_in_protocol_extension_associated_types(
+    extension: &Arc<dyn Symbol<KestrelLanguage>>,
+    name: &str,
+) -> Option<SymbolResolution> {
+    let target_beh = extension
+        .metadata()
+        .get_behavior::<ExtensionTargetBehavior>()?;
+
+    let protocol_sym = target_beh.target_protocol()?;
+
+    let flattened = protocol_sym
+        .metadata()
+        .get_behavior::<FlattenedProtocolBehavior>()?;
+
+    let assoc_type = flattened.associated_types().get(name)?;
+
+    Some(SymbolResolution::Found(vec![assoc_type.symbol.metadata().id()]))
 }

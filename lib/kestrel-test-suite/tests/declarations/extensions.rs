@@ -1408,6 +1408,47 @@ mod protocol_extensions {
         .expect(Compiles);
     }
 
+    #[test]
+    fn protocol_extension_uses_associated_type_in_signature() {
+        // Protocol extension method can use associated types in parameter/return types
+        Test::new(
+            r#"module Test
+            protocol Container {
+                type Element
+                func add(item: Element)
+            }
+            extend Container {
+                func addTwo(first: Element, second: Element) {
+                    self.add(first);
+                    self.add(second);
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn protocol_extension_uses_inherited_associated_type() {
+        // Protocol extension can access associated type from parent protocol
+        Test::new(
+            r#"module Test
+            protocol Base {
+                type Element
+            }
+            protocol Child: Base {
+                func fetch() -> Element
+            }
+            extend Child {
+                func fetchWithFallback(fallback: Element) -> Element {
+                    return self.fetch();
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
     // TODO: Future work - these tests document features not yet implemented:
     //
     // 1. protocol_extension_provides_default_for_requirement

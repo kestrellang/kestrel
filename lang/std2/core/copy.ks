@@ -7,10 +7,6 @@ module std.core
 @builtin(.Copyable)
 public protocol Copyable {}
 
-/// Marker protocol for types that cannot be implicitly copied.
-/// Types conforming to NonCopyable must be explicitly moved or cloned.
-/// Note: In practice, use `not Copyable` syntax on the type instead.
-public protocol NonCopyable {}
 
 /// Protocol for types that can be copied via a clone() method.
 /// Unlike simple Copyable (bitwise copy), Cloneable types have custom copy behavior.

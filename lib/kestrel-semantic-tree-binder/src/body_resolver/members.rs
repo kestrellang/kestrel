@@ -41,9 +41,9 @@ use crate::diagnostics::{
 use super::calls::{collect_overload_descriptions, try_resolve_subscript_call, validate_argument_access_modes};
 use super::context::BodyResolutionContext;
 use super::utils::{
-    format_symbol_kind, get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
-    get_type_parameter_bounds_from_context, infer_type_arguments, matches_signature,
-    substitute_self, substitute_type, type_satisfies_bound,
+    find_type_directed_match, format_symbol_kind, get_callable_behavior, get_type_container,
+    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, infer_type_arguments,
+    matches_signature, substitute_self, substitute_type, type_satisfies_bound,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -767,10 +767,12 @@ pub fn resolve_member_call(
         return Expression::error(span);
     }
 
-    // Find matching overload
+    // Find matching overload - collect all candidates first for type-directed selection
     let mut invisible_matches = Vec::new();
+    let mut candidates: Vec<(usize, &Arc<dyn Symbol<KestrelLanguage>>, CallableBehavior)> =
+        Vec::new();
 
-    for method in &methods {
+    for (idx, method) in methods.iter().enumerate() {
         if let Some(callable) = get_callable_behavior(method) {
             if matches_signature(&callable, arguments.len(), arg_labels) {
                 // Check visibility
@@ -782,95 +784,98 @@ pub fn resolve_member_call(
                     invisible_matches.push(method.clone());
                     continue;
                 }
-
-                let mut return_ty = callable.return_type().clone();
-                let method_id = method.metadata().id();
-
-                // Apply substitutions from the base type to the return type
-                // e.g., for Box[Int].get() where get returns T, substitute T with Int
-                // or for Option[Int].Some where Some returns Option[T], substitute T with Int
-                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
-                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                    return_ty = return_ty.apply_substitutions(substitutions);
-                } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs()
-                {
-                    // Check if base type already has concrete substitutions
-                    let has_concrete_subs = !substitutions.is_empty()
-                        && substitutions
-                            .iter()
-                            .all(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
-
-                    if has_concrete_subs {
-                        // Base type has concrete type args (e.g., Option[Int].Some)
-                        return_ty = return_ty.apply_substitutions(substitutions);
-                    } else {
-                        // Base type has no concrete type args - infer from arguments
-                        // e.g., Option.Some(value: 42) should infer T = Int from the argument
-                        let type_params = enum_sym.type_parameters();
-                        if !type_params.is_empty() {
-                            let arg_types: Vec<Ty> =
-                                arguments.iter().map(|a| a.value.ty.clone()).collect();
-                            let inferred_subs =
-                                infer_type_arguments(&type_params, &callable, &arg_types);
-                            return_ty = substitute_type(&return_ty, &inferred_subs);
-                        }
-                    }
-                }
-
-                // Validate access modes for arguments
-                validate_argument_access_modes(&callable, &arguments, &span, ctx);
-
-                // Build combined substitutions for the Call expression:
-                // 1. Base type substitutions (e.g., T from Optional[T])
-                // 2. Method's own type parameter substitutions (e.g., U from map[U])
-                let mut call_subs = Substitutions::new();
-
-                // Add base type substitutions
-                if let Some((_, base_subs)) = resolved_base_ty.as_struct_with_subs() {
-                    for (key, ty) in base_subs.iter() {
-                        call_subs.insert(*key, ty.clone());
-                    }
-                } else if let Some((_, base_subs)) = resolved_base_ty.as_enum_with_subs() {
-                    for (key, ty) in base_subs.iter() {
-                        call_subs.insert(*key, ty.clone());
-                    }
-                }
-
-                // Infer method's own type parameters from argument types
-                // e.g., for map[U](transform: (T) -> U), infer U from the closure's return type
-                if let Some(generics) = method.metadata().get_behavior::<GenericsBehavior>() {
-                    let method_type_params = generics.type_parameters();
-                    if !method_type_params.is_empty() {
-                        let arg_types: Vec<Ty> =
-                            arguments.iter().map(|a| a.value.ty.clone()).collect();
-                        let method_subs =
-                            infer_type_arguments(method_type_params, &callable, &arg_types);
-                        for (key, ty) in method_subs.iter() {
-                            call_subs.insert(*key, ty.clone());
-                        }
-                        // Also apply method substitutions to return type
-                        return_ty = return_ty.apply_substitutions(&method_subs);
-                    }
-                }
-
-                // Create method ref and then call
-                let method_ref = Expression::method_ref(
-                    object.clone(),
-                    vec![method_id],
-                    member_name.to_string(),
-                    span.clone(),
-                );
-
-                // Use generic_call to store substitutions for type checking
-                return Expression::generic_call(
-                    method_ref,
-                    arguments,
-                    call_subs,
-                    return_ty,
-                    span,
-                );
+                candidates.push((idx, method, callable));
             }
         }
+    }
+
+    // Select the best candidate using type-directed conformance if multiple
+    let selected_idx = if candidates.len() > 1 {
+        let arg_types: Vec<Ty> = arguments.iter().map(|arg| arg.value.ty.clone()).collect();
+        // Use methods[0] as dummy struct_symbol (not used in the function anyway)
+        find_type_directed_match(&candidates, &arg_types, &methods[0]).unwrap_or(0)
+    } else {
+        0
+    };
+
+    // Use the selected candidate
+    if let Some((_, method, callable)) = candidates.get(selected_idx) {
+        let mut return_ty = callable.return_type().clone();
+        let method_id = method.metadata().id();
+
+        // Apply substitutions from the base type to the return type
+        // e.g., for Box[Int].get() where get returns T, substitute T with Int
+        // or for Option[Int].Some where Some returns Option[T], substitute T with Int
+        let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+        if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+            return_ty = return_ty.apply_substitutions(substitutions);
+        } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs() {
+            // Check if base type already has concrete substitutions
+            let has_concrete_subs = !substitutions.is_empty()
+                && substitutions
+                    .iter()
+                    .all(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
+
+            if has_concrete_subs {
+                // Base type has concrete type args (e.g., Option[Int].Some)
+                return_ty = return_ty.apply_substitutions(substitutions);
+            } else {
+                // Base type has no concrete type args - infer from arguments
+                // e.g., Option.Some(value: 42) should infer T = Int from the argument
+                let type_params = enum_sym.type_parameters();
+                if !type_params.is_empty() {
+                    let arg_types: Vec<Ty> =
+                        arguments.iter().map(|a| a.value.ty.clone()).collect();
+                    let inferred_subs = infer_type_arguments(&type_params, callable, &arg_types);
+                    return_ty = substitute_type(&return_ty, &inferred_subs);
+                }
+            }
+        }
+
+        // Validate access modes for arguments
+        validate_argument_access_modes(callable, &arguments, &span, ctx);
+
+        // Build combined substitutions for the Call expression:
+        // 1. Base type substitutions (e.g., T from Optional[T])
+        // 2. Method's own type parameter substitutions (e.g., U from map[U])
+        let mut call_subs = Substitutions::new();
+
+        // Add base type substitutions
+        if let Some((_, base_subs)) = resolved_base_ty.as_struct_with_subs() {
+            for (key, ty) in base_subs.iter() {
+                call_subs.insert(*key, ty.clone());
+            }
+        } else if let Some((_, base_subs)) = resolved_base_ty.as_enum_with_subs() {
+            for (key, ty) in base_subs.iter() {
+                call_subs.insert(*key, ty.clone());
+            }
+        }
+
+        // Infer method's own type parameters from argument types
+        // e.g., for map[U](transform: (T) -> U), infer U from the closure's return type
+        if let Some(generics) = method.metadata().get_behavior::<GenericsBehavior>() {
+            let method_type_params = generics.type_parameters();
+            if !method_type_params.is_empty() {
+                let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+                let method_subs = infer_type_arguments(method_type_params, callable, &arg_types);
+                for (key, ty) in method_subs.iter() {
+                    call_subs.insert(*key, ty.clone());
+                }
+                // Also apply method substitutions to return type
+                return_ty = return_ty.apply_substitutions(&method_subs);
+            }
+        }
+
+        // Create method ref and then call
+        let method_ref = Expression::method_ref(
+            object.clone(),
+            vec![method_id],
+            member_name.to_string(),
+            span.clone(),
+        );
+
+        // Use generic_call to store substitutions for type checking
+        return Expression::generic_call(method_ref, arguments, call_subs, return_ty, span);
     }
 
     // No matching visible method found

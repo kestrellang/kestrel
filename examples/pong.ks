@@ -12,7 +12,7 @@ import std.text.(String)
 import std.core.(Bool, Equatable)
 
 // Player keys for the score dictionary
-enum Player: Equatable {
+public enum Player: Equatable {
     case player1
     case player2
 
