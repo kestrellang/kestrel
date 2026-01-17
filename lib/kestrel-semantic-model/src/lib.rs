@@ -18,8 +18,9 @@ mod type_oracle;
 pub use extension_registry::ExtensionRegistry;
 pub use model::SemanticModel;
 pub use queries::{
-    AncestorOfKind, AssociatedTypeBindingsForStruct, CallableParamTypesForCall, ChildByName,
-    ConformancesForSymbol, DeclaredName, DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods,
+    AncestorOfKind, AssociatedTypeBindingsForEnum, AssociatedTypeBindingsForStruct,
+    CallableParamTypesForCall, ChildByName, ConformancesForSymbol, DeclaredName,
+    DeclaredNamesInScope, ExecutableBodyFor, ExtensionMethods,
     ExtensionsFor, FunctionsInSymbol, GenericsData, GenericsDataFor, HasBody, ImportsInScope,
     InferenceResultFor, InheritedProtocolMember, IsInsideAny, IsVisibleFrom, LocalName,
     PropertyRequirement, ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,

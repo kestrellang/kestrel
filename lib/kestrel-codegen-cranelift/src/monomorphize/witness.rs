@@ -251,7 +251,7 @@ pub fn resolve_witness(
     let witness_def = &mir.witnesses[witness_match.witness_id];
 
     // Look up the method binding
-    let impl_func_name = witness_def.method_bindings.get(method).ok_or_else(|| {
+    let (impl_func_name, method_type_args) = witness_def.method_bindings.get(method).ok_or_else(|| {
         MonomorphizeError::MethodNotFoundInWitness {
             protocol,
             method: method.to_string(),
@@ -259,8 +259,10 @@ pub fn resolve_witness(
         }
     })?;
 
-    // Build the type arguments in the order of the witness's type params
-    let type_args: Vec<_> = witness_def
+    // Build the type arguments:
+    // 1. First, the witness's type params (from pattern matching the implementing type)
+    // 2. Then, any method-specific type args (e.g., Self=X for protocol extension methods)
+    let mut type_args: Vec<_> = witness_def
         .type_params
         .iter()
         .map(|tp| {
@@ -280,6 +282,9 @@ pub fn resolve_witness(
                 })
         })
         .collect();
+
+    // Add method-specific type arguments (e.g., Self binding for protocol extension methods)
+    type_args.extend(method_type_args.iter().cloned());
 
     Ok((*impl_func_name, type_args))
 }

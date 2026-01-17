@@ -2,12 +2,10 @@
 
 module std.core
 
-import std.core.(Equal as EqualOp, NotEqual as NotEqualOp)
+// Note: Equal[Self] and NotEqual[Self] are automatically provided by
+// the extension `extend Equatable: Equal[Self], NotEqual[Self]`
 
-public enum Ordering: Equatable, EqualOp[Self], NotEqualOp[Self] {
-    type EqualOp.Output = Bool
-    type NotEqualOp.Output = Bool
-
+public enum Ordering: Equatable {
     case Less
     case Equal
     case Greater
@@ -22,12 +20,7 @@ public enum Ordering: Equatable, EqualOp[Self], NotEqualOp[Self] {
     }
 
     public func notEquals(other: Ordering) -> Bool {
-        match (self, other) {
-            (.Less, .Less) => false,
-            (.Equal, .Equal) => false,
-            (.Greater, .Greater) => false,
-            _ => true
-        }
+        if self.equals(other) { false } else { true }
     }
 
     public func reverse() -> Ordering {

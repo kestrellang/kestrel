@@ -5,16 +5,17 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::{
-    AssociatedTypeBindingsForStruct, ConformancesForSymbol, ExtensionsFor, PropertyRequirement,
-    ProtocolAssociatedTypesWithDefaults, ProtocolInitializersWithDefiner,
-    ProtocolMethodsWithDefiner, ProtocolRequiredInitializers, ProtocolRequiredMethods,
-    ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
+    AssociatedTypeBindingsForEnum, AssociatedTypeBindingsForStruct, ConformancesForSymbol,
+    ExtensionsFor, PropertyRequirement, ProtocolAssociatedTypesWithDefaults,
+    ProtocolInitializersWithDefiner, ProtocolMethodsWithDefiner, ProtocolRequiredInitializers,
+    ProtocolRequiredMethods, ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
 };
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -31,6 +32,7 @@ use diagnostics::*;
 pub struct ConformanceAnalyzer {
     protocols: Vec<(Arc<dyn Symbol<KestrelLanguage>>, Arc<ProtocolSymbol>)>,
     structs: Vec<(Arc<dyn Symbol<KestrelLanguage>>, Arc<StructSymbol>)>,
+    enums: Vec<(Arc<dyn Symbol<KestrelLanguage>>, Arc<EnumSymbol>)>,
 }
 
 impl ConformanceAnalyzer {
@@ -38,6 +40,7 @@ impl ConformanceAnalyzer {
         Self {
             protocols: Vec::new(),
             structs: Vec::new(),
+            enums: Vec::new(),
         }
     }
 }
@@ -75,6 +78,16 @@ impl Analyzer for ConformanceAnalyzer {
                     }
                 }
             }
+            KestrelSymbolKind::Enum => {
+                let conformances = ctx.model.query(ConformancesForSymbol {
+                    symbol_id: symbol.metadata().id(),
+                });
+                if !conformances.is_empty() {
+                    if let Ok(enum_sym) = symbol.clone().into_any_arc().downcast::<EnumSymbol>() {
+                        self.enums.push((symbol.clone(), enum_sym));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -86,8 +99,9 @@ impl Analyzer for ConformanceAnalyzer {
             check_protocol_associated_type_defaults(proto, sym, ctx);
         }
 
-        // Also consider structs that gain conformances via extensions
+        // Also consider structs and enums that gain conformances via extensions
         let mut extra_structs = Vec::new();
+        let mut extra_enums = Vec::new();
         for extension in ctx.model.extension_registry().all_extensions() {
             let conformances = ctx.model.query(ConformancesForSymbol {
                 symbol_id: extension.metadata().id(),
@@ -96,26 +110,48 @@ impl Analyzer for ConformanceAnalyzer {
                 continue;
             }
             if let Some(target_ty) = extension.target_type() {
-                if let TyKind::Struct { symbol: s, .. } = target_ty.kind() {
-                    let id = s.metadata().id();
-                    let already = self.structs.iter().any(|(_, ss)| ss.metadata().id() == id);
-                    if !already {
-                        extra_structs
-                            .push((s.clone() as Arc<dyn Symbol<KestrelLanguage>>, s.clone()));
+                match target_ty.kind() {
+                    TyKind::Struct { symbol: s, .. } => {
+                        let id = s.metadata().id();
+                        let already = self.structs.iter().any(|(_, ss)| ss.metadata().id() == id);
+                        if !already {
+                            extra_structs
+                                .push((s.clone() as Arc<dyn Symbol<KestrelLanguage>>, s.clone()));
+                        }
                     }
+                    TyKind::Enum { symbol: e, .. } => {
+                        let id = e.metadata().id();
+                        let already = self.enums.iter().any(|(_, es)| es.metadata().id() == id);
+                        if !already {
+                            extra_enums
+                                .push((e.clone() as Arc<dyn Symbol<KestrelLanguage>>, e.clone()));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
         self.structs.extend(extra_structs);
+        self.enums.extend(extra_enums);
 
         // Conformance checks
         for (dyn_sym, struct_sym) in &self.structs {
             check_struct_conformance(struct_sym, dyn_sym, ctx.model, ctx);
         }
 
+        // Conformance checks for enums
+        for (dyn_sym, enum_sym) in &self.enums {
+            check_enum_conformance(enum_sym, dyn_sym, ctx.model, ctx);
+        }
+
         // Link protocol methods for all structs
         for (dyn_sym, struct_sym) in &self.structs {
             link_protocol_methods_for_struct(struct_sym, dyn_sym, ctx.model, ctx);
+        }
+
+        // Link protocol methods for all enums
+        for (dyn_sym, enum_sym) in &self.enums {
+            link_protocol_methods_for_enum(enum_sym, dyn_sym, ctx.model, ctx);
         }
 
         // Link protocol initializers for all structs
@@ -984,5 +1020,318 @@ fn link_protocol_initializers_for_struct(
             );
             struct_init.metadata().add_behavior(implements);
         }
+    }
+}
+
+/// Check enum conformance to protocols.
+///
+/// Similar to `check_struct_conformance` but for enums.
+fn check_enum_conformance(
+    enum_sym: &Arc<EnumSymbol>,
+    dyn_sym: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    let enum_name = &enum_sym.metadata().name().value;
+    let enum_id = enum_sym.metadata().id();
+
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: dyn_sym.metadata().id(),
+    });
+    let extensions = model.query(ExtensionsFor { target_id: enum_id });
+    for extension in &extensions {
+        let ext_confs = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        conformances.extend(ext_confs);
+    }
+    if conformances.is_empty() {
+        return;
+    }
+
+    let associated_type_bindings = model.query(AssociatedTypeBindingsForEnum { enum_id });
+
+    // Compute self_type first - this is used for Self substitution in enum method signatures
+    let self_type = dyn_sym
+        .metadata()
+        .get_behavior::<TypedBehavior>()
+        .map(|tb| SignatureType::from_ty(tb.ty()))
+        .unwrap_or_else(|| SignatureType::Named(vec![enum_name.clone()]));
+
+    let mut all_methods = collect_methods_from_symbol(dyn_sym);
+    let extensions = model.query(ExtensionsFor { target_id: enum_id });
+    for extension in extensions {
+        let methods =
+            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        all_methods.extend(methods);
+    }
+
+    // Build enum method map with Self substituted to the concrete type
+    let mut self_bindings = HashMap::new();
+    self_bindings.insert("Self".to_string(), self_type.clone());
+
+    let enum_method_map: HashMap<MethodLookupKey, (Arc<FunctionSymbol>, SignatureType)> =
+        all_methods
+            .iter()
+            .map(|f| {
+                // Substitute Self in the signature and return type
+                let substituted_sig = substitute_signature(&f.signature(), &self_bindings);
+                let raw_return = SignatureType::from_ty(&f.return_type());
+                let substituted_return = substitute_associated_types(&raw_return, &self_bindings);
+                (
+                    substituted_sig.lookup_key(),
+                    (f.clone(), substituted_return),
+                )
+            })
+            .collect();
+
+    for conformance_ty in &conformances {
+        let (protocol_symbol, type_param_bindings) = match resolve_protocol_type(conformance_ty) {
+            Some(r) => r,
+            None => continue,
+        };
+        let protocol_name = &protocol_symbol.metadata().name().value;
+
+        let protocol_associated_types = model.query(ProtocolAssociatedTypesWithDefaults {
+            protocol_id: protocol_symbol.metadata().id(),
+        });
+        for (type_name, default_type) in &protocol_associated_types {
+            if default_type.is_none() && !associated_type_bindings.contains_key(type_name) {
+                let span = enum_sym.metadata().declaration_span().clone();
+                ctx.report(MissingAssociatedTypeError {
+                    span,
+                    struct_name: enum_name.clone(),
+                    protocol_name: protocol_name.clone(),
+                    type_name: type_name.clone(),
+                });
+            }
+        }
+
+        let mut effective_bindings = type_param_bindings;
+        for (name, binding) in &associated_type_bindings {
+            effective_bindings.insert(name.clone(), binding.clone());
+        }
+        for (type_name, default_type) in &protocol_associated_types {
+            if !effective_bindings.contains_key(type_name) {
+                if let Some(default) = default_type {
+                    effective_bindings.insert(type_name.clone(), default.clone());
+                }
+            }
+        }
+        // Use the already-computed self_type
+        effective_bindings.insert("Self".to_string(), self_type.clone());
+
+        let required_methods = model.query(ProtocolRequiredMethods {
+            protocol_id: protocol_symbol.metadata().id(),
+        });
+        for (protocol_sig, method) in &required_methods {
+            let method_name = &method.metadata().name().value;
+            let raw_return_type = SignatureType::from_ty(&method.return_type());
+            let required_return_type =
+                substitute_associated_types(&raw_return_type, &effective_bindings);
+            let substituted_sig = substitute_signature(protocol_sig, &effective_bindings);
+            match enum_method_map.get(&substituted_sig.lookup_key()) {
+                None => {
+                    let span = enum_sym.metadata().declaration_span().clone();
+                    ctx.report(MissingProtocolMethodError {
+                        span,
+                        struct_name: enum_name.clone(),
+                        protocol_name: protocol_name.clone(),
+                        method_name: method_name.clone(),
+                    });
+                }
+                Some((_enum_method, enum_return_type)) => {
+                    if enum_return_type != &required_return_type {
+                        let span = enum_sym.metadata().declaration_span().clone();
+                        ctx.report(WrongMethodReturnTypeError {
+                            span,
+                            method_name: method_name.clone(),
+                            protocol_name: protocol_name.clone(),
+                            expected_type: format!("{:?}", required_return_type),
+                            actual_type: format!("{:?}", enum_return_type),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Link protocol methods for an enum (attach ImplementsBehavior).
+///
+/// Similar to `link_protocol_methods_for_struct` but for enums.
+fn link_protocol_methods_for_enum(
+    enum_sym: &Arc<EnumSymbol>,
+    enum_dyn: &Arc<dyn Symbol<KestrelLanguage>>,
+    model: &SemanticModel,
+    ctx: &mut AnalysisContext,
+) {
+    let enum_name = &enum_sym.metadata().name().value;
+    let enum_id = enum_sym.metadata().id();
+
+    let mut conformances = model.query(ConformancesForSymbol {
+        symbol_id: enum_dyn.metadata().id(),
+    });
+    let extensions = model.query(ExtensionsFor { target_id: enum_id });
+    for extension in &extensions {
+        let ext_confs = model.query(ConformancesForSymbol {
+            symbol_id: extension.metadata().id(),
+        });
+        conformances.extend(ext_confs);
+    }
+    if conformances.is_empty() {
+        return;
+    }
+
+    let mut protocol_methods: Vec<(
+        Arc<ProtocolSymbol>,
+        Arc<FunctionSymbol>,
+        CallableSignature,
+        HashMap<String, SignatureType>,
+        SignatureType, // conformance_signature
+    )> = Vec::new();
+    for conformance_ty in &conformances {
+        if let Some((conforming_protocol, bindings)) =
+            resolve_protocol_type_for_link_enum(conformance_ty, enum_dyn, enum_name, model)
+        {
+            let conformance_sig = SignatureType::from_ty(conformance_ty);
+            let methods = model.query(ProtocolMethodsWithDefiner {
+                protocol_id: conforming_protocol.metadata().id(),
+            });
+            for (defining_protocol, method) in methods {
+                let sig = method.signature();
+                let substituted_sig = substitute_signature(&sig, &bindings);
+                protocol_methods.push((
+                    defining_protocol,
+                    method,
+                    substituted_sig,
+                    bindings.clone(),
+                    conformance_sig.clone(),
+                ));
+            }
+        }
+    }
+
+    let mut all_methods = collect_methods_from_symbol(enum_dyn);
+    let extensions = model.query(ExtensionsFor { target_id: enum_id });
+    for extension in extensions {
+        let extension_methods =
+            collect_methods_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        all_methods.extend(extension_methods);
+    }
+
+    for enum_method in &all_methods {
+        let enum_sig = enum_method.signature();
+        let method_name = &enum_method.metadata().name().value;
+        let method_span = enum_method.metadata().declaration_span().clone();
+
+        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, SignatureType)> = Vec::new();
+        for (protocol, protocol_method, substituted_sig, _bindings, conformance_sig) in
+            &protocol_methods
+        {
+            if &enum_sig == substituted_sig {
+                let enum_receiver = enum_method
+                    .metadata()
+                    .get_behavior::<CallableBehavior>()
+                    .and_then(|cb| cb.receiver());
+                let protocol_receiver = protocol_method
+                    .metadata()
+                    .get_behavior::<CallableBehavior>()
+                    .and_then(|cb| cb.receiver());
+                if enum_receiver == protocol_receiver {
+                    matches.push((
+                        protocol.clone(),
+                        protocol_method.clone(),
+                        conformance_sig.clone(),
+                    ));
+                } else {
+                    let protocol_name = protocol.metadata().name().value.clone();
+                    ctx.report(ProtocolMethodReceiverMismatchError {
+                        span: method_span.clone(),
+                        method_name: method_name.clone(),
+                        protocol_name,
+                        expected_receiver: receiver_kind_to_string(&protocol_receiver),
+                        actual_receiver: receiver_kind_to_string(&enum_receiver),
+                    });
+                }
+            }
+        }
+
+        // Deduplicate matches by protocol method ID.
+        matches.sort_by_key(|(_, method, _)| method.metadata().id().raw());
+        matches.dedup_by(|(_, method_a, _), (_, method_b, _)| {
+            method_a.metadata().id() == method_b.metadata().id()
+        });
+
+        if matches.len() > 1 {
+            let protocol_names: Vec<String> = matches
+                .iter()
+                .map(|(p, _, _)| p.metadata().name().value.clone())
+                .collect();
+            ctx.report(AmbiguousProtocolMethodError {
+                span: method_span,
+                method_name: method_name.clone(),
+                protocols: protocol_names,
+            });
+        } else if matches.len() == 1 {
+            let (protocol, protocol_method, conformance_sig) = &matches[0];
+            let implements =
+                kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
+                    protocol.metadata().id(),
+                    protocol_method.metadata().id(),
+                    conformance_sig.clone(),
+                );
+            enum_method.metadata().add_behavior(implements);
+        }
+    }
+}
+
+fn resolve_protocol_type_for_link_enum(
+    ty: &Ty,
+    enum_dyn: &Arc<dyn Symbol<KestrelLanguage>>,
+    enum_name: &str,
+    model: &SemanticModel,
+) -> Option<(Arc<ProtocolSymbol>, HashMap<String, SignatureType>)> {
+    match ty.kind() {
+        TyKind::Protocol {
+            symbol,
+            substitutions,
+        } => {
+            let mut bindings = HashMap::new();
+            let type_params = symbol.type_parameters();
+            for type_param in type_params.iter() {
+                let param_id = type_param.metadata().id();
+                let param_name = type_param.metadata().name().value.clone();
+
+                // Prefer explicit substitution unless it's an inferred placeholder (`_`).
+                if let Some(sub_ty) = substitutions.get(param_id)
+                    && !matches!(sub_ty.kind(), TyKind::Infer)
+                {
+                    bindings.insert(param_name, SignatureType::from_ty(sub_ty));
+                    continue;
+                }
+
+                // Otherwise, apply the default if present.
+                if let Some(default_ty) = type_param.default() {
+                    bindings.insert(param_name, SignatureType::from_ty(default_ty));
+                }
+            }
+            let self_type = enum_dyn
+                .metadata()
+                .get_behavior::<TypedBehavior>()
+                .map(|tb| SignatureType::from_ty(tb.ty()))
+                .unwrap_or_else(|| SignatureType::Named(vec![enum_name.to_string()]));
+            bindings.insert("Self".to_string(), self_type);
+            if let Ok(enum_sym) = enum_dyn.clone().into_any_arc().downcast::<EnumSymbol>() {
+                let assoc_bindings = model.query(AssociatedTypeBindingsForEnum {
+                    enum_id: enum_sym.metadata().id(),
+                });
+                for (name, sig_type) in assoc_bindings {
+                    bindings.insert(name, sig_type);
+                }
+            }
+            Some((symbol.clone(), bindings))
+        }
+        _ => None,
     }
 }

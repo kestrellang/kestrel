@@ -5,6 +5,7 @@
 //! - Extension conformances: `extend Int: Hashable { ... }`
 
 use kestrel_execution_graph::{Id, TypeParam};
+use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::SymbolFor;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
@@ -40,9 +41,19 @@ pub fn generate_witnesses_for_struct(ctx: &mut LoweringContext, struct_symbol: &
         .get_behavior::<ConformancesBehavior>()
     {
         for protocol_ty in conformances.conformances() {
+            // Generate witness for the direct conformance
             generate_witness_for_protocol(
                 ctx,
                 &(struct_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+                implementing_type,
+                protocol_ty,
+                &type_param_ids,
+            );
+
+            // Generate derived witnesses from protocol extensions
+            // (e.g., if X: Comparable and extend Comparable: Less[Self], generate X: Less)
+            generate_derived_witnesses_for_protocol_extensions(
+                ctx,
                 implementing_type,
                 protocol_ty,
                 &type_param_ids,
@@ -70,9 +81,19 @@ pub fn generate_witnesses_for_enum(ctx: &mut LoweringContext, enum_symbol: &Arc<
         .get_behavior::<ConformancesBehavior>()
     {
         for protocol_ty in conformances.conformances() {
+            // Generate witness for the direct conformance
             generate_witness_for_protocol(
                 ctx,
                 &(enum_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+                implementing_type,
+                protocol_ty,
+                &type_param_ids,
+            );
+
+            // Generate derived witnesses from protocol extensions
+            // (e.g., if X: Comparable and extend Comparable: Less[Self], generate X: Less)
+            generate_derived_witnesses_for_protocol_extensions(
+                ctx,
                 implementing_type,
                 protocol_ty,
                 &type_param_ids,
@@ -430,7 +451,158 @@ fn bind_methods(
             // Get the implementation function's qualified name
             let impl_name = qualified_name_for_symbol(ctx, &child);
 
-            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name);
+            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
+        }
+    }
+}
+
+/// Generate derived witnesses from protocol extensions.
+///
+/// When a struct/enum conforms to a protocol (e.g., `struct X: Comparable`), and there
+/// are extensions on that protocol (e.g., `extend Comparable: Less[Self]`), this function
+/// generates witnesses for the derived conformances (e.g., `witness X: Less`).
+///
+/// The method bindings in the derived witness point to the extension methods with
+/// `Self` bound to the implementing type.
+pub fn generate_derived_witnesses_for_protocol_extensions(
+    ctx: &mut LoweringContext,
+    implementing_type: Id<kestrel_execution_graph::Ty>,
+    protocol_ty: &Ty,
+    type_param_ids: &[Id<TypeParam>],
+) {
+    // Get the protocol symbol from the type
+    let TyKind::Protocol {
+        symbol: protocol_symbol,
+        ..
+    } = protocol_ty.kind()
+    else {
+        return;
+    };
+
+    let protocol_id = protocol_symbol.metadata().id();
+
+    // Find all extensions on this protocol
+    let extensions = ctx.model.query(ExtensionsFor {
+        target_id: protocol_id,
+    });
+
+    for extension in &extensions {
+        // Get conformances added by this extension (e.g., Less[Self], Greater[Self])
+        let Some(extension_conformances) = extension.metadata().get_behavior::<ConformancesBehavior>()
+        else {
+            continue;
+        };
+
+        for added_protocol_ty in extension_conformances.conformances() {
+            // Get the added protocol symbol
+            let TyKind::Protocol {
+                symbol: added_protocol_symbol,
+                ..
+            } = added_protocol_ty.kind()
+            else {
+                continue;
+            };
+
+            let added_protocol_name =
+                qualified_name_for_symbol(ctx, &(added_protocol_symbol.clone() as _));
+
+            // Create the derived witness
+            let witness_id = ctx.mir.add_witness(implementing_type, added_protocol_name);
+
+            // Store the type parameters on the witness
+            ctx.mir.witnesses[witness_id].type_params = type_param_ids.to_vec();
+
+            // Bind associated types from the extension
+            bind_associated_types_from_extension(ctx, witness_id, extension, added_protocol_symbol);
+
+            // Bind methods from the extension with Self=implementing_type
+            bind_methods_from_extension(
+                ctx,
+                witness_id,
+                extension,
+                added_protocol_symbol,
+                implementing_type,
+            );
+        }
+    }
+}
+
+/// Bind associated types in a derived witness from an extension.
+fn bind_associated_types_from_extension(
+    ctx: &mut LoweringContext,
+    witness_id: Id<kestrel_execution_graph::Witness>,
+    extension: &Arc<ExtensionSymbol>,
+    added_protocol_symbol: &Arc<kestrel_semantic_tree::symbol::protocol::ProtocolSymbol>,
+) {
+    let added_protocol_id = added_protocol_symbol.metadata().id();
+
+    for child in extension.metadata().children() {
+        if child.metadata().kind() != KestrelSymbolKind::TypeAlias {
+            continue;
+        }
+
+        // Check if this type alias provides a binding for the added protocol
+        if let Some(conforms_to) = child.metadata().get_behavior::<ConformsToBehavior>() {
+            if conforms_to.protocol().metadata().id() != added_protocol_id {
+                continue;
+            }
+
+            // Get the aliased type
+            if let Ok(alias_symbol) = child.clone().downcast_arc::<TypeAliasSymbol>() {
+                if let Some(typed_behavior) = alias_symbol
+                    .metadata()
+                    .get_behavior::<TypeAliasTypedBehavior>()
+                {
+                    let mir_ty = lower_type(ctx, typed_behavior.resolved_ty());
+                    ctx.mir.witnesses[witness_id]
+                        .bind_type(conforms_to.associated_type_name(), mir_ty);
+                }
+            }
+        }
+    }
+}
+
+/// Bind methods in a derived witness from an extension.
+///
+/// The method bindings point to the extension methods with `Self=implementing_type`.
+///
+/// Protocol extension methods don't have `ImplementsBehavior` attached because they ARE
+/// the default implementations, not struct implementations. So we match by name:
+/// for each method required by the protocol, look for a method with that name in the extension.
+fn bind_methods_from_extension(
+    ctx: &mut LoweringContext,
+    witness_id: Id<kestrel_execution_graph::Witness>,
+    extension: &Arc<ExtensionSymbol>,
+    added_protocol_symbol: &Arc<kestrel_semantic_tree::symbol::protocol::ProtocolSymbol>,
+    implementing_type: Id<kestrel_execution_graph::Ty>,
+) {
+    // Get the required methods from the protocol
+    let protocol_methods: Vec<_> = added_protocol_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Function)
+        .collect();
+
+    // For each required protocol method, look for an implementation in the extension
+    for protocol_method in &protocol_methods {
+        let method_name = protocol_method.metadata().name().value.clone();
+
+        // Look for a method with this name in the extension
+        let extension_method = extension.metadata().children().into_iter().find(|c| {
+            c.metadata().kind() == KestrelSymbolKind::Function
+                && c.metadata().name().value == method_name
+        });
+
+        if let Some(impl_method) = extension_method {
+            // Get the extension method's qualified name
+            let impl_name = qualified_name_for_symbol(ctx, &impl_method);
+
+            // Protocol extension methods use MirTy::SelfType which gets substituted
+            // during monomorphization via FunctionInstantiation.self_type.
+            // We don't need to pass type args here - the collector will set self_type
+            // when creating the FunctionInstantiation.
+            ctx.mir.witnesses[witness_id].bind_method(method_name, impl_name, vec![]);
         }
     }
 }

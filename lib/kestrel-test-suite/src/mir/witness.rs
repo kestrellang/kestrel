@@ -79,14 +79,14 @@ impl MirWitness {
     ) -> Result<(), String> {
         match expectation {
             WitnessExpectation::HasMethod { name, impl_func } => {
-                let mapping = def.method_bindings.get(name).ok_or_else(|| {
+                let (impl_name, _type_args) = def.method_bindings.get(name).ok_or_else(|| {
                     let available: Vec<_> = def.method_bindings.keys().cloned().collect();
                     format!(
                         "Witness for {} : {} does not have method '{}'. Available: {:?}",
                         self.implementing_type, self.protocol, name, available
                     )
                 })?;
-                let actual_impl = mir_ctx.mir.name(*mapping).to_string();
+                let actual_impl = mir_ctx.mir.name(*impl_name).to_string();
                 if actual_impl != *impl_func {
                     return Err(format!(
                         "Witness method '{}' maps to '{}', expected '{}'",

@@ -387,8 +387,14 @@ impl<'a> CollectionContext<'a> {
                 match witness::resolve_witness(self.mir, *protocol, method, concrete_for_type) {
                     Ok((impl_name, impl_type_args)) => {
                         // Record the implementation function instantiation
+                        // For protocol extension methods, set self_type to concrete_for_type
+                        // so that MirTy::SelfType gets properly substituted.
                         if let Some(&func_id) = self.functions_by_name.get(&impl_name) {
-                            let inst = FunctionInstantiation::new(func_id, impl_type_args);
+                            let inst = FunctionInstantiation::with_self_type(
+                                func_id,
+                                impl_type_args,
+                                concrete_for_type,
+                            );
                             if self.result.add_function(inst.clone()) {
                                 self.pending.push_back(inst);
                             }
@@ -448,8 +454,13 @@ impl<'a> CollectionContext<'a> {
                 // Resolve the witness
                 match witness::resolve_witness(self.mir, *protocol, method, concrete_for_type) {
                     Ok((impl_name, impl_type_args)) => {
+                        // For protocol extension methods, set self_type to concrete_for_type
                         if let Some(&func_id) = self.functions_by_name.get(&impl_name) {
-                            let inst = FunctionInstantiation::new(func_id, impl_type_args);
+                            let inst = FunctionInstantiation::with_self_type(
+                                func_id,
+                                impl_type_args,
+                                concrete_for_type,
+                            );
                             if self.result.add_function(inst.clone()) {
                                 self.pending.push_back(inst);
                             }

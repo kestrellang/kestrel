@@ -4,6 +4,7 @@
 //! Each query is a struct that implements the Query trait.
 
 mod ancestor_of_kind;
+mod associated_type_bindings_for_enum;
 mod associated_type_bindings_for_struct;
 mod callable_param_types_for_call;
 mod child_by_name;
@@ -41,6 +42,7 @@ mod visible_children;
 mod visible_children_by_name;
 
 pub use ancestor_of_kind::AncestorOfKind;
+pub use associated_type_bindings_for_enum::AssociatedTypeBindingsForEnum;
 pub use associated_type_bindings_for_struct::AssociatedTypeBindingsForStruct;
 pub use callable_param_types_for_call::CallableParamTypesForCall;
 pub use child_by_name::ChildByName;
