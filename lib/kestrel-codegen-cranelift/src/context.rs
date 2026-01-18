@@ -6,7 +6,7 @@ use crate::monomorphize::{
     FunctionInstantiation, MonomorphizationSet, Substitution, build_substitution,
 };
 use crate::types::translate_type;
-use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_name};
+use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_function_with_self, mangle_name};
 use kestrel_execution_graph::{Function, FunctionDef, Id, MirContext, QualifiedNameData, Ty};
 
 use cranelift_codegen::Context as CraneliftContext;
@@ -157,7 +157,7 @@ impl<'a> CodegenContext<'a> {
                 (extern_info.symbol_name.clone(), Linkage::Import)
             } else {
                 (
-                    mangle_name(self.mir, func_def.name, &inst.type_args),
+                    mangle_function_with_self(self.mir, inst.func_id, &inst.type_args, inst.self_type),
                     Linkage::Local,
                 )
             };
@@ -210,7 +210,7 @@ impl<'a> CodegenContext<'a> {
         let symbol_name = if is_main {
             "main".to_string()
         } else {
-            mangle_name(self.mir, func_def.name, &inst.type_args)
+            mangle_function_with_self(self.mir, inst.func_id, &inst.type_args, inst.self_type)
         };
 
         let cl_func_id = *self.func_ids_by_name.get(&symbol_name).ok_or_else(|| {
@@ -221,7 +221,12 @@ impl<'a> CodegenContext<'a> {
         })?;
 
         // Build the substitution for this instantiation
-        let subst = build_substitution(self.mir, &func_def.type_params, &inst.type_args);
+        let mut subst = build_substitution(self.mir, &func_def.type_params, &inst.type_args);
+
+        // Set self_type if this instantiation has one (protocol extension methods)
+        if let Some(st) = inst.self_type {
+            subst.set_self_type(st);
+        }
 
         let sig = self.create_signature_with_subst(func_def, &inst.type_args);
         let mut cl_func =
@@ -285,12 +290,10 @@ impl<'a> CodegenContext<'a> {
         // Parameters - apply substitution to get concrete types
         for &param_id in &func_def.params {
             let param = &self.mir.params[param_id];
-            // For signature purposes, we need to use the original type if substitution
-            // would fail (readonly mode), but since collection already interned all types,
-            // this should always succeed. If not, fall back to original.
+            // Collection phase should have interned all types, so this should always succeed.
             let concrete_ty = subst
                 .apply_ty_readonly(self.mir, param.ty)
-                .unwrap_or(param.ty);
+                .expect("type substitution failed for param type");
             let cl_type = translate_type(self.mir, concrete_ty, self.target);
             sig.params.push(AbiParam::new(cl_type));
         }
@@ -300,7 +303,7 @@ impl<'a> CodegenContext<'a> {
         let is_main = self.is_main(func_def);
         let concrete_ret = subst
             .apply_ty_readonly(self.mir, func_def.ret)
-            .unwrap_or(func_def.ret);
+            .expect("type substitution failed for return type");
         let ret_ty = self.mir.ty(concrete_ret);
         if is_main {
             // C runtime expects int main() - always return i64

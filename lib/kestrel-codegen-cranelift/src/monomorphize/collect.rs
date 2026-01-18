@@ -354,10 +354,23 @@ impl<'a> CollectionContext<'a> {
                     .map(|ty| subst.apply_ty(self.mir, *ty))
                     .collect();
 
-                // Record function instantiation (including self_type if present in substitution)
+                // Record function instantiation (only include self_type if callee needs it)
                 if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let inst = if let Some(st) = subst.get_self_type() {
-                        FunctionInstantiation::with_self_type(func_id, concrete_args, st)
+                    // Check if the callee actually uses Self in its signature
+                    let callee_def = &self.mir.functions[func_id];
+                    let callee_needs_self = callee_def.params.iter().any(|&param_id| {
+                        let param = &self.mir.params[param_id];
+                        self.type_needs_self(self.mir.ty(param.ty))
+                    }) || self.type_needs_self(self.mir.ty(callee_def.ret));
+
+                    let inst = if callee_needs_self {
+                        if let Some(st) = subst.get_self_type() {
+                            FunctionInstantiation::with_self_type(func_id, concrete_args, st)
+                        } else {
+                            // Callee needs Self but caller doesn't have it - skip for now,
+                            // will be processed later when called with concrete type
+                            return;
+                        }
                     } else {
                         FunctionInstantiation::new(func_id, concrete_args)
                     };
@@ -365,7 +378,6 @@ impl<'a> CollectionContext<'a> {
                         self.pending.push_back(inst);
                     }
                 } else {
-                    let name_str = self.mir.name(*name);
                     self.errors
                         .push(MonomorphizeError::FunctionNotFound { name: *name });
                 }
@@ -405,14 +417,6 @@ impl<'a> CollectionContext<'a> {
                         }
                     }
                     Err(e) => {
-                        // Debug: print protocol and type names
-                        let protocol_name = self.mir.name(*protocol);
-                        let ty = self.mir.ty(concrete_for_type);
-                        let type_str = match ty {
-                            MirTy::Named { name, .. } => self.mir.name(*name).to_string(),
-                            other => format!("{:?}", other),
-                        };
-                        eprintln!("[witness error] protocol='{}' type='{}'", protocol_name, type_str);
                         self.errors.push(e);
                     }
                 }
@@ -437,7 +441,6 @@ impl<'a> CollectionContext<'a> {
                         self.pending.push_back(inst);
                     }
                 } else {
-                    let name_str = self.mir.name(*name);
                     self.errors
                         .push(MonomorphizeError::FunctionNotFound { name: *name });
                 }
@@ -485,6 +488,7 @@ impl<'a> CollectionContext<'a> {
             | ImmediateKind::FloatLiteral { .. }
             | ImmediateKind::BoolLiteral(_)
             | ImmediateKind::StringLiteral(_)
+            | ImmediateKind::StringPointer(_)
             | ImmediateKind::Unit
             | ImmediateKind::Error => {}
         }

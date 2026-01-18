@@ -84,12 +84,12 @@ pub fn translate_type_with_subst(
     subst: &Substitution,
 ) -> CraneliftType {
     // Apply substitution first
-    let concrete_ty = subst.apply_ty_readonly(ctx, ty).unwrap_or(ty);
+    let concrete_ty = subst.apply_ty_readonly(ctx, ty).expect("type substitution failed for translate_type");
     translate_type(ctx, concrete_ty, target)
 }
 
 /// Check if a type should be passed by value, applying substitution first.
 pub fn is_pass_by_value_with_subst(ctx: &MirContext, ty: Id<Ty>, subst: &Substitution) -> bool {
-    let concrete_ty = subst.apply_ty_readonly(ctx, ty).unwrap_or(ty);
+    let concrete_ty = subst.apply_ty_readonly(ctx, ty).expect("type substitution failed for is_pass_by_value");
     is_pass_by_value(ctx, concrete_ty)
 }

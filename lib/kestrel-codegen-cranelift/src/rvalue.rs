@@ -6,11 +6,11 @@ use crate::monomorphize::{Substitution, resolve_witness};
 use crate::place::compile_place_read;
 use crate::types::translate_type;
 
-use kestrel_codegen::mangle_name;
+use kestrel_codegen::{mangle_function, mangle_function_with_self, mangle_name};
 use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, FloatBits, Function, FunctionDef, Id, Immediate,
-    ImmediateKind, IntBits, Local, MirTy, Origin, Place, PlaceKind, QualifiedName, Rvalue, Struct,
-    Ty, UnOp, Value,
+    ImmediateKind, IntBits, Local, MirTy, Origin, PassingMode, Place, PlaceKind, QualifiedName,
+    Rvalue, Struct, Ty, UnOp, Value,
 };
 
 use cranelift_codegen::ir::condcodes::IntCC;
@@ -23,6 +23,33 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_module::Module;
 
 use std::collections::HashMap;
+
+use kestrel_execution_graph::MirContext;
+
+/// Check if a type uses SelfType anywhere in its structure.
+fn type_uses_self(mir: &MirContext, ty_id: Id<Ty>) -> bool {
+    let ty = mir.ty(ty_id);
+    match ty {
+        MirTy::SelfType => true,
+        MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
+            type_uses_self(mir, *inner)
+        }
+        MirTy::Tuple(elems) => elems.iter().any(|e| type_uses_self(mir, *e)),
+        MirTy::Named { type_args, .. } => type_args.iter().any(|a| type_uses_self(mir, *a)),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(|p| type_uses_self(mir, *p)) || type_uses_self(mir, *ret)
+        }
+        _ => false,
+    }
+}
+
+/// Check if a function definition uses Self in its signature.
+fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
+    func_def.params.iter().any(|&param_id| {
+        let param = &mir.params[param_id];
+        type_uses_self(mir, param.ty)
+    }) || type_uses_self(mir, func_def.ret)
+}
 
 /// Compile an rvalue to a Cranelift value.
 pub fn compile_rvalue(
@@ -208,7 +235,7 @@ pub fn compile_rvalue(
         Rvalue::PtrRead { ptr, ty } => {
             // Load value from pointer
             let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-            let pointee_ty = subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty);
+            let pointee_ty = subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for PtrRead");
             let cl_ty = translate_type(ctx.mir, pointee_ty, ctx.target);
             Ok(builder.ins().load(cl_ty, cranelift_codegen::ir::MemFlags::new(), ptr_val, 0))
         }
@@ -241,7 +268,7 @@ pub fn compile_rvalue(
 
         Rvalue::SizeOf { ty } => {
             // Return the size of the type as a constant
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty);
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for SizeOf");
             let layout = ctx.layouts.layout_of(concrete_ty);
             let size = layout.size as i64;
             let int_ty = if ctx.target.is_64bit() {
@@ -254,7 +281,7 @@ pub fn compile_rvalue(
 
         Rvalue::AlignOf { ty } => {
             // Return the alignment of the type as a constant
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty);
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for AlignOf");
             let layout = ctx.layouts.layout_of(concrete_ty);
             let align = layout.align as i64;
             let int_ty = if ctx.target.is_64bit() {
@@ -518,7 +545,7 @@ fn compile_tuple(
         // Check if this is a nested compound type - if so, copy the data
         let is_compound = if let Some(ty) = elem_ty {
             // Apply substitution to get concrete type for generic tuples
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).expect("type substitution failed for tuple element");
             let elem_mir_ty = ctx.mir.ty(concrete_ty);
             matches!(elem_mir_ty, MirTy::Named { .. } | MirTy::Tuple(_))
                 && (is_struct_type(ctx, concrete_ty) || matches!(elem_mir_ty, MirTy::Tuple(_)))
@@ -673,6 +700,11 @@ fn get_immediate_layout(
             // String is a fat pointer: { ptr, len }
             let ptr_size = ctx.target.pointer_size();
             Ok(Layout::new(ptr_size * 2, ptr_size))
+        }
+        ImmediateKind::StringPointer(_) => {
+            // String pointer is just a pointer
+            let ptr_size = ctx.target.pointer_size();
+            Ok(Layout::new(ptr_size, ptr_size))
         }
         ImmediateKind::NullPtr(ty) => {
             let layout = ctx.layouts.layout_of(*ty);
@@ -1260,6 +1292,18 @@ fn compile_immediate(
 
         ImmediateKind::StringLiteral(s) => compile_string_literal(ctx, s, builder),
 
+        ImmediateKind::StringPointer(s) => {
+            // Just return the pointer to string data (no fat pointer struct)
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+            let data_id = ctx.add_string_data(s)?;
+            let data_ref = ctx.module.declare_data_in_func(data_id, builder.func);
+            Ok(builder.ins().global_value(ptr_type, data_ref))
+        }
+
         ImmediateKind::FunctionRef { name, type_args } => {
             // Get the function address as a pointer value
             let ptr_type = if ctx.target.is_64bit() {
@@ -1271,11 +1315,21 @@ fn compile_immediate(
             // Apply substitution to type args
             let concrete_args: Vec<_> = type_args
                 .iter()
-                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty))
+                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for intrinsic call"))
                 .collect();
 
-            // Look up the function by its mangled name
-            let mangled_name = mangle_name(ctx.mir, *name, &concrete_args);
+            // Look up the function by name to get func_id for mangling
+            let func_lookup = ctx
+                .mir
+                .functions
+                .iter()
+                .find(|(_, def)| def.name == *name);
+
+            // Look up the function by its mangled name (with param types for overloads)
+            let mangled_name = match func_lookup {
+                Some((func_id, _)) => mangle_function(ctx.mir, func_id, &concrete_args),
+                None => mangle_name(ctx.mir, *name, &concrete_args), // Fallback for external
+            };
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "function not found for reference: {} (mangled: {})",
@@ -1312,7 +1366,17 @@ fn compile_immediate(
                 cl_types::I32
             };
 
-            let mangled_name = mangle_name(ctx.mir, impl_name, &impl_type_args);
+            // Look up the function by name to get func_id for mangling
+            let func_lookup = ctx
+                .mir
+                .functions
+                .iter()
+                .find(|(_, def)| def.name == impl_name);
+
+            let mangled_name = match func_lookup {
+                Some((func_id, _)) => mangle_function(ctx.mir, func_id, &impl_type_args),
+                None => mangle_name(ctx.mir, impl_name, &impl_type_args), // Fallback
+            };
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "witness method function not found: {} (mangled: {})",
@@ -1610,24 +1674,32 @@ pub fn compile_call(
             // Apply substitution to type args
             let concrete_args: Vec<_> = type_args
                 .iter()
-                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).unwrap_or(*ty))
+                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for direct call"))
                 .collect();
 
             // Look up the Cranelift FuncId for this function.
             // For extern functions, use the symbol name from extern_info.
-            // Otherwise, use the mangled name.
-            let callee_def = ctx
+            // Otherwise, use the mangled name (with param types for overloads).
+            let callee_lookup = ctx
                 .mir
                 .functions
                 .iter()
-                .find(|(_, def)| def.name == *name)
-                .map(|(_, def)| def);
+                .find(|(_, def)| def.name == *name);
 
-            let lookup_name = match callee_def {
-                Some(def) if def.extern_info.is_some() => {
+            let lookup_name = match callee_lookup {
+                Some((_, def)) if def.extern_info.is_some() => {
                     def.extern_info.as_ref().unwrap().symbol_name.clone()
                 }
-                _ => mangle_name(ctx.mir, *name, &concrete_args),
+                Some((func_id, def)) => {
+                    // Only pass self_type if the callee actually uses Self in its signature
+                    let self_type = if func_uses_self(ctx.mir, def) {
+                        subst.get_self_type()
+                    } else {
+                        None
+                    };
+                    mangle_function_with_self(ctx.mir, func_id, &concrete_args, self_type)
+                }
+                None => mangle_name(ctx.mir, *name, &concrete_args), // Fallback
             };
 
             let cl_func_id = ctx.func_ids_by_name.get(&lookup_name).ok_or_else(|| {
@@ -1641,11 +1713,46 @@ pub fn compile_call(
             // Get the function reference for use in this function
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
 
-            // Compile arguments
+            // Compile arguments with proper PassingMode handling
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
-                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                arg_values.push(val);
+                match arg.mode {
+                    PassingMode::Copy | PassingMode::Move => {
+                        // Pass value directly
+                        let val =
+                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                        arg_values.push(val);
+                    }
+                    PassingMode::Ref | PassingMode::MutRef => {
+                        // Pass by reference: spill to stack and pass address
+                        let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                        let val =
+                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+
+                        // Create stack slot for the value
+                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            layout.size as u32,
+                            layout.align as u8,
+                        ));
+
+                        // Get pointer type
+                        let ptr_type = if ctx.target.is_64bit() {
+                            cl_types::I64
+                        } else {
+                            cl_types::I32
+                        };
+
+                        // Get address of slot
+                        let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+                        // Store value in slot
+                        builder.ins().store(MemFlags::new(), val, addr, 0);
+
+                        // Pass the address
+                        arg_values.push(addr);
+                    }
+                }
             }
 
             // Emit the call instruction
@@ -1668,7 +1775,7 @@ pub fn compile_call(
                     .map(|(_, def)| def);
 
                 if let Some(def) = callee_def {
-                    let ret_ty = subst.apply_ty_readonly(ctx.mir, def.ret).unwrap_or(def.ret);
+                    let ret_ty = subst.apply_ty_readonly(ctx.mir, def.ret).expect("type substitution failed for return type");
                     if matches!(ctx.mir.ty(ret_ty), kestrel_execution_graph::MirTy::Str) {
                         // Copy the string fat pointer to our stack
                         let ptr_type = if ctx.target.is_64bit() {
@@ -1732,8 +1839,17 @@ pub fn compile_call(
             let (impl_name, impl_type_args) =
                 resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
 
-            // Look up the function
-            let mangled_name = mangle_name(ctx.mir, impl_name, &impl_type_args);
+            // Look up the function by name to get func_id for mangling
+            let func_lookup = ctx
+                .mir
+                .functions
+                .iter()
+                .find(|(_, def)| def.name == impl_name);
+
+            let mangled_name = match func_lookup {
+                Some((func_id, _)) => mangle_function(ctx.mir, func_id, &impl_type_args),
+                None => mangle_name(ctx.mir, impl_name, &impl_type_args), // Fallback
+            };
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "witness method function not found: {} (mangled: {})",
@@ -1744,11 +1860,46 @@ pub fn compile_call(
 
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
 
-            // Compile arguments
+            // Compile arguments with proper PassingMode handling
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
-                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                arg_values.push(val);
+                match arg.mode {
+                    PassingMode::Copy | PassingMode::Move => {
+                        // Pass value directly
+                        let val =
+                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                        arg_values.push(val);
+                    }
+                    PassingMode::Ref | PassingMode::MutRef => {
+                        // Pass by reference: spill to stack and pass address
+                        let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                        let val =
+                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+
+                        // Create stack slot for the value
+                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            layout.size as u32,
+                            layout.align as u8,
+                        ));
+
+                        // Get pointer type
+                        let ptr_type = if ctx.target.is_64bit() {
+                            cl_types::I64
+                        } else {
+                            cl_types::I32
+                        };
+
+                        // Get address of slot
+                        let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+                        // Store value in slot
+                        builder.ins().store(MemFlags::new(), val, addr, 0);
+
+                        // Pass the address
+                        arg_values.push(addr);
+                    }
+                }
             }
 
             // Emit the call instruction
@@ -2115,7 +2266,8 @@ fn compile_apply_partial(
 
     // 2. Get the function pointer for the closure function
     // The closure function is non-generic, so we use empty type args
-    let mangled_name = mangle_name(ctx.mir, func, &[]);
+    // Use mangle_function with the func_id we already looked up
+    let mangled_name = mangle_function(ctx.mir, closure_func_id, &[]);
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "closure function not found: {} (mangled: {})",
@@ -2272,8 +2424,18 @@ fn compile_func_to_escaping(
     };
     let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
+    // Look up the function by name to get func_id for mangling
+    let func_lookup = ctx
+        .mir
+        .functions
+        .iter()
+        .find(|(_, def)| def.name == func);
+
     // Get the function pointer
-    let mangled_name = mangle_name(ctx.mir, func, &[]);
+    let mangled_name = match func_lookup {
+        Some((func_id, _)) => mangle_function(ctx.mir, func_id, &[]),
+        None => mangle_name(ctx.mir, func, &[]), // Fallback
+    };
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "function not found for escaping conversion: {} (mangled: {})",
@@ -2365,11 +2527,44 @@ fn compile_thin_call(
     let sig = build_signature_from_func_type(ctx, func_ty, builder)?;
     let sig_ref = builder.import_signature(sig);
 
-    // Compile arguments
+    // Compile arguments with proper PassingMode handling
     let mut arg_values = Vec::with_capacity(args.len());
     for arg in args {
-        let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-        arg_values.push(val);
+        match arg.mode {
+            PassingMode::Copy | PassingMode::Move => {
+                // Pass value directly
+                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                arg_values.push(val);
+            }
+            PassingMode::Ref | PassingMode::MutRef => {
+                // Pass by reference: spill to stack and pass address
+                let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+
+                // Create stack slot for the value
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    layout.size as u32,
+                    layout.align as u8,
+                ));
+
+                // Get pointer type
+                let ptr_type = if ctx.target.is_64bit() {
+                    cl_types::I64
+                } else {
+                    cl_types::I32
+                };
+
+                // Get address of slot
+                let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+                // Store value in slot
+                builder.ins().store(MemFlags::new(), val, addr, 0);
+
+                // Pass the address
+                arg_values.push(addr);
+            }
+        }
     }
 
     // Make the indirect call
@@ -2549,12 +2744,48 @@ fn compile_thick_call(
 
             let sig_ref = builder.import_signature(sig);
 
-            // Compile arguments - env_ptr is the first argument
+            // Compile arguments with proper PassingMode handling
+            // env_ptr is the first argument
             let mut arg_values = Vec::with_capacity(args.len() + 1);
             arg_values.push(env_ptr);
             for arg in args {
-                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                arg_values.push(val);
+                match arg.mode {
+                    PassingMode::Copy | PassingMode::Move => {
+                        // Pass value directly
+                        let val =
+                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                        arg_values.push(val);
+                    }
+                    PassingMode::Ref | PassingMode::MutRef => {
+                        // Pass by reference: spill to stack and pass address
+                        let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                        let val =
+                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+
+                        // Create stack slot for the value
+                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            layout.size as u32,
+                            layout.align as u8,
+                        ));
+
+                        // Get pointer type
+                        let ptr_type = if ctx.target.is_64bit() {
+                            cl_types::I64
+                        } else {
+                            cl_types::I32
+                        };
+
+                        // Get address of slot
+                        let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+                        // Store value in slot
+                        builder.ins().store(MemFlags::new(), val, addr, 0);
+
+                        // Pass the address
+                        arg_values.push(addr);
+                    }
+                }
             }
 
             // Make the indirect call

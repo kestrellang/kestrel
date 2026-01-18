@@ -20,12 +20,55 @@
 //! Pair[Int, Bool]        -> _K4PairIibE
 //! ```
 
-use kestrel_execution_graph::{Id, MirContext, MirTy, QualifiedName, Ty};
+use kestrel_execution_graph::{Function, Id, MirContext, MirTy, QualifiedName, Ty};
 
 /// Mangle a qualified name with optional type arguments into a linker symbol.
+///
+/// NOTE: For functions, prefer `mangle_function` which includes parameter types
+/// in the mangled name to differentiate overloads.
 pub fn mangle_name(ctx: &MirContext, name: Id<QualifiedName>, type_args: &[Id<Ty>]) -> String {
     let mut mangler = Mangler::new(ctx);
     mangler.mangle_qualified_name(name, type_args)
+}
+
+/// Mangle a function with its full signature (name + params + type_args).
+///
+/// This produces unique symbols for overloaded functions by including parameter
+/// types in the mangled name (C++ style differentiation).
+///
+/// Format: `_K{name_segments}P{param_count}{param_types}I{type_args}ES{self_type}E`
+///
+/// # Examples
+///
+/// ```text
+/// init(intLiteral: Int64)       -> _K...4initP1Ri
+/// init(floatLiteral: Float64)   -> _K...4initP1Rf
+/// func foo(x: Int, y: Bool)     -> _K3fooP2RiRb
+/// func identity[T](x: T) [T=Int] -> _K8identityP1RiIiE
+/// ```
+pub fn mangle_function(ctx: &MirContext, func_id: Id<Function>, type_args: &[Id<Ty>]) -> String {
+    mangle_function_with_self(ctx, func_id, type_args, None)
+}
+
+/// Mangle a function with its full signature including optional Self type.
+///
+/// The `self_type` is used for protocol extension methods where `Self` needs
+/// to be substituted with a concrete type.
+pub fn mangle_function_with_self(
+    ctx: &MirContext,
+    func_id: Id<Function>,
+    type_args: &[Id<Ty>],
+    self_type: Option<Id<Ty>>,
+) -> String {
+    let func_def = &ctx.functions[func_id];
+    let param_types: Vec<Id<Ty>> = func_def
+        .params
+        .iter()
+        .map(|p| ctx.params[*p].ty)
+        .collect();
+
+    let mut mangler = Mangler::new(ctx);
+    mangler.mangle_function_sig_with_self(func_def.name, &param_types, type_args, self_type)
 }
 
 /// Name mangler that produces unique linker symbols.
@@ -66,6 +109,71 @@ impl<'a> Mangler<'a> {
         }
 
         self.output.clone()
+    }
+
+    /// Mangle a function with its full signature (name + params + type_args).
+    ///
+    /// Format: `_K{name_segments}P{param_count}{param_types}I{type_args}E`
+    pub fn mangle_function_sig(
+        &mut self,
+        name: Id<QualifiedName>,
+        params: &[Id<Ty>],
+        type_args: &[Id<Ty>],
+    ) -> String {
+        self.mangle_function_sig_with_self(name, params, type_args, None)
+    }
+
+    /// Mangle a function with its full signature including optional Self type.
+    ///
+    /// Format: `_K{name_segments}P{param_count}{param_types}I{type_args}ES{self_type}E`
+    pub fn mangle_function_sig_with_self(
+        &mut self,
+        name: Id<QualifiedName>,
+        params: &[Id<Ty>],
+        type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
+    ) -> String {
+        self.output.clear();
+        self.output.push_str("_K");
+
+        // Name segments
+        let name_data = self.ctx.name(name);
+        for segment in &name_data.segments {
+            self.mangle_segment(segment);
+        }
+
+        // Parameter types
+        self.mangle_params(params);
+
+        // Type arguments (generics)
+        if !type_args.is_empty() {
+            self.output.push('I');
+            for &ty in type_args {
+                self.mangle_type(ty);
+            }
+            self.output.push('E');
+        }
+
+        // Self type (for protocol extension methods)
+        if let Some(st) = self_type {
+            self.output.push_str("S_");
+            self.mangle_type(st);
+        }
+
+        self.output.clone()
+    }
+
+    /// Mangle parameter types.
+    ///
+    /// Format: `P{count}{types...}` (e.g., `P2ib` for two params: Int64, Bool)
+    fn mangle_params(&mut self, params: &[Id<Ty>]) {
+        if !params.is_empty() {
+            self.output.push('P');
+            self.output.push_str(&params.len().to_string());
+            for &param in params {
+                self.mangle_type(param);
+            }
+        }
     }
 
     /// Mangle a single name segment.

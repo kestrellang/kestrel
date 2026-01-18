@@ -45,7 +45,7 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use crate::context::LoweringContext;
 use crate::error::LoweringError;
 use crate::expr::lower_expression;
-use crate::ty::lower_type;
+use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a match expression to MIR.
 ///
@@ -294,10 +294,11 @@ fn emit_switch(
             );
         }
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -462,6 +463,7 @@ fn emit_enum_switch(
 fn emit_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(Constructor, DecisionTree)],
     default: &Option<Box<DecisionTree>>,
     scrutinee: &Place,
@@ -472,6 +474,7 @@ fn emit_int_switch(
     emit_comparison_chain_int(
         ctx,
         switch_place,
+        int_bits,
         cases,
         default,
         scrutinee,
@@ -508,6 +511,7 @@ fn emit_string_switch(
 fn emit_comparison_chain_int(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(Constructor, DecisionTree)],
     default: &Option<Box<DecisionTree>>,
     scrutinee: &Place,
@@ -549,7 +553,7 @@ fn emit_comparison_chain_int(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -577,7 +581,7 @@ fn emit_comparison_chain_int(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -591,7 +595,7 @@ fn emit_comparison_chain_int(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 
@@ -719,10 +723,11 @@ fn emit_comparison_chain(
 ) {
     // For unsupported types, just try int comparison chain as fallback
     match ty.kind() {
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_comparison_chain_int(
                 ctx,
                 switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,

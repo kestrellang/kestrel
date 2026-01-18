@@ -246,7 +246,6 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
 }
 
 /// Convert semantic IntBits to MIR IntBits.
-#[allow(dead_code)]
 pub fn convert_int_bits(bits: SemanticIntBits) -> kestrel_execution_graph::IntBits {
     match bits {
         SemanticIntBits::I8 => kestrel_execution_graph::IntBits::I8,
@@ -257,11 +256,35 @@ pub fn convert_int_bits(bits: SemanticIntBits) -> kestrel_execution_graph::IntBi
 }
 
 /// Convert semantic FloatBits to MIR FloatBits.
-#[allow(dead_code)]
 pub fn convert_float_bits(bits: SemanticFloatBits) -> kestrel_execution_graph::FloatBits {
     match bits {
         SemanticFloatBits::F16 => kestrel_execution_graph::FloatBits::F16,
         SemanticFloatBits::F32 => kestrel_execution_graph::FloatBits::F32,
         SemanticFloatBits::F64 => kestrel_execution_graph::FloatBits::F64,
     }
+}
+
+/// Create an integer immediate with the correct bit width from a semantic type.
+pub fn make_int_immediate(bits: SemanticIntBits, value: i64) -> kestrel_execution_graph::Immediate {
+    kestrel_execution_graph::Immediate::int(convert_int_bits(bits), value as i128)
+}
+
+/// Create a float immediate with the correct bit width from a semantic type.
+pub fn make_float_immediate(bits: SemanticFloatBits, value: f64) -> kestrel_execution_graph::Immediate {
+    kestrel_execution_graph::Immediate::float(convert_float_bits(bits), value)
+}
+
+/// Create a zero integer immediate matching the given MIR integer type.
+/// Returns None if the type is not an integer type.
+pub fn make_int_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<MirTyMarker>) -> Option<kestrel_execution_graph::Immediate> {
+    use kestrel_execution_graph::IntBits;
+    let mir_ty = ctx.mir.ty(ty);
+    let bits = match mir_ty {
+        MirTy::I8 => IntBits::I8,
+        MirTy::I16 => IntBits::I16,
+        MirTy::I32 => IntBits::I32,
+        MirTy::I64 => IntBits::I64,
+        _ => return None,
+    };
+    Some(kestrel_execution_graph::Immediate::int(bits, 0))
 }

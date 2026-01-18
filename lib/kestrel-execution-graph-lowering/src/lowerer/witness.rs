@@ -115,6 +115,15 @@ pub fn generate_witnesses_for_extension(
         return;
     };
 
+    // Protocol extensions don't generate witnesses directly.
+    // When `extend Comparable: Less[Self]` is defined, no witness is created here.
+    // Instead, when a concrete type `struct X: Comparable` is processed,
+    // the derived witness `X: Less` is generated through
+    // `generate_derived_witnesses_for_protocol_extensions()`.
+    if matches!(target_ty.kind(), TyKind::Protocol { .. }) {
+        return;
+    }
+
     // Register type parameters from the extension before lowering the target type.
     // Extensions that extend generic types (e.g., `extend Array[T, A]`) have
     // referenced_type_parameters() which need to be in scope.

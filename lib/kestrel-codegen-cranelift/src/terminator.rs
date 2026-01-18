@@ -147,15 +147,17 @@ pub fn compile_terminator(
 
         TerminatorKind::Panic(_msg) => {
             // TODO: Call panic handler
-            builder
-                .ins()
-                .trap(cranelift_codegen::ir::TrapCode::unwrap_user(0));
-        }
-
-        TerminatorKind::Unreachable => {
+            // User trap code 1 = panic
             builder
                 .ins()
                 .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+        }
+
+        TerminatorKind::Unreachable => {
+            // User trap code 2 = unreachable
+            builder
+                .ins()
+                .trap(cranelift_codegen::ir::TrapCode::unwrap_user(2));
         }
     }
 

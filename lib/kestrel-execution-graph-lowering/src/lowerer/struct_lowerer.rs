@@ -35,9 +35,18 @@ pub fn lower_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>
     }
 
     // Add fields (now type parameters are in scope)
+    // Only include stored instance fields, not static or computed properties
     for child in struct_symbol.metadata().children() {
         if child.metadata().kind() == KestrelSymbolKind::Field {
             if let Ok(field_symbol) = child.downcast_arc::<FieldSymbol>() {
+                // Skip static fields - they're not part of the instance layout
+                if field_symbol.is_static() {
+                    continue;
+                }
+                // Skip computed properties - they have getters, not storage
+                if field_symbol.is_computed() {
+                    continue;
+                }
                 lower_field(ctx, struct_id, &field_symbol);
             }
         }

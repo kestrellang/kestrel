@@ -24,7 +24,7 @@ use crate::context::LoweringContext;
 use crate::error::LoweringError;
 use crate::name::qualified_name_for_symbol;
 use crate::stmt::lower_statement;
-use crate::ty::lower_type;
+use crate::ty::{lower_type, make_float_immediate, make_int_immediate, make_int_zero_for_mir_ty};
 
 /// Convert a ParameterAccessMode to a PassingMode based on type copyability.
 ///
@@ -1553,6 +1553,7 @@ fn lower_array_literal_init_call(
     };
 
     // Build the qualified name for the init function
+    // Array literal inits are named: init$_arrayLiteralPointer$_arrayLiteralCount
     let mut name_parts = Vec::new();
     collect_symbol_name_parts(
         &(struct_symbol.clone()
@@ -1561,7 +1562,7 @@ fn lower_array_literal_init_call(
             >),
         &mut name_parts,
     );
-    name_parts.push("init".to_string());
+    name_parts.push("init$_arrayLiteralPointer$_arrayLiteralCount".to_string());
 
     let init_name = ctx.mir.intern_name(QualifiedNameData::new(name_parts));
 
@@ -1615,17 +1616,17 @@ fn lower_literal(ctx: &mut LoweringContext, lit: &LiteralValue, expr: &Expressio
     // Check the resolved type of the literal expression
     match ty.kind() {
         // Primitive types - return immediate directly
-        TyKind::Int(_) => {
+        TyKind::Int(bits) => {
             let LiteralValue::Integer(n) = lit else {
                 return Value::Immediate(Immediate::error());
             };
-            Value::Immediate(Immediate::i64(*n))
+            Value::Immediate(make_int_immediate(*bits, *n))
         }
-        TyKind::Float(_) => {
+        TyKind::Float(bits) => {
             let LiteralValue::Float(f) = lit else {
                 return Value::Immediate(Immediate::error());
             };
-            Value::Immediate(Immediate::f64(*f))
+            Value::Immediate(make_float_immediate(*bits, *f))
         }
         TyKind::Bool => {
             let LiteralValue::Bool(b) = lit else {
@@ -1724,7 +1725,7 @@ fn lower_literal_init_call(
             }
         });
 
-    let Some(_init_sym) = init_symbol else {
+    let Some(init_sym) = init_symbol else {
         // No init found - fall back to immediate (this is the case for types
         // where the init is trivial or the type doesn't have the protocol)
         return match lit {
@@ -1737,12 +1738,29 @@ fn lower_literal_init_call(
     };
 
     // Build the qualified name for the init function
+    // Initializers are named with ALL their parameter labels: init$intLiteral, init$stringLiteral$length, etc.
     let mut name_parts = Vec::new();
     collect_symbol_name_parts(
         &(struct_symbol.clone() as std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
         &mut name_parts,
     );
-    name_parts.push("init".to_string());
+
+    // Get all labels from the found init symbol
+    let init_name_suffix = if let Some(callable) = init_sym.metadata().get_behavior::<CallableBehavior>() {
+        let labels: Vec<&str> = callable
+            .parameters()
+            .iter()
+            .filter_map(|p| p.external_label())
+            .collect();
+        if labels.is_empty() {
+            "init".to_string()
+        } else {
+            format!("init${}", labels.join("$"))
+        }
+    } else {
+        format!("init${}", init_label)
+    };
+    name_parts.push(init_name_suffix);
 
     let init_name = ctx
         .mir
@@ -1763,11 +1781,28 @@ fn lower_literal_init_call(
     // Emit: %self_ref = ref var %result
     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
 
-    // Build call args: self_ref first (MutRef), then the primitive value (Copy)
-    let call_args = vec![
-        CallArg::mutating(Value::Place(self_ref_place)),
-        CallArg::copy(primitive_value),
-    ];
+    // Build call args: self_ref first (MutRef), then the primitive value(s)
+    // String literals are special: they need both ptr and length as separate args
+    let call_args = match lit {
+        LiteralValue::String(s) => {
+            // String.init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
+            // expects two primitive args: ptr and length (passed by reference)
+            let ptr_value = Value::Immediate(Immediate::string_ptr(s.clone()));
+            let len_value = Value::Immediate(Immediate::i64(s.len() as i64));
+            vec![
+                CallArg::mutating(Value::Place(self_ref_place)),
+                CallArg::borrow(ptr_value),
+                CallArg::borrow(len_value),
+            ]
+        }
+        _ => {
+            // All literal init methods take the primitive by reference (borrow)
+            vec![
+                CallArg::mutating(Value::Place(self_ref_place)),
+                CallArg::borrow(primitive_value),
+            ]
+        }
+    };
 
     // Create a temp for the unit return value of init (we discard it)
     let unit_ty = ctx.mir.ty_unit();
@@ -1898,12 +1933,14 @@ fn lower_primitive_method_call(
             let cmp_ty = ctx.mir.ty_bool();
             let cmp_local = ctx.create_temp("is_neg", cmp_ty);
             let cmp_place = Place::local(cmp_local);
+            // Create a zero with the same bit width as the integer type
+            let zero_imm = make_int_zero_for_mir_ty(ctx, int_ty).unwrap_or_else(|| Immediate::i64(0));
             ctx.emit_assign(
                 cmp_place.clone(),
                 Rvalue::BinaryOp {
                     op: BinOp::LtSigned,
                     lhs: Value::Place(receiver_place.clone()),
-                    rhs: Value::Immediate(Immediate::i64(0)),
+                    rhs: Value::Immediate(zero_imm),
                 },
             );
 
@@ -2562,10 +2599,42 @@ fn lower_call(
             let symbol = ctx.model.query(SymbolFor { id: *symbol_id });
             match symbol {
                 Some(sym) => {
-                    // Build the init function name
+                    // Try to find the initializer symbol to get its CallableBehavior
+                    // Look for an "init" child of the type symbol
+                    let init_sym = sym
+                        .metadata()
+                        .children()
+                        .iter()
+                        .find(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::Initializer
+                                && child.metadata().name().value == "init"
+                        })
+                        .cloned();
+
+                    let init_beh = init_sym
+                        .as_ref()
+                        .and_then(|s| s.metadata().get_behavior::<CallableBehavior>());
+
+                    // Build the init function name with labels
+                    // Initializers are named: init$label1$label2 (or just "init" if no labels)
                     let mut name_parts = Vec::new();
                     collect_symbol_name_parts(&sym, &mut name_parts);
-                    name_parts.push("init".to_string());
+
+                    let init_name_part = if let Some(beh) = &init_beh {
+                        let labels: Vec<&str> = beh
+                            .parameters()
+                            .iter()
+                            .filter_map(|p| p.external_label())
+                            .collect();
+                        if labels.is_empty() {
+                            "init".to_string()
+                        } else {
+                            format!("init${}", labels.join("$"))
+                        }
+                    } else {
+                        "init".to_string()
+                    };
+                    name_parts.push(init_name_part);
 
                     let init_name = ctx
                         .mir
@@ -2579,20 +2648,6 @@ fn lower_call(
 
                     // Emit: %self_ref = ref var %result
                     ctx.emit_assign(self_ref_place.clone(), Rvalue::RefMut(result_place.clone()));
-
-                    // Try to find the initializer symbol to get its CallableBehavior
-                    // Look for an "init" child of the type symbol
-                    let init_beh = sym
-                        .metadata()
-                        .children()
-                        .iter()
-                        .find(|child| {
-                            child.metadata().kind() == KestrelSymbolKind::Initializer
-                                && child.metadata().name().value == "init"
-                        })
-                        .and_then(|init_sym| {
-                            init_sym.metadata().get_behavior::<CallableBehavior>()
-                        });
 
                     // Build call args: self_ref first (always MutRef), then user args with their modes
                     let mut call_args = vec![CallArg::mutating(Value::Place(self_ref_place))];
@@ -3829,10 +3884,11 @@ fn emit_if_let_switch(
             );
         }
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_if_let_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -4042,6 +4098,7 @@ fn emit_if_let_enum_switch(
 fn emit_if_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(
         kestrel_semantic_pattern_matching::Constructor,
         kestrel_semantic_pattern_matching::DecisionTree,
@@ -4090,7 +4147,7 @@ fn emit_if_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -4118,7 +4175,7 @@ fn emit_if_let_int_switch(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -4131,7 +4188,7 @@ fn emit_if_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 
@@ -4633,10 +4690,11 @@ fn emit_while_let_switch(
             );
         }
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_while_let_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -4845,6 +4903,7 @@ fn emit_while_let_enum_switch(
 fn emit_while_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(
         kestrel_semantic_pattern_matching::Constructor,
         kestrel_semantic_pattern_matching::DecisionTree,
@@ -4893,7 +4952,7 @@ fn emit_while_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -4921,7 +4980,7 @@ fn emit_while_let_int_switch(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -4934,7 +4993,7 @@ fn emit_while_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 

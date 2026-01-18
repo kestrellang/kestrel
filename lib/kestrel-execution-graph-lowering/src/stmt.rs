@@ -9,7 +9,7 @@ use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use crate::context::LoweringContext;
 use crate::expr::lower_expression;
 use crate::pattern::lower_pattern;
-use crate::ty::lower_type;
+use crate::ty::{lower_type, make_int_immediate};
 
 /// Lower a statement to MIR.
 ///
@@ -374,10 +374,11 @@ fn emit_guard_let_switch(
             );
         }
 
-        TyKind::Int(_) => {
+        TyKind::Int(int_bits) => {
             emit_guard_let_int_switch(
                 ctx,
                 &switch_place,
+                *int_bits,
                 cases,
                 default,
                 scrutinee,
@@ -616,6 +617,7 @@ fn emit_guard_let_enum_switch(
 fn emit_guard_let_int_switch(
     ctx: &mut LoweringContext,
     switch_place: &Place,
+    int_bits: kestrel_semantic_tree::ty::IntBits,
     cases: &[(
         kestrel_semantic_pattern_matching::Constructor,
         kestrel_semantic_pattern_matching::DecisionTree,
@@ -664,7 +666,7 @@ fn emit_guard_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::Eq,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*value)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *value)),
                     },
                 );
 
@@ -698,7 +700,7 @@ fn emit_guard_let_int_switch(
                     cmp1_place.clone(),
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
-                        lhs: Value::Immediate(Immediate::i64(*start)),
+                        lhs: Value::Immediate(make_int_immediate(int_bits, *start)),
                         rhs: Value::Place(switch_place.clone()),
                     },
                 );
@@ -711,7 +713,7 @@ fn emit_guard_let_int_switch(
                     Rvalue::BinaryOp {
                         op: BinOp::LeSigned,
                         lhs: Value::Place(switch_place.clone()),
-                        rhs: Value::Immediate(Immediate::i64(*end)),
+                        rhs: Value::Immediate(make_int_immediate(int_bits, *end)),
                     },
                 );
 

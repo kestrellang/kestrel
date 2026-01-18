@@ -25,8 +25,10 @@ pub enum ImmediateKind {
     FloatLiteral { bits: FloatBits, value: f64 },
     /// Boolean literal.
     BoolLiteral(bool),
-    /// String literal.
+    /// String literal (fat pointer: ptr + len).
     StringLiteral(String),
+    /// String pointer (just the pointer to string data, without length).
+    StringPointer(String),
     /// Unit value.
     Unit,
 
@@ -131,12 +133,21 @@ impl Immediate {
         }
     }
 
-    /// Create a string literal.
+    /// Create a string literal (fat pointer: ptr + len).
     pub fn string(value: impl Into<String>) -> Self {
         Self {
             meta: Metadata::new(),
             inline_name: None,
             kind: ImmediateKind::StringLiteral(value.into()),
+        }
+    }
+
+    /// Create a string pointer (just the pointer to string data).
+    pub fn string_ptr(value: impl Into<String>) -> Self {
+        Self {
+            meta: Metadata::new(),
+            inline_name: None,
+            kind: ImmediateKind::StringPointer(value.into()),
         }
     }
 
@@ -245,6 +256,7 @@ impl fmt::Display for ImmediateDisplay<'_> {
             }
             ImmediateKind::BoolLiteral(b) => write!(f, "{}", b),
             ImmediateKind::StringLiteral(s) => write!(f, "str.literal {:?}", s),
+            ImmediateKind::StringPointer(s) => write!(f, "str.ptr {:?}", s),
             ImmediateKind::Unit => write!(f, "()"),
             ImmediateKind::FunctionRef { name, type_args } => {
                 write!(f, "{}", self.ctx.name(*name))?;

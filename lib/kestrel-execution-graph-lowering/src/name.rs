@@ -1,6 +1,7 @@
 //! Qualified name generation from semantic symbols.
 
 use kestrel_execution_graph::{Id, QualifiedName, QualifiedNameData};
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -114,8 +115,23 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         }
 
         KestrelSymbolKind::Initializer => {
-            // Initializers are named "init"
-            segments.push("init".to_string());
+            // Initializers include parameter labels in the name for overload differentiation
+            // e.g., init(intLiteral:) becomes "init$intLiteral", init() becomes "init"
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                let labels: Vec<&str> = callable
+                    .parameters()
+                    .iter()
+                    .filter_map(|p| p.external_label())
+                    .collect();
+
+                if labels.is_empty() {
+                    segments.push("init".to_string());
+                } else {
+                    segments.push(format!("init${}", labels.join("$")));
+                }
+            } else {
+                segments.push("init".to_string());
+            }
         }
 
         // Enum cases contribute their name
