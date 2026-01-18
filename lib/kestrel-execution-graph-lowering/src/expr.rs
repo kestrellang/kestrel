@@ -2166,7 +2166,7 @@ fn lower_call(
     let get_ordered_type_args =
         |ctx: &mut LoweringContext,
          sym: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>|
-         -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+         -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
             use kestrel_semantic_tree::symbol::EnumSymbol;
             use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
             use semantic_tree::symbol::SymbolId;
@@ -2222,18 +2222,47 @@ fn lower_call(
             };
 
             if let Some(ids) = param_ids {
-                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
-                    return ordered_types
-                        .into_iter()
-                        .map(|ty| lower_type(ctx, ty))
-                        .collect();
+                if ids.is_empty() {
+                    if substitutions.is_empty() {
+                        return Some(Vec::new());
+                    }
+                    ctx.emit_error(LoweringError::internal(
+                        format!(
+                            "missing type arguments for generic call to {}",
+                            sym.metadata().name().value
+                        ),
+                        Some(expr.span.clone()),
+                    ));
+                    return None;
                 }
+                if let Some(ordered_types) = substitutions.types_in_order(&ids) {
+                    return Some(
+                        ordered_types
+                            .into_iter()
+                            .map(|ty| lower_type(ctx, ty))
+                            .collect(),
+                    );
+                }
+                ctx.emit_error(LoweringError::internal(
+                    format!(
+                        "missing type arguments for generic call to {}",
+                        sym.metadata().name().value
+                    ),
+                    Some(expr.span.clone()),
+                ));
+                return None;
             }
-            // Fallback: use arbitrary order (should only happen for non-generic symbols or errors)
-            substitutions
-                .types()
-                .map(|ty| lower_type(ctx, ty))
-                .collect()
+            if substitutions.is_empty() {
+                return Some(Vec::new());
+            }
+            ctx.emit_error(LoweringError::internal(
+                format!(
+                    "missing type parameter order for generic call to {}",
+                    sym.metadata().name().value
+                ),
+                Some(expr.span.clone()),
+            ));
+            None
         };
 
     // Get the result type and create a temp for the result
@@ -2358,7 +2387,10 @@ fn lower_call(
                         } else {
                             // Regular initializer call
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = get_ordered_type_args(ctx, &sym);
+                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                                Some(args) => args,
+                                None => return Value::Immediate(Immediate::error()),
+                            };
                             let mir_callee = if type_args.is_empty() {
                                 Callee::direct(func_name)
                             } else {
@@ -2371,7 +2403,10 @@ fn lower_call(
                     } else {
                         // Regular function call
                         let func_name = qualified_name_for_symbol(ctx, &sym);
-                        let type_args = get_ordered_type_args(ctx, &sym);
+                        let type_args = match get_ordered_type_args(ctx, &sym) {
+                            Some(args) => args,
+                            None => return Value::Immediate(Immediate::error()),
+                        };
                         let mir_callee = if type_args.is_empty() {
                             Callee::direct(func_name)
                         } else {
@@ -2560,7 +2595,10 @@ fn lower_call(
                         } else {
                             // Regular direct method call (concrete type, non-protocol method)
                             let func_name = qualified_name_for_symbol(ctx, &sym);
-                            let type_args = get_ordered_type_args(ctx, &sym);
+                            let type_args = match get_ordered_type_args(ctx, &sym) {
+                                Some(args) => args,
+                                None => return Value::Immediate(Immediate::error()),
+                            };
                             let mir_callee = if type_args.is_empty() {
                                 Callee::direct(func_name)
                             } else {
@@ -2685,7 +2723,10 @@ fn lower_call(
                     let unit_place = Place::local(unit_local);
 
                     // Call the init function
-                    let type_args = get_ordered_type_args(ctx, &sym);
+                    let type_args = match get_ordered_type_args(ctx, &sym) {
+                        Some(args) => args,
+                        None => return Value::Immediate(Immediate::error()),
+                    };
                     let mir_callee = if type_args.is_empty() {
                         Callee::direct(init_name)
                     } else {
@@ -2824,7 +2865,10 @@ fn lower_subscript_call(
             let func_name = qualified_name_for_symbol(ctx, &sym);
 
             // Build type arguments from receiver's substitutions (for generic subscripts)
-            let type_args = get_type_args_for_receiver(ctx, &receiver.ty);
+            let type_args = match get_type_args_for_receiver(ctx, &receiver.ty, Some(expr.span.clone())) {
+                Some(args) => args,
+                None => return Value::Immediate(Immediate::error()),
+            };
 
             // Create the callee
             let mir_callee = if type_args.is_empty() {
@@ -2852,15 +2896,61 @@ fn lower_subscript_call(
 fn get_type_args_for_receiver(
     ctx: &mut LoweringContext,
     receiver_ty: &Ty,
-) -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
-    match receiver_ty.kind() {
-        TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
-            substitutions
-                .types()
-                .map(|ty| lower_type(ctx, ty))
-                .collect()
+    span: Option<kestrel_span::Span>,
+) -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
+    use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+    use semantic_tree::symbol::Symbol;
+
+    let (type_params, substitutions) = match receiver_ty.kind() {
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let params: Vec<_> = if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+                generics.type_parameters().iter().map(|p| p.metadata().id()).collect()
+            } else {
+                vec![]
+            };
+            (params, substitutions)
         }
-        _ => Vec::new(),
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let params: Vec<_> = if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+                generics.type_parameters().iter().map(|p| p.metadata().id()).collect()
+            } else {
+                vec![]
+            };
+            (params, substitutions)
+        }
+        _ => return Some(Vec::new()),
+    };
+
+    if type_params.is_empty() {
+        if substitutions.is_empty() {
+            return Some(Vec::new());
+        }
+        ctx.emit_error(LoweringError::internal(
+            "missing type parameter order for generic receiver".to_string(),
+            span,
+        ));
+        return None;
+    }
+
+    if let Some(ordered_types) = substitutions.types_in_order(&type_params) {
+        Some(
+            ordered_types
+                .into_iter()
+                .map(|ty| lower_type(ctx, ty))
+                .collect(),
+        )
+    } else {
+        ctx.emit_error(LoweringError::internal(
+            "missing type arguments for generic receiver".to_string(),
+            span,
+        ));
+        None
     }
 }
 
@@ -2987,7 +3077,10 @@ fn lower_subscript_setter_call(
     let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
 
     // Build type arguments from receiver's substitutions
-    let type_args = get_type_args_for_receiver(ctx, &receiver.ty);
+    let type_args = match get_type_args_for_receiver(ctx, &receiver.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
 
     // Create the callee
     let mir_callee = if type_args.is_empty() {
@@ -3116,7 +3209,10 @@ fn lower_getter_call(
     let getter_name = qualified_name_for_symbol(ctx, &getter_symbol);
 
     // Get type arguments from the receiver's type for generic types
-    let type_args = extract_type_args_from_receiver(ctx, &object.ty);
+    let type_args = match extract_type_args_from_receiver(ctx, &object.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
 
     // Look up CallableBehavior to get receiver access mode
     let callable_beh = getter_symbol.metadata().get_behavior::<CallableBehavior>();
@@ -3185,7 +3281,8 @@ fn lower_getter_call(
 fn extract_type_args_from_receiver(
     ctx: &mut LoweringContext,
     receiver_ty: &Ty,
-) -> Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> {
+    span: Option<kestrel_span::Span>,
+) -> Option<Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>>> {
     use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
     use semantic_tree::symbol::Symbol;
 
@@ -3207,17 +3304,34 @@ fn extract_type_args_from_receiver(
         };
         (params, subs)
     } else {
-        return vec![];
+        return Some(vec![]);
     };
 
     // Get types in the correct order based on type parameter declaration order
+    if type_params.is_empty() {
+        if substitutions.is_empty() {
+            return Some(vec![]);
+        }
+        ctx.emit_error(LoweringError::internal(
+            "missing type parameter order for generic receiver".to_string(),
+            span,
+        ));
+        return None;
+    }
+
     if let Some(ordered_types) = substitutions.types_in_order(&type_params) {
-        ordered_types
+        Some(
+            ordered_types
             .into_iter()
             .map(|ty| lower_type(ctx, ty))
-            .collect()
+            .collect(),
+        )
     } else {
-        vec![]
+        ctx.emit_error(LoweringError::internal(
+            "missing type arguments for generic receiver".to_string(),
+            span,
+        ));
+        None
     }
 }
 
@@ -3297,7 +3411,10 @@ fn lower_setter_call(
     let setter_name = qualified_name_for_symbol(ctx, &setter_symbol);
 
     // Get type arguments from the receiver's type for generic types
-    let type_args = extract_type_args_from_receiver(ctx, &object.ty);
+    let type_args = match extract_type_args_from_receiver(ctx, &object.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
 
     // Look up CallableBehavior to get parameter access modes
     let callable_beh = setter_symbol.metadata().get_behavior::<CallableBehavior>();

@@ -6,7 +6,7 @@ use crate::monomorphize::{Substitution, resolve_witness};
 use crate::place::compile_place_read;
 use crate::types::translate_type;
 
-use kestrel_codegen::{mangle_function, mangle_function_with_self, mangle_name};
+use kestrel_codegen::mangle_name;
 use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, FloatBits, Function, FunctionDef, Id, Immediate,
     ImmediateKind, IntBits, Local, MirTy, Origin, PassingMode, Place, PlaceKind, QualifiedName,
@@ -49,6 +49,41 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
         let param = &mir.params[param_id];
         type_uses_self(mir, param.ty)
     }) || type_uses_self(mir, func_def.ret)
+}
+
+/// Check if a type is fully concrete (no type params, Self, or associated projections).
+fn type_is_concrete(mir: &MirContext, ty_id: Id<Ty>) -> bool {
+    match mir.ty(ty_id) {
+        MirTy::TypeParam(_) | MirTy::SelfType | MirTy::Error => false,
+        MirTy::AssociatedTypeProjection { .. } => false,
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
+            type_is_concrete(mir, *inner)
+        }
+        MirTy::Tuple(elems) => elems.iter().all(|e| type_is_concrete(mir, *e)),
+        MirTy::Named { type_args, .. } => type_args.iter().all(|a| type_is_concrete(mir, *a)),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().all(|p| type_is_concrete(mir, *p)) && type_is_concrete(mir, *ret)
+        }
+        _ => true,
+    }
+}
+
+/// Ensure type arguments are fully resolved before mangling.
+fn ensure_concrete_type_args(
+    mir: &MirContext,
+    type_args: &[Id<Ty>],
+    context: &str,
+) -> Result<(), CodegenError> {
+    for &ty in type_args {
+        if !type_is_concrete(mir, ty) {
+            return Err(CodegenError::Unsupported(format!(
+                "unresolved type argument for {}: {:?}",
+                context,
+                mir.ty(ty)
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Compile an rvalue to a Cranelift value.
@@ -1317,6 +1352,11 @@ fn compile_immediate(
                 .iter()
                 .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for intrinsic call"))
                 .collect();
+            ensure_concrete_type_args(
+                ctx.mir,
+                &concrete_args,
+                &format!("function reference {}", ctx.mir.name(*name)),
+            )?;
 
             // Look up the function by name to get func_id for mangling
             let func_lookup = ctx
@@ -1325,11 +1365,27 @@ fn compile_immediate(
                 .iter()
                 .find(|(_, def)| def.name == *name);
 
-            // Look up the function by its mangled name (with param types for overloads)
-            let mangled_name = match func_lookup {
-                Some((func_id, _)) => mangle_function(ctx.mir, func_id, &concrete_args),
-                None => mangle_name(ctx.mir, *name, &concrete_args), // Fallback for external
+            let self_type = match func_lookup {
+                Some((_, def)) if func_uses_self(ctx.mir, def) => {
+                    let st = subst.get_self_type().ok_or_else(|| {
+                        CodegenError::Unsupported(format!(
+                            "function reference requires Self type: {}",
+                            ctx.mir.name(*name)
+                        ))
+                    })?;
+                    if !type_is_concrete(ctx.mir, st) {
+                        return Err(CodegenError::Unsupported(format!(
+                            "unresolved Self type for function reference: {}",
+                            ctx.mir.name(*name)
+                        )));
+                    }
+                    Some(st)
+                }
+                _ => None,
             };
+
+            // Look up the function by its mangled name (with param types for overloads)
+            let mangled_name = ctx.resolve_symbol_name(*name, &concrete_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "function not found for reference: {} (mangled: {})",
@@ -1354,10 +1410,20 @@ fn compile_immediate(
             let concrete_for_type = subst
                 .apply_ty_readonly(ctx.mir, *for_type)
                 .unwrap_or(*for_type);
+            if !type_is_concrete(ctx.mir, concrete_for_type) {
+                return Err(CodegenError::Unsupported(
+                    "unresolved Self type for witness method reference".to_string(),
+                ));
+            }
 
             // Resolve the witness to get the concrete function
             let (impl_name, impl_type_args) =
                 resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
+            ensure_concrete_type_args(
+                ctx.mir,
+                &impl_type_args,
+                &format!("witness method reference {}", ctx.mir.name(impl_name)),
+            )?;
 
             // Get the function address
             let ptr_type = if ctx.target.is_64bit() {
@@ -1373,10 +1439,11 @@ fn compile_immediate(
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
 
-            let mangled_name = match func_lookup {
-                Some((func_id, _)) => mangle_function(ctx.mir, func_id, &impl_type_args),
-                None => mangle_name(ctx.mir, impl_name, &impl_type_args), // Fallback
+            let self_type = match func_lookup {
+                Some((_, def)) if func_uses_self(ctx.mir, def) => Some(concrete_for_type),
+                _ => None,
             };
+            let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "witness method function not found: {} (mangled: {})",
@@ -1676,6 +1743,11 @@ pub fn compile_call(
                 .iter()
                 .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for direct call"))
                 .collect();
+            ensure_concrete_type_args(
+                ctx.mir,
+                &concrete_args,
+                &format!("direct call {}", ctx.mir.name(*name)),
+            )?;
 
             // Look up the Cranelift FuncId for this function.
             // For extern functions, use the symbol name from extern_info.
@@ -1686,21 +1758,25 @@ pub fn compile_call(
                 .iter()
                 .find(|(_, def)| def.name == *name);
 
-            let lookup_name = match callee_lookup {
-                Some((_, def)) if def.extern_info.is_some() => {
-                    def.extern_info.as_ref().unwrap().symbol_name.clone()
+            let self_type = match callee_lookup {
+                Some((_, def)) if func_uses_self(ctx.mir, def) => {
+                    let st = subst.get_self_type().ok_or_else(|| {
+                        CodegenError::Unsupported(format!(
+                            "direct call requires Self type: {}",
+                            ctx.mir.name(*name)
+                        ))
+                    })?;
+                    if !type_is_concrete(ctx.mir, st) {
+                        return Err(CodegenError::Unsupported(format!(
+                            "unresolved Self type for direct call: {}",
+                            ctx.mir.name(*name)
+                        )));
+                    }
+                    Some(st)
                 }
-                Some((func_id, def)) => {
-                    // Only pass self_type if the callee actually uses Self in its signature
-                    let self_type = if func_uses_self(ctx.mir, def) {
-                        subst.get_self_type()
-                    } else {
-                        None
-                    };
-                    mangle_function_with_self(ctx.mir, func_id, &concrete_args, self_type)
-                }
-                None => mangle_name(ctx.mir, *name, &concrete_args), // Fallback
+                _ => None,
             };
+            let lookup_name = ctx.resolve_symbol_name(*name, &concrete_args, self_type);
 
             let cl_func_id = ctx.func_ids_by_name.get(&lookup_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
@@ -1834,10 +1910,20 @@ pub fn compile_call(
             let concrete_for_type = subst
                 .apply_ty_readonly(ctx.mir, *for_type)
                 .unwrap_or(*for_type);
+            if !type_is_concrete(ctx.mir, concrete_for_type) {
+                return Err(CodegenError::Unsupported(
+                    "unresolved Self type for witness call".to_string(),
+                ));
+            }
 
             // Resolve the witness to get the concrete implementation
             let (impl_name, impl_type_args) =
                 resolve_witness(ctx.mir, *protocol, method, concrete_for_type)?;
+            ensure_concrete_type_args(
+                ctx.mir,
+                &impl_type_args,
+                &format!("witness call {}", ctx.mir.name(impl_name)),
+            )?;
 
             // Look up the function by name to get func_id for mangling
             let func_lookup = ctx
@@ -1846,10 +1932,11 @@ pub fn compile_call(
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
 
-            let mangled_name = match func_lookup {
-                Some((func_id, _)) => mangle_function(ctx.mir, func_id, &impl_type_args),
-                None => mangle_name(ctx.mir, impl_name, &impl_type_args), // Fallback
+            let self_type = match func_lookup {
+                Some((_, def)) if func_uses_self(ctx.mir, def) => Some(concrete_for_type),
+                _ => None,
             };
+            let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
             let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
                 CodegenError::Unsupported(format!(
                     "witness method function not found: {} (mangled: {})",
@@ -2074,6 +2161,39 @@ fn compile_str_from_parts(
     Ok(struct_ptr)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_execution_graph::{MirTy, TypeParamDef, TypeParamOwner};
+
+    #[test]
+    fn concrete_type_args_reject_type_params() {
+        let mut mir = MirContext::new();
+        let int_ty = mir.ty_i64();
+        assert!(type_is_concrete(&mir, int_ty));
+
+        let tp = mir.type_params.alloc(TypeParamDef {
+            meta: Default::default(),
+            priors: vec![],
+            name: "T".to_string(),
+            owner: TypeParamOwner::Function(Id::from_raw(0)),
+        });
+        let tp_ty = mir.intern_type(MirTy::TypeParam(tp));
+        assert!(!type_is_concrete(&mir, tp_ty));
+
+        assert!(ensure_concrete_type_args(&mir, &[int_ty], "test").is_ok());
+        assert!(ensure_concrete_type_args(&mir, &[tp_ty], "test").is_err());
+    }
+
+    #[test]
+    fn concrete_type_args_reject_self_type() {
+        let mut mir = MirContext::new();
+        let self_ty = mir.ty_self();
+        assert!(!type_is_concrete(&mir, self_ty));
+        assert!(ensure_concrete_type_args(&mir, &[self_ty], "test").is_err());
+    }
+}
+
 /// Get the type of a place expression (for determining function signature in indirect calls).
 fn get_place_type_for_call(
     ctx: &CodegenContext<'_>,
@@ -2263,11 +2383,24 @@ fn compile_apply_partial(
 
     // 1. Find the closure function and get its environment struct
     let (closure_func_id, env_struct_id) = find_closure_function_and_env(ctx, func)?;
+    let closure_def = &ctx.mir.functions[closure_func_id];
+    if !closure_def.type_params.is_empty() {
+        return Err(CodegenError::Unsupported(format!(
+            "generic closure functions are not supported in apply partial: {}",
+            ctx.mir.name(func)
+        )));
+    }
+    if func_uses_self(ctx.mir, closure_def) {
+        return Err(CodegenError::Unsupported(format!(
+            "closure function uses Self type in apply partial: {}",
+            ctx.mir.name(func)
+        )));
+    }
 
     // 2. Get the function pointer for the closure function
     // The closure function is non-generic, so we use empty type args
-    // Use mangle_function with the func_id we already looked up
-    let mangled_name = mangle_function(ctx.mir, closure_func_id, &[]);
+    // Use resolved symbol name with the func_id we already looked up
+    let mangled_name = ctx.symbol_name_for_function(closure_func_id, closure_def, &[], None);
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
         CodegenError::Unsupported(format!(
             "closure function not found: {} (mangled: {})",
@@ -2433,7 +2566,21 @@ fn compile_func_to_escaping(
 
     // Get the function pointer
     let mangled_name = match func_lookup {
-        Some((func_id, _)) => mangle_function(ctx.mir, func_id, &[]),
+        Some((_, def)) => {
+            if !def.type_params.is_empty() {
+                return Err(CodegenError::Unsupported(format!(
+                    "generic function requires type arguments for escaping conversion: {}",
+                    ctx.mir.name(func)
+                )));
+            }
+            if func_uses_self(ctx.mir, def) {
+                return Err(CodegenError::Unsupported(format!(
+                    "function requires Self type for escaping conversion: {}",
+                    ctx.mir.name(func)
+                )));
+            }
+            ctx.resolve_symbol_name(func, &[], None)
+        }
         None => mangle_name(ctx.mir, func, &[]), // Fallback
     };
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {

@@ -271,6 +271,25 @@ impl<'a> CollectionContext<'a> {
             Rvalue::FuncToEscaping(name) => {
                 // Non-generic function reference
                 if let Some(&func_id) = self.functions_by_name.get(name) {
+                    let func_def = &self.mir.functions[func_id];
+                    if !func_def.type_params.is_empty() {
+                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
+                            name: *name,
+                            reason: "generic function requires type arguments".to_string(),
+                        });
+                        return;
+                    }
+                    let needs_self = func_def.params.iter().any(|&param_id| {
+                        let param = &self.mir.params[param_id];
+                        self.type_needs_self(self.mir.ty(param.ty))
+                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
+                    if needs_self {
+                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
+                            name: *name,
+                            reason: "function reference requires Self type".to_string(),
+                        });
+                        return;
+                    }
                     let inst = FunctionInstantiation::non_generic(func_id);
                     if self.result.add_function(inst.clone()) {
                         self.pending.push_back(inst);
@@ -281,6 +300,25 @@ impl<'a> CollectionContext<'a> {
             Rvalue::ApplyPartial { func, captures } => {
                 // Non-generic function reference
                 if let Some(&func_id) = self.functions_by_name.get(func) {
+                    let func_def = &self.mir.functions[func_id];
+                    if !func_def.type_params.is_empty() {
+                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
+                            name: *func,
+                            reason: "generic function requires type arguments".to_string(),
+                        });
+                        return;
+                    }
+                    let needs_self = func_def.params.iter().any(|&param_id| {
+                        let param = &self.mir.params[param_id];
+                        self.type_needs_self(self.mir.ty(param.ty))
+                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
+                    if needs_self {
+                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
+                            name: *func,
+                            reason: "function reference requires Self type".to_string(),
+                        });
+                        return;
+                    }
                     let inst = FunctionInstantiation::non_generic(func_id);
                     if self.result.add_function(inst.clone()) {
                         self.pending.push_back(inst);
@@ -436,7 +474,35 @@ impl<'a> CollectionContext<'a> {
 
                 // Record function instantiation
                 if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let inst = FunctionInstantiation::new(func_id, concrete_args);
+                    let func_def = &self.mir.functions[func_id];
+                    if !func_def.type_params.is_empty()
+                        && func_def.type_params.len() != concrete_args.len()
+                    {
+                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
+                            name: *name,
+                            reason: "missing or mismatched type arguments".to_string(),
+                        });
+                        return;
+                    }
+
+                    let callee_needs_self = func_def.params.iter().any(|&param_id| {
+                        let param = &self.mir.params[param_id];
+                        self.type_needs_self(self.mir.ty(param.ty))
+                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
+
+                    let inst = if callee_needs_self {
+                        if let Some(st) = subst.get_self_type() {
+                            FunctionInstantiation::with_self_type(func_id, concrete_args, st)
+                        } else {
+                            self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
+                                name: *name,
+                                reason: "missing Self type for function reference".to_string(),
+                            });
+                            return;
+                        }
+                    } else {
+                        FunctionInstantiation::new(func_id, concrete_args)
+                    };
                     if self.result.add_function(inst.clone()) {
                         self.pending.push_back(inst);
                     }

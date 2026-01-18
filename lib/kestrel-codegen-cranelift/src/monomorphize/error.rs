@@ -22,6 +22,9 @@ pub enum MonomorphizeError {
     /// A function was not found by name.
     FunctionNotFound { name: Id<QualifiedName> },
 
+    /// A function reference could not be instantiated.
+    UnsupportedFunctionReference { name: Id<QualifiedName>, reason: String },
+
     /// Type mismatch during pattern matching.
     TypeMismatch { expected: Id<Ty>, found: Id<Ty> },
 
@@ -55,6 +58,9 @@ impl fmt::Display for MonomorphizeError {
             }
             MonomorphizeError::FunctionNotFound { name } => {
                 write!(f, "function not found: {:?}", name)
+            }
+            MonomorphizeError::UnsupportedFunctionReference { name, reason } => {
+                write!(f, "unsupported function reference: {:?} ({})", name, reason)
             }
             MonomorphizeError::TypeMismatch { expected, found } => {
                 write!(

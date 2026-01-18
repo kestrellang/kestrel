@@ -96,6 +96,56 @@ impl<'a> CodegenContext<'a> {
         Ok(())
     }
 
+    /// Resolve the symbol name for a function instantiation.
+    pub(crate) fn symbol_name_for_instantiation(&self, inst: &FunctionInstantiation) -> String {
+        let func_def = &self.mir.functions[inst.func_id];
+        self.symbol_name_for_function(inst.func_id, func_def, &inst.type_args, inst.self_type)
+    }
+
+    /// Resolve the symbol name for a function definition and concrete type args.
+    pub(crate) fn symbol_name_for_function(
+        &self,
+        func_id: Id<Function>,
+        func_def: &FunctionDef,
+        type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
+    ) -> String {
+        if self.is_main(func_def) {
+            "main".to_string()
+        } else if let Some(extern_info) = &func_def.extern_info {
+            extern_info.symbol_name.clone()
+        } else {
+            mangle_function_with_self(self.mir, func_id, type_args, self_type)
+        }
+    }
+
+    /// Resolve a symbol name by qualified name, falling back to mangling when unknown.
+    pub(crate) fn resolve_symbol_name(
+        &self,
+        name: Id<QualifiedName>,
+        type_args: &[Id<Ty>],
+        self_type: Option<Id<Ty>>,
+    ) -> String {
+        if let Some((func_id, func_def)) =
+            self.mir.functions.iter().find(|(_, def)| def.name == name)
+        {
+            self.symbol_name_for_function(func_id, func_def, type_args, self_type)
+        } else {
+            mangle_name(self.mir, name, type_args)
+        }
+    }
+
+    /// Resolve linkage for a function definition.
+    fn linkage_for_function(&self, func_def: &FunctionDef) -> Linkage {
+        if self.is_main(func_def) {
+            Linkage::Export
+        } else if func_def.extern_info.is_some() {
+            Linkage::Import
+        } else {
+            Linkage::Local
+        }
+    }
+
     /// Declare runtime helper functions (e.g., memcmp for string comparison).
     fn declare_runtime_helpers(&mut self) -> Result<(), CodegenError> {
         // Declare memcmp for string comparison
@@ -146,21 +196,8 @@ impl<'a> CodegenContext<'a> {
 
         for inst in instantiations {
             let func_def = &self.mir.functions[inst.func_id];
-            let is_main = self.is_main(func_def);
-
-            // Main function is exported as "main" for the C runtime
-            // Extern functions use Import linkage with their specified symbol name
-            // Other functions use mangled names (with type args for generics)
-            let (symbol_name, linkage) = if is_main {
-                ("main".to_string(), Linkage::Export)
-            } else if let Some(extern_info) = &func_def.extern_info {
-                (extern_info.symbol_name.clone(), Linkage::Import)
-            } else {
-                (
-                    mangle_function_with_self(self.mir, inst.func_id, &inst.type_args, inst.self_type),
-                    Linkage::Local,
-                )
-            };
+            let symbol_name = self.symbol_name_for_instantiation(&inst);
+            let linkage = self.linkage_for_function(func_def);
 
             // Skip if already declared (can happen with multiple paths to same instantiation)
             if self.func_ids_by_name.contains_key(&symbol_name) {
@@ -207,11 +244,7 @@ impl<'a> CodegenContext<'a> {
     ) -> Result<(), CodegenError> {
         let func_def = &self.mir.functions[inst.func_id];
         let is_main = self.is_main(func_def);
-        let symbol_name = if is_main {
-            "main".to_string()
-        } else {
-            mangle_function_with_self(self.mir, inst.func_id, &inst.type_args, inst.self_type)
-        };
+        let symbol_name = self.symbol_name_for_instantiation(inst);
 
         let cl_func_id = *self.func_ids_by_name.get(&symbol_name).ok_or_else(|| {
             CodegenError::FunctionDefinition {
