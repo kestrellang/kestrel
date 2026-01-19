@@ -9,7 +9,7 @@ use crate::terminator::compile_terminator;
 
 use kestrel_execution_graph::{Block, FunctionDef, Id, Local, Place, StatementKind};
 
-use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::ir::{InstBuilder, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
 
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ pub fn compile_block(
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
     is_main: bool,
+    sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
     let block = ctx.mir.block(block_id);
 
@@ -36,7 +37,15 @@ pub fn compile_block(
     // Compile the terminator
     if let Some(ref terminator) = block.terminator {
         compile_terminator(
-            ctx, func_def, subst, terminator, builder, block_map, local_map, is_main,
+            ctx,
+            func_def,
+            subst,
+            terminator,
+            builder,
+            block_map,
+            local_map,
+            is_main,
+            sret_ptr,
         )?;
     } else {
         // Block has no terminator - this is dead code (unreachable)

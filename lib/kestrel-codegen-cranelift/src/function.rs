@@ -6,7 +6,7 @@ use crate::monomorphize::Substitution;
 use crate::types::translate_type_with_subst;
 
 use kestrel_execution_graph::{
-    Block, FunctionDef, Id, Local, LocalDef, Place, PlaceKind, Rvalue, StatementKind,
+    Block, FunctionDef, Id, Local, LocalDef, MirTy, Place, PlaceKind, Rvalue, StatementKind, Ty,
 };
 
 use cranelift_codegen::ir::types as cl_types;
@@ -55,6 +55,13 @@ fn get_root_local(place: &Place) -> Option<Id<Local>> {
         PlaceKind::Downcast { parent, .. } => get_root_local(parent),
         PlaceKind::Deref(inner) => get_root_local(inner),
     }
+}
+
+fn is_aggregate_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
+    matches!(
+        ctx.mir.ty(ty),
+        MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
+    )
 }
 
 /// Compile a function body.
@@ -109,6 +116,12 @@ fn compile_blocks(
     is_main: bool,
 ) -> Result<(), CodegenError> {
     let mir_entry_block = func_def.entry_block.unwrap();
+    let concrete_ret = subst
+        .apply_ty_readonly(ctx.mir, func_def.ret)
+        .unwrap_or(func_def.ret);
+    let ret_mir_ty = ctx.mir.ty(concrete_ret);
+    let needs_sret =
+        !is_main && !matches!(ret_mir_ty, MirTy::Unit) && is_aggregate_type(ctx, concrete_ret);
 
     // Create Cranelift blocks for each MIR block
     // The entry block gets special handling - it needs function parameters
@@ -138,12 +151,62 @@ fn compile_blocks(
     builder.switch_to_block(entry_block);
 
     let params = builder.block_params(entry_block).to_vec();
+    let mut param_offset = 0;
+    let mut sret_ptr = None;
+    if needs_sret {
+        sret_ptr = params.get(0).copied();
+        param_offset = 1;
+    }
+
     for (i, &param_id) in func_def.params.iter().enumerate() {
         // Use the param's direct local field instead of searching by name
         let param = &ctx.mir.params[param_id];
         let local_id = param.local;
         if let Some(&var) = local_map.get(&local_id) {
-            builder.def_var(var, params[i]);
+            builder.def_var(var, params[i + param_offset]);
+        }
+    }
+
+    // Collect parameter local IDs for filtering
+    let param_local_ids: HashSet<Id<Local>> = func_def
+        .params
+        .iter()
+        .map(|&p| ctx.mir.params[p].local)
+        .collect();
+
+    // Allocate stack slots for ALL aggregate-typed non-parameter locals.
+    // This ensures they have valid addresses when Ref/RefMut is taken.
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    for &local_id in &func_def.locals {
+        // Skip parameters - they're already initialized from function args
+        if param_local_ids.contains(&local_id) {
+            continue;
+        }
+
+        let local_def = ctx.mir.local(local_id);
+        let concrete_ty = subst
+            .apply_ty_readonly(ctx.mir, local_def.ty)
+            .unwrap_or(local_def.ty);
+        if is_aggregate_type(ctx, concrete_ty) {
+            // Allocate a stack slot for this local
+            let layout = ctx.layouts.layout_of(concrete_ty);
+            let size = if layout.size == 0 { 1 } else { layout.size };
+            let align = if layout.align == 0 { 1 } else { layout.align };
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                size as u32,
+                align as u8,
+            ));
+            let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+            // Initialize the Variable to point to the stack slot
+            let var = local_map[&local_id];
+            builder.def_var(var, addr);
         }
     }
 
@@ -155,7 +218,15 @@ fn compile_blocks(
         }
 
         crate::block::compile_block(
-            ctx, func_def, subst, block_id, builder, &block_map, &local_map, is_main,
+            ctx,
+            func_def,
+            subst,
+            block_id,
+            builder,
+            &block_map,
+            &local_map,
+            is_main,
+            sret_ptr,
         )?;
     }
 

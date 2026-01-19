@@ -354,9 +354,14 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
         }
     }
 
-    // Initializers implicitly return unit
+    // Lower yield expression (if any) for side effects, then return unit.
     if !ctx.is_block_terminated() {
-        ctx.emit_return_unit();
+        if let Some(yield_expr) = body.yield_expr.as_ref() {
+            let _ = lower_expression(ctx, yield_expr);
+        }
+        if !ctx.is_block_terminated() {
+            ctx.emit_return_unit();
+        }
     }
 
     ctx.exit_function();

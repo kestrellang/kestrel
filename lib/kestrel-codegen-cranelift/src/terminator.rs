@@ -12,7 +12,7 @@ use kestrel_execution_graph::{
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::{InstBuilder, MemFlags};
+use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
 
 use std::collections::HashMap;
@@ -27,16 +27,38 @@ pub fn compile_terminator(
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
     is_main: bool,
+    sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
     match &terminator.kind {
         TerminatorKind::Return(value) => {
-            let ret_ty = ctx.mir.ty(func_def.ret);
+            let concrete_ret = subst
+                .apply_ty_readonly(ctx.mir, func_def.ret)
+                .unwrap_or(func_def.ret);
+            let ret_ty = ctx.mir.ty(concrete_ret);
             if matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) {
                 if is_main {
                     // main() must return 0 for success exit code
                     let zero = builder.ins().iconst(cl_types::I64, 0);
                     builder.ins().return_(&[zero]);
                 } else {
+                    builder.ins().return_(&[]);
+                }
+            } else if let Some(dest_ptr) = sret_ptr {
+                // Check if we're trying to return unit in a non-unit function
+                let is_unit_value = matches!(
+                    value,
+                    Value::Immediate(kestrel_execution_graph::Immediate {
+                        kind: kestrel_execution_graph::ImmediateKind::Unit,
+                        ..
+                    })
+                );
+                if is_unit_value {
+                    builder
+                        .ins()
+                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+                } else {
+                    let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+                    copy_aggregate_value(ctx, concrete_ret, dest_ptr, val, builder);
                     builder.ins().return_(&[]);
                 }
             } else {
@@ -162,6 +184,28 @@ pub fn compile_terminator(
     }
 
     Ok(())
+}
+
+fn copy_aggregate_value(
+    ctx: &mut CodegenContext<'_>,
+    ty: Id<kestrel_execution_graph::Ty>,
+    dest_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    builder: &mut FunctionBuilder<'_>,
+) {
+    let layout = ctx.layouts.layout_of(ty);
+    if layout.size == 0 {
+        return;
+    }
+
+    for offset in 0..layout.size {
+        let byte = builder
+            .ins()
+            .load(cl_types::I8, MemFlags::new(), src_ptr, offset as i32);
+        builder
+            .ins()
+            .store(MemFlags::new(), byte, dest_ptr, offset as i32);
+    }
 }
 
 /// Get the enum ID from a place expression.

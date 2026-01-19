@@ -322,6 +322,33 @@ impl<'a> CodegenContext<'a> {
         // Build substitution
         let subst = build_substitution(self.mir, &func_def.type_params, type_args);
 
+        // Return type (used for sret decisions)
+        let is_main = self.is_main(func_def);
+        let concrete_ret = subst
+            .apply_ty_readonly(self.mir, func_def.ret)
+            .expect("type substitution failed for return type");
+        let ret_ty = self.mir.ty(concrete_ret);
+        let is_aggregate_ret = matches!(
+            ret_ty,
+            kestrel_execution_graph::MirTy::Tuple(_)
+                | kestrel_execution_graph::MirTy::Named { .. }
+                | kestrel_execution_graph::MirTy::Str
+                | kestrel_execution_graph::MirTy::FuncThick { .. }
+        );
+        let needs_sret = !func_def.is_extern()
+            && !is_main
+            && !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit)
+            && is_aggregate_ret;
+
+        if needs_sret {
+            let ptr_type = if self.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+            sig.params.push(AbiParam::new(ptr_type));
+        }
+
         // Parameters - apply substitution to get concrete types
         for &param_id in &func_def.params {
             let param = &self.mir.params[param_id];
@@ -335,15 +362,10 @@ impl<'a> CodegenContext<'a> {
 
         // Return type
         // Special case: main() must return i64 for C runtime even if Kestrel return type is Unit
-        let is_main = self.is_main(func_def);
-        let concrete_ret = subst
-            .apply_ty_readonly(self.mir, func_def.ret)
-            .expect("type substitution failed for return type");
-        let ret_ty = self.mir.ty(concrete_ret);
         if is_main {
             // C runtime expects int main() - always return i64
             sig.returns.push(AbiParam::new(cl_types::I64));
-        } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) {
+        } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) && !needs_sret {
             let cl_type = translate_type(self.mir, concrete_ret, self.target);
             sig.returns.push(AbiParam::new(cl_type));
         }

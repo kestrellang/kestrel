@@ -1178,12 +1178,15 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     Value::Place(Place::local(result))
                 }
                 LangIntrinsic::PtrTo { .. } => {
-                    // ptr_to requires stack slot allocation - complex, emit error for now
-                    ctx.emit_error(LoweringError::unsupported_expr(
-                        "lang.ptr_to intrinsic (stack allocation)",
-                        expr.span.clone(),
-                    ));
-                    Value::Immediate(Immediate::error())
+                    let value = lower_expression(ctx, &arguments[0].value);
+                    let ref_value = create_ref(ctx, &value, &arguments[0].value.ty, false);
+                    let result_ty = lower_type(ctx, &expr.ty);
+                    let result = ctx.create_temp("ptr_to", result_ty);
+                    ctx.emit_assign(
+                        Place::local(result),
+                        Rvalue::RefToPtr(ref_value),
+                    );
+                    Value::Place(Place::local(result))
                 }
                 LangIntrinsic::PtrRead { .. } => {
                     let ptr = lower_expression(ctx, &arguments[0].value);

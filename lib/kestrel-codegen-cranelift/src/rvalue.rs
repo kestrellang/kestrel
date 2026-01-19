@@ -2,11 +2,11 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::monomorphize::{Substitution, resolve_witness};
+use crate::monomorphize::{Substitution, build_substitution, resolve_witness};
 use crate::place::compile_place_read;
 use crate::types::translate_type;
 
-use kestrel_codegen::mangle_name;
+use kestrel_codegen::{Layout, mangle_name};
 use kestrel_execution_graph::{
     BinOp, CallArg, Callee, CastKind, FloatBits, Function, FunctionDef, Id, Immediate,
     ImmediateKind, IntBits, Local, MirTy, Origin, PassingMode, Place, PlaceKind, QualifiedName,
@@ -51,6 +51,11 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
     }) || type_uses_self(mir, func_def.ret)
 }
 
+fn is_main_function(ctx: &CodegenContext<'_>, func_def: &FunctionDef) -> bool {
+    let name = ctx.mir.name(func_def.name);
+    name.segments.last().map(|s| s.as_str()) == Some("main")
+}
+
 /// Check if a type is fully concrete (no type params, Self, or associated projections).
 fn type_is_concrete(mir: &MirContext, ty_id: Id<Ty>) -> bool {
     match mir.ty(ty_id) {
@@ -65,6 +70,54 @@ fn type_is_concrete(mir: &MirContext, ty_id: Id<Ty>) -> bool {
             params.iter().all(|p| type_is_concrete(mir, *p)) && type_is_concrete(mir, *ret)
         }
         _ => true,
+    }
+}
+
+fn is_aggregate_value_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
+    matches!(
+        mir.ty(ty_id),
+        MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
+    )
+}
+
+fn needs_sret_for_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
+    !matches!(mir.ty(ty_id), MirTy::Unit) && is_aggregate_value_type(mir, ty_id)
+}
+
+fn ref_arg_should_pass_direct(
+    ctx: &CodegenContext<'_>,
+    subst: &Substitution,
+    ty_opt: Option<Id<Ty>>,
+) -> bool {
+    let Some(ty) = ty_opt else {
+        return false;
+    };
+    let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+    match ctx.mir.ty(concrete_ty) {
+        MirTy::Ref(_) | MirTy::RefMut(_) | MirTy::Pointer(_) => true,
+        _ => is_aggregate_value_type(ctx.mir, concrete_ty),
+    }
+}
+
+fn copy_aggregate_value(
+    ctx: &mut CodegenContext<'_>,
+    ty: Id<Ty>,
+    dest_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    builder: &mut FunctionBuilder<'_>,
+) {
+    let layout = ctx.layouts.layout_of(ty);
+    if layout.size == 0 {
+        return;
+    }
+
+    for offset in 0..layout.size {
+        let byte = builder
+            .ins()
+            .load(cl_types::I8, MemFlags::new(), src_ptr, offset as i32);
+        builder
+            .ins()
+            .store(MemFlags::new(), byte, dest_ptr, offset as i32);
     }
 }
 
@@ -270,7 +323,11 @@ pub fn compile_rvalue(
         Rvalue::PtrRead { ptr, ty } => {
             // Load value from pointer
             let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-            let pointee_ty = subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for PtrRead");
+            let pointee_ty =
+                subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for PtrRead");
+            if is_aggregate_value_type(ctx.mir, pointee_ty) {
+                return Ok(ptr_val);
+            }
             let cl_ty = translate_type(ctx.mir, pointee_ty, ctx.target);
             Ok(builder.ins().load(cl_ty, cranelift_codegen::ir::MemFlags::new(), ptr_val, 0))
         }
@@ -279,6 +336,17 @@ pub fn compile_rvalue(
             // Store value through pointer
             let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
             let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+            if let Ok((_, Some(ptr_ty))) = get_value_layout(ctx, ptr, local_map) {
+                let concrete_ptr_ty = subst.apply_ty_readonly(ctx.mir, ptr_ty).unwrap_or(ptr_ty);
+                if let Ok(pointee_ty) = get_pointee_type(ctx, concrete_ptr_ty) {
+                    let concrete_pointee_ty =
+                        subst.apply_ty_readonly(ctx.mir, pointee_ty).unwrap_or(pointee_ty);
+                    if is_aggregate_value_type(ctx.mir, concrete_pointee_ty) {
+                        copy_aggregate_value(ctx, concrete_pointee_ty, ptr_val, val, builder);
+                        return Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0));
+                    }
+                }
+            }
             builder.ins().store(cranelift_codegen::ir::MemFlags::new(), val, ptr_val, 0);
             // Return unit (represented as 0)
             Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0))
@@ -475,31 +543,14 @@ fn compile_construct(
             .apply_ty_readonly(ctx.mir, field_ty)
             .unwrap_or(field_ty);
 
-        // Check if this is a nested struct - if so, copy the struct data
-        let field_mir_ty = ctx.mir.ty(concrete_field_ty);
-        let is_nested_struct =
-            matches!(field_mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, concrete_field_ty);
-
-        if is_nested_struct {
-            // Value is a pointer to the nested struct - copy its contents
-            let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
+        // Check if this is a nested aggregate - if so, copy its data
+        if is_aggregate_value_type(ctx.mir, concrete_field_ty) {
             let dest_ptr = if *offset == 0 {
                 ptr
             } else {
                 builder.ins().iadd_imm(ptr, *offset as i64)
             };
-            // Copy the struct data byte by byte (simple approach)
-            // For larger structs, we could use memcpy, but for now just copy word by word
-            let words = (nested_layout.size + 7) / 8;
-            for i in 0..words {
-                let word_offset = (i * 8) as i32;
-                let word = builder
-                    .ins()
-                    .load(cl_types::I64, MemFlags::new(), value, word_offset);
-                builder
-                    .ins()
-                    .store(MemFlags::new(), word, dest_ptr, word_offset);
-            }
+            copy_aggregate_value(ctx, concrete_field_ty, dest_ptr, value, builder);
         } else {
             // Store primitive value directly
             builder
@@ -571,41 +622,33 @@ fn compile_tuple(
     // Store each element at its offset
     for (i, value) in values.iter().enumerate() {
         let offset = offsets[i];
-        let elem_layout = element_layouts[i];
         let elem_ty = element_types[i];
 
         // Compile the element value
         let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
 
         // Check if this is a nested compound type - if so, copy the data
-        let is_compound = if let Some(ty) = elem_ty {
+        let compound_ty = if let Some(ty) = elem_ty {
             // Apply substitution to get concrete type for generic tuples
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).expect("type substitution failed for tuple element");
-            let elem_mir_ty = ctx.mir.ty(concrete_ty);
-            matches!(elem_mir_ty, MirTy::Named { .. } | MirTy::Tuple(_))
-                && (is_struct_type(ctx, concrete_ty) || matches!(elem_mir_ty, MirTy::Tuple(_)))
+            let concrete_ty =
+                subst.apply_ty_readonly(ctx.mir, ty).expect("type substitution failed for tuple element");
+            if is_aggregate_value_type(ctx.mir, concrete_ty) {
+                Some(concrete_ty)
+            } else {
+                None
+            }
         } else {
-            false
+            None
         };
 
-        if is_compound {
+        if let Some(concrete_ty) = compound_ty {
             // Value is a pointer to the nested compound type - copy its contents
             let dest_ptr = if offset == 0 {
                 ptr
             } else {
                 builder.ins().iadd_imm(ptr, offset as i64)
             };
-            // Copy the data word by word
-            let words = (elem_layout.size + 7) / 8;
-            for w in 0..words {
-                let word_offset = (w * 8) as i32;
-                let word = builder
-                    .ins()
-                    .load(cl_types::I64, MemFlags::new(), val, word_offset);
-                builder
-                    .ins()
-                    .store(MemFlags::new(), word, dest_ptr, word_offset);
-            }
+            copy_aggregate_value(ctx, concrete_ty, dest_ptr, val, builder);
         } else {
             // Store primitive value directly
             builder
@@ -846,9 +889,10 @@ fn compile_enum_variant(
         let payload_layout = ctx.layouts.struct_layout(payload_struct_id);
         let field_offsets = payload_layout.field_offsets.clone();
 
-        // Discriminant is 4 bytes, payload starts at offset 4 (or aligned)
-        // The payload offset is after discriminant, aligned to payload's alignment
-        let payload_base_offset = 4i32; // discriminant is i32 = 4 bytes
+        // Discriminant is 4 bytes; payload starts after alignment padding.
+        let discriminant_layout = Layout::new(4, 4);
+        let (payload_offset, _) = discriminant_layout.append(payload_layout.layout);
+        let payload_base_offset = payload_offset as i32;
 
         // Get the struct definition to find field names in order
         let payload_struct = ctx.mir.struct_def(payload_struct_id);
@@ -874,28 +918,14 @@ fn compile_enum_variant(
             let concrete_field_ty = subst
                 .apply_ty_readonly(ctx.mir, field_ty)
                 .unwrap_or(field_ty);
-            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
-            let is_nested_struct = matches!(field_mir_ty, MirTy::Named { .. })
-                && is_struct_type(ctx, concrete_field_ty);
-
-            if is_nested_struct {
+            if is_aggregate_value_type(ctx.mir, concrete_field_ty) {
                 // Copy nested struct data
-                let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
                 let dest_ptr = if total_offset == 0 {
                     ptr
                 } else {
                     builder.ins().iadd_imm(ptr, total_offset as i64)
                 };
-                let words = (nested_layout.size + 7) / 8;
-                for w in 0..words {
-                    let word_offset = (w * 8) as i32;
-                    let word = builder
-                        .ins()
-                        .load(cl_types::I64, MemFlags::new(), val, word_offset);
-                    builder
-                        .ins()
-                        .store(MemFlags::new(), word, dest_ptr, word_offset);
-                }
+                copy_aggregate_value(ctx, concrete_field_ty, dest_ptr, val, builder);
             } else {
                 // Store primitive value directly
                 builder.ins().store(MemFlags::new(), val, ptr, total_offset);
@@ -949,13 +979,7 @@ fn compile_ref(
             let concrete_local_ty = subst
                 .apply_ty_readonly(ctx.mir, local_ty)
                 .unwrap_or(local_ty);
-            let mir_ty = ctx.mir.ty(concrete_local_ty);
-
-            // Check if this is a struct type (already a pointer)
-            let is_struct =
-                matches!(mir_ty, MirTy::Named { .. }) && is_struct_type(ctx, concrete_local_ty);
-
-            if is_struct {
+            if is_aggregate_value_type(ctx.mir, concrete_local_ty) {
                 // Structs are already represented as pointers, just return the value
                 let var = local_map
                     .get(local_id)
@@ -1273,7 +1297,28 @@ fn compile_ptr_offset(
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-    let offset_val = compile_value(ctx, func_def, subst, offset, builder, local_map)?;
+    let mut offset_val = compile_value(ctx, func_def, subst, offset, builder, local_map)?;
+    if let Value::Place(place) = offset {
+        if let Ok(offset_ty) = get_place_type(ctx, place, local_map) {
+            let concrete_offset_ty = subst.apply_ty_readonly(ctx.mir, offset_ty).unwrap_or(offset_ty);
+            if is_aggregate_value_type(ctx.mir, concrete_offset_ty) {
+                if let Ok((field_offset, field_ty)) =
+                    get_field_info(ctx, concrete_offset_ty, "value")
+                {
+                    let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
+                    let raw = builder
+                        .ins()
+                        .load(cl_field_ty, MemFlags::new(), offset_val, field_offset as i32);
+                    let ptr_ty = builder.func.dfg.value_type(ptr_val);
+                    if cl_field_ty != ptr_ty {
+                        offset_val = builder.ins().sextend(ptr_ty, raw);
+                    } else {
+                        offset_val = raw;
+                    }
+                }
+            }
+        }
+    }
 
     // For now, assume offset is in bytes
     // TODO: If we need ptr + n * sizeof(pointee), we'd need the pointee type
@@ -1797,11 +1842,49 @@ pub fn compile_call(
                 ))
             })?;
 
+            let callee_def = callee_lookup.map(|(_, def)| def);
+            let is_extern = callee_def.map(|def| def.is_extern()).unwrap_or(false);
+            let mut needs_sret = false;
+            let mut ret_ptr = None;
+            if let Some(def) = callee_def {
+                let mut callee_subst =
+                    build_substitution(ctx.mir, &def.type_params, &concrete_args);
+                if let Some(st) = self_type {
+                    callee_subst.set_self_type(st);
+                }
+                let concrete_ret = callee_subst
+                    .apply_ty_readonly(ctx.mir, def.ret)
+                    .unwrap_or(def.ret);
+                needs_sret = !def.is_extern()
+                    && !is_main_function(ctx, def)
+                    && needs_sret_for_type(ctx.mir, concrete_ret);
+                if needs_sret {
+                    let layout = ctx.layouts.layout_of(concrete_ret);
+                    let size = if layout.size == 0 { 1 } else { layout.size };
+                    let align = if layout.align == 0 { 1 } else { layout.align };
+                    let ptr_type = if ctx.target.is_64bit() {
+                        cl_types::I64
+                    } else {
+                        cl_types::I32
+                    };
+                    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        size as u32,
+                        align as u8,
+                    ));
+                    ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
+                }
+            }
+
             // Get the function reference for use in this function
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
 
             // Compile arguments with proper PassingMode handling
-            let mut arg_values = Vec::with_capacity(args.len());
+            let mut arg_values =
+                Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
+            if let Some(ptr) = ret_ptr {
+                arg_values.push(ptr);
+            }
             for arg in args {
                 match arg.mode {
                     PassingMode::Copy | PassingMode::Move => {
@@ -1811,11 +1894,15 @@ pub fn compile_call(
                         arg_values.push(val);
                     }
                     PassingMode::Ref | PassingMode::MutRef => {
-                        // Pass by reference: spill to stack and pass address
-                        let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                        let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
                         let val =
                             compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                        if is_extern || ref_arg_should_pass_direct(ctx, subst, ty_opt) {
+                            arg_values.push(val);
+                            continue;
+                        }
 
+                        // Pass by reference: spill to stack and pass address
                         // Create stack slot for the value
                         let slot = builder.create_sized_stack_slot(StackSlotData::new(
                             StackSlotKind::ExplicitSlot,
@@ -1846,60 +1933,15 @@ pub fn compile_call(
             let call_inst = builder.ins().call(func_ref, &arg_values);
 
             // Get the return value (if any)
+            if let Some(ptr) = ret_ptr {
+                return Ok(ptr);
+            }
+
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
                 // Unit return - return a dummy value
                 Ok(builder.ins().iconst(cl_types::I8, 0))
             } else {
-                // Check if the return type is a string - if so, we need to copy the
-                // fat pointer struct from the callee's stack to our own stack,
-                // because the callee's stack will be deallocated.
-                let callee_def = ctx
-                    .mir
-                    .functions
-                    .iter()
-                    .find(|(_, def)| def.name == *name)
-                    .map(|(_, def)| def);
-
-                if let Some(def) = callee_def {
-                    let ret_ty = subst.apply_ty_readonly(ctx.mir, def.ret).expect("type substitution failed for return type");
-                    if matches!(ctx.mir.ty(ret_ty), kestrel_execution_graph::MirTy::Str) {
-                        // Copy the string fat pointer to our stack
-                        let ptr_type = if ctx.target.is_64bit() {
-                            cl_types::I64
-                        } else {
-                            cl_types::I32
-                        };
-                        let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
-
-                        // The result is a pointer to a (ptr, len) struct in callee's stack
-                        let src_ptr = results[0];
-
-                        // Allocate space in our stack frame
-                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            (ptr_size * 2) as u32,
-                            ptr_size as u8,
-                        ));
-                        let dest_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-                        // Copy the ptr field (offset 0)
-                        let str_ptr = builder.ins().load(ptr_type, MemFlags::new(), src_ptr, 0);
-                        builder.ins().store(MemFlags::new(), str_ptr, dest_ptr, 0);
-
-                        // Copy the len field (offset ptr_size)
-                        let str_len =
-                            builder
-                                .ins()
-                                .load(ptr_type, MemFlags::new(), src_ptr, ptr_size as i32);
-                        builder
-                            .ins()
-                            .store(MemFlags::new(), str_len, dest_ptr, ptr_size as i32);
-
-                        return Ok(dest_ptr);
-                    }
-                }
-
                 Ok(results[0])
             }
         }
@@ -1965,9 +2007,9 @@ pub fn compile_call(
                 .functions
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
-
-            let self_type = match func_lookup {
-                Some((_, def)) if func_uses_self(ctx.mir, def) => Some(concrete_for_type),
+            let callee_def = func_lookup.map(|(_, def)| def);
+            let self_type = match callee_def {
+                Some(def) if func_uses_self(ctx.mir, def) => Some(concrete_for_type),
                 _ => None,
             };
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
@@ -1980,9 +2022,45 @@ pub fn compile_call(
             })?;
 
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
+            let is_extern = callee_def.map(|def| def.is_extern()).unwrap_or(false);
+            let mut needs_sret = false;
+            let mut ret_ptr = None;
+            if let Some(def) = callee_def {
+                let mut callee_subst =
+                    build_substitution(ctx.mir, &def.type_params, &impl_type_args);
+                if let Some(st) = self_type {
+                    callee_subst.set_self_type(st);
+                }
+                let concrete_ret = callee_subst
+                    .apply_ty_readonly(ctx.mir, def.ret)
+                    .unwrap_or(def.ret);
+                needs_sret = !def.is_extern()
+                    && !is_main_function(ctx, def)
+                    && needs_sret_for_type(ctx.mir, concrete_ret);
+                if needs_sret {
+                    let layout = ctx.layouts.layout_of(concrete_ret);
+                    let size = if layout.size == 0 { 1 } else { layout.size };
+                    let align = if layout.align == 0 { 1 } else { layout.align };
+                    let ptr_type = if ctx.target.is_64bit() {
+                        cl_types::I64
+                    } else {
+                        cl_types::I32
+                    };
+                    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        size as u32,
+                        align as u8,
+                    ));
+                    ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
+                }
+            }
 
             // Compile arguments with proper PassingMode handling
-            let mut arg_values = Vec::with_capacity(args.len());
+            let mut arg_values =
+                Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
+            if let Some(ptr) = ret_ptr {
+                arg_values.push(ptr);
+            }
             for arg in args {
                 match arg.mode {
                     PassingMode::Copy | PassingMode::Move => {
@@ -1992,10 +2070,13 @@ pub fn compile_call(
                         arg_values.push(val);
                     }
                     PassingMode::Ref | PassingMode::MutRef => {
-                        // Pass by reference: spill to stack and pass address
-                        let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                        let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
                         let val =
                             compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                        if is_extern || ref_arg_should_pass_direct(ctx, subst, ty_opt) {
+                            arg_values.push(val);
+                            continue;
+                        }
 
                         // Create stack slot for the value
                         let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -2027,6 +2108,10 @@ pub fn compile_call(
             let call_inst = builder.ins().call(func_ref, &arg_values);
 
             // Get the return value (if any)
+            if let Some(ptr) = ret_ptr {
+                return Ok(ptr);
+            }
+
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
                 Ok(builder.ins().iconst(cl_types::I8, 0))
@@ -2369,6 +2454,16 @@ fn build_signature_from_func_type(
 
     let call_conv = builder.func.signature.call_conv;
     let mut sig = Signature::new(call_conv);
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+    let needs_sret = needs_sret_for_type(ctx.mir, ret);
+
+    if needs_sret {
+        sig.params.push(AbiParam::new(ptr_type));
+    }
 
     // Add parameters
     for param_ty in &params {
@@ -2378,7 +2473,7 @@ fn build_signature_from_func_type(
 
     // Add return type if not unit
     let ret_mir_ty = ctx.mir.ty(ret);
-    if !matches!(ret_mir_ty, MirTy::Unit) {
+    if !matches!(ret_mir_ty, MirTy::Unit) && !needs_sret {
         let cl_type = translate_type(ctx.mir, ret, ctx.target);
         sig.returns.push(AbiParam::new(cl_type));
     }
@@ -2703,13 +2798,39 @@ fn compile_thin_call(
 
     // Get the type of the place to determine the function signature
     let func_ty = get_place_type_for_call(ctx, place, local_map)?;
+    let resolved_ty = resolve_func_type(ctx, func_ty);
+    let ret_ty = match ctx.mir.ty(resolved_ty) {
+        MirTy::FuncThin { ret, .. } | MirTy::FuncThick { ret, .. } => *ret,
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "not a function type: {:?}",
+                ctx.mir.ty(resolved_ty)
+            )));
+        }
+    };
+    let needs_sret = needs_sret_for_type(ctx.mir, ret_ty);
+    let mut ret_ptr = None;
+    if needs_sret {
+        let layout = ctx.layouts.layout_of(ret_ty);
+        let size = if layout.size == 0 { 1 } else { layout.size };
+        let align = if layout.align == 0 { 1 } else { layout.align };
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            size as u32,
+            align as u8,
+        ));
+        ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
+    }
 
     // Build the signature
     let sig = build_signature_from_func_type(ctx, func_ty, builder)?;
     let sig_ref = builder.import_signature(sig);
 
     // Compile arguments with proper PassingMode handling
-    let mut arg_values = Vec::with_capacity(args.len());
+    let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
+    if let Some(ptr) = ret_ptr {
+        arg_values.push(ptr);
+    }
     for arg in args {
         match arg.mode {
             PassingMode::Copy | PassingMode::Move => {
@@ -2718,9 +2839,12 @@ fn compile_thin_call(
                 arg_values.push(val);
             }
             PassingMode::Ref | PassingMode::MutRef => {
-                // Pass by reference: spill to stack and pass address
-                let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
                 let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                if ref_arg_should_pass_direct(ctx, subst, ty_opt) {
+                    arg_values.push(val);
+                    continue;
+                }
 
                 // Create stack slot for the value
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -2752,19 +2876,18 @@ fn compile_thin_call(
     let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
 
     // Get the return value (if any)
+    if let Some(ptr) = ret_ptr {
+        return Ok(ptr);
+    }
+
     let results = builder.inst_results(call_inst);
     if results.is_empty() {
         // Unit return - return a dummy value
         Ok(builder.ins().iconst(cl_types::I8, 0))
     } else {
         // Check if the return type is a string - if so, copy the fat pointer
-        let resolved_ty = resolve_func_type(ctx, func_ty);
-        if let kestrel_execution_graph::MirTy::FuncThin { ret, .. }
-        | kestrel_execution_graph::MirTy::FuncThick { ret, .. } = ctx.mir.ty(resolved_ty)
-        {
-            if matches!(ctx.mir.ty(*ret), kestrel_execution_graph::MirTy::Str) {
-                return Ok(copy_string_return_value(ctx, results[0], builder));
-            }
+        if matches!(ctx.mir.ty(ret_ty), kestrel_execution_graph::MirTy::Str) {
+            return Ok(copy_string_return_value(ctx, results[0], builder));
         }
         Ok(results[0])
     }
@@ -2828,6 +2951,20 @@ fn compile_thick_call(
 
             let call_conv = builder.func.signature.call_conv;
             let mut sig = Signature::new(call_conv);
+            let needs_sret = needs_sret_for_type(ctx.mir, *ret);
+            let mut ret_ptr = None;
+            if needs_sret {
+                sig.params.push(AbiParam::new(ptr_type));
+                let layout = ctx.layouts.layout_of(*ret);
+                let size = if layout.size == 0 { 1 } else { layout.size };
+                let align = if layout.align == 0 { 1 } else { layout.align };
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    size as u32,
+                    align as u8,
+                ));
+                ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
+            }
 
             for param_ty in params {
                 let cl_type = translate_type(ctx.mir, *param_ty, ctx.target);
@@ -2835,20 +2972,26 @@ fn compile_thick_call(
             }
 
             let ret_mir_ty = ctx.mir.ty(*ret);
-            if !matches!(ret_mir_ty, MirTy::Unit) {
+            if !matches!(ret_mir_ty, MirTy::Unit) && !needs_sret {
                 let cl_type = translate_type(ctx.mir, *ret, ctx.target);
                 sig.returns.push(AbiParam::new(cl_type));
             }
 
             let sig_ref = builder.import_signature(sig);
 
-            let mut arg_values = Vec::with_capacity(args.len());
+            let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
+            if let Some(ptr) = ret_ptr {
+                arg_values.push(ptr);
+            }
             for arg in args {
                 let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
                 arg_values.push(val);
             }
 
             let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+            if let Some(ptr) = ret_ptr {
+                return Ok(ptr);
+            }
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
                 return Ok(builder.ins().iconst(cl_types::I8, 0));
@@ -2906,6 +3049,20 @@ fn compile_thick_call(
 
             let call_conv = builder.func.signature.call_conv;
             let mut sig = Signature::new(call_conv);
+            let needs_sret = needs_sret_for_type(ctx.mir, *ret);
+            let mut ret_ptr = None;
+            if needs_sret {
+                sig.params.push(AbiParam::new(ptr_type));
+                let layout = ctx.layouts.layout_of(*ret);
+                let size = if layout.size == 0 { 1 } else { layout.size };
+                let align = if layout.align == 0 { 1 } else { layout.align };
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    size as u32,
+                    align as u8,
+                ));
+                ret_ptr = Some(builder.ins().stack_addr(ptr_type, slot, 0));
+            }
 
             // First parameter is the environment pointer
             sig.params.push(AbiParam::new(ptr_type));
@@ -2918,7 +3075,7 @@ fn compile_thick_call(
 
             // Add return type if not unit
             let ret_mir_ty = ctx.mir.ty(*ret);
-            if !matches!(ret_mir_ty, MirTy::Unit) {
+            if !matches!(ret_mir_ty, MirTy::Unit) && !needs_sret {
                 let cl_type = translate_type(ctx.mir, *ret, ctx.target);
                 sig.returns.push(AbiParam::new(cl_type));
             }
@@ -2927,7 +3084,11 @@ fn compile_thick_call(
 
             // Compile arguments with proper PassingMode handling
             // env_ptr is the first argument
-            let mut arg_values = Vec::with_capacity(args.len() + 1);
+            let mut arg_values =
+                Vec::with_capacity(args.len() + 1 + if needs_sret { 1 } else { 0 });
+            if let Some(ptr) = ret_ptr {
+                arg_values.push(ptr);
+            }
             arg_values.push(env_ptr);
             for arg in args {
                 match arg.mode {
@@ -2938,10 +3099,13 @@ fn compile_thick_call(
                         arg_values.push(val);
                     }
                     PassingMode::Ref | PassingMode::MutRef => {
-                        // Pass by reference: spill to stack and pass address
-                        let (layout, _) = get_value_layout(ctx, &arg.value, local_map)?;
+                        let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
                         let val =
                             compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                        if ref_arg_should_pass_direct(ctx, subst, ty_opt) {
+                            arg_values.push(val);
+                            continue;
+                        }
 
                         // Create stack slot for the value
                         let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -2971,6 +3135,10 @@ fn compile_thick_call(
 
             // Make the indirect call
             let call_inst = builder.ins().call_indirect(sig_ref, func_ptr, &arg_values);
+
+            if let Some(ptr) = ret_ptr {
+                return Ok(ptr);
+            }
 
             let results = builder.inst_results(call_inst);
             if results.is_empty() {

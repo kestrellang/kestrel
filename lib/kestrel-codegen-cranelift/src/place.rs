@@ -5,6 +5,8 @@ use crate::error::CodegenError;
 use crate::monomorphize::Substitution;
 use crate::types::{translate_type, translate_type_with_subst};
 
+use kestrel_codegen::Layout;
+
 use kestrel_execution_graph::{Id, Local, MirTy, Place, PlaceKind, Ty};
 
 use cranelift_codegen::ir::types as cl_types;
@@ -53,12 +55,8 @@ pub fn compile_place_read(
                 .apply_ty_readonly(ctx.mir, field_ty)
                 .unwrap_or(field_ty);
 
-            // Check if the field is itself a struct (compound type)
-            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
-            let is_struct_field = matches!(field_mir_ty, MirTy::Named { .. })
-                && is_struct_type(ctx, concrete_field_ty);
-
-            if is_struct_field {
+            // Check if the field is an aggregate type - keep it as a pointer
+            if is_aggregate_type(ctx, concrete_field_ty) {
                 // For struct fields, return a pointer to the nested struct
                 if field_offset == 0 {
                     Ok(struct_ptr)
@@ -107,13 +105,8 @@ pub fn compile_place_read(
                 .apply_ty_readonly(ctx.mir, field_ty)
                 .unwrap_or(field_ty);
 
-            // Check if the field is itself a compound type (struct or tuple)
-            let field_mir_ty = ctx.mir.ty(concrete_field_ty);
-            let is_compound_field = matches!(field_mir_ty, MirTy::Tuple(_))
-                || (matches!(field_mir_ty, MirTy::Named { .. })
-                    && is_struct_type(ctx, concrete_field_ty));
-
-            if is_compound_field {
+            // Check if the field is an aggregate type - keep it as a pointer
+            if is_aggregate_type(ctx, concrete_field_ty) {
                 // For compound fields, return a pointer to the nested struct/tuple
                 if field_offset == 0 {
                     Ok(parent_ptr)
@@ -133,9 +126,11 @@ pub fn compile_place_read(
 
         PlaceKind::Downcast { parent, variant } => {
             // Downcast is used after a switch to access the variant's payload.
-            // The enum layout is: [discriminant: i32][payload...]
-            // After downcast, we return a pointer to the payload area (offset 4).
+            // The enum layout is: [discriminant: i32][padding][payload...]
+            // After downcast, we return a pointer to the payload area.
             let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let enum_ty = get_place_type(ctx, parent, local_map)?;
+            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)?;
 
             // Compute pointer type
             let ptr_type = if ctx.target.is_64bit() {
@@ -144,9 +139,8 @@ pub fn compile_place_read(
                 cl_types::I32
             };
 
-            // The payload is at offset 4 (after the i32 discriminant)
             // Return a pointer to the payload area
-            Ok(builder.ins().iadd_imm(enum_ptr, 4))
+            Ok(builder.ins().iadd_imm(enum_ptr, payload_offset as i64))
         }
 
         PlaceKind::Deref(inner) => {
@@ -163,12 +157,8 @@ pub fn compile_place_read(
                 .apply_ty_readonly(ctx.mir, pointee_ty)
                 .unwrap_or(pointee_ty);
 
-            // Check if the pointee is a struct (compound type)
-            let pointee_mir_ty = ctx.mir.ty(concrete_pointee_ty);
-            let is_struct = matches!(pointee_mir_ty, MirTy::Named { .. })
-                && is_struct_type(ctx, concrete_pointee_ty);
-
-            if is_struct {
+            // Check if the pointee is an aggregate type - keep it as a pointer
+            if is_aggregate_type(ctx, concrete_pointee_ty) {
                 // For struct types, the "value" is the pointer itself
                 // (structs are always passed by pointer)
                 Ok(ptr)
@@ -190,6 +180,61 @@ fn get_pointee_type(ctx: &CodegenContext<'_>, ptr_ty: Id<Ty>) -> Result<Id<Ty>, 
             ctx.mir.ty(ptr_ty)
         ))),
     }
+}
+
+fn get_enum_payload_offset(
+    ctx: &mut CodegenContext<'_>,
+    enum_ty: Id<Ty>,
+    variant: &str,
+) -> Result<usize, CodegenError> {
+    let mir_ty = ctx.mir.ty(enum_ty);
+    let enum_id = match mir_ty {
+        MirTy::Named { name, .. } => {
+            let name_data = ctx.mir.name(*name);
+            let mut found = None;
+            for (id, def) in ctx.mir.enums.iter() {
+                if ctx.mir.name(def.name) == name_data {
+                    found = Some(id);
+                    break;
+                }
+            }
+            found.ok_or_else(|| {
+                CodegenError::Unsupported(format!("enum not found for type: {}", name_data))
+            })?
+        }
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "downcast on non-enum type: {:?}",
+                mir_ty
+            )));
+        }
+    };
+
+    let enum_def = ctx.mir.enum_def(enum_id);
+    let case_id = enum_def
+        .case_by_name(variant)
+        .ok_or_else(|| CodegenError::Unsupported(format!("enum case not found: {}", variant)))?;
+    let case_def = &ctx.mir.enum_cases[case_id];
+    let payload_struct_id = case_def.struct_def.ok_or_else(|| {
+        CodegenError::Unsupported(format!("enum case {} has no payload", variant))
+    })?;
+    let payload_layout = ctx.layouts.struct_layout(payload_struct_id);
+    let discriminant_layout = Layout::new(4, 4);
+    let (payload_offset, _) = discriminant_layout.append(payload_layout.layout);
+    Ok(payload_offset)
+}
+
+/// Check if a type is a struct type.
+pub fn is_struct_type_public(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
+    is_struct_type(ctx, ty)
+}
+
+/// Check if a type is represented as an aggregate behind a pointer.
+fn is_aggregate_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
+    matches!(
+        ctx.mir.ty(ty),
+        MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
+    )
 }
 
 /// Check if a type is a struct type.
@@ -242,6 +287,29 @@ fn get_place_type(
             // Return the pointee type
             get_pointee_type(ctx, inner_ty)
         }
+    }
+}
+
+fn copy_aggregate_value(
+    ctx: &mut CodegenContext<'_>,
+    ty: Id<Ty>,
+    dest_ptr: CraneliftValue,
+    src_ptr: CraneliftValue,
+    builder: &mut FunctionBuilder<'_>,
+) {
+    let layout = ctx.layouts.layout_of(ty);
+    if layout.size == 0 {
+        return;
+    }
+
+    // Byte-wise copy keeps correctness for small aggregates (e.g. UInt8 structs).
+    for offset in 0..layout.size {
+        let byte = builder
+            .ins()
+            .load(cl_types::I8, MemFlags::new(), src_ptr, offset as i32);
+        builder
+            .ins()
+            .store(MemFlags::new(), byte, dest_ptr, offset as i32);
     }
 }
 
@@ -449,6 +517,15 @@ pub fn compile_place_write(
                 .get(local_id)
                 .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
 
+            let local_def = ctx.mir.local(*local_id);
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, local_def.ty)
+                .unwrap_or(local_def.ty);
+            if is_aggregate_type(ctx, concrete_ty) {
+                let dest_ptr = builder.use_var(*var);
+                copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
+                return Ok(());
+            }
 
             builder.def_var(*var, value);
             Ok(())
@@ -460,9 +537,22 @@ pub fn compile_place_write(
 
             // Get the type of the parent to find field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
-            let (field_offset, _field_ty) = get_field_info(ctx, parent_ty, name)?;
+            let (field_offset, field_ty) = get_field_info(ctx, parent_ty, name)?;
 
             // Store the value at struct_ptr + offset
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty);
+            if is_aggregate_type(ctx, concrete_ty) {
+                let dest_ptr = if field_offset == 0 {
+                    struct_ptr
+                } else {
+                    builder.ins().iadd_imm(struct_ptr, field_offset as i64)
+                };
+                copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
+                return Ok(());
+            }
+
             builder
                 .ins()
                 .store(MemFlags::new(), value, struct_ptr, field_offset as i32);
@@ -479,24 +569,40 @@ pub fn compile_place_write(
             let parent_ty = get_place_type(ctx, parent, local_map)?;
 
             // Find the field offset for this index
-            let (field_offset, _field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+            let (field_offset, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
 
             // Store the value at parent_ptr + offset
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty);
+            if is_aggregate_type(ctx, concrete_ty) {
+                let dest_ptr = if field_offset == 0 {
+                    parent_ptr
+                } else {
+                    builder.ins().iadd_imm(parent_ptr, field_offset as i64)
+                };
+                copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
+                return Ok(());
+            }
+
             builder
                 .ins()
                 .store(MemFlags::new(), value, parent_ptr, field_offset as i32);
             Ok(())
         }
 
-        PlaceKind::Downcast { parent, variant: _ } => {
+        PlaceKind::Downcast { parent, variant } => {
             // Downcast write is used when assigning to an enum variant's payload area.
-            // The enum layout is: [discriminant: i32][payload...]
+            // The enum layout is: [discriminant: i32][padding][payload...]
             // We need to get the pointer to the payload area and store there.
             let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let enum_ty = get_place_type(ctx, parent, local_map)?;
+            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)? as i32;
 
-            // The payload is at offset 4 (after the i32 discriminant)
             // Store the value at the payload area
-            builder.ins().store(MemFlags::new(), value, enum_ptr, 4);
+            builder
+                .ins()
+                .store(MemFlags::new(), value, enum_ptr, payload_offset);
             Ok(())
         }
 
@@ -505,6 +611,13 @@ pub fn compile_place_write(
             let ptr = compile_place_read(ctx, inner, builder, local_map, subst)?;
 
             // Store the value at the pointer address
+            let dest_ty = get_place_type(ctx, place, local_map)?;
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, dest_ty).unwrap_or(dest_ty);
+            if is_aggregate_type(ctx, concrete_ty) {
+                copy_aggregate_value(ctx, concrete_ty, ptr, value, builder);
+                return Ok(());
+            }
+
             builder.ins().store(MemFlags::new(), value, ptr, 0);
             Ok(())
         }

@@ -7,21 +7,33 @@ module std.ffi
 import std.core.(Int)
 
 // Memory allocation
-@extern(.C)
-public func malloc(size: Int) -> lang.ptr[lang.i8]
+@extern(.C, mangleName: "malloc_debug")
+public func malloc(consuming size: Int) -> lang.ptr[lang.i8]
 
-@extern(.C)
-public func free(ptr: lang.ptr[lang.i8])
+@extern(.C, mangleName: "free_debug")
+public func free(consuming ptr: lang.ptr[lang.i8])
 
-@extern(.C)
-public func realloc(ptr: lang.ptr[lang.i8], size: Int) -> lang.ptr[lang.i8]
+@extern(.C, mangleName: "realloc_debug")
+public func realloc(consuming ptr: lang.ptr[lang.i8], consuming size: Int) -> lang.ptr[lang.i8]
 
 // Memory operations
-@extern(.C)
-public func memcpy(dest: lang.ptr[lang.i8], src: lang.ptr[lang.i8], n: Int) -> lang.ptr[lang.i8]
+@extern(.C, mangleName: "memcpy_debug")
+public func memcpy(
+    consuming dest: lang.ptr[lang.i8],
+    consuming src: lang.ptr[lang.i8],
+    consuming n: Int
+) -> lang.ptr[lang.i8]
 
-@extern(.C)
-public func memmove(dest: lang.ptr[lang.i8], src: lang.ptr[lang.i8], n: Int) -> lang.ptr[lang.i8]
+@extern(.C, mangleName: "memmove_debug")
+public func memmove(
+    consuming dest: lang.ptr[lang.i8],
+    consuming src: lang.ptr[lang.i8],
+    consuming n: Int
+) -> lang.ptr[lang.i8]
 
-@extern(.C)
-public func memset(dest: lang.ptr[lang.i8], c: Int, n: Int) -> lang.ptr[lang.i8]
+@extern(.C, mangleName: "memset_debug")
+public func memset(
+    consuming dest: lang.ptr[lang.i8],
+    consuming c: Int,
+    consuming n: Int
+) -> lang.ptr[lang.i8]
