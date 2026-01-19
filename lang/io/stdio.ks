@@ -115,16 +115,22 @@ public func readLine() -> Result[String, Error] {
         var buf = Array[UInt8](capacity: 1);
         buf.append(0);
         let slice = Slice(pointer: buf.pointer(), count: 1);
-        let n = try input.read(into: slice);
-        if n == 0 {
-            done = true  // EOF
-        } else {
-            let b = buf.getUnchecked(0);
-            if b == 10 {  // newline
-                done = true
-            } else {
-                bytes.append(b)
-            }
+        // TODO: add try back
+        let readResult = input.read(into: slice);
+        match readResult {
+            .Ok(n) => {
+                if n == 0 {
+                    done = true  // EOF
+                } else {
+                    let b = buf.getUnchecked(0);
+                    if b == 10 {  // newline
+                        done = true
+                    } else {
+                        bytes.append(b)
+                    }
+                }
+            },
+            .Err(e) => return .Err(e)
         }
     }
 
@@ -145,8 +151,16 @@ public func readLine() -> Result[String, Error] {
 
 // Prompt and read line
 public func prompt(message: String) -> Result[String, Error] {
-    try print(s: message);
-    var out = stdout();
-    try out.flush();
-    readLine()
+    // TODO: add try back
+    match print(message) {
+        .Ok(_) => {
+            var out = stdout();
+            // TODO: add try back
+            match out.flush() {
+                .Ok(_) => readLine(),
+                .Err(e) => .Err(e)
+            }
+        },
+        .Err(e) => .Err(e)
+    }
 }

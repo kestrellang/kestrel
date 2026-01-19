@@ -93,11 +93,16 @@ public func readByte[R](reader: R) -> Result[Optional[UInt8], Error] where R: Re
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
     let slice = Slice(pointer: buf.pointer(), count: 1);
-    let n = try reader.read(into: slice);
-    if n == 0 {
-        .Ok(.None)
-    } else {
-        .Ok(.Some(buf.getUnchecked(0)))
+    // TODO: add try back
+    match reader.read(into: slice) {
+        .Ok(n) => {
+            if n == 0 {
+                .Ok(.None)
+            } else {
+                .Ok(.Some(buf.getUnchecked(0)))
+            }
+        },
+        .Err(e) => .Err(e)
     }
 }
 
@@ -113,19 +118,32 @@ public func readAll[R](reader: R, into buf: Array[UInt8]) -> Result[Int64, Error
     }
 
     var done: Bool = false;
+    var errorResult: Optional[Error] = .None;
     while done == false {
         let slice = Slice(pointer: chunk.pointer(), count: 4096);
-        let n = try reader.read(into: slice);
-        if n == 0 {
-            done = true
-        } else {
-            var j: Int64 = 0;
-            while j < n {
-                buf.append(chunk.getUnchecked(j));
-                j = j + 1
+        // TODO: add try back
+        let readResult = reader.read(into: slice);
+        match readResult {
+            .Ok(n) => {
+                if n == 0 {
+                    done = true
+                } else {
+                    var j: Int64 = 0;
+                    while j < n {
+                        buf.append(chunk.getUnchecked(j));
+                        j = j + 1
+                    }
+                    total = total + n
+                }
+            },
+            .Err(e) => {
+                errorResult = .Some(e);
+                done = true
             }
-            total = total + n
         }
     }
-    .Ok(total)
+    match errorResult {
+        .Some(e) => .Err(e),
+        .None => .Ok(total)
+    }
 }

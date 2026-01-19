@@ -71,15 +71,27 @@ public struct Buffer: Write {
 // Write all bytes from a slice
 public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
     var written: Int64 = 0;
-    while written < buf.count {
+    var errorResult: Result[(), Error] = .Ok(());
+    var done: Bool = false;
+    while written < buf.count and done == false {
         let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
-        let n = try writer.write(from: remaining);
-        if n == 0 {
-            return .Err(brokenPipe())
+        // TODO: add try back
+        match writer.write(from: remaining) {
+            .Ok(n) => {
+                if n == 0 {
+                    errorResult = .Err(brokenPipe());
+                    done = true
+                } else {
+                    written = written + n
+                }
+            },
+            .Err(e) => {
+                errorResult = .Err(e);
+                done = true
+            }
         }
-        written = written + n
     }
-    .Ok(())
+    errorResult
 }
 
 // Write a single byte
@@ -100,16 +112,27 @@ public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Writ
     // Create a slice from the string's internal bytes
     // Note: String stores bytes internally, we need to access them
     var i: Int64 = 0;
-    while i < byteCount {
+    var errorResult: Result[(), Error] = .Ok(());
+    var done: Bool = false;
+    while i < byteCount and done == false {
         let byte = s.byteAtUnchecked(i);
-        try writeByte(writer: writer, byte: byte);
-        i = i + 1
+        // TODO: add try back
+        match writeByte(writer, byte) {
+            .Ok(_) => i = i + 1,
+            .Err(e) => {
+                errorResult = .Err(e);
+                done = true
+            }
+        }
     }
-    .Ok(())
+    errorResult
 }
 
 // Write string with newline
 public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write {
-    try writeStr(writer, s);
-    writeByte(writer, 10)  // '\n'
+    // TODO: add try back
+    match writeStr(writer, s) {
+        .Ok(_) => writeByte(writer, 10),  // '\n'
+        .Err(e) => .Err(e)
+    }
 }
