@@ -67,6 +67,33 @@ impl BinaryOp {
             BinaryOp::Coalesce => "coalesce",
         }
     }
+
+    /// Get the symbol representation of this operator for error messages.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Rem => "%",
+            BinaryOp::BitAnd => "&",
+            BinaryOp::BitOr => "|",
+            BinaryOp::BitXor => "^",
+            BinaryOp::Shl => "<<",
+            BinaryOp::Shr => ">>",
+            BinaryOp::Eq => "==",
+            BinaryOp::Ne => "!=",
+            BinaryOp::Lt => "<",
+            BinaryOp::Gt => ">",
+            BinaryOp::Le => "<=",
+            BinaryOp::Ge => ">=",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+            BinaryOp::RangeInclusive => "..=",
+            BinaryOp::RangeExclusive => "..<",
+            BinaryOp::Coalesce => "??",
+        }
+    }
 }
 
 /// Unary operators (both prefix and postfix).
@@ -88,6 +115,16 @@ impl UnaryOp {
             UnaryOp::BitNot => "bitwiseNot",
             UnaryOp::LogicalNot => "logicalNot",
             UnaryOp::Unwrap => "unwrap",
+        }
+    }
+
+    /// Get the symbol representation of this operator for error messages.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            UnaryOp::Neg => "-",
+            UnaryOp::BitNot => "!",
+            UnaryOp::LogicalNot => "not",
+            UnaryOp::Unwrap => "!",
         }
     }
 }

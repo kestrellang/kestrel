@@ -191,7 +191,7 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
                 .collect(),
-            substitutions: substitutions.clone(),
+            substitutions: resolve_substitutions(substitutions, solution),
         },
 
         ExprKind::PrimitiveMethodCall {
@@ -710,10 +710,38 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
             };
             Ty::unresolved_function(resolved_param_info, resolved_return, ty.span().clone())
         }
-        // Nominal types with substitutions would need recursive resolution too,
-        // but for now just return the original type
+        // Struct types with substitutions - resolve any inference placeholders in substitutions
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
+            let resolved_subs = resolve_substitutions(substitutions, solution);
+            Ty::generic_struct(symbol.clone(), resolved_subs, ty.span().clone())
+        }
+        // Enum types with substitutions - resolve any inference placeholders in substitutions
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
+            let resolved_subs = resolve_substitutions(substitutions, solution);
+            Ty::generic_enum(symbol.clone(), resolved_subs, ty.span().clone())
+        }
+        // Pointer types - resolve pointee
+        TyKind::Pointer(pointee) => {
+            Ty::pointer(resolve_type(pointee, solution), ty.span().clone())
+        }
+        // Other types - no inference placeholders to resolve
         _ => ty.clone(),
     }
+}
+
+/// Resolve inference placeholders within substitutions.
+fn resolve_substitutions(subs: &Substitutions, solution: &Solution) -> Substitutions {
+    let mut resolved = Substitutions::new();
+    for (id, ty) in subs.iter() {
+        resolved.insert(*id, resolve_type(ty, solution));
+    }
+    resolved
 }
 
 /// Resolve embedded types within a LangIntrinsic, using the expression's resolved type.
@@ -848,8 +876,11 @@ fn resolve_intrinsic(
 /// the old placeholder types. When subsequent code references these locals via
 /// `LocalRef`, it reads the type from the container, so we must update it.
 ///
-/// Additionally, the `self` local is created with `SelfType` which needs to be
-/// resolved to the concrete type (struct, enum, or extension target type).
+/// Additionally, compound types (like `Struct[Infer]`) may contain inference
+/// placeholders in their substitutions that need to be resolved.
+///
+/// The `self` local is created with `SelfType` which needs to be resolved to
+/// the concrete type (struct, enum, or extension target type).
 pub fn apply_solution_to_locals(
     container: &dyn LocalContainer,
     solution: &Solution,
@@ -858,19 +889,21 @@ pub fn apply_solution_to_locals(
     for local in container.locals() {
         let ty = local.ty();
 
-        // Handle inference placeholders
-        if matches!(ty.kind(), TyKind::Infer) {
-            if let Some(resolved) = solution.get_type(ty.id()) {
-                let fully_resolved = resolve_type(resolved, solution);
-                container.update_local_type(local.id(), fully_resolved);
-            }
-        }
-
-        // Handle SelfType -> concrete type
+        // Handle SelfType -> concrete type (must check first before resolve_type)
         if matches!(ty.kind(), TyKind::SelfType) {
             if let Some(concrete) = concrete_self_type {
                 container.update_local_type(local.id(), concrete.clone());
             }
+            continue;
+        }
+
+        // Resolve ALL types, not just TyKind::Infer at the top level.
+        // This handles cases like `Wrapper[Infer]` where the struct's substitutions
+        // contain inference placeholders that need to be resolved.
+        let resolved = resolve_type(ty, solution);
+        if resolved.id() != ty.id() {
+            // Only update if the type actually changed
+            container.update_local_type(local.id(), resolved);
         }
     }
 }

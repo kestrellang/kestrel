@@ -58,8 +58,8 @@ public protocol Hashable: Equatable {
 // Hasher - types that can compute hash values
 // Note: Full implementation requires Slice and UInt64
 public protocol Hasher {
-    // mutating func write(bytes: Slice[UInt8])
-    // mutating func finish() -> UInt64
+    //mutating func write(bytes: Slice[UInt8])
+    //mutating func finish() -> UInt64
 }
 
 // DefaultHasher comes later when we have UInt64 and Slice

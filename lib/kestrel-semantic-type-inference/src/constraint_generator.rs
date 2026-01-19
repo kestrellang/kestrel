@@ -978,6 +978,37 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.register_type(ty);
                 }
 
+                // Numeric binary intrinsics - constrain both arguments to match the primitive type
+                LangIntrinsic::IntBinary { primitive, .. }
+                | LangIntrinsic::IntBinarySigned { primitive, .. }
+                | LangIntrinsic::IntBinaryUnsigned { primitive, .. }
+                | LangIntrinsic::FloatBinary { primitive, .. } => {
+                    let prim_ty = primitive.to_ty(expr.span.clone());
+                    ctx.register_type(&prim_ty);
+                    for arg in arguments {
+                        ctx.equate(arg.value.ty.id(), prim_ty.id(), arg.span.clone());
+                    }
+                }
+
+                // Numeric unary intrinsics - constrain argument to match the primitive type
+                LangIntrinsic::IntUnary { primitive, .. }
+                | LangIntrinsic::FloatUnary { primitive, .. } => {
+                    let prim_ty = primitive.to_ty(expr.span.clone());
+                    ctx.register_type(&prim_ty);
+                    if let Some(arg) = arguments.first() {
+                        ctx.equate(arg.value.ty.id(), prim_ty.id(), arg.span.clone());
+                    }
+                }
+
+                // Float predicates (isNan, isInfinite) - constrain argument to float type
+                LangIntrinsic::FloatPred { primitive, .. } => {
+                    let prim_ty = primitive.to_ty(expr.span.clone());
+                    ctx.register_type(&prim_ty);
+                    if let Some(arg) = arguments.first() {
+                        ctx.equate(arg.value.ty.id(), prim_ty.id(), arg.span.clone());
+                    }
+                }
+
                 // Other intrinsics don't have type parameters that need constraint generation
                 _ => {}
             }

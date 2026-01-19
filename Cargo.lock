@@ -469,6 +469,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "cranelift-object",
+ "indexmap",
  "kestrel-codegen",
  "kestrel-execution-graph",
  "target-lexicon",

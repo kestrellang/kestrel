@@ -230,6 +230,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         // === Inference Placeholder ===
         TyKind::Infer => {
             // This shouldn't appear after type inference
+            eprintln!("[DEBUG] Lowering TyKind::Infer - ty.id={:?} span={:?}", ty.id(), ty.span());
             ctx.emit_error(LoweringError::unsupported_type(
                 "unresolved inference type",
                 ty.span().clone(),
@@ -287,4 +288,36 @@ pub fn make_int_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<Mi
         _ => return None,
     };
     Some(kestrel_execution_graph::Immediate::int(bits, 0))
+}
+
+/// Create a zero/default immediate for any MIR type.
+/// This is used to initialize variables before control flow to ensure
+/// Cranelift's SSA builder always has a definition.
+pub fn make_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<MirTyMarker>) -> kestrel_execution_graph::Immediate {
+    use kestrel_execution_graph::{IntBits, FloatBits};
+    let mir_ty = ctx.mir.ty(ty);
+    match mir_ty {
+        MirTy::I8 => kestrel_execution_graph::Immediate::int(IntBits::I8, 0),
+        MirTy::I16 => kestrel_execution_graph::Immediate::int(IntBits::I16, 0),
+        MirTy::I32 => kestrel_execution_graph::Immediate::int(IntBits::I32, 0),
+        MirTy::I64 => kestrel_execution_graph::Immediate::int(IntBits::I64, 0),
+        MirTy::F32 => kestrel_execution_graph::Immediate::float(FloatBits::F32, 0.0),
+        MirTy::F64 => kestrel_execution_graph::Immediate::float(FloatBits::F64, 0.0),
+        MirTy::Bool => kestrel_execution_graph::Immediate::bool(false),
+        MirTy::Unit => kestrel_execution_graph::Immediate::unit(),
+        // Named types (struct, enum) are represented as pointers in Cranelift
+        // A null pointer (0) is the zero value
+        MirTy::Named { .. } => kestrel_execution_graph::Immediate::i64(0),
+        // For other types, use i64(0) as a fallback
+        _ => kestrel_execution_graph::Immediate::i64(0),
+    }
+}
+
+/// Create an integer immediate with the correct bit width from a semantic type.
+/// Extracts integer bits from the type if it's an Int type, otherwise defaults to i64.
+pub fn make_int_immediate_for_ty(ty: &Ty, value: i64) -> kestrel_execution_graph::Immediate {
+    match ty.kind() {
+        TyKind::Int(bits) => make_int_immediate(*bits, value),
+        _ => kestrel_execution_graph::Immediate::i64(value), // Fallback for non-int types
+    }
 }

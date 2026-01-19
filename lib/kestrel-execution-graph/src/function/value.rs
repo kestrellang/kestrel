@@ -4,13 +4,16 @@ use crate::MirContext;
 use crate::function::{Immediate, Place};
 use std::fmt;
 
-/// A value is either a place or an immediate.
+/// A value is either a place, an immediate, or unreachable (diverged).
 #[derive(Debug, Clone)]
 pub enum Value {
     /// A memory location.
     Place(Place),
     /// A constant value.
     Immediate(Immediate),
+    /// The expression diverged (return/break/continue) and never produces a value.
+    /// This should not be used in assignments - callers should check for this variant.
+    Unreachable,
 }
 
 impl Value {
@@ -27,6 +30,11 @@ impl Value {
     /// Check if this is an immediate.
     pub fn is_immediate(&self) -> bool {
         matches!(self, Value::Immediate(_))
+    }
+
+    /// Check if this is an unreachable value (expression diverged).
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, Value::Unreachable)
     }
 
     /// Get the place if this is a place value.
@@ -68,6 +76,7 @@ impl fmt::Display for ValueDisplay<'_> {
         match self.value {
             Value::Place(p) => write!(f, "{}", p.display(self.ctx)),
             Value::Immediate(i) => write!(f, "{}", i.display(self.ctx)),
+            Value::Unreachable => write!(f, "<unreachable>"),
         }
     }
 }

@@ -13,6 +13,7 @@ use kestrel_semantic_tree::behavior::callable::{
     CallableBehavior, ParameterAccessMode, ReceiverKind,
 };
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use semantic_tree::symbol::SymbolId;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, LiteralValue, PrimitiveMethod,
@@ -292,6 +293,7 @@ fn create_ref(ctx: &mut LoweringContext, value: &Value, ty: &Ty, is_mutable: boo
 
             Value::Place(ref_place)
         }
+        Value::Unreachable => Value::Unreachable,
     }
 }
 
@@ -465,6 +467,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     ));
                     Value::Immediate(Immediate::error())
                 }
+                Value::Unreachable => Value::Unreachable,
             }
         }
 
@@ -479,6 +482,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     ));
                     Value::Immediate(Immediate::error())
                 }
+                Value::Unreachable => Value::Unreachable,
             }
         }
 
@@ -520,6 +524,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     ));
                     return Value::Immediate(Immediate::error());
                 }
+                Value::Unreachable => return Value::Unreachable,
             };
 
             let rhs_value = lower_expression(ctx, value);
@@ -537,6 +542,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 Value::Immediate(imm) => {
                     ctx.emit_assign(target_place, Rvalue::Use(imm));
                 }
+                Value::Unreachable => return Value::Unreachable,
             }
 
             // Assignment expression yields unit (actually Never in semantic tree)
@@ -632,7 +638,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 ));
             }
             // Break never produces a value (it transfers control)
-            Value::Immediate(Immediate::unit())
+            Value::Unreachable
         }
 
         ExprKind::Continue { loop_id, label: _ } => {
@@ -649,7 +655,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 ));
             }
             // Continue never produces a value (it transfers control)
-            Value::Immediate(Immediate::unit())
+            Value::Unreachable
         }
 
         ExprKind::Return { value } => {
@@ -661,8 +667,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             // Emit deinits for all scopes before returning
             ctx.emit_all_scope_deinits();
             ctx.emit_return(ret_value);
-            // Return a unit value even though this is never used (block is terminated)
-            Value::Immediate(Immediate::unit())
+            // Return diverges - this value is never used (block is terminated)
+            Value::Unreachable
         }
 
         // === Match Expressions ===
@@ -690,7 +696,7 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                 }
             } else {
                 // Block was terminated (e.g., by return) - value is unreachable
-                Value::Immediate(Immediate::unit())
+                Value::Unreachable
             }
         }
 
@@ -897,8 +903,8 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                     let unreachable_block = ctx.create_block();
                     ctx.set_current_block(unreachable_block);
 
-                    // Return unit since the type is Never (control doesn't reach here)
-                    Value::Immediate(Immediate::unit())
+                    // Panic diverges - return Unreachable so callers don't try to use this value
+                    Value::Unreachable
                 }
                 LangIntrinsic::Cast { from, to } => {
                     // Lower the operand argument
@@ -1827,6 +1833,11 @@ fn lower_primitive_method_call(
 ) -> Value {
     let receiver_value = lower_expression(ctx, receiver);
 
+    // Early return if receiver diverged
+    if receiver_value.is_unreachable() {
+        return Value::Unreachable;
+    }
+
     // Determine if this is a unary or binary operation
     let result_ty = lower_type(ctx, &expr.ty);
     let result_local = ctx.create_temp("prim", result_ty);
@@ -1922,6 +1933,7 @@ fn lower_primitive_method_call(
                     ctx.emit_assign(temp_place.clone(), Rvalue::Use(imm.clone()));
                     temp_place
                 }
+                Value::Unreachable => unreachable!("already handled above"),
             };
 
             // Create blocks for the conditional
@@ -2215,9 +2227,23 @@ fn lower_call(
                         .map(|tp| Symbol::metadata(tp.as_ref()).id())
                         .collect(),
                 )
+            } else if sym.as_ref().downcast_ref::<InitializerSymbol>().is_some() {
+                // Initializers inherit type parameters from their parent struct/enum
+                let mut all_params: Vec<SymbolId> = Vec::new();
+                if let Some(parent) = sym.metadata().parent() {
+                    if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                        for tp in struct_sym.type_parameters() {
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
+                    } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                        for tp in enum_sym.type_parameters() {
+                            all_params.push(Symbol::metadata(tp.as_ref()).id());
+                        }
+                    }
+                }
+                Some(all_params)
             } else {
-                // For initializers and other symbols without type_parameters,
-                // they inherit from parent - just use the fallback
+                // For other symbols without type_parameters, use the fallback
                 None
             };
 
@@ -2793,6 +2819,9 @@ fn lower_call(
                         expr.span.clone(),
                     ));
                     return Value::Immediate(Immediate::error());
+                }
+                Value::Unreachable => {
+                    return Value::Unreachable;
                 }
             }
         }
@@ -3603,18 +3632,28 @@ fn lower_if(
     else_branch: &Option<ElseBranch>,
     expr: &Expression,
 ) -> Value {
-    // Get result type
-    let result_ty = lower_type(ctx, &expr.ty);
-    let result_local = ctx.create_temp("if_result", result_ty);
-    let result_place = Place::local(result_local);
+    // Check if all branches diverge (result type is Never)
+    // In this case, we should NOT create a result local since it will never be assigned
+    // This avoids SSA issues in codegen where an undefined local gets aliased to wrong types
+    let all_branches_diverge = matches!(expr.ty.kind(), kestrel_semantic_tree::ty::TyKind::Never);
 
-    // Track the temp for deinit if the result type needs deinit
-    if ctx.type_needs_deinit(&expr.ty) {
-        ctx.track_statement_temp(result_local);
-    }
+    // Only create result local and join block if branches converge
+    let (result_place, join_block) = if all_branches_diverge {
+        (None, None)
+    } else {
+        let result_ty = lower_type(ctx, &expr.ty);
+        let result_local = ctx.create_temp("if_result", result_ty);
+        let result_place = Place::local(result_local);
 
-    // Create the join block where both branches converge
-    let join_block = ctx.create_block();
+        // Track the temp for deinit if the result type needs deinit
+        if ctx.type_needs_deinit(&expr.ty) {
+            ctx.track_statement_temp(result_local);
+        }
+
+        // Create the join block where both branches converge
+        let join_block = ctx.create_block();
+        (Some(result_place), Some(join_block))
+    };
 
     // Create the else block
     let else_block_id = ctx.create_block();
@@ -3640,17 +3679,22 @@ fn lower_if(
     }
 
     // Evaluate then value before capturing statuses (might cause moves)
+    // Only assign to result_place if branches converge (result_place is Some)
     let _then_result_value = if !ctx.is_block_terminated() {
         if let Some(value_expr) = then_value {
             let result = lower_expression(ctx, value_expr);
             if !ctx.is_block_terminated() {
-                ctx.emit_assign_value(result_place.clone(), result);
+                if let Some(ref place) = result_place {
+                    ctx.emit_assign_value(place.clone(), result);
+                }
             }
             true
-        } else {
-            // No then value - assign unit
-            ctx.emit_imm(result_place.clone(), Immediate::unit());
+        } else if let Some(ref place) = result_place {
+            // No then value - assign unit (only if we have a result place)
+            ctx.emit_imm(place.clone(), Immediate::unit());
             true
+        } else {
+            false
         }
     } else {
         false
@@ -3694,10 +3738,12 @@ fn lower_if(
                 if let Some(value_expr) = value {
                     let else_result = lower_expression(ctx, value_expr);
                     if !ctx.is_block_terminated() {
-                        ctx.emit_assign_value(result_place.clone(), else_result);
+                        if let Some(ref place) = result_place {
+                            ctx.emit_assign_value(place.clone(), else_result);
+                        }
                     }
-                } else {
-                    ctx.emit_imm(result_place.clone(), Immediate::unit());
+                } else if let Some(ref place) = result_place {
+                    ctx.emit_imm(place.clone(), Immediate::unit());
                 }
             }
 
@@ -3712,7 +3758,9 @@ fn lower_if(
             let else_result = lower_expression(ctx, else_if_expr);
 
             if !ctx.is_block_terminated() {
-                ctx.emit_assign_value(result_place.clone(), else_result);
+                if let Some(ref place) = result_place {
+                    ctx.emit_assign_value(place.clone(), else_result);
+                }
             }
 
             else_statuses = ctx.snapshot_parent_deinit_statuses();
@@ -3722,8 +3770,10 @@ fn lower_if(
         }
 
         None => {
-            // No else branch - result is unit
-            ctx.emit_imm(result_place.clone(), Immediate::unit());
+            // No else branch - result is unit (only if we have a result place)
+            if let Some(ref place) = result_place {
+                ctx.emit_imm(place.clone(), Immediate::unit());
+            }
 
             else_statuses = ctx.snapshot_parent_deinit_statuses();
             else_final_terminated = ctx.is_block_terminated();
@@ -3761,7 +3811,10 @@ fn lower_if(
                 ctx.emit_scope_deinits(scope);
             }
 
-            ctx.emit_jump(join_block);
+            // Jump to join block if we have one (branches converge)
+            if let Some(jb) = join_block {
+                ctx.emit_jump(jb);
+            }
         }
     }
 
@@ -3785,7 +3838,10 @@ fn lower_if(
                 ctx.emit_scope_deinits(scope);
             }
 
-            ctx.emit_jump(join_block);
+            // Jump to join block if we have one (branches converge)
+            if let Some(jb) = join_block {
+                ctx.emit_jump(jb);
+            }
         }
     }
 
@@ -3794,10 +3850,16 @@ fn lower_if(
         ctx.apply_merge_updates(merge.updates);
     }
 
-    // Continue with join block
-    ctx.set_current_block(join_block);
-
-    Value::Place(result_place)
+    // If all branches diverge, return unit placeholder (unreachable code)
+    // Otherwise, continue with join block and return the result place
+    if let (Some(jb), Some(place)) = (join_block, result_place) {
+        ctx.set_current_block(jb);
+        Value::Place(place)
+    } else {
+        // All branches diverge - return unit placeholder
+        // The current block is now undefined, but no code will use it
+        Value::Immediate(Immediate::unit())
+    }
 }
 
 /// Lower a chain of conditions for if/if-let.
@@ -3877,6 +3939,10 @@ fn lower_if_let_condition(
             let place = Place::local(scrutinee_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
+        }
+        Value::Unreachable => {
+            // Scrutinee diverged, if-let is unreachable
+            return;
         }
     };
 
@@ -4689,6 +4755,10 @@ fn lower_while_let_pattern_condition(
             let place = Place::local(scrutinee_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
+        }
+        Value::Unreachable => {
+            // Scrutinee diverged, while-let is unreachable
+            return;
         }
     };
 

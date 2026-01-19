@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use kestrel_compiler::{Compilation, TargetConfig};
+use kestrel_compiler::{Compilation, CompileError, TargetConfig};
 use kestrel_lexer::lex;
 use kestrel_parser::{Parser as KestrelParser, parse_source_file};
 use std::fs;
@@ -285,6 +285,11 @@ fn run_program(
             }
             ExitCode::from(result.exit_code as u8)
         }
+        Err(CompileError::LoweringFailed(diagnostics)) => {
+            // Emit lowering diagnostics with full source context
+            compilation.diagnostics().emit_additional(&diagnostics).ok();
+            ExitCode::from(1)
+        }
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(1)
@@ -367,6 +372,11 @@ fn run_build(
                 eprintln!("  Built successfully: {}", output_path);
             }
             ExitCode::SUCCESS
+        }
+        Err(CompileError::LoweringFailed(diagnostics)) => {
+            // Emit lowering diagnostics with full source context
+            compilation.diagnostics().emit_additional(&diagnostics).ok();
+            ExitCode::from(1)
         }
         Err(e) => {
             eprintln!("error: {}", e);

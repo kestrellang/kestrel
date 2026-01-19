@@ -8,13 +8,14 @@ use std::sync::LazyLock;
 
 use kestrel_semantic_tree::expr::{CallArgument, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::operators::{BinaryOp, InfixAction, OperatorRegistry, UnaryOp};
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::utils::get_node_span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
+use crate::diagnostics::OperatorOnLangIntrinsicType;
 
 /// Global operator registry used for Pratt parsing.
 static OPERATOR_REGISTRY: LazyLock<OperatorRegistry> = LazyLock::new(OperatorRegistry::new);
@@ -315,20 +316,25 @@ fn desugar_binary_op(
     rhs: Expression,
     _op_span: Span,
     full_span: Span,
-    _ctx: &mut BodyResolutionContext,
+    ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // If either operand has a poison type, propagate error without cascading diagnostics.
     if lhs.ty.is_poison() || rhs.ty.is_poison() {
         return Expression::error(full_span);
     }
 
-    let method_name = op.method_name();
-
-    // Check for primitive method (known primitive types like Int, Float, Bool, String)
-    if let Some(prim_method) = lookup_primitive_binary_method(&lhs.ty, method_name) {
-        let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
-        return Expression::primitive_method_call(lhs, prim_method, vec![arg], full_span);
+    // Check if LHS is a lang intrinsic type - operators are not allowed on these types
+    if is_lang_intrinsic_type(&lhs.ty) {
+        ctx.diagnostics.throw(OperatorOnLangIntrinsicType {
+            span: full_span.clone(),
+            operator: op.symbol().to_string(),
+            type_name: lang_intrinsic_type_name(&lhs.ty),
+            suggested_intrinsic: suggested_binary_intrinsic(&lhs.ty, op),
+        });
+        return Expression::error(full_span);
     }
+
+    let method_name = op.method_name();
 
     // For non-primitive types, create a DeferredMethodCall.
     // Type inference will resolve this to a concrete protocol method call.
@@ -345,25 +351,136 @@ fn desugar_unary_op(
     operand: Expression,
     _op_span: Span,
     full_span: Span,
-    _ctx: &mut BodyResolutionContext,
+    ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // If operand has a poison type, propagate error without cascading diagnostics.
     if operand.ty.is_poison() {
         return Expression::error(full_span);
     }
 
-    let method_name = op.method_name();
-
-    // Check for primitive method (known primitive types like Int, Float, Bool)
-    if let Some(prim_method) = lookup_primitive_unary_method(&operand.ty, method_name) {
-        return Expression::primitive_method_call(operand, prim_method, vec![], full_span);
+    // Check if operand is a lang intrinsic type - operators are not allowed on these types
+    // Exception: unwrap operator (!) is allowed as it's not a numeric/bitwise operation
+    if op != UnaryOp::Unwrap && is_lang_intrinsic_type(&operand.ty) {
+        ctx.diagnostics.throw(OperatorOnLangIntrinsicType {
+            span: full_span.clone(),
+            operator: op.symbol().to_string(),
+            type_name: lang_intrinsic_type_name(&operand.ty),
+            suggested_intrinsic: suggested_unary_intrinsic(&operand.ty, op),
+        });
+        return Expression::error(full_span);
     }
+
+    let method_name = op.method_name();
 
     // For non-primitive types, create a DeferredMethodCall.
     // Type inference will resolve this to a concrete protocol method call.
     // Use Infer so type inference determines the actual return type from the resolved method.
     let result_ty = Ty::infer(full_span.clone());
     Expression::deferred_method_call(operand, method_name.to_string(), vec![], result_ty, full_span)
+}
+
+/// Check if a type is a lang intrinsic type that should not support operators.
+/// These types require explicit intrinsic function calls.
+fn is_lang_intrinsic_type(ty: &Ty) -> bool {
+    matches!(
+        ty.kind(),
+        TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::Pointer(_) | TyKind::Array(_)
+    )
+}
+
+/// Get the display name for a lang intrinsic type.
+fn lang_intrinsic_type_name(ty: &Ty) -> String {
+    match ty.kind() {
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "lang.i8".to_string(),
+            IntBits::I16 => "lang.i16".to_string(),
+            IntBits::I32 => "lang.i32".to_string(),
+            IntBits::I64 => "lang.i64".to_string(),
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "lang.f16".to_string(),
+            FloatBits::F32 => "lang.f32".to_string(),
+            FloatBits::F64 => "lang.f64".to_string(),
+        },
+        TyKind::Bool => "lang.i1".to_string(),
+        TyKind::Pointer(elem) => format!("lang.ptr[{}]", elem),
+        TyKind::Array(elem) => format!("lang.array[{}]", elem),
+        _ => format!("{}", ty),
+    }
+}
+
+/// Get the suggested intrinsic function name for a binary operator on a type.
+fn suggested_binary_intrinsic(ty: &Ty, op: BinaryOp) -> String {
+    let prefix = match ty.kind() {
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "lang.i8",
+            IntBits::I16 => "lang.i16",
+            IntBits::I32 => "lang.i32",
+            IntBits::I64 => "lang.i64",
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "lang.f16",
+            FloatBits::F32 => "lang.f32",
+            FloatBits::F64 => "lang.f64",
+        },
+        TyKind::Bool => "lang.i1",
+        TyKind::Pointer(_) => "lang.ptr",
+        TyKind::Array(_) => "lang.array",
+        _ => "lang",
+    };
+
+    let op_name = match op {
+        BinaryOp::Add => "_add",
+        BinaryOp::Sub => "_sub",
+        BinaryOp::Mul => "_mul",
+        BinaryOp::Div => "_signed_div", // Suggest signed by default
+        BinaryOp::Rem => "_signed_rem",
+        BinaryOp::Eq => "_eq",
+        BinaryOp::Ne => "_ne",
+        BinaryOp::Lt => "_signed_lt",
+        BinaryOp::Le => "_signed_le",
+        BinaryOp::Gt => "_signed_gt",
+        BinaryOp::Ge => "_signed_ge",
+        BinaryOp::BitAnd => "_and",
+        BinaryOp::BitOr => "_or",
+        BinaryOp::BitXor => "_xor",
+        BinaryOp::Shl => "_shl",
+        BinaryOp::Shr => "_signed_shr",
+        BinaryOp::And => "_and",
+        BinaryOp::Or => "_or",
+        _ => "(a, b)",
+    };
+
+    format!("{}{}(a, b)", prefix, op_name)
+}
+
+/// Get the suggested intrinsic function name for a unary operator on a type.
+fn suggested_unary_intrinsic(ty: &Ty, op: UnaryOp) -> String {
+    let prefix = match ty.kind() {
+        TyKind::Int(bits) => match bits {
+            IntBits::I8 => "lang.i8",
+            IntBits::I16 => "lang.i16",
+            IntBits::I32 => "lang.i32",
+            IntBits::I64 => "lang.i64",
+        },
+        TyKind::Float(bits) => match bits {
+            FloatBits::F16 => "lang.f16",
+            FloatBits::F32 => "lang.f32",
+            FloatBits::F64 => "lang.f64",
+        },
+        TyKind::Bool => "lang.i1",
+        TyKind::Pointer(_) => "lang.ptr",
+        _ => "lang",
+    };
+
+    let op_name = match op {
+        UnaryOp::Neg => "_neg",
+        UnaryOp::BitNot => "_not",
+        UnaryOp::LogicalNot => "_not",
+        UnaryOp::Unwrap => "", // No intrinsic for unwrap
+    };
+
+    format!("{}{}(a)", prefix, op_name)
 }
 
 /// Look up a primitive method on a type for binary operators.

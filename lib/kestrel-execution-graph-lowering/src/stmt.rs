@@ -248,6 +248,10 @@ fn lower_guard_let_condition(
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
         }
+        Value::Unreachable => {
+            // Scrutinee diverged, rest of statement is unreachable
+            return;
+        }
     };
 
     // Compile the pattern into a decision tree

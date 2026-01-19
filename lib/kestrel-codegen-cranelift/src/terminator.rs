@@ -256,8 +256,91 @@ fn get_place_type(
                 )),
             }
         }
-        _ => Err(CodegenError::Unsupported(
-            "unsupported place kind for type lookup".to_string(),
-        )),
+        PlaceKind::Index { parent, index } => {
+            // Get the parent's type, then look up the field type by index
+            let parent_ty_id = get_place_type(ctx, parent)?;
+            let parent_ty = ctx.mir.ty(parent_ty_id);
+
+            // Check if the parent is a downcast - in that case, find the variant struct
+            if let PlaceKind::Downcast {
+                parent: grandparent,
+                variant,
+            } = &parent.kind
+            {
+                let enum_ty_id = get_place_type(ctx, grandparent)?;
+                let enum_ty = ctx.mir.ty(enum_ty_id);
+
+                if let MirTy::Named { name, .. } = enum_ty {
+                    let name_data = ctx.mir.name(*name);
+                    for (_, enum_def) in ctx.mir.enums.iter() {
+                        if ctx.mir.name(enum_def.name) == name_data {
+                            let case_id = enum_def.case_by_name(variant).ok_or_else(|| {
+                                CodegenError::Unsupported(format!("enum case not found: {}", variant))
+                            })?;
+                            let case_def = &ctx.mir.enum_cases[case_id];
+                            let struct_id = case_def.struct_def.ok_or_else(|| {
+                                CodegenError::Unsupported(format!(
+                                    "enum case {} has no struct_def",
+                                    variant
+                                ))
+                            })?;
+                            let struct_def = ctx.mir.struct_def(struct_id);
+                            let fields: Vec<_> = struct_def.fields.clone();
+                            if *index >= fields.len() {
+                                return Err(CodegenError::Unsupported(format!(
+                                    "field index {} out of bounds",
+                                    index
+                                )));
+                            }
+                            let field_id = fields[*index];
+                            let field_def = &ctx.mir.fields[field_id];
+                            return Ok(field_def.ty);
+                        }
+                    }
+                }
+            }
+
+            // Regular struct or tuple
+            match parent_ty {
+                MirTy::Named {
+                    name: type_name, ..
+                } => {
+                    let type_name_data = ctx.mir.name(*type_name);
+                    for (_, struct_def) in ctx.mir.structs.iter() {
+                        if ctx.mir.name(struct_def.name) == type_name_data {
+                            let fields: Vec<_> = struct_def.fields.clone();
+                            if *index >= fields.len() {
+                                return Err(CodegenError::Unsupported(format!(
+                                    "field index {} out of bounds (struct has {} fields)",
+                                    index,
+                                    fields.len()
+                                )));
+                            }
+                            let field_id = fields[*index];
+                            let field_def = &ctx.mir.fields[field_id];
+                            return Ok(field_def.ty);
+                        }
+                    }
+                    Err(CodegenError::Unsupported(format!(
+                        "struct not found for index access: {}",
+                        type_name_data
+                    )))
+                }
+                MirTy::Tuple(elements) => {
+                    if *index >= elements.len() {
+                        return Err(CodegenError::Unsupported(format!(
+                            "tuple index {} out of bounds (len {})",
+                            index,
+                            elements.len()
+                        )));
+                    }
+                    Ok(elements[*index])
+                }
+                _ => Err(CodegenError::Unsupported(format!(
+                    "index access on unsupported type: {:?}",
+                    parent_ty
+                ))),
+            }
+        }
     }
 }

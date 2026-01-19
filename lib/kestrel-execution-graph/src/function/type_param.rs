@@ -1,6 +1,6 @@
 //! Type parameter definitions.
 
-use crate::id::{Enum, Function, Id, Protocol, Struct};
+use crate::id::{Enum, Function, Id, Protocol, ProtocolMethod, Struct};
 use crate::metadata::{Metadata, Prior};
 
 /// A type parameter definition.
@@ -32,4 +32,5 @@ pub enum TypeParamOwner {
     Struct(Id<Struct>),
     Enum(Id<Enum>),
     Protocol(Id<Protocol>),
+    ProtocolMethod(Id<ProtocolMethod>),
 }

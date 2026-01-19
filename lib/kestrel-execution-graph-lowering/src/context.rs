@@ -374,10 +374,17 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Emit an assignment from a value (place or immediate).
+    ///
+    /// If the value is `Unreachable`, no assignment is emitted since the
+    /// expression diverged and never produces a value.
     pub fn emit_assign_value(&mut self, dest: Place, value: Value) {
         match value {
             Value::Place(p) => self.emit_copy(dest, p),
             Value::Immediate(i) => self.emit_imm(dest, i),
+            Value::Unreachable => {
+                // Expression diverged (return/break/continue), no value to assign.
+                // The block should already be terminated, so this is a no-op.
+            }
         }
     }
 

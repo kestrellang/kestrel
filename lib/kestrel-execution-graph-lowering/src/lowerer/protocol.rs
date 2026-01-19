@@ -1,7 +1,7 @@
 //! Protocol lowering - converts semantic protocol symbols to MIR protocol definitions.
 
 use kestrel_execution_graph::function::TypeParamOwner;
-use kestrel_execution_graph::{Id, Protocol};
+use kestrel_execution_graph::{Id, Protocol, ProtocolMethod};
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
@@ -107,34 +107,53 @@ fn lower_protocol_method(
 ) {
     let name = func_symbol.metadata().name().value.clone();
 
+    // We need to allocate the method ID first so we can use it for type param ownership.
+    // We'll create a placeholder return type initially and update it after lowering.
+    let placeholder_ret = ctx.mir.ty_unit();
+    let method_def =
+        kestrel_execution_graph::item::ProtocolMethodDef::new(name.clone(), placeholder_ret);
+    let method_id: Id<ProtocolMethod> = ctx.mir.protocol_methods.alloc(method_def);
+
+    // Register the method's own type parameters (e.g., H in `func hash[H](...) where H: Hasher`)
+    // This must happen BEFORE we lower any types in the signature.
+    for tp in func_symbol.type_parameters() {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def = kestrel_execution_graph::function::TypeParamDef::new(
+            tp_name,
+            TypeParamOwner::ProtocolMethod(method_id),
+        );
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.protocol_methods[method_id].type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // NOW we can lower types with the method's type parameters in scope
+
     // Get the return type
     let return_ty = func_symbol.return_type();
     let mir_ret = lower_type(ctx, &return_ty);
-
-    let mut method_def =
-        kestrel_execution_graph::item::ProtocolMethodDef::new(name.clone(), mir_ret);
+    ctx.mir.protocol_methods[method_id].ret = mir_ret;
 
     // Get callable behavior for parameter info
     if let Some(callable) = func_symbol.metadata().get_behavior::<CallableBehavior>() {
         // Add self parameter based on receiver kind (if not static)
         if let Some(receiver) = callable.receiver() {
             let self_ty = build_self_type_for_receiver(ctx, receiver);
-            method_def.add_param("self", self_ty);
+            ctx.mir.protocol_methods[method_id].add_param("self", self_ty);
         }
 
         // Add regular parameters
         for param in callable.parameters() {
             let param_name = param.internal_name().to_string();
             let param_ty = lower_type(ctx, &param.ty);
-            method_def.add_param(param_name, param_ty);
+            ctx.mir.protocol_methods[method_id].add_param(param_name, param_ty);
         }
     }
 
     // Note: We skip default method bodies as per design decision
     // has_default is set based on whether the method has a body
-    method_def.has_default = func_symbol.has_body();
+    ctx.mir.protocol_methods[method_id].has_default = func_symbol.has_body();
 
-    let method_id = ctx.mir.protocol_methods.alloc(method_def);
     ctx.mir.protocols[protocol_id].add_method(name, method_id);
 }
 

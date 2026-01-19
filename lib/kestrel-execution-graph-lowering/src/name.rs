@@ -108,10 +108,25 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             }
         }
 
-        // Functions and initializers contribute their name
+        // Functions contribute their name, with labels for overload differentiation
+        // e.g., unwrap(orElse:) becomes "unwrap$orElse", unwrap() becomes "unwrap"
         KestrelSymbolKind::Function => {
             let name = symbol.metadata().name();
-            segments.push(name.value.clone());
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                let labels: Vec<&str> = callable
+                    .parameters()
+                    .iter()
+                    .filter_map(|p| p.external_label())
+                    .collect();
+
+                if labels.is_empty() {
+                    segments.push(name.value.clone());
+                } else {
+                    segments.push(format!("{}${}", name.value, labels.join("$")));
+                }
+            } else {
+                segments.push(name.value.clone());
+            }
         }
 
         KestrelSymbolKind::Initializer => {

@@ -652,6 +652,11 @@ fn compile_stack_alloc(
                 "stack_alloc with dynamic count not yet supported".into(),
             ))
         }
+        Value::Unreachable => {
+            return Err(CodegenError::Unsupported(
+                "stack_alloc with unreachable count".into(),
+            ))
+        }
     };
 
     // Calculate total size (count * element_size)
@@ -701,6 +706,9 @@ fn get_value_layout(
             let layout = get_immediate_layout(ctx, imm)?;
             Ok((layout, None))
         }
+        Value::Unreachable => Err(CodegenError::Unsupported(
+            "cannot get layout of unreachable value".into(),
+        )),
     }
 }
 
@@ -1284,6 +1292,9 @@ pub fn compile_value(
     match value {
         Value::Place(place) => compile_place_read(ctx, place, builder, local_map, subst),
         Value::Immediate(imm) => compile_immediate(ctx, subst, imm, builder),
+        Value::Unreachable => Err(CodegenError::Unsupported(
+            "cannot compile unreachable value - this indicates a MIR lowering bug".into(),
+        )),
     }
 }
 
@@ -1906,15 +1917,38 @@ pub fn compile_call(
             method,
             for_type,
         } => {
-            // Apply substitution to for_type
-            let concrete_for_type = subst
-                .apply_ty_readonly(ctx.mir, *for_type)
-                .unwrap_or(*for_type);
-            if !type_is_concrete(ctx.mir, concrete_for_type) {
-                return Err(CodegenError::Unsupported(
-                    "unresolved Self type for witness call".to_string(),
-                ));
-            }
+            // If for_type uses SelfType, we need to resolve it from the substitution first
+            let concrete_for_type = if type_uses_self(ctx.mir, *for_type) {
+                // Get the self type from the substitution
+                let self_ty = subst.get_self_type().ok_or_else(|| {
+                    CodegenError::Unsupported(format!(
+                        "witness call requires Self type for: {}",
+                        ctx.mir.name(*protocol)
+                    ))
+                })?;
+                if !type_is_concrete(ctx.mir, self_ty) {
+                    return Err(CodegenError::Unsupported(format!(
+                        "unresolved Self type for witness call: {:?}",
+                        ctx.mir.ty(self_ty)
+                    )));
+                }
+                // Now apply substitution with self type resolved
+                subst
+                    .apply_ty_readonly(ctx.mir, *for_type)
+                    .unwrap_or(self_ty)
+            } else {
+                // No self type involved, just apply substitution
+                let applied = subst
+                    .apply_ty_readonly(ctx.mir, *for_type)
+                    .unwrap_or(*for_type);
+                if !type_is_concrete(ctx.mir, applied) {
+                    return Err(CodegenError::Unsupported(format!(
+                        "unresolved type for witness call: {:?}",
+                        ctx.mir.ty(applied)
+                    )));
+                }
+                applied
+            };
 
             // Resolve the witness to get the concrete implementation
             let (impl_name, impl_type_args) =

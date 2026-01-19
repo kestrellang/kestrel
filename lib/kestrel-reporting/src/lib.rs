@@ -84,6 +84,24 @@ impl DiagnosticContext {
         Ok(())
     }
 
+    /// Emit additional diagnostics to stderr with color support.
+    ///
+    /// This is useful for emitting diagnostics that were not collected during
+    /// the original compilation, such as lowering or codegen errors.
+    pub fn emit_additional(
+        &self,
+        diagnostics: &[Diagnostic<usize>],
+    ) -> Result<(), codespan_reporting::files::Error> {
+        let writer = StandardStream::stderr(ColorChoice::Always);
+        let config = codespan_reporting::term::Config::default();
+
+        for diagnostic in diagnostics {
+            term::emit_to_write_style(&mut writer.lock(), &config, &self.files, diagnostic)?;
+        }
+
+        Ok(())
+    }
+
     /// Emit all diagnostics to a custom writer.
     pub fn emit_to<W: term::termcolor::WriteColor>(
         &self,

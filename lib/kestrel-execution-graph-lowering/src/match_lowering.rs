@@ -89,6 +89,10 @@ pub fn lower_match_expr(
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
         }
+        Value::Unreachable => {
+            // Scrutinee diverged (e.g., was a return), so match is unreachable
+            return Value::Unreachable;
+        }
     };
 
     // Extract patterns and guards from arms

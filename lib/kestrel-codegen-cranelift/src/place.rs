@@ -448,6 +448,8 @@ pub fn compile_place_write(
             let var = local_map
                 .get(local_id)
                 .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
+
+
             builder.def_var(*var, value);
             Ok(())
         }

@@ -20,10 +20,10 @@ public struct LiteralSliceIterator[T]: Iterator {
     }
 
     public mutating func next() -> Optional[T] {
-        if self.remaining > 0 {
+        if lang.i64_signed_gt(self.remaining, 0) {
             let value = lang.ptr_read(self.ptr);
             self.ptr = lang.ptr_offset[T](self.ptr, lang.sizeof[T]());
-            self.remaining = self.remaining - 1;
+            self.remaining = lang.i64_sub(self.remaining, 1);
             .Some(value)
         } else {
             .None
@@ -47,7 +47,7 @@ public struct LiteralSlice[T]: Iterable {
 
     public func count() -> Int64 { Int64(intLiteral: self.len) }
 
-    public func isEmpty() -> Bool { Bool(boolLiteral: self.len == 0) }
+    public func isEmpty() -> Bool { Bool(boolLiteral: lang.i64_eq(self.len, 0)) }
 
     public func iter() -> LiteralSliceIterator[T] {
         LiteralSliceIterator(ptr: self.ptr, remaining: self.len)

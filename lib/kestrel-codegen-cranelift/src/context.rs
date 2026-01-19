@@ -7,7 +7,9 @@ use crate::monomorphize::{
 };
 use crate::types::translate_type;
 use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_function_with_self, mangle_name};
-use kestrel_execution_graph::{Function, FunctionDef, Id, MirContext, QualifiedNameData, Ty};
+use kestrel_execution_graph::{
+    Function, FunctionDef, Id, MirContext, QualifiedName, QualifiedNameData, Ty,
+};
 
 use cranelift_codegen::Context as CraneliftContext;
 use cranelift_codegen::ir::types as cl_types;

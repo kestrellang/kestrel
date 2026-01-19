@@ -239,11 +239,11 @@ public struct LinesIterator: Iterator {
             let byteVal: lang.i32 = lang.cast_i8_i32(byte);
             let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
 
-            if unsignedByte == 10 {  // \n
+            if Bool(boolLiteral: lang.i32_eq(unsignedByte, 10)) {  // \n
                 lineEnd = self.byteIndex;
                 self.byteIndex = self.byteIndex + Int64(intLiteral: 1);
                 foundNewline = true
-            } else if unsignedByte == 13 {  // \r
+            } else if Bool(boolLiteral: lang.i32_eq(unsignedByte, 13)) {  // \r
                 lineEnd = self.byteIndex;
                 self.byteIndex = self.byteIndex + Int64(intLiteral: 1);
                 // Handle \r\n
@@ -253,7 +253,7 @@ public struct LinesIterator: Iterator {
                     let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
                     let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
                     let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
-                    if nextUnsigned == 10 {
+                    if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
                         self.byteIndex = self.byteIndex + Int64(intLiteral: 1)
                     }
                 }

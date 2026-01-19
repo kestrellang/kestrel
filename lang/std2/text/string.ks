@@ -165,7 +165,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
 
     // ExpressibleByStringLiteral
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        if length > 0 {
+        if lang.i64_signed_gt(length, 0) {
             let byteCount = Int64(intLiteral: length);
             let layout = Layout.array[UInt8](byteCount);
             var allocator = SystemAllocator();
@@ -435,7 +435,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
             let byte = self.ptr.offset(by: start).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // space=32, tab=9, newline=10, carriage return=13
-            if v == 32 or v == 9 or v == 10 or v == 13 {
+            let isWhitespace = lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13));
+            if Bool(boolLiteral: isWhitespace) {
                 start = start + Int64(intLiteral: 1)
             } else {
                 // break out
@@ -451,7 +452,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
         while realStart < self.len and done == false {
             let byte = self.ptr.offset(by: realStart).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-            if v == 32 or v == 9 or v == 10 or v == 13 {
+            let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13));
+            if Bool(boolLiteral: isWs) {
                 realStart = realStart + Int64(intLiteral: 1)
             } else {
                 done = true
@@ -467,7 +469,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
             let idx = endPos - Int64(intLiteral: 1);
             let byte = self.ptr.offset(by: idx).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-            if v == 32 or v == 9 or v == 10 or v == 13 {
+            let isWhitespace = lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13));
+            if Bool(boolLiteral: isWhitespace) {
                 endPos = endPos - Int64(intLiteral: 1)
             } else {
                 done = true
@@ -484,8 +487,9 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
             let byte = self.ptr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // A-Z: 65-90 -> a-z: 97-122
-            if v >= 65 and v <= 90 {
-                result.appendByte(UInt8(raw: lang.cast_i32_i8(v + 32)))
+            let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
+            if Bool(boolLiteral: isUppercase) {
+                result.appendByte(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
             } else {
                 result.appendByte(byte)
             }
@@ -501,8 +505,9 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
             let byte = self.ptr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // a-z: 97-122 -> A-Z: 65-90
-            if v >= 97 and v <= 122 {
-                result.appendByte(UInt8(raw: lang.cast_i32_i8(v - 32)))
+            let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
+            if Bool(boolLiteral: isLowercase) {
+                result.appendByte(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
             } else {
                 result.appendByte(byte)
             }

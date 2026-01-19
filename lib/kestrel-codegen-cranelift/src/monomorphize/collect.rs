@@ -79,15 +79,29 @@ impl<'a> CollectionContext<'a> {
 
     /// Seed the queue with non-generic functions.
     fn seed_non_generic_functions(&mut self) {
-        let non_generic: Vec<_> = self
+        // Collect non-generic function IDs first to avoid borrow issues
+        let non_generic_ids: Vec<_> = self
             .mir
             .functions
             .iter()
             .filter(|(_, def)| def.type_params.is_empty())
-            .map(|(id, _)| FunctionInstantiation::non_generic(id))
+            .map(|(id, _)| id)
             .collect();
 
-        for inst in non_generic {
+        for func_id in non_generic_ids {
+            let func_def = &self.mir.functions[func_id];
+
+            // Skip functions that need Self type - they'll be processed when called with concrete types
+            let needs_self_type = func_def.params.iter().any(|&param_id| {
+                let param = &self.mir.params[param_id];
+                self.type_needs_self(self.mir.ty(param.ty))
+            }) || self.type_needs_self(self.mir.ty(func_def.ret));
+
+            if needs_self_type {
+                continue;
+            }
+
+            let inst = FunctionInstantiation::non_generic(func_id);
             if self.result.add_function(inst.clone()) {
                 self.pending.push_back(inst);
             }
@@ -172,7 +186,14 @@ impl<'a> CollectionContext<'a> {
                 self.scan_rvalue(rvalue, subst);
             }
             StatementKind::Call { callee, args } => {
-                self.scan_callee(callee, subst);
+                // For protocol extension method calls, we need to track Self type.
+                // Check if this is a direct call to a function with Self-typed parameters.
+                let self_type = self.infer_self_type_from_call(callee, args, subst);
+                let mut call_subst = subst.clone();
+                if let Some(st) = self_type {
+                    call_subst.set_self_type(st);
+                }
+                self.scan_callee(callee, &call_subst);
                 for arg in args {
                     self.scan_value(&arg.value, subst);
                 }
@@ -567,6 +588,7 @@ impl<'a> CollectionContext<'a> {
             Value::Immediate(imm) => {
                 self.scan_immediate(&imm.kind, subst);
             }
+            Value::Unreachable => {}
         }
     }
 
@@ -795,6 +817,7 @@ impl<'a> CollectionContext<'a> {
         match value {
             Value::Place(place) => self.get_place_type(place, subst),
             Value::Immediate(_) => None,
+            Value::Unreachable => None,
         }
     }
 

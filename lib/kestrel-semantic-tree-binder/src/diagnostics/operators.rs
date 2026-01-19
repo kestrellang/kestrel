@@ -66,3 +66,31 @@ impl IntoDiagnostic for UnsupportedUnaryOperator {
             ])
     }
 }
+
+/// Error when an operator is used on a lang intrinsic type.
+/// These types should use explicit lang.* intrinsic functions instead.
+pub struct OperatorOnLangIntrinsicType {
+    /// Span of the operator expression
+    pub span: Span,
+    /// The operator used (e.g., "+", "-", "==")
+    pub operator: String,
+    /// The type name (e.g., "lang.i32", "lang.ptr[T]")
+    pub type_name: String,
+    /// The suggested intrinsic function to use instead
+    pub suggested_intrinsic: String,
+}
+
+impl IntoDiagnostic for OperatorOnLangIntrinsicType {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "operators cannot be used on lang intrinsic type '{}'",
+                self.type_name
+            ))
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
+                .with_message(format!("use '{}' instead", self.suggested_intrinsic))])
+            .with_notes(vec![format!(
+                "lang intrinsic types require explicit intrinsic function calls"
+            )])
+    }
+}

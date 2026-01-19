@@ -311,6 +311,10 @@ fn ensure_place(
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
         }
+        Value::Unreachable => {
+            // This shouldn't happen - callers should check for Unreachable before calling
+            panic!("ensure_place called with Unreachable value");
+        }
     }
 }
 

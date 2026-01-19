@@ -3,8 +3,8 @@
 //! These types represent concrete instantiations of generic items
 //! (functions, structs, enums) with specific type arguments.
 
+use indexmap::IndexSet;
 use kestrel_execution_graph::{Enum, Function, Id, Struct, Ty};
-use std::collections::HashSet;
 
 /// A concrete instantiation of a generic function.
 ///
@@ -85,14 +85,17 @@ impl EnumInstantiation {
 ///
 /// This is computed by the collection phase and used during codegen
 /// to know which instantiations need to be compiled.
+///
+/// Uses `IndexSet` instead of `HashSet` to ensure deterministic iteration order,
+/// which makes error messages and codegen output reproducible across runs.
 #[derive(Debug, Default)]
 pub struct MonomorphizationSet {
     /// All function instantiations that need to be compiled.
-    pub functions: HashSet<FunctionInstantiation>,
+    pub functions: IndexSet<FunctionInstantiation>,
     /// All struct instantiations that are used.
-    pub structs: HashSet<StructInstantiation>,
+    pub structs: IndexSet<StructInstantiation>,
     /// All enum instantiations that are used.
-    pub enums: HashSet<EnumInstantiation>,
+    pub enums: IndexSet<EnumInstantiation>,
 }
 
 impl MonomorphizationSet {

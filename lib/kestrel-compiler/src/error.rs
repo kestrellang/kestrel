@@ -37,7 +37,16 @@ impl fmt::Display for CompileError {
             CompileError::LoweringFailed(diagnostics) => {
                 writeln!(f, "lowering to execution graph failed:")?;
                 for diag in diagnostics {
-                    writeln!(f, "  - {}", diag.message)?;
+                    // Include source location from labels if available
+                    if let Some(label) = diag.labels.first() {
+                        writeln!(
+                            f,
+                            "  - {} (file {}, bytes {}..{})",
+                            diag.message, label.file_id, label.range.start, label.range.end
+                        )?;
+                    } else {
+                        writeln!(f, "  - {}", diag.message)?;
+                    }
                 }
                 Ok(())
             }
