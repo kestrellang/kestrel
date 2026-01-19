@@ -37,7 +37,7 @@ public struct RawPointer: Equatable, FFISafe {
     }
 
     public func offset(by bytes: Int64) -> RawPointer {
-        RawPointer(raw: lang.ptr_offset(self.raw, bytes))
+        RawPointer(raw: lang.ptr_offset(self.raw, bytes.raw))
     }
 
     public func equals(other: RawPointer) -> Bool {
@@ -87,7 +87,7 @@ public struct Pointer[T]: Equatable {
 
     public func offset(by n: Int64) -> Pointer[T] {
         let byteOffset = n * Int64(intLiteral: lang.sizeof[T]());
-        Pointer(raw: lang.ptr_offset[T](self._raw, byteOffset))
+        Pointer(raw: lang.ptr_offset[T](self._raw, byteOffset.raw))
     }
 
     public func asRaw() -> RawPointer {

@@ -57,9 +57,9 @@ fn get_root_local(place: &Place) -> Option<Id<Local>> {
     }
 }
 
-fn is_aggregate_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
+fn is_aggregate_type(ctx: &CodegenContext<'_>, ty_id: Id<Ty>) -> bool {
     matches!(
-        ctx.mir.ty(ty),
+        ctx.mir.ty(ty_id),
         MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
     )
 }
@@ -211,17 +211,20 @@ fn compile_blocks(
     }
 
     // Compile each block (but don't seal yet - we need all predecessors first)
-    for &block_id in &func_def.blocks {
+    for (i, &block_id) in func_def.blocks.iter().enumerate() {
         let cl_block = block_map[&block_id];
         if block_id != mir_entry_block {
             builder.switch_to_block(cl_block);
         }
+
+        let next_block_id = func_def.blocks.get(i + 1).copied();
 
         crate::block::compile_block(
             ctx,
             func_def,
             subst,
             block_id,
+            next_block_id,
             builder,
             &block_map,
             &local_map,

@@ -12,7 +12,12 @@ import std.iter.(Iterator, Iterable)
 func nextPowerOfTwo(n: Int64) -> Int64 {
     var p: Int64 = Int64(intLiteral: 1);
     while p < n {
-        p = p * Int64(intLiteral: 2)
+        let next = p * Int64(intLiteral: 2);
+        // Check for overflow (since Int64 is signed)
+        if next <= p {
+            return p
+        }
+        p = next
     }
     let minCap = Int64(intLiteral: 8);
     if p < minCap { minCap } else { p }
@@ -79,17 +84,23 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     var entries: Pointer[DictionaryEntry[K, V]]
     var len: Int64
     var cap: Int64
+    var placeholderKey: K
+    var placeholderValue: V
 
-    // Create empty dictionary
-    public init() {
+    // Create empty dictionary - requires placeholder key/value for future resizing
+    public init(placeholderKey: K, placeholderValue: V) {
         self.entries = Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]());
         self.len = Int64(intLiteral: 0);
         self.cap = Int64(intLiteral: 0);
+        self.placeholderKey = placeholderKey;
+        self.placeholderValue = placeholderValue;
     }
 
     // Create with initial capacity - requires a placeholder key/value for initialization
     public init(capacity: Int64, placeholderKey: K, placeholderValue: V) {
         let actualCap = nextPowerOfTwo(capacity);
+        self.placeholderKey = placeholderKey;
+        self.placeholderValue = placeholderValue;
         if actualCap > Int64(intLiteral: 0) {
             let layout = Layout.array[DictionaryEntry[K, V]](actualCap);
             var allocator = SystemAllocator();
@@ -155,7 +166,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
         while i < self.cap and done == false {
             let entry = self.entries.offset(by: i).read();
-            if entry.occupied and entry.key.equals(key) {
+            if entry.occupied == true and entry.key.equals(key) == true {
                 result = .Some(i);
                 done = true
             }
@@ -182,10 +193,10 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     }
 
     // Ensure we have capacity for more entries (resize at 75% load)
-    private mutating func ensureCapacity(placeholderKey: K, placeholderValue: V) {
+    private mutating func ensureCapacity() {
         let threshold = self.cap * Int64(intLiteral: 3) / Int64(intLiteral: 4);
         if self.len >= threshold or self.cap == Int64(intLiteral: 0) {
-            self.resize(placeholderKey, placeholderValue)
+            self.resize(self.placeholderKey, self.placeholderValue)
         }
     }
 
@@ -227,8 +238,11 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
                     // Find empty slot and insert
                     let maybeSlot = self.findEmptySlot();
                     if maybeSlot.isSome() {
-                        self.entries.offset(by: maybeSlot.unwrap()).write(entry);
+                        let slotIndex = maybeSlot.unwrap();
+                        self.entries.offset(by: slotIndex).write(entry);
                         self.len = self.len + Int64(intLiteral: 1)
+                    } else {
+                        lang.panic("Dictionary resize failed - no empty slot found")
                     }
                 }
                 i = i + Int64(intLiteral: 1)
@@ -264,7 +278,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     public mutating func insert(key: K, value: V) -> Optional[V] {
         // Check if key already exists
         let maybeIndex = self.findEntry(key);
-        if maybeIndex.isSome() {
+        if maybeIndex.isSome() == true {
             let index = maybeIndex.unwrap();
             let oldEntry = self.entries.offset(by: index).read();
             self.entries.offset(by: index).write(DictionaryEntry(
@@ -277,12 +291,13 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
         }
 
         // Need to insert - ensure capacity first
-        self.ensureCapacity(key, value);
+        self.ensureCapacity();
 
         // Find empty slot
         let maybeSlot = self.findEmptySlot();
         if maybeSlot.isSome() {
-            self.entries.offset(by: maybeSlot.unwrap()).write(DictionaryEntry(
+            let slotIndex = maybeSlot.unwrap();
+            self.entries.offset(by: slotIndex).write(DictionaryEntry(
                 key: key,
                 value: value,
                 hash: UInt64(intLiteral: 0),
@@ -388,7 +403,7 @@ extend Dictionary[K, V]: Cloneable where K: Cloneable, V: Cloneable {
         let selfEntries = self.getEntries();
 
         if selfCount == Int64(intLiteral: 0) {
-            return Dictionary()
+            return Dictionary(placeholderKey: self.placeholderKey.clone(), placeholderValue: self.placeholderValue.clone())
         }
 
         // Find first entry to use as placeholder

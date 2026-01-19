@@ -2245,7 +2245,7 @@ impl Expression {
                 target: Box::new(target),
                 value: Box::new(value),
             },
-            ty: Ty::never(span.clone()),
+            ty: Ty::unit(span.clone()),
             span,
             mutable: false,
         }

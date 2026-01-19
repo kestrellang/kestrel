@@ -1,0 +1,6 @@
+breakpoint set -n "__K3std6memory15SystemAllocator8allocateP2M3std6memory15SystemAllocatorR3std6memory6Layout"
+run
+finish
+# After Int64::raw getter, we are at 1000013a8
+disassemble -s 0x1000013a0 -c 5
+register read x0

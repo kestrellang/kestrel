@@ -5,7 +5,7 @@ use crate::error::CodegenError;
 use crate::monomorphize::{
     FunctionInstantiation, MonomorphizationSet, Substitution, build_substitution,
 };
-use crate::types::translate_type;
+use crate::types::{translate_type, translate_type_ext};
 use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_function_with_self, mangle_name};
 use kestrel_execution_graph::{
     Function, FunctionDef, Id, MirContext, QualifiedName, QualifiedNameData, Ty,
@@ -356,7 +356,7 @@ impl<'a> CodegenContext<'a> {
             let concrete_ty = subst
                 .apply_ty_readonly(self.mir, param.ty)
                 .expect("type substitution failed for param type");
-            let cl_type = translate_type(self.mir, concrete_ty, self.target);
+            let cl_type = translate_type_ext(self.mir, concrete_ty, self.target, func_def.is_extern());
             sig.params.push(AbiParam::new(cl_type));
         }
 
@@ -366,7 +366,7 @@ impl<'a> CodegenContext<'a> {
             // C runtime expects int main() - always return i64
             sig.returns.push(AbiParam::new(cl_types::I64));
         } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) && !needs_sret {
-            let cl_type = translate_type(self.mir, concrete_ret, self.target);
+            let cl_type = translate_type_ext(self.mir, concrete_ret, self.target, func_def.is_extern());
             sig.returns.push(AbiParam::new(cl_type));
         }
 

@@ -30,7 +30,7 @@ public struct Int16:
     RightShift,
     ExpressibleByIntLiteral,
     FFISafe,
-    Convertible[Int8],
+        Convertible[Int8],
     Convertible[Int32],
     Convertible[Int64],
     Convertible[UInt8],
@@ -38,39 +38,37 @@ public struct Int16:
     Convertible[UInt32],
     Convertible[UInt64]
 {
-    private var value: lang.i16
-
-    public var raw: lang.i16 { self.value }
+    public var raw: lang.i16
 
     public static var zero: Int16 { Int16(intLiteral: 0) }
     public static var one: Int16 { Int16(intLiteral: 1) }
-    public static var minValue: Int16 { -32768 }
-    public static var maxValue: Int16 { 32767 }
+    public static var minValue: Int16 { Int16(intLiteral: lang.i64_neg(32768)) }
+    public static var maxValue: Int16 { Int16(intLiteral: 32767) }
     // public static var bitWidth: Int { 16 }
 
     public init(intLiteral value: lang.i64) {
-        self.value = lang.cast_i64_i16(value)
+        self.raw = lang.cast_i64_i16(value)
     }
 
     init(raw value: lang.i16) {
-        self.value = value
+        self.raw = value
     }
 
-    public init(from other: Int8) { self.value = lang.cast_i8_i16(other.raw) }
-    public init(from other: Int32) { self.value = lang.cast_i32_i16(other.raw) }
-    public init(from other: Int64) { self.value = lang.cast_i64_i16(other.raw) }
-    public init(from other: UInt8) { self.value = lang.cast_i8_i16(other.raw) }
-    public init(from other: UInt16) { self.value = other.raw }
-    public init(from other: UInt32) { self.value = lang.cast_i32_i16(other.raw) }
-    public init(from other: UInt64) { self.value = lang.cast_i64_i16(other.raw) }
+    public init(from other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
+    public init(from other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    public init(from other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    public init(from other: UInt8) { self.raw = lang.cast_i8_i16(other.raw) }
+    public init(from other: UInt16) { self.raw = other.raw }
+    public init(from other: UInt32) { self.raw = lang.cast_i32_i16(other.raw) }
+    public init(from other: UInt64) { self.raw = lang.cast_i64_i16(other.raw) }
 
     public func equals(other: Int16) -> Bool {
-        Bool(boolLiteral: lang.i16_eq(self.value, other.value))
+        Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
     }
 
     public func compare(other: Int16) -> Ordering {
-        if Bool(boolLiteral: lang.i16_signed_lt(self.value, other.value)) { .Less }
-        else if Bool(boolLiteral: lang.i16_signed_gt(self.value, other.value)) { .Greater }
+        if Bool(boolLiteral: lang.i16_signed_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.i16_signed_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -91,18 +89,18 @@ public struct Int16:
     type LeftShift.Output = Int16
     type RightShift.Output = Int16
 
-    public func add(other: Int16) -> Int16 { Int16(raw: lang.i16_add(self.value, other.value)) }
-    public func subtract(other: Int16) -> Int16 { Int16(raw: lang.i16_sub(self.value, other.value)) }
-    public func multiply(other: Int16) -> Int16 { Int16(raw: lang.i16_mul(self.value, other.value)) }
-    public func divide(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.value, other.value)) }
-    public func modulo(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.value, other.value)) }
-    public func negate() -> Int16 { Int16(raw: lang.i16_neg(self.value)) }
-    public func abs() -> Int16 { if Bool(boolLiteral: lang.i16_signed_lt(self.value, 0)) { self.negate() } else { self } }
-    public func bitwiseAnd(other: Int16) -> Int16 { Int16(raw: lang.i16_and(self.value, other.value)) }
-    public func bitwiseOr(other: Int16) -> Int16 { Int16(raw: lang.i16_or(self.value, other.value)) }
-    public func bitwiseXor(other: Int16) -> Int16 { Int16(raw: lang.i16_xor(self.value, other.value)) }
-    public func bitwiseNot() -> Int16 { Int16(raw: lang.i16_not(self.value)) }
-    public func shiftLeft(by count: lang.i64) -> Int16 { Int16(raw: lang.i16_shl(self.value, lang.cast_i64_i16(count))) }
-    public func shiftRight(by count: lang.i64) -> Int16 { Int16(raw: lang.i16_signed_shr(self.value, lang.cast_i64_i16(count))) }
+    public func add(other: Int16) -> Int16 { Int16(raw: lang.i16_add(self.raw, other.raw)) }
+    public func subtract(other: Int16) -> Int16 { Int16(raw: lang.i16_sub(self.raw, other.raw)) }
+    public func multiply(other: Int16) -> Int16 { Int16(raw: lang.i16_mul(self.raw, other.raw)) }
+    public func divide(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.raw, other.raw)) }
+    public func modulo(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.raw, other.raw)) }
+    public func negate() -> Int16 { Int16(raw: lang.i16_neg(self.raw)) }
+    public func abs() -> Int16 { if Bool(boolLiteral: lang.i16_signed_lt(self.raw, 0)) { self.negate() } else { self } }
+    public func bitwiseAnd(other: Int16) -> Int16 { Int16(raw: lang.i16_and(self.raw, other.raw)) }
+    public func bitwiseOr(other: Int16) -> Int16 { Int16(raw: lang.i16_or(self.raw, other.raw)) }
+    public func bitwiseXor(other: Int16) -> Int16 { Int16(raw: lang.i16_xor(self.raw, other.raw)) }
+    public func bitwiseNot() -> Int16 { Int16(raw: lang.i16_not(self.raw)) }
+    public func shiftLeft(by count: lang.i64) -> Int16 { Int16(raw: lang.i16_shl(self.raw, lang.cast_i64_i16(count))) }
+    public func shiftRight(by count: lang.i64) -> Int16 { Int16(raw: lang.i16_signed_shr(self.raw, lang.cast_i64_i16(count))) }
 }
 

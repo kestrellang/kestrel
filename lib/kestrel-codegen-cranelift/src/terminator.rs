@@ -55,7 +55,7 @@ pub fn compile_terminator(
                 if is_unit_value {
                     builder
                         .ins()
-                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
                 } else {
                     let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
                     copy_aggregate_value(ctx, concrete_ret, dest_ptr, val, builder);
@@ -75,7 +75,7 @@ pub fn compile_terminator(
                     // This is dead code - emit trap
                     builder
                         .ins()
-                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
                 } else {
                     let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
                     builder.ins().return_(&[val]);
@@ -96,13 +96,27 @@ pub fn compile_terminator(
             else_block,
         } => {
             let cond = compile_value(ctx, func_def, subst, condition, builder, local_map)?;
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+            let cond = if builder.func.dfg.value_type(cond) == ptr_type {
+                // Bool is a wrapper struct in std2; branch on its underlying byte.
+                builder.ins().load(cl_types::I8, MemFlags::new(), cond, 0)
+            } else {
+                cond
+            };
+            // Bool is i8 in Cranelift, but brif expects a boolean condition.
+            // Explicitly compare with 0.
+            let cond_bool = builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
             let then_cl = block_map
                 .get(then_block)
                 .ok_or_else(|| CodegenError::Unsupported("unknown then block".to_string()))?;
             let else_cl = block_map
                 .get(else_block)
                 .ok_or_else(|| CodegenError::Unsupported("unknown else block".to_string()))?;
-            builder.ins().brif(cond, *then_cl, &[], *else_cl, &[]);
+            builder.ins().brif(cond_bool, *then_cl, &[], *else_cl, &[]);
         }
 
         TerminatorKind::Switch {
@@ -149,8 +163,16 @@ pub fn compile_terminator(
                     let expected_discr = case_def.discriminant as i64;
 
                     if i == cases.len() - 1 {
-                        // Last case - just jump unconditionally (exhaustive match)
-                        builder.ins().jump(*target_cl, &[]);
+                        // Last case - check if it's the only case or if we need to compare
+                        if cases.len() == 1 {
+                            builder.ins().jump(*target_cl, &[]);
+                        } else {
+                            let cmp = builder
+                                .ins()
+                                .icmp_imm(IntCC::Equal, discr_val, expected_discr);
+                            // If it's exhaustive, we can just jump, but let's be safe
+                            builder.ins().brif(cmp, *target_cl, &[], *target_cl, &[]);
+                        }
                     } else {
                         // Compare discriminant and branch
                         let cmp = builder

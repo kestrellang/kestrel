@@ -1009,6 +1009,43 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     }
                 }
 
+                LangIntrinsic::PtrOffset => {
+                    // Argument 1: Pointer[T]
+                    // Argument 2: lang.i64
+                    // Returns: Pointer[T]
+                    if let Some(ptr_arg) = arguments.first() {
+                        if let TyKind::Pointer(pointee) = ptr_arg.value.ty.kind() {
+                            ctx.register_type(pointee);
+                        }
+                    }
+                    if let Some(offset_arg) = arguments.get(1) {
+                        use kestrel_semantic_tree::ty::IntBits;
+                        let i64_ty = Ty::int(IntBits::I64, offset_arg.span.clone());
+                        ctx.register_type(&i64_ty);
+                        ctx.equate(offset_arg.value.ty.id(), i64_ty.id(), offset_arg.span.clone());
+                    }
+                }
+
+                LangIntrinsic::PtrToAddress => {
+                    // Argument 1: Pointer[T]
+                    // Returns: lang.i64
+                    if let Some(arg) = arguments.first() {
+                        if let TyKind::Pointer(pointee) = arg.value.ty.kind() {
+                            ctx.register_type(pointee);
+                        }
+                    }
+                }
+
+                LangIntrinsic::PtrIsNull => {
+                    // Argument 1: Pointer[T]
+                    // Returns: lang.i1
+                    if let Some(arg) = arguments.first() {
+                        if let TyKind::Pointer(pointee) = arg.value.ty.kind() {
+                            ctx.register_type(pointee);
+                        }
+                    }
+                }
+
                 // Other intrinsics don't have type parameters that need constraint generation
                 _ => {}
             }

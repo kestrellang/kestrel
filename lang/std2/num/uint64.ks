@@ -30,7 +30,7 @@ public struct UInt64:
     RightShift,
     ExpressibleByIntLiteral,
     FFISafe,
-    Convertible[Int8],
+        Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
     Convertible[Int64],
@@ -38,39 +38,37 @@ public struct UInt64:
     Convertible[UInt16],
     Convertible[UInt32]
 {
-    private var value: lang.i64
-
-    public var raw: lang.i64 { self.value }
+    public var raw: lang.i64
 
     public static var zero: UInt64 { UInt64(intLiteral: 0) }
     public static var one: UInt64 { UInt64(intLiteral: 1) }
-    public static var minValue: UInt64 { UInt64(intLiteral: 0) }
+    public static var minValue: UInt64 { UInt64(intLiteral: lang.i64_neg(0)) }
     public static var maxValue: UInt64 { UInt64(intLiteral: 18446744073709551615) }
     // public static var bitWidth: Int { 64 }
 
     public init(intLiteral value: lang.i64) {
-        self.value = value
+        self.raw = value
     }
 
     init(raw value: lang.i64) {
-        self.value = value
+        self.raw = value
     }
 
-    public init(from other: Int8) { self.value = lang.cast_i8_i64(other.raw) }
-    public init(from other: Int16) { self.value = lang.cast_i16_i64(other.raw) }
-    public init(from other: Int32) { self.value = lang.cast_i32_i64(other.raw) }
-    public init(from other: Int64) { self.value = other.raw }
-    public init(from other: UInt8) { self.value = lang.cast_i8_i64(other.raw) }
-    public init(from other: UInt16) { self.value = lang.cast_i16_i64(other.raw) }
-    public init(from other: UInt32) { self.value = lang.cast_i32_i64(other.raw) }
+    public init(from other: Int8) { self.raw = lang.cast_i8_i64(other.raw) }
+    public init(from other: Int16) { self.raw = lang.cast_i16_i64(other.raw) }
+    public init(from other: Int32) { self.raw = lang.cast_i32_i64(other.raw) }
+    public init(from other: Int64) { self.raw = other.raw }
+    public init(from other: UInt8) { self.raw = lang.cast_i8_i64(other.raw) }
+    public init(from other: UInt16) { self.raw = lang.cast_i16_i64(other.raw) }
+    public init(from other: UInt32) { self.raw = lang.cast_i32_i64(other.raw) }
 
     public func equals(other: UInt64) -> Bool {
-        Bool(boolLiteral: lang.i64_eq(self.value, other.value))
+        Bool(boolLiteral: lang.i64_eq(self.raw, other.raw))
     }
 
     public func compare(other: UInt64) -> Ordering {
-        if Bool(boolLiteral: lang.i64_unsigned_lt(self.value, other.value)) { .Less }
-        else if Bool(boolLiteral: lang.i64_unsigned_gt(self.value, other.value)) { .Greater }
+        if Bool(boolLiteral: lang.i64_unsigned_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.i64_unsigned_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -91,19 +89,19 @@ public struct UInt64:
     type LeftShift.Output = UInt64
     type RightShift.Output = UInt64
 
-    public func add(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.value, other.value)) }
-    public func subtract(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.value, other.value)) }
-    public func multiply(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.value, other.value)) }
-    public func divide(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_div(self.value, other.value)) }
-    public func modulo(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_rem(self.value, other.value)) }
+    public func add(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.raw, other.raw)) }
+    public func subtract(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.raw, other.raw)) }
+    public func multiply(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.raw, other.raw)) }
+    public func divide(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_div(self.raw, other.raw)) }
+    public func modulo(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_rem(self.raw, other.raw)) }
     
     
-    public func bitwiseAnd(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_and(self.value, other.value)) }
-    public func bitwiseOr(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_or(self.value, other.value)) }
-    public func bitwiseXor(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_xor(self.value, other.value)) }
-    public func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.value)) }
-    public func shiftLeft(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_shl(self.value, count)) }
-    public func shiftRight(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.value, count)) }
+    public func bitwiseAnd(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_and(self.raw, other.raw)) }
+    public func bitwiseOr(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_or(self.raw, other.raw)) }
+    public func bitwiseXor(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_xor(self.raw, other.raw)) }
+    public func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.raw)) }
+    public func shiftLeft(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_shl(self.raw, count)) }
+    public func shiftRight(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.raw, count)) }
 }
 
 // UInt - platform-sized unsigned integer (alias to UInt64 on 64-bit platforms)

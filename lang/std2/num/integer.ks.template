@@ -30,14 +30,12 @@ public struct {{TYPE_NAME}}:
     RightShift,
     ExpressibleByIntLiteral,
     FFISafe,
-{{CONVERTIBLE_CONFORMANCES}}{
-    private var value: lang.{{LANG_TYPE}}
-
-    public var raw: lang.{{LANG_TYPE}} { self.value }
+    {{CONVERTIBLE_CONFORMANCES}}{
+    public var raw: lang.{{LANG_TYPE}}
 
     public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 0) }
     public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 1) }
-    public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MIN_VALUE}}) }
+    public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: lang.i64_neg({{MIN_VALUE_ABS}})) }
     public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MAX_VALUE}}) }
     // public static var bitWidth: Int { {{BITS}} }
 
@@ -46,17 +44,17 @@ public struct {{TYPE_NAME}}:
     }
 
     init(raw value: lang.{{LANG_TYPE}}) {
-        self.value = value
+        self.raw = value
     }
 
 {{CONVERTIBLE_INITS}}
     public func equals(other: {{TYPE_NAME}}) -> Bool {
-        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.value, other.value))
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
     }
 
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
-        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.value, other.value)) { .Less }
-        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}gt(self.value, other.value)) { .Greater }
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -77,18 +75,18 @@ public struct {{TYPE_NAME}}:
     type LeftShift.Output = {{TYPE_NAME}}
     type RightShift.Output = {{TYPE_NAME}}
 
-    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
-    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }
-    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.value, other.value)) }
-    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.value, other.value)) }
-    public func modulo(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.value, other.value)) }
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.raw, other.raw)) }
+    public func modulo(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.raw, other.raw)) }
     {{NEGATE_METHOD}}
     {{ABS_METHOD}}
-    public func bitwiseAnd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_and(self.value, other.value)) }
-    public func bitwiseOr(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_or(self.value, other.value)) }
-    public func bitwiseXor(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_xor(self.value, other.value)) }
-    public func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.value)) }
-    public func shiftLeft(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.value, {{SHIFT_CAST}})) }
-    public func shiftRight(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.value, {{SHIFT_CAST}})) }
+    public func bitwiseAnd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_and(self.raw, other.raw)) }
+    public func bitwiseOr(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_or(self.raw, other.raw)) }
+    public func bitwiseXor(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_xor(self.raw, other.raw)) }
+    public func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.raw)) }
+    public func shiftLeft(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.raw, {{SHIFT_CAST}})) }
+    public func shiftRight(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.raw, {{SHIFT_CAST}})) }
 }
 {{TYPE_ALIAS}}

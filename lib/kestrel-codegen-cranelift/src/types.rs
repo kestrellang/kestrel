@@ -27,7 +27,20 @@ fn resolve_projection(ctx: &MirContext, ty: Id<Ty>) -> Result<Id<Ty>, String> {
 ///
 /// IMPORTANT: If you call this with a type that might be an `AssociatedTypeProjection`,
 /// you should call `resolve_projection` first, or use `translate_type_with_subst` instead.
-pub fn translate_type(ctx: &MirContext, ty: Id<Ty>, target: &TargetConfig) -> CraneliftType {
+pub fn translate_type(
+    ctx: &MirContext,
+    ty: Id<Ty>,
+    target: &TargetConfig,
+) -> CraneliftType {
+    translate_type_ext(ctx, ty, target, false)
+}
+
+pub fn translate_type_ext(
+    ctx: &MirContext,
+    ty: Id<Ty>,
+    target: &TargetConfig,
+    is_extern: bool,
+) -> CraneliftType {
     let ptr_type = if target.is_64bit() {
         cl_types::I64
     } else {
@@ -37,7 +50,14 @@ pub fn translate_type(ctx: &MirContext, ty: Id<Ty>, target: &TargetConfig) -> Cr
     // Try to resolve any associated type projections before translation
     let ty = resolve_projection(ctx, ty).expect("failed to resolve projection in translate_type");
 
+    if is_extern {
+        if let Some(inner) = get_wrapper_primitive(ctx, ty) {
+            return translate_type_ext(ctx, inner, target, is_extern);
+        }
+    }
+
     match ctx.ty(ty) {
+        // ...
         // Primitives
         MirTy::I8 => cl_types::I8,
         MirTy::I16 => cl_types::I16,
@@ -80,8 +100,18 @@ pub fn translate_type(ctx: &MirContext, ty: Id<Ty>, target: &TargetConfig) -> Cr
 
 /// Check if a type should be passed by value (fits in a register).
 pub fn is_pass_by_value(ctx: &MirContext, ty: Id<Ty>) -> bool {
+    is_pass_by_value_ext(ctx, ty, false)
+}
+
+pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bool {
     // Resolve any associated type projections first
     let ty = resolve_projection(ctx, ty).expect("failed to resolve projection in is_pass_by_value");
+
+    if is_extern {
+        if let Some(inner) = get_wrapper_primitive(ctx, ty) {
+            return is_pass_by_value_ext(ctx, inner, is_extern);
+        }
+    }
 
     matches!(
         ctx.ty(ty),
@@ -99,6 +129,19 @@ pub fn is_pass_by_value(ctx: &MirContext, ty: Id<Ty>) -> bool {
             | MirTy::RefMut(_)
             | MirTy::FuncThin { .. }
     )
+}
+
+fn get_wrapper_primitive(ctx: &MirContext, ty: Id<Ty>) -> Option<Id<Ty>> {
+    if let MirTy::Named { name, .. } = ctx.ty(ty) {
+        if let Some((_, struct_def)) = ctx.structs.iter().find(|(_, s)| s.name == *name) {
+            if struct_def.fields.len() == 1 {
+                let field_id = struct_def.fields[0];
+                let field_def = &ctx.fields[field_id];
+                return Some(field_def.ty);
+            }
+        }
+    }
+    None
 }
 
 /// Translate a MIR type to a Cranelift type, applying substitution for type params.

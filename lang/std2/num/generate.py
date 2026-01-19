@@ -67,7 +67,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     for other_name, other_bits in other_types:
         conformances.append(f"    Convertible[{other_name}]")
         cast_expr = get_cast(other_bits, bits)
-        inits.append(f"    public init(from other: {other_name}) {{ self.value = {cast_expr} }}")
+        inits.append(f"    public init(from other: {other_name}) {{ self.raw = {cast_expr} }}")
 
     # Join with comma+newline, no trailing comma
     convertible_conformances = ",\n".join(conformances) + "\n" if conformances else ""
@@ -75,15 +75,17 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
 
     if signed:
         min_val, max_val = SIGNED_RANGES[bits]
+        min_val_abs = abs(min_val)
         signedness = "signed"
         signedness_protocol = "SignedInteger"
         signed_prefix = "signed_"
         negatable = "Negatable,"
         negatable_output = f"type Negatable.Output = {type_name}"
-        negate_method = f"public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.value)) }}"
-        abs_method = f"public func abs() -> {type_name} {{ if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.value, 0)) {{ self.negate() }} else {{ self }} }}"
+        negate_method = f"public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"
+        abs_method = f"public func abs() -> {type_name} {{ if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ self.negate() }} else {{ self }} }}"
     else:
         min_val = 0
+        min_val_abs = 0
         max_val = UNSIGNED_MAX[bits]
         signedness = "unsigned"
         signedness_protocol = "UnsignedInteger"
@@ -95,9 +97,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
 
     # Int literal init - need to cast from i64 for smaller types
     if bits == 64:
-        int_literal_init = "self.value = value"
+        int_literal_init = "self.raw = value"
     else:
-        int_literal_init = f"self.value = lang.cast_i64_i{bits}(value)"
+        int_literal_init = f"self.raw = lang.cast_i64_i{bits}(value)"
 
     # Shift cast - need to cast count from i64 for smaller types
     if bits == 64:
@@ -121,6 +123,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{SIGNEDNESS_PROTOCOL}}", signedness_protocol)
     result = result.replace("{{LANG_TYPE}}", lang_type)
     result = result.replace("{{MIN_VALUE}}", str(min_val))
+    result = result.replace("{{MIN_VALUE_ABS}}", str(min_val_abs))
     result = result.replace("{{MAX_VALUE}}", str(max_val))
     result = result.replace("{{SIGNED_PREFIX}}", signed_prefix)
     result = result.replace("{{NEGATABLE}}", negatable)
@@ -143,10 +146,10 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
 
     # Float literal init - need to cast from f64 for f32
     if bits == 64:
-        float_literal_init = "self.value = value"
+        float_literal_init = "self.raw = value"
         zero_literal = "0.0"
     else:
-        float_literal_init = f"self.value = lang.cast_f64_f{bits}(value)"
+        float_literal_init = f"self.raw = lang.cast_f64_f{bits}(value)"
         zero_literal = "0.0"  # Will be cast by the literal protocol
 
     # Type alias for platform default

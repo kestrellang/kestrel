@@ -22,9 +22,7 @@ public struct Float64:
     ExpressibleByIntLiteral,
     FFISafe
 {
-    private var value: lang.f64
-
-    public var raw: lang.f64 { self.value }
+    public var raw: lang.f64
 
     public static var zero: Float64 { Float64(floatLiteral: 0.0) }
     public static var one: Float64 { Float64(floatLiteral: 1.0) }
@@ -38,23 +36,23 @@ public struct Float64:
     public static var tau: Float64 { Float64(floatLiteral: 6.283185307179586) }
 
     public init(floatLiteral value: lang.f64) {
-        self.value = value
+        self.raw = value
     }
 
     public init(intLiteral value: lang.i64) {
-        self.value = lang.cast_i64_f64(value)
+        self.raw = lang.cast_i64_f64(value)
     }
 
     init(raw value: lang.f64) {
-        self.value = value
+        self.raw = value
     }
 
     public func isNaN() -> Bool {
-        Bool(boolLiteral: lang.f64_is_nan(self.value))
+        Bool(boolLiteral: lang.f64_is_nan(self.raw))
     }
 
     public func isInfinite() -> Bool {
-        Bool(boolLiteral: lang.f64_is_infinite(self.value))
+        Bool(boolLiteral: lang.f64_is_infinite(self.raw))
     }
 
     public func isFinite() -> Bool {
@@ -62,12 +60,12 @@ public struct Float64:
     }
 
     public func equals(other: Float64) -> Bool {
-        Bool(boolLiteral: lang.f64_eq(self.value, other.value))
+        Bool(boolLiteral: lang.f64_eq(self.raw, other.raw))
     }
 
     public func compare(other: Float64) -> Ordering {
-        if Bool(boolLiteral: lang.f64_lt(self.value, other.value)) { .Less }
-        else if Bool(boolLiteral: lang.f64_gt(self.value, other.value)) { .Greater }
+        if Bool(boolLiteral: lang.f64_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.f64_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -78,21 +76,21 @@ public struct Float64:
     type Divisible.Output = Float64
     type Negatable.Output = Float64
 
-    public func add(other: Float64) -> Float64 { Float64(raw: lang.f64_add(self.value, other.value)) }
-    public func subtract(other: Float64) -> Float64 { Float64(raw: lang.f64_sub(self.value, other.value)) }
-    public func multiply(other: Float64) -> Float64 { Float64(raw: lang.f64_mul(self.value, other.value)) }
-    public func divide(other: Float64) -> Float64 { Float64(raw: lang.f64_div(self.value, other.value)) }
-    public func negate() -> Float64 { Float64(raw: lang.f64_neg(self.value)) }
+    public func add(other: Float64) -> Float64 { Float64(raw: lang.f64_add(self.raw, other.raw)) }
+    public func subtract(other: Float64) -> Float64 { Float64(raw: lang.f64_sub(self.raw, other.raw)) }
+    public func multiply(other: Float64) -> Float64 { Float64(raw: lang.f64_mul(self.raw, other.raw)) }
+    public func divide(other: Float64) -> Float64 { Float64(raw: lang.f64_div(self.raw, other.raw)) }
+    public func negate() -> Float64 { Float64(raw: lang.f64_neg(self.raw)) }
 
     public func abs() -> Float64 {
-        if lang.f64_lt(self.value, 0.0) { self.negate() } else { self }
+        if Bool(boolLiteral: lang.f64_lt(self.raw, 0.0)) { self.negate() } else { self }
     }
 
-    public func floor() -> Float64 { Float64(raw: lang.f64_floor(self.value)) }
-    public func ceil() -> Float64 { Float64(raw: lang.f64_ceil(self.value)) }
-    public func round() -> Float64 { Float64(raw: lang.f64_round(self.value)) }
-    public func trunc() -> Float64 { Float64(raw: lang.f64_trunc(self.value)) }
-    public func sqrt() -> Float64 { Float64(raw: lang.f64_sqrt(self.value)) }
+    public func floor() -> Float64 { Float64(raw: lang.f64_floor(self.raw)) }
+    public func ceil() -> Float64 { Float64(raw: lang.f64_ceil(self.raw)) }
+    public func round() -> Float64 { Float64(raw: lang.f64_round(self.raw)) }
+    public func trunc() -> Float64 { Float64(raw: lang.f64_trunc(self.raw)) }
+    public func sqrt() -> Float64 { Float64(raw: lang.f64_sqrt(self.raw)) }
 }
 
 // Float - alias to Float64

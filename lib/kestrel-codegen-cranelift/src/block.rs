@@ -20,6 +20,7 @@ pub fn compile_block(
     func_def: &FunctionDef,
     subst: &Substitution,
     block_id: Id<Block>,
+    next_block_id: Option<Id<Block>>,
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
@@ -47,13 +48,20 @@ pub fn compile_block(
             is_main,
             sret_ptr,
         )?;
+    } else if let Some(next_block) = next_block_id {
+        // Fall through to the next block in the list
+        let target_cl = block_map
+            .get(&next_block)
+            .ok_or_else(|| CodegenError::Unsupported("unknown fall-through target".to_string()))?;
+        builder.ins().jump(*target_cl, &[]);
     } else {
-        // Block has no terminator - this is dead code (unreachable)
-        // Emit a trap to satisfy Cranelift's requirement that all blocks have terminators
-        builder
-            .ins()
-            .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
-    }
+        // Last block in the function has no terminator - this is dead code (unreachable)
+                    // or an implicit return that was missed.
+                    // Emit a trap to satisfy Cranelift's requirement that all blocks have terminators.
+                    builder
+                        .ins()
+                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(4));
+                }
 
     Ok(())
 }

@@ -41,35 +41,39 @@ struct Pong {
     var paddle2Y: Int64
     var scores: Dictionary[Player, Int64]
 
-    // Constants as computed properties
-    var width: Int64 { 60 }
-    var height: Int64 { 20 }
-    var paddleSize: Int64 { 4 }
+    var width: Int64 { Int64(intLiteral: 60) }
+    var height: Int64 { Int64(intLiteral: 20) }
+    var paddleSize: Int64 { Int64(intLiteral: 4) }
 
     init() {
-        self.ballX = 30;
-        self.ballY = 10;
-        self.ballDX = 1;
-        self.ballDY = 1;
-        self.paddle1Y = 8;
-        self.paddle2Y = 8;
+        println("Pong.init start");
+        self.ballX = Int64(intLiteral: 30);
+        self.ballY = Int64(intLiteral: 10);
+        self.ballDX = Int64(intLiteral: 1);
+        self.ballDY = Int64(intLiteral: 1);
+        self.paddle1Y = Int64(intLiteral: 8);
+        self.paddle2Y = Int64(intLiteral: 8);
 
         // Using Dictionary from std.collections
-        self.scores = Dictionary[Player, Int64]();
-        self.scores.insert(.player1, 0);
-        self.scores.insert(.player2, 0);
+        println("Scores dict init");
+        self.scores = Dictionary[Player, Int64](placeholderKey: .player1, placeholderValue: Int64(intLiteral: 0));
+        println("Inserting player1 score");
+        self.scores.insert(.player1, Int64(intLiteral: 0));
+        println("Inserting player2 score");
+        self.scores.insert(.player2, Int64(intLiteral: 0));
+        println("Pong.init end");
     }
 
     func getScore(player player: Player) -> Int64 {
         match self.scores.getValue(player) {
             .Some(s) => s,
-            .None => 0
+            .None => Int64(intLiteral: 0)
         }
     }
 
     mutating func addScore(player player: Player) {
         let current = self.getScore(player: player);
-        self.scores.insert(player, current + 1);
+        self.scores.insert(player, current + Int64(intLiteral: 1));
     }
 
     mutating func update() {
@@ -127,9 +131,9 @@ struct Pong {
     }
 
     mutating func resetBall() {
-        self.ballX = self.width / 2;
-        self.ballY = self.height / 2;
-        self.ballDX = 0 - self.ballDX;
+        self.ballX = self.width / Int64(intLiteral: 2);
+        self.ballY = self.height / Int64(intLiteral: 2);
+        self.ballDX = Int64(intLiteral: 0) - self.ballDX;
     }
 
     func render() -> Result[(), Error] {
@@ -138,32 +142,32 @@ struct Pong {
 
         // Top border
         var topBorder = "+";
-        var i: Int64 = 0;
+        var i: Int64 = Int64(intLiteral: 0);
         while i < self.width {
             topBorder = topBorder + "-";
-            i = i + 1;
+            i = i + Int64(intLiteral: 1);
         }
         /* try */ println( topBorder + "+");
 
         // Game field
-        var y: Int64 = 0;
+        var y: Int64 = Int64(intLiteral: 0);
         while y < self.height {
             var line = "|";
-            var x: Int64 = 0;
+            var x: Int64 = Int64(intLiteral: 0);
             while x < self.width {
                 if x == self.ballX and y == self.ballY {
                     line = line + "O"; // Ball
-                } else if x == 0 and y >= self.paddle1Y and y < self.paddle1Y + self.paddleSize {
+                } else if x == Int64(intLiteral: 0) and y >= self.paddle1Y and y < self.paddle1Y + self.paddleSize {
                     line = line + "#"; // Paddle 1
-                } else if x == self.width - 1 and y >= self.paddle2Y and y < self.paddle2Y + self.paddleSize {
+                } else if x == self.width - Int64(intLiteral: 1) and y >= self.paddle2Y and y < self.paddle2Y + self.paddleSize {
                     line = line + "#"; // Paddle 2
                 } else {
                     line = line + " ";
                 }
-                x = x + 1;
+                x = x + Int64(intLiteral: 1);
             }
             /* try */ println( line + "|");
-            y = y + 1;
+            y = y + Int64(intLiteral: 1);
         }
 
         /* try */ println( topBorder + "+");
@@ -223,6 +227,7 @@ func intToString(n: Int64) -> String {
 func usleep(usec: UInt32) -> Int32
 
 func main() -> Result[(), Error] {
+    println("Main start");
     // ANSI: Hide cursor and clear screen
     /* try */ print( "\x1b[?25l");
     /* try */ print( "\x1b[2J");
@@ -230,12 +235,12 @@ func main() -> Result[(), Error] {
     var game = Pong();
 
     // Run for a fixed number of frames for this demo
-    var frames: Int64 = 0;
-    while frames < 500 {
+    var frames: Int64 = Int64(intLiteral: 0);
+    while frames < Int64(intLiteral: 5) {
         game.update();
         /* try */ game.render();
-        usleep(33333); // ~30 FPS
-        frames = frames + 1;
+        usleep(UInt32(intLiteral: 33333)); // ~30 FPS
+        frames = frames + Int64(intLiteral: 1);
     }
 
     // ANSI: Show cursor again

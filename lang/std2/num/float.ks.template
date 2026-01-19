@@ -22,9 +22,7 @@ public struct {{TYPE_NAME}}:
     ExpressibleByIntLiteral,
     FFISafe
 {
-    private var value: lang.{{LANG_TYPE}}
-
-    public var raw: lang.{{LANG_TYPE}} { self.value }
+    public var raw: lang.{{LANG_TYPE}}
 
     public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.0) }
     public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.0) }
@@ -42,19 +40,19 @@ public struct {{TYPE_NAME}}:
     }
 
     public init(intLiteral value: lang.i64) {
-        self.value = lang.cast_i64_{{LANG_TYPE}}(value)
+        self.raw = lang.cast_i64_{{LANG_TYPE}}(value)
     }
 
     init(raw value: lang.{{LANG_TYPE}}) {
-        self.value = value
+        self.raw = value
     }
 
     public func isNaN() -> Bool {
-        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_nan(self.value))
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_nan(self.raw))
     }
 
     public func isInfinite() -> Bool {
-        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_infinite(self.value))
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_infinite(self.raw))
     }
 
     public func isFinite() -> Bool {
@@ -62,12 +60,12 @@ public struct {{TYPE_NAME}}:
     }
 
     public func equals(other: {{TYPE_NAME}}) -> Bool {
-        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.value, other.value))
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
     }
 
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
-        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.value, other.value)) { .Less }
-        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.value, other.value)) { .Greater }
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -78,20 +76,20 @@ public struct {{TYPE_NAME}}:
     type Divisible.Output = {{TYPE_NAME}}
     type Negatable.Output = {{TYPE_NAME}}
 
-    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.value, other.value)) }
-    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.value, other.value)) }
-    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.value, other.value)) }
-    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.value, other.value)) }
-    public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.value)) }
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.raw, other.raw)) }
+    public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw)) }
 
     public func abs() -> {{TYPE_NAME}} {
-        if lang.{{LANG_TYPE}}_lt(self.value, {{ZERO_LITERAL}}) { self.negate() } else { self }
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, {{ZERO_LITERAL}})) { self.negate() } else { self }
     }
 
-    public func floor() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_floor(self.value)) }
-    public func ceil() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_ceil(self.value)) }
-    public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.value)) }
-    public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.value)) }
-    public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.value)) }
+    public func floor() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_floor(self.raw)) }
+    public func ceil() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_ceil(self.raw)) }
+    public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.raw)) }
+    public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.raw)) }
+    public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.raw)) }
 }
 {{TYPE_ALIAS}}

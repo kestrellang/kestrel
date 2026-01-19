@@ -4,7 +4,7 @@ use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::{Substitution, build_substitution, resolve_witness};
 use crate::place::compile_place_read;
-use crate::types::translate_type;
+use crate::types::{translate_type, translate_type_ext};
 
 use kestrel_codegen::{Layout, mangle_name};
 use kestrel_execution_graph::{
@@ -89,13 +89,17 @@ fn ref_arg_should_pass_direct(
     subst: &Substitution,
     ty_opt: Option<Id<Ty>>,
 ) -> bool {
+    // In strict pass-by-ref ABI, almost nothing should be passed direct.
+    // We only pass Ref types themselves direct because they are already pointers.
+    // Everything else (including primitives like i64 and pointers like p[T]) 
+    // must be passed by address if the parameter is a reference.
     let Some(ty) = ty_opt else {
         return false;
     };
     let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
     match ctx.mir.ty(concrete_ty) {
-        MirTy::Ref(_) | MirTy::RefMut(_) | MirTy::Pointer(_) => true,
-        _ => is_aggregate_value_type(ctx.mir, concrete_ty),
+        MirTy::Ref(_) | MirTy::RefMut(_) => true,
+        _ => false,
     }
 }
 
@@ -158,11 +162,19 @@ pub fn compile_rvalue(
         Rvalue::BinaryOp { op, lhs, rhs } => {
             let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
             let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            let (_, lhs_ty_opt) = get_value_layout(ctx, lhs, local_map)?;
+            let (_, rhs_ty_opt) = get_value_layout(ctx, rhs, local_map)?;
+
+            let lhs_val = ensure_primitive_value(ctx, subst, lhs_val, lhs_ty_opt, builder)?;
+            let rhs_val = ensure_primitive_value(ctx, subst, rhs_val, rhs_ty_opt, builder)?;
+
             compile_binop(ctx, *op, lhs_val, rhs_val, builder)
         }
 
         Rvalue::UnaryOp { op, operand } => {
             let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+            let (_, ty_opt) = get_value_layout(ctx, operand, local_map)?;
+            let operand_val = ensure_primitive_value(ctx, subst, operand_val, ty_opt, builder)?;
             compile_unop(ctx, *op, operand_val, builder)
         }
 
@@ -746,12 +758,87 @@ fn get_value_layout(
             Ok((layout, Some(ty)))
         }
         Value::Immediate(imm) => {
-            let layout = get_immediate_layout(ctx, imm)?;
-            Ok((layout, None))
+            let layout = get_immediate_layout_readonly(ctx, imm)?;
+            let mir_ty = match &imm.kind {
+                ImmediateKind::IntLiteral { bits, .. } => match bits {
+                    IntBits::I8 => MirTy::I8,
+                    IntBits::I16 => MirTy::I16,
+                    IntBits::I32 => MirTy::I32,
+                    IntBits::I64 => MirTy::I64,
+                },
+                ImmediateKind::FloatLiteral { bits, .. } => match bits {
+                    FloatBits::F16 => MirTy::F16,
+                    FloatBits::F32 => MirTy::F32,
+                    FloatBits::F64 => MirTy::F64,
+                },
+                ImmediateKind::BoolLiteral(_) => MirTy::Bool,
+                ImmediateKind::Unit => MirTy::Unit,
+                ImmediateKind::StringLiteral(_) => MirTy::Str,
+                ImmediateKind::StringPointer(_) => MirTy::Pointer(ctx.mir.lookup_type(&MirTy::I8).unwrap()),
+                ImmediateKind::FunctionRef { name, type_args } => MirTy::Named {
+                    name: *name,
+                    type_args: type_args.clone(),
+                },
+                ImmediateKind::WitnessMethod { .. } => MirTy::Unit,
+                ImmediateKind::NullPtr(ty) => MirTy::Pointer(*ty),
+                ImmediateKind::Error => MirTy::Error,
+            };
+            let ty = ctx.mir.lookup_type(&mir_ty);
+            Ok((layout, ty))
         }
         Value::Unreachable => Err(CodegenError::Unsupported(
             "cannot get layout of unreachable value".into(),
         )),
+    }
+}
+
+fn get_immediate_layout_readonly(
+    ctx: &mut CodegenContext<'_>,
+    imm: &Immediate,
+) -> Result<kestrel_codegen::Layout, CodegenError> {
+    use kestrel_codegen::Layout;
+
+    match &imm.kind {
+        ImmediateKind::IntLiteral { bits, .. } => {
+            let layout = match bits {
+                IntBits::I8 => Layout::new(1, 1),
+                IntBits::I16 => Layout::new(2, 2),
+                IntBits::I32 => Layout::new(4, 4),
+                IntBits::I64 => Layout::new(8, 8),
+            };
+            Ok(layout)
+        }
+        ImmediateKind::FloatLiteral { bits, .. } => {
+            let layout = match bits {
+                FloatBits::F16 => Layout::new(2, 2),
+                FloatBits::F32 => Layout::new(4, 4),
+                FloatBits::F64 => Layout::new(8, 8),
+            };
+            Ok(layout)
+        }
+        ImmediateKind::BoolLiteral(_) => Ok(Layout::new(1, 1)),
+        ImmediateKind::Unit => Ok(Layout::new(0, 1)),
+        ImmediateKind::StringLiteral(_) => {
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+            Ok(Layout::new(ptr_size * 2, ptr_size))
+        }
+        ImmediateKind::StringPointer(_) => {
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+            Ok(Layout::new(ptr_size, ptr_size))
+        }
+        ImmediateKind::FunctionRef { .. } => {
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+            Ok(Layout::new(ptr_size, ptr_size))
+        }
+        ImmediateKind::WitnessMethod { .. } => {
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+            Ok(Layout::new(ptr_size, ptr_size))
+        }
+        ImmediateKind::NullPtr(_) => {
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
+            Ok(Layout::new(ptr_size, ptr_size))
+        }
+        ImmediateKind::Error => Ok(Layout::new(0, 1)),
     }
 }
 
@@ -1286,6 +1373,51 @@ fn get_struct_field_by_index(
     Ok((offset, field_ty))
 }
 
+fn ensure_primitive_value(
+    ctx: &mut CodegenContext<'_>,
+    subst: &Substitution,
+    val: CraneliftValue,
+    ty_opt: Option<Id<Ty>>,
+    builder: &mut FunctionBuilder<'_>,
+) -> Result<CraneliftValue, CodegenError> {
+    let Some(ty) = ty_opt else {
+        return Ok(val);
+    };
+    let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+    if is_aggregate_value_type(ctx.mir, concrete_ty) {
+        // It's an aggregate wrapper, load the primitive value
+        if let Ok((field_offset, field_ty)) = get_field_info(ctx, concrete_ty, "value") {
+            let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
+            Ok(builder
+                .ins()
+                .load(cl_field_ty, MemFlags::new(), val, field_offset as i32))
+        } else if let MirTy::Named { name, .. } = ctx.mir.ty(concrete_ty) {
+            if let Some((_, struct_def)) = ctx.mir.structs.iter().find(|(_, s)| s.name == *name) {
+                if struct_def.fields.len() == 1 {
+                    let field_id = struct_def.fields[0];
+                    let field_def = &ctx.mir.fields[field_id];
+                    if let Ok((field_offset, field_ty)) =
+                        get_field_info(ctx, concrete_ty, &field_def.name)
+                    {
+                        let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
+                        return Ok(builder.ins().load(
+                            cl_field_ty,
+                            MemFlags::new(),
+                            val,
+                            field_offset as i32,
+                        ));
+                    }
+                }
+            }
+            Ok(val)
+        } else {
+            Ok(val)
+        }
+    } else {
+        Ok(val)
+    }
+}
+
 /// Compile a pointer offset operation.
 fn compile_ptr_offset(
     ctx: &mut CodegenContext<'_>,
@@ -1297,31 +1429,18 @@ fn compile_ptr_offset(
     local_map: &HashMap<Id<Local>, Variable>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-    let mut offset_val = compile_value(ctx, func_def, subst, offset, builder, local_map)?;
-    if let Value::Place(place) = offset {
-        if let Ok(offset_ty) = get_place_type(ctx, place, local_map) {
-            let concrete_offset_ty = subst.apply_ty_readonly(ctx.mir, offset_ty).unwrap_or(offset_ty);
-            if is_aggregate_value_type(ctx.mir, concrete_offset_ty) {
-                if let Ok((field_offset, field_ty)) =
-                    get_field_info(ctx, concrete_offset_ty, "value")
-                {
-                    let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
-                    let raw = builder
-                        .ins()
-                        .load(cl_field_ty, MemFlags::new(), offset_val, field_offset as i32);
-                    let ptr_ty = builder.func.dfg.value_type(ptr_val);
-                    if cl_field_ty != ptr_ty {
-                        offset_val = builder.ins().sextend(ptr_ty, raw);
-                    } else {
-                        offset_val = raw;
-                    }
-                }
-            }
-        }
+    let offset_val = compile_value(ctx, func_def, subst, offset, builder, local_map)?;
+    let (_, offset_ty_opt) = get_value_layout(ctx, offset, local_map)?;
+
+    let mut offset_val = ensure_primitive_value(ctx, subst, offset_val, offset_ty_opt, builder)?;
+
+    let ptr_ty = builder.func.dfg.value_type(ptr_val);
+    let offset_cl_ty = builder.func.dfg.value_type(offset_val);
+
+    if offset_cl_ty != ptr_ty {
+        offset_val = builder.ins().sextend(ptr_ty, offset_val);
     }
 
-    // For now, assume offset is in bytes
-    // TODO: If we need ptr + n * sizeof(pointee), we'd need the pointee type
     Ok(builder.ins().iadd(ptr_val, offset_val))
 }
 
@@ -1889,15 +2008,38 @@ pub fn compile_call(
                 match arg.mode {
                     PassingMode::Copy | PassingMode::Move => {
                         // Pass value directly
-                        let val =
+                        let mut val =
                             compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+
+                        if is_extern {
+                            let (_, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
+                            val = ensure_primitive_value(ctx, subst, val, ty_opt, builder)?;
+                        }
+
                         arg_values.push(val);
                     }
                     PassingMode::Ref | PassingMode::MutRef => {
                         let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
                         let val =
                             compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                        if is_extern || ref_arg_should_pass_direct(ctx, subst, ty_opt) {
+
+                        // Decide whether to pass the value directly (in register) or by address
+                        let pass_direct = ref_arg_should_pass_direct(ctx, subst, ty_opt);
+
+                        if pass_direct {
+                            arg_values.push(val);
+                            continue;
+                        }
+
+                        let dest_is_aggregate = if let Some(ty) = ty_opt {
+                            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+                            is_aggregate_value_type(ctx.mir, concrete_ty)
+                        } else {
+                            false
+                        };
+
+                        if dest_is_aggregate {
+                            // Aggregates are already passed by address; preserve reference semantics.
                             arg_values.push(val);
                             continue;
                         }
@@ -1920,7 +2062,7 @@ pub fn compile_call(
                         // Get address of slot
                         let addr = builder.ins().stack_addr(ptr_type, slot, 0);
 
-                        // Store value in slot
+                        // Destination is a primitive, just store the value
                         builder.ins().store(MemFlags::new(), val, addr, 0);
 
                         // Pass the address
@@ -2073,7 +2215,24 @@ pub fn compile_call(
                         let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
                         let val =
                             compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                        if is_extern || ref_arg_should_pass_direct(ctx, subst, ty_opt) {
+
+                        // Decide whether to pass the value directly (in register) or by address
+                        let pass_direct = ref_arg_should_pass_direct(ctx, subst, ty_opt);
+
+                        if pass_direct {
+                            arg_values.push(val);
+                            continue;
+                        }
+
+                        let dest_is_aggregate = if let Some(ty) = ty_opt {
+                            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+                            is_aggregate_value_type(ctx.mir, concrete_ty)
+                        } else {
+                            false
+                        };
+
+                        if dest_is_aggregate {
+                            // Aggregates are already passed by address; preserve reference semantics.
                             arg_values.push(val);
                             continue;
                         }
@@ -2095,7 +2254,7 @@ pub fn compile_call(
                         // Get address of slot
                         let addr = builder.ins().stack_addr(ptr_type, slot, 0);
 
-                        // Store value in slot
+                        // Destination is a primitive, just store the value
                         builder.ins().store(MemFlags::new(), val, addr, 0);
 
                         // Pass the address
@@ -2467,14 +2626,14 @@ fn build_signature_from_func_type(
 
     // Add parameters
     for param_ty in &params {
-        let cl_type = translate_type(ctx.mir, *param_ty, ctx.target);
+        let cl_type = translate_type_ext(ctx.mir, *param_ty, ctx.target, false); // TODO: check if extern
         sig.params.push(AbiParam::new(cl_type));
     }
 
     // Add return type if not unit
     let ret_mir_ty = ctx.mir.ty(ret);
     if !matches!(ret_mir_ty, MirTy::Unit) && !needs_sret {
-        let cl_type = translate_type(ctx.mir, ret, ctx.target);
+        let cl_type = translate_type_ext(ctx.mir, ret, ctx.target, false); // TODO: check if extern
         sig.returns.push(AbiParam::new(cl_type));
     }
 
@@ -2846,6 +3005,19 @@ fn compile_thin_call(
                     continue;
                 }
 
+                let dest_is_aggregate = if let Some(ty) = ty_opt {
+                    let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+                    is_aggregate_value_type(ctx.mir, concrete_ty)
+                } else {
+                    false
+                };
+
+                if dest_is_aggregate {
+                    // Aggregates are already passed by address; preserve reference semantics.
+                    arg_values.push(val);
+                    continue;
+                }
+
                 // Create stack slot for the value
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
@@ -3107,6 +3279,19 @@ fn compile_thick_call(
                             continue;
                         }
 
+                        let dest_is_aggregate = if let Some(ty) = ty_opt {
+                            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+                            is_aggregate_value_type(ctx.mir, concrete_ty)
+                        } else {
+                            false
+                        };
+
+                        if dest_is_aggregate {
+                            // Aggregates are already passed by address; preserve reference semantics.
+                            arg_values.push(val);
+                            continue;
+                        }
+
                         // Create stack slot for the value
                         let slot = builder.create_sized_stack_slot(StackSlotData::new(
                             StackSlotKind::ExplicitSlot,
@@ -3124,7 +3309,7 @@ fn compile_thick_call(
                         // Get address of slot
                         let addr = builder.ins().stack_addr(ptr_type, slot, 0);
 
-                        // Store value in slot
+                        // Destination is a primitive, just store the value
                         builder.ins().store(MemFlags::new(), val, addr, 0);
 
                         // Pass the address
