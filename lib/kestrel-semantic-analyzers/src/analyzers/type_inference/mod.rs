@@ -40,7 +40,15 @@ fn get_concrete_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<T
         KestrelSymbolKind::Extension => parent
             .metadata()
             .get_behavior::<ExtensionTargetBehavior>()
-            .map(|b| b.target_type().clone()),
+            .and_then(|b| {
+                // Protocol extensions keep Self abstract (like direct protocol methods)
+                // This allows constraint method resolution to work correctly
+                if b.is_protocol_extension() {
+                    None
+                } else {
+                    Some(b.target_type().clone())
+                }
+            }),
 
         KestrelSymbolKind::Struct => {
             // Downcast Arc<dyn Symbol> to Arc<StructSymbol>

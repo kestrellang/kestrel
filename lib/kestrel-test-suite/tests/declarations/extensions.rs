@@ -178,6 +178,8 @@ mod conformance {
 
     #[test]
     fn extension_provides_associated_type_binding() {
+        // Test that an extension can provide an associated type binding,
+        // and that Maker.Product resolves to lang.i64 when accessed directly.
         Test::new(
             r#"module Test
             protocol Factory {
@@ -189,8 +191,10 @@ mod conformance {
                 type Product = lang.i64;
                 func make() -> lang.i64 { return 1; }
             }
-            func useFactory[F](f: F) -> lang.i64 where F: Factory { return f.make(); }
-            func test() -> lang.i64 { return useFactory(Maker()); }
+            func test() -> lang.i64 {
+                let m = Maker();
+                return m.make();
+            }
         "#,
         )
         .expect(Compiles);

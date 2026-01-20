@@ -66,9 +66,9 @@ struct Pong {
         // Frame counter
         self.frameCount = 0;
 
-        // Scores (testing with non-zero values)
-        self.score1 = 42;
-        self.score2 = 7;
+        // Scores
+        self.score1 = 0;
+        self.score2 = 0;
     }
 
     // Convenience init with defaults

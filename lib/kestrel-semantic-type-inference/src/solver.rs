@@ -744,9 +744,15 @@ fn unify(
         | (TyKind::Protocol { .. }, TyKind::SelfType) => Ok(SolveResult::Solved),
 
         // Struct to Protocol - check conformance
-        (TyKind::Struct { .. }, TyKind::Protocol { symbol, .. }) => {
+        (TyKind::Struct { substitutions, .. }, TyKind::Protocol { symbol, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if struct has unresolved inference placeholders in substitutions
+            // (conformance check needs fully resolved types to match extensions)
+            if substitutions.iter().any(|(_, ty)| matches!(ty.kind(), TyKind::Infer)) {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_a, protocol_id) {
@@ -759,9 +765,14 @@ fn unify(
                 ))
             }
         }
-        (TyKind::Protocol { symbol, .. }, TyKind::Struct { .. }) => {
+        (TyKind::Protocol { symbol, .. }, TyKind::Struct { substitutions, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if struct has unresolved inference placeholders in substitutions
+            if substitutions.iter().any(|(_, ty)| matches!(ty.kind(), TyKind::Infer)) {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_b, protocol_id) {
@@ -776,9 +787,14 @@ fn unify(
         }
 
         // Enum to Protocol - check conformance
-        (TyKind::Enum { .. }, TyKind::Protocol { symbol, .. }) => {
+        (TyKind::Enum { substitutions, .. }, TyKind::Protocol { symbol, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if enum has unresolved inference placeholders in substitutions
+            if substitutions.iter().any(|(_, ty)| matches!(ty.kind(), TyKind::Infer)) {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_a, protocol_id) {
@@ -791,9 +807,14 @@ fn unify(
                 ))
             }
         }
-        (TyKind::Protocol { symbol, .. }, TyKind::Enum { .. }) => {
+        (TyKind::Protocol { symbol, .. }, TyKind::Enum { substitutions, .. }) => {
             use kestrel_semantic_tree::language::KestrelLanguage;
             use semantic_tree::symbol::Symbol;
+
+            // Defer if enum has unresolved inference placeholders in substitutions
+            if substitutions.iter().any(|(_, ty)| matches!(ty.kind(), TyKind::Infer)) {
+                return Ok(SolveResult::Deferred);
+            }
 
             let protocol_id = Symbol::<KestrelLanguage>::metadata(symbol.as_ref()).id();
             if ctx.oracle().conforms_to(&ty_b, protocol_id) {

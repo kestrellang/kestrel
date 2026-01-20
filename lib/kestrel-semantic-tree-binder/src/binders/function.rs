@@ -644,10 +644,19 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
         }
         KestrelSymbolKind::Extension => {
             // For extension methods, use the target type from ExtensionTargetBehavior
+            // For protocol extensions, use SelfType so constraint methods can be resolved
             parent
                 .metadata()
                 .get_behavior::<ExtensionTargetBehavior>()
-                .map(|b| b.target_type().clone())
+                .map(|b| {
+                    if b.is_protocol_extension() {
+                        // Protocol extensions need SelfType for constraint method resolution
+                        // (e.g., `extend Proto where Self: OtherProto` needs to find OtherProto methods)
+                        Ty::self_type(parent_span.clone())
+                    } else {
+                        b.target_type().clone()
+                    }
+                })
         }
         _ => None,
     }

@@ -1586,6 +1586,12 @@ pub(super) fn filter_applicable_extensions(
         return extensions;
     }
 
+    // Handle SelfType inside protocol extensions - also return all extensions
+    // This allows calling other extension methods from within a protocol extension
+    if matches!(actual_ty.kind(), TyKind::SelfType) {
+        return extensions;
+    }
+
     // Get substitutions from actual type (struct or enum)
     let actual_subs = if let Some((_, subs)) = actual_ty.as_struct_with_subs() {
         subs
@@ -1776,6 +1782,11 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
                             if let Some(target_beh) =
                                 parent.metadata().get_behavior::<ExtensionTargetBehavior>()
                             {
+                                // For protocol extensions, keep SelfType abstract so constraint
+                                // methods can be resolved (e.g., `extend Proto where Self: Other`)
+                                if target_beh.is_protocol_extension() {
+                                    return ty.clone();
+                                }
                                 let target_ty = target_beh.target_type();
                                 // Make sure target type isn't also SelfType (should never happen, but prevent infinite recursion)
                                 if !matches!(target_ty.kind(), TyKind::SelfType) {

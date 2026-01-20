@@ -554,6 +554,32 @@ impl TypeOracle for SemanticModel {
                     }
                 }
 
+                // Check extensions for associated type bindings
+                // (e.g., `extend Maker: Factory { type Product = Int }`)
+                let extensions = self.query(ExtensionsFor {
+                    target_id: symbol.metadata().id(),
+                });
+
+                let applicable_extensions =
+                    filter_applicable_extensions_for_conformance(&extensions, &Some(substitutions.clone()));
+
+                for extension in applicable_extensions {
+                    // Look for a type alias in the extension
+                    for child in extension.metadata().children() {
+                        if child.metadata().kind() == KestrelSymbolKind::TypeAlias
+                            && child.metadata().name().value == assoc_name
+                        {
+                            if let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>() {
+                                if let Some(resolved) = self.query(ResolvedAliasedType {
+                                    type_alias_id: type_alias.metadata().id(),
+                                }) {
+                                    return Some(resolved.apply_substitutions(substitutions));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 None
             }
 
@@ -1130,7 +1156,12 @@ fn is_extension_applicable_for_conformance(
 /// Simple type matching for conformance checking.
 ///
 /// Compares types structurally at the top level.
+/// Expands type aliases before comparing to handle cases like `lang.i64` vs `Int64`.
 fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
+    // Expand type aliases before comparing
+    let a = a.expand_aliases();
+    let b = b.expand_aliases();
+
     match (a.kind(), b.kind()) {
         // Primitives
         (TyKind::Unit, TyKind::Unit) => true,
