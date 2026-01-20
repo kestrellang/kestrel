@@ -1,7 +1,0 @@
-breakpoint set -a 0x100041e24
-run
-register read x1
-memory read -size 4 -count 4 $x1
-stepi
-stepi
-register read w5

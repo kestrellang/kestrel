@@ -1,1 +1,0 @@
-I want to implement default protocol methods. So that would mean a protocol method would have a default implementation, a body. Then it would be passed to any implementor that didnt have an implementation of that. I also want to have extensions for protocols, that can provide a default method for some subset of types. Like if the generics/ associated types conform to something.

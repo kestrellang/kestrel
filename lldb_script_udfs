@@ -1,5 +1,0 @@
-breakpoint set -a 0x1000438f0
-breakpoint set -a 0x100043b44
-run
-bt
-register read
