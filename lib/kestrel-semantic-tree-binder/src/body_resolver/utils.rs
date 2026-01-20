@@ -900,6 +900,10 @@ pub fn type_satisfies_bound(
             false
         }
 
+        // Inference placeholders - optimistically assume they will satisfy bounds
+        // once resolved. Type inference will catch actual violations later.
+        TyKind::Infer => true,
+
         // Other types don't satisfy protocol bounds
         _ => false,
     }
