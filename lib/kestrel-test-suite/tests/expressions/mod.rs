@@ -18,3 +18,4 @@ mod loops;
 mod operators;
 mod paths;
 mod returns;
+mod strings;

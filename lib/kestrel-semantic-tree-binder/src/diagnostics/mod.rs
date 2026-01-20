@@ -16,6 +16,7 @@
 //! - `control_flow` - Break/continue/label errors
 //! - `pattern` - Pattern matching errors
 //! - `move_tracking` - Use-after-move errors for non-copyable types
+//! - `literals` - String escape sequence and literal parsing errors
 
 mod access_mode;
 mod attributes;
@@ -26,6 +27,7 @@ mod copy_semantics;
 mod declaration;
 mod deinit;
 mod extern_fn;
+mod literals;
 mod member_access;
 mod module;
 mod move_tracking;
@@ -44,6 +46,7 @@ pub use copy_semantics::*;
 pub use declaration::*;
 pub use deinit::*;
 pub use extern_fn::*;
+pub use literals::*;
 pub use member_access::*;
 pub use module::*;
 pub use move_tracking::*;

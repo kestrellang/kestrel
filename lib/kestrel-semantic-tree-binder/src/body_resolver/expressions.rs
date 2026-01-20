@@ -12,8 +12,10 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::diagnostics::{
-    BreakOutsideLoopError, ContinueOutsideLoopError, TupleIndexOnNonTupleError,
-    TupleIndexOutOfBoundsError, UndeclaredLabelError,
+    AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
+    IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
+    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
+    UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -56,7 +58,13 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         }
 
         SyntaxKind::ExprString => {
-            let value = extract_string_value(expr_node);
+            let value = extract_string_value(expr_node, ctx);
+            // Use inference type so literal protocols can be applied
+            Expression::string_infer(value, span)
+        }
+
+        SyntaxKind::ExprRawString => {
+            let value = extract_raw_string_value(expr_node);
             // Use inference type so literal protocols can be applied
             Expression::string_infer(value, span)
         }
@@ -148,21 +156,255 @@ fn extract_float_value(node: &SyntaxNode) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Extract string value from an ExprString node (strips quotes)
-fn extract_string_value(node: &SyntaxNode) -> String {
+/// Extract string value from an ExprString node (strips quotes and processes escapes)
+fn extract_string_value(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> String {
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::String)
         .map(|t| {
             let text = t.text();
+            let text_range = t.text_range();
+            let token_start: usize = text_range.start().into();
             // Strip surrounding quotes
             if text.len() >= 2 {
-                text[1..text.len() - 1].to_string()
+                let inner = &text[1..text.len() - 1];
+                // Process escape sequences, offset by 1 for the opening quote
+                unescape_string(inner, ctx.file_id, token_start + 1, ctx)
             } else {
                 text.to_string()
             }
         })
         .unwrap_or_default()
+}
+
+/// Extract raw string value from an ExprRawString node (strips quotes, no escape processing)
+fn extract_raw_string_value(node: &SyntaxNode) -> String {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::RawString)
+        .map(|t| {
+            let text = t.text();
+            // Count opening quotes (minimum 3)
+            let quote_count = text.chars().take_while(|&c| c == '"').count();
+            // Strip surrounding quotes
+            if text.len() >= quote_count * 2 {
+                text[quote_count..text.len() - quote_count].to_string()
+            } else {
+                text.to_string()
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// Process escape sequences in a string literal.
+///
+/// Supports:
+/// - Basic escapes: \n, \r, \t, \\, \", \', \0
+/// - Hex ASCII escapes: \xNN (must be 0x00-0x7F)
+/// - Unicode escapes: \u{NNNN} (1-6 hex digits, max 0x10FFFF)
+/// - Line continuation: \ followed by newline (skips the newline)
+pub(crate) fn unescape_string(
+    s: &str,
+    file_id: usize,
+    base_offset: usize,
+    ctx: &mut BodyResolutionContext,
+) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.char_indices().peekable();
+
+    while let Some((i, c)) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+
+        // We have a backslash - look at the next character
+        let escape_start = base_offset + i;
+        match chars.next() {
+            None => {
+                // Backslash at end of string
+                let error = IncompleteEscapeSequenceError {
+                    span: Span::new(file_id, escape_start..escape_start + 1),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                result.push('\\');
+            }
+            Some((j, next_char)) => {
+                match next_char {
+                    'n' => result.push('\n'),
+                    'r' => result.push('\r'),
+                    't' => result.push('\t'),
+                    '\\' => result.push('\\'),
+                    '"' => result.push('"'),
+                    '\'' => result.push('\''),
+                    '0' => result.push('\0'),
+                    // Line continuation: \ followed by newline
+                    '\n' => {
+                        // Skip the newline (line continuation)
+                        // Also skip any leading whitespace on the next line
+                        while let Some(&(_, ch)) = chars.peek() {
+                            if ch == ' ' || ch == '\t' {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    '\r' => {
+                        // Handle \r\n as line continuation
+                        if let Some(&(_, '\n')) = chars.peek() {
+                            chars.next();
+                        }
+                        // Skip leading whitespace on next line
+                        while let Some(&(_, ch)) = chars.peek() {
+                            if ch == ' ' || ch == '\t' {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    // Hex escape: \xNN
+                    'x' => {
+                        let hex_start = base_offset + j + 1;
+                        let mut hex_str = String::new();
+                        for _ in 0..2 {
+                            if let Some(&(_, ch)) = chars.peek() {
+                                if ch.is_ascii_hexdigit() {
+                                    hex_str.push(ch);
+                                    chars.next();
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        if hex_str.len() != 2 {
+                            let error = InvalidEscapeSequenceError {
+                                span: Span::new(file_id, escape_start..hex_start + hex_str.len()),
+                                sequence: format!("\\x{}", hex_str),
+                            };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            result.push_str(&format!("\\x{}", hex_str));
+                        } else {
+                            let value = u8::from_str_radix(&hex_str, 16).unwrap();
+                            if value > 0x7F {
+                                let error = AsciiEscapeOutOfRangeError {
+                                    span: Span::new(file_id, escape_start..hex_start + 2),
+                                    value,
+                                };
+                                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                result.push_str(&format!("\\x{:02X}", value));
+                            } else {
+                                result.push(value as char);
+                            }
+                        }
+                    }
+                    // Unicode escape: \u{NNNN}
+                    'u' => {
+                        let u_pos = base_offset + j;
+                        // Expect opening brace
+                        if chars.peek().map(|&(_, c)| c) != Some('{') {
+                            let error = InvalidUnicodeEscapeError {
+                                span: Span::new(file_id, escape_start..u_pos + 1),
+                                value: "\\u".to_string(),
+                                reason: UnicodeEscapeErrorReason::MissingOpenBrace,
+                            };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            result.push_str("\\u");
+                            continue;
+                        }
+                        chars.next(); // consume '{'
+
+                        let mut hex_str = String::new();
+                        let mut found_close = false;
+                        while let Some(&(_, ch)) = chars.peek() {
+                            if ch == '}' {
+                                chars.next();
+                                found_close = true;
+                                break;
+                            } else if ch.is_ascii_hexdigit() && hex_str.len() < 6 {
+                                hex_str.push(ch);
+                                chars.next();
+                            } else if ch.is_ascii_hexdigit() {
+                                // Too many digits
+                                hex_str.push(ch);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        let escape_end = base_offset + j + 2 + hex_str.len() + if found_close { 1 } else { 0 };
+                        let escape_seq = format!("\\u{{{}}}", hex_str);
+
+                        if !found_close {
+                            let error = InvalidUnicodeEscapeError {
+                                span: Span::new(file_id, escape_start..escape_end),
+                                value: escape_seq.clone(),
+                                reason: UnicodeEscapeErrorReason::MissingCloseBrace,
+                            };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            result.push_str(&escape_seq);
+                        } else if hex_str.is_empty() {
+                            let error = InvalidUnicodeEscapeError {
+                                span: Span::new(file_id, escape_start..escape_end),
+                                value: escape_seq.clone(),
+                                reason: UnicodeEscapeErrorReason::EmptyBraces,
+                            };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            result.push_str(&escape_seq);
+                        } else if hex_str.len() > 6 {
+                            let error = InvalidUnicodeEscapeError {
+                                span: Span::new(file_id, escape_start..escape_end),
+                                value: escape_seq.clone(),
+                                reason: UnicodeEscapeErrorReason::TooManyDigits,
+                            };
+                            ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                            result.push_str(&escape_seq);
+                        } else {
+                            match u32::from_str_radix(&hex_str, 16) {
+                                Ok(code_point) if code_point <= 0x10FFFF => {
+                                    if let Some(ch) = char::from_u32(code_point) {
+                                        result.push(ch);
+                                    } else {
+                                        // Invalid unicode scalar (e.g., surrogate)
+                                        let error = InvalidUnicodeEscapeError {
+                                            span: Span::new(file_id, escape_start..escape_end),
+                                            value: escape_seq.clone(),
+                                            reason: UnicodeEscapeErrorReason::OutOfRange,
+                                        };
+                                        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                        result.push_str(&escape_seq);
+                                    }
+                                }
+                                _ => {
+                                    let error = InvalidUnicodeEscapeError {
+                                        span: Span::new(file_id, escape_start..escape_end),
+                                        value: escape_seq.clone(),
+                                        reason: UnicodeEscapeErrorReason::OutOfRange,
+                                    };
+                                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                                    result.push_str(&escape_seq);
+                                }
+                            }
+                        }
+                    }
+                    // Unknown escape sequence
+                    other => {
+                        let error = InvalidEscapeSequenceError {
+                            span: Span::new(file_id, escape_start..base_offset + j + other.len_utf8()),
+                            sequence: format!("\\{}", other),
+                        };
+                        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
+                        result.push('\\');
+                        result.push(other);
+                    }
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Extract boolean value from an ExprBool node

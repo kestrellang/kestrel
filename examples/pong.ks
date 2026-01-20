@@ -41,27 +41,48 @@ struct Pong {
     var paddle2Y: Int64
     var scores: Dictionary[Player, Int64]
 
-    var width: Int64 { Int64(intLiteral: 60) }
-    var height: Int64 { Int64(intLiteral: 20) }
-    var paddleSize: Int64 { Int64(intLiteral: 4) }
+    // Trail tracking (3 positions)
+    var trailX1: Int64
+    var trailY1: Int64
+    var trailX2: Int64
+    var trailY2: Int64
+    var trailX3: Int64
+    var trailY3: Int64
 
-    init() {
-        println("Pong.init start");
-        self.ballX = Int64(intLiteral: 30);
-        self.ballY = Int64(intLiteral: 10);
+    // Configurable settings
+    var width: Int64
+    var height: Int64
+    var paddleSize: Int64
+
+    init(width: Int64, height: Int64, paddleSize: Int64) {
+        self.width = width;
+        self.height = height;
+        self.paddleSize = paddleSize;
+
+        self.ballX = width / Int64(intLiteral: 2);
+        self.ballY = height / Int64(intLiteral: 2);
         self.ballDX = Int64(intLiteral: 1);
         self.ballDY = Int64(intLiteral: 1);
-        self.paddle1Y = Int64(intLiteral: 8);
-        self.paddle2Y = Int64(intLiteral: 8);
+        self.paddle1Y = (height - paddleSize) / Int64(intLiteral: 2);
+        self.paddle2Y = (height - paddleSize) / Int64(intLiteral: 2);
+
+        // Initialize trail to ball starting position
+        self.trailX1 = self.ballX;
+        self.trailY1 = self.ballY;
+        self.trailX2 = self.ballX;
+        self.trailY2 = self.ballY;
+        self.trailX3 = self.ballX;
+        self.trailY3 = self.ballY;
 
         // Using Dictionary from std.collections
-        println("Scores dict init");
         self.scores = Dictionary[Player, Int64](placeholderKey: .player1, placeholderValue: Int64(intLiteral: 0));
-        println("Inserting player1 score");
         self.scores.insert(.player1, Int64(intLiteral: 0));
-        println("Inserting player2 score");
         self.scores.insert(.player2, Int64(intLiteral: 0));
-        println("Pong.init end");
+    }
+
+    // Convenience init with defaults
+    init() {
+        self.init(width: Int64(intLiteral: 60), height: Int64(intLiteral: 20), paddleSize: Int64(intLiteral: 4));
     }
 
     func getScore(player player: Player) -> Int64 {
@@ -76,7 +97,32 @@ struct Pong {
         self.scores.insert(player, current + Int64(intLiteral: 1));
     }
 
+    // Helper: check if position is part of the ball trail
+    func isTrail(x x: Int64, y y: Int64) -> Bool {
+        (x == self.trailX1 and y == self.trailY1) or
+        (x == self.trailX2 and y == self.trailY2) or
+        (x == self.trailX3 and y == self.trailY3)
+    }
+
+    // Helper: check if y position is within paddle 1
+    func isPaddle1(y y: Int64) -> Bool {
+        y >= self.paddle1Y and y < self.paddle1Y + self.paddleSize
+    }
+
+    // Helper: check if y position is within paddle 2
+    func isPaddle2(y y: Int64) -> Bool {
+        y >= self.paddle2Y and y < self.paddle2Y + self.paddleSize
+    }
+
     mutating func update() {
+        // Shift trail positions before moving ball
+        self.trailX3 = self.trailX2;
+        self.trailY3 = self.trailY2;
+        self.trailX2 = self.trailX1;
+        self.trailY2 = self.trailY1;
+        self.trailX1 = self.ballX;
+        self.trailY1 = self.ballY;
+
         // Move ball
         self.ballX = self.ballX + self.ballDX;
         self.ballY = self.ballY + self.ballDY;
@@ -134,52 +180,126 @@ struct Pong {
         self.ballX = self.width / Int64(intLiteral: 2);
         self.ballY = self.height / Int64(intLiteral: 2);
         self.ballDX = Int64(intLiteral: 0) - self.ballDX;
+
+        // Reset trail to new ball position
+        self.trailX1 = self.ballX;
+        self.trailY1 = self.ballY;
+        self.trailX2 = self.ballX;
+        self.trailY2 = self.ballY;
+        self.trailX3 = self.ballX;
+        self.trailY3 = self.ballY;
     }
 
     func render() -> Result[(), Error] {
         // ANSI: Move cursor to home position
-        /* try */ print( "\x1b[H");
+        print("\x1b[H");
 
-        // Top border
-        var topBorder = "+";
+        // Top border: ╔═══...═══╗
+        print("\x1b[37m╔");
         var i: Int64 = Int64(intLiteral: 0);
         while i < self.width {
-            topBorder = topBorder + "-";
+            print("═");
             i = i + Int64(intLiteral: 1);
         }
-        /* try */ println( topBorder + "+");
+        println("╗\x1b[0m");
 
         // Game field
+        let centerX = self.width / Int64(intLiteral: 2);
         var y: Int64 = Int64(intLiteral: 0);
         while y < self.height {
-            var line = "|";
+            print("\x1b[37m║\x1b[0m");
+
             var x: Int64 = Int64(intLiteral: 0);
             while x < self.width {
                 if x == self.ballX and y == self.ballY {
-                    line = line + "O"; // Ball
-                } else if x == Int64(intLiteral: 0) and y >= self.paddle1Y and y < self.paddle1Y + self.paddleSize {
-                    line = line + "#"; // Paddle 1
-                } else if x == self.width - Int64(intLiteral: 1) and y >= self.paddle2Y and y < self.paddle2Y + self.paddleSize {
-                    line = line + "#"; // Paddle 2
+                    // Yellow ball
+                    print("\x1b[33m●\x1b[0m");
+                } else if self.isTrail(x: x, y: y) {
+                    // Gray trail
+                    print("\x1b[90m·\x1b[0m");
+                } else if x == Int64(intLiteral: 0) and self.isPaddle1(y: y) {
+                    // Green paddle 1
+                    print("\x1b[32m█\x1b[0m");
+                } else if x == self.width - Int64(intLiteral: 1) and self.isPaddle2(y: y) {
+                    // Cyan paddle 2
+                    print("\x1b[36m█\x1b[0m");
+                } else if x == centerX and y % Int64(intLiteral: 2) == Int64(intLiteral: 0) {
+                    // Center line (every other row, ball/trail takes priority)
+                    print("╎");
                 } else {
-                    line = line + " ";
+                    print(" ");
                 }
                 x = x + Int64(intLiteral: 1);
             }
-            /* try */ println( line + "|");
+
+            println("\x1b[37m║\x1b[0m");
             y = y + Int64(intLiteral: 1);
         }
 
-        /* try */ println( topBorder + "+");
+        // Bottom border: ╚═══...═══╝
+        print("\x1b[37m╚");
+        i = Int64(intLiteral: 0);
+        while i < self.width {
+            print("═");
+            i = i + Int64(intLiteral: 1);
+        }
+        println("╝\x1b[0m");
 
-        // Display scores
+        // Score box
+        self.renderScoreBox();
+
+        .Ok(())
+    }
+
+    func renderScoreBox() {
         let s1 = self.getScore(player: .player1);
         let s2 = self.getScore(player: .player2);
 
-        /* try */ println( " " + Player.player1.description() + ": " + intToString(s1) + " | " + Player.player2.description() + ": " + intToString(s2));
-        /* try */ println( " (Press Ctrl+C to exit)");
+        // Score box top border
+        print("\x1b[37m╔");
+        var i: Int64 = Int64(intLiteral: 0);
+        while i < self.width {
+            print("═");
+            i = i + Int64(intLiteral: 1);
+        }
+        println("╗\x1b[0m");
 
-        .Ok(())
+        // Score line with colored player names
+        // Calculate padding for centered scores
+        let halfWidth = self.width / Int64(intLiteral: 2);
+
+        print("\x1b[37m║\x1b[0m");
+        print("     \x1b[32mPLAYER 1:\x1b[0m \x1b[1;37m");
+        print(intToString(s1));
+        print("\x1b[0m");
+
+        // Middle divider with padding
+        var pad: Int64 = Int64(intLiteral: 0);
+        while pad < halfWidth - Int64(intLiteral: 18) {
+            print(" ");
+            pad = pad + Int64(intLiteral: 1);
+        }
+        print("\x1b[37m║\x1b[0m");
+        pad = Int64(intLiteral: 0);
+        while pad < halfWidth - Int64(intLiteral: 18) {
+            print(" ");
+            pad = pad + Int64(intLiteral: 1);
+        }
+
+        print("\x1b[36mPLAYER 2:\x1b[0m \x1b[1;37m");
+        print(intToString(s2));
+        println("\x1b[0m     \x1b[37m║\x1b[0m");
+
+        // Score box bottom border
+        print("\x1b[37m╚");
+        i = Int64(intLiteral: 0);
+        while i < self.width {
+            print("═");
+            i = i + Int64(intLiteral: 1);
+        }
+        println("╝\x1b[0m");
+
+        println("              (Press Ctrl+C to exit)");
     }
 }
 
@@ -227,25 +347,24 @@ func intToString(n: Int64) -> String {
 func usleep(usec: UInt32) -> Int32
 
 func main() -> Result[(), Error] {
-    println("Main start");
     // ANSI: Hide cursor and clear screen
-    /* try */ print( "\x1b[?25l");
-    /* try */ print( "\x1b[2J");
+    print("\x1b[?25l");
+    print("\x1b[2J");
 
     var game = Pong();
 
     // Run for a fixed number of frames for this demo
     var frames: Int64 = Int64(intLiteral: 0);
-    while frames < Int64(intLiteral: 5) {
+    while frames < Int64(intLiteral: 200) {
         game.update();
-        /* try */ game.render();
+        game.render();
         usleep(UInt32(intLiteral: 33333)); // ~30 FPS
         frames = frames + Int64(intLiteral: 1);
     }
 
     // ANSI: Show cursor again
-    /* try */ print("\x1b[?25h");
-    /* try */ println("\nGame demo complete.");
+    print("\x1b[?25h");
+    println("\nGame demo complete.");
 
     .Ok(())
 }

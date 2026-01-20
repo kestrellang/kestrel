@@ -132,6 +132,7 @@ pub enum SyntaxKind {
     ExprInteger,              // 42, 0xFF, 0b1010, 0o17
     ExprFloat,                // 3.14, 1.0e10
     ExprString,               // "hello"
+    ExprRawString,            // """hello""" (raw/multi-line string)
     ExprBool,                 // true, false
     ExprArray,                // [1, 2, 3]
     ExprTuple,                // (1, 2, 3)
@@ -190,6 +191,7 @@ pub enum SyntaxKind {
     // Literals
     Identifier,
     String,
+    RawString, // """...""" raw string literal
     Integer,
     Float,
     Boolean,
@@ -309,6 +311,7 @@ impl From<Token> for SyntaxKind {
             // Literals
             Token::Identifier => SyntaxKind::Identifier,
             Token::String => SyntaxKind::String,
+            Token::RawString => SyntaxKind::RawString,
             Token::Integer => SyntaxKind::Integer,
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,

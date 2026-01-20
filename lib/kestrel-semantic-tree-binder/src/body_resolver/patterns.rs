@@ -373,8 +373,27 @@ fn resolve_literal_pattern(
                     return Pattern::error(span);
                 }
                 SyntaxKind::String => {
-                    // Remove quotes
-                    let value = text.trim_matches('"').to_string();
+                    // Remove quotes and process escape sequences
+                    let text_range = token.text_range();
+                    let token_start: usize = text_range.start().into();
+                    let inner = if text.len() >= 2 {
+                        &text[1..text.len() - 1]
+                    } else {
+                        text
+                    };
+                    let value =
+                        super::expressions::unescape_string(inner, ctx.file_id, token_start + 1, ctx);
+                    let ty = Ty::string(span.clone());
+                    return Pattern::literal(LiteralValue::String(value), ty, span);
+                }
+                SyntaxKind::RawString => {
+                    // Raw strings: strip quotes, no escape processing
+                    let quote_count = text.chars().take_while(|&c| c == '"').count();
+                    let value = if text.len() >= quote_count * 2 {
+                        text[quote_count..text.len() - quote_count].to_string()
+                    } else {
+                        text.to_string()
+                    };
                     let ty = Ty::string(span.clone());
                     return Pattern::literal(LiteralValue::String(value), ty, span);
                 }
