@@ -1072,7 +1072,7 @@ mod edge_cases {
 
     #[test]
     fn type_param_shadowing_in_nested() {
-        // Inner struct has its own T that shadows outer T
+        // Inner struct has its own T that shadows outer T - this is disallowed
         Test::new(
             r#"module Test
             struct Outer[T] {
@@ -1082,19 +1082,7 @@ mod edge_cases {
             }
         "#,
         )
-        .expect(Compiles)
-        .expect(
-            Symbol::new("Outer")
-                .is(SymbolKind::Struct)
-                .has(Behavior::IsGeneric(true))
-                .has(Behavior::TypeParamCount(1)),
-        )
-        .expect(
-            Symbol::new("Inner")
-                .is(SymbolKind::Struct)
-                .has(Behavior::IsGeneric(true))
-                .has(Behavior::TypeParamCount(1)),
-        );
+        .expect(HasError("shadows"));
     }
 
     #[test]

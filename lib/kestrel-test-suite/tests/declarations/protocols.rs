@@ -717,8 +717,8 @@ mod type_directed_conformance {
             }
 
             public func test() {
-                let w8 = Wrapper8(raw: lang.cast_i64_i8(1));
-                let w32 = Wrapper32(raw: lang.cast_i64_i32(42));
+                let w8 = Wrapper8(lang.cast_i64_i8(1));
+                let w32 = Wrapper32(lang.cast_i64_i32(42));
 
                 // These should work - different labels select correct init
                 let t1 = Target(from8: w8);

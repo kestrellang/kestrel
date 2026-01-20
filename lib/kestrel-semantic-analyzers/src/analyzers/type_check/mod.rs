@@ -115,6 +115,13 @@ impl Analyzer for TypeCheckAnalyzer {
             ExprKind::While { condition, .. } => {
                 self.check_while_condition(condition, ctx);
             }
+            ExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.check_guard_condition(guard, ctx);
+                    }
+                }
+            }
             ExprKind::Call { arguments, .. } | ExprKind::ImplicitStructInit { arguments, .. } => {
                 self.check_call_arguments(expr, arguments, ctx);
             }
@@ -301,6 +308,30 @@ impl TypeCheckAnalyzer {
             span: condition.span.clone(),
             found: condition.ty.to_string(),
             condition_kind: "while",
+        });
+    }
+
+    fn check_guard_condition(&self, condition: &Expression, ctx: &mut AnalysisContext) {
+        if condition.ty.is_poison() {
+            return;
+        }
+
+        // Accept primitive lang.bool directly
+        if condition.ty.is_bool() {
+            return;
+        }
+
+        // Check BooleanConditional conformance
+        if let Some(protocol_id) = ctx.model.builtin_protocol(LanguageFeature::BooleanConditional) {
+            if ctx.model.conforms_to(&condition.ty, protocol_id) {
+                return;
+            }
+        }
+
+        ctx.report(ConditionNotBoolError {
+            span: condition.span.clone(),
+            found: condition.ty.to_string(),
+            condition_kind: "guard",
         });
     }
 

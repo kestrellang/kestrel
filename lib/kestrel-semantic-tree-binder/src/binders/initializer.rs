@@ -54,8 +54,9 @@ impl DeclarationBinder for InitializerBinder {
         symbol.metadata().add_behavior(generics_behavior);
 
         // Extract and resolve parameters from syntax
+        // Initializers use explicit labels only (like functions), not implicit labels
         let resolved_params = crate::binders::utils::parameters::resolve_parameters_from_syntax(
-            syntax, &source, file_id, symbol_id, context, true,
+            syntax, &source, file_id, symbol_id, context, false,
         );
 
         // Initializers return unit type - they don't return a value

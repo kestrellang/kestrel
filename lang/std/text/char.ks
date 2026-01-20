@@ -68,17 +68,17 @@ public struct CodePoint: Equatable, Comparable {
 
     public func toUppercase() -> CodePoint {
         if self.isLowercase() {
-            CodePoint(value: self._value - UInt32(intLiteral: 32))
+            CodePoint(self._value - UInt32(intLiteral: 32))
         } else {
-            self
+            CodePoint(self._value)
         }
     }
 
     public func toLowercase() -> CodePoint {
         if self.isUppercase() {
-            CodePoint(value: self._value + UInt32(intLiteral: 32))
+            CodePoint(self._value + UInt32(intLiteral: 32))
         } else {
-            self
+            CodePoint(self._value)
         }
     }
 
@@ -103,7 +103,7 @@ public struct CodePoint: Equatable, Comparable {
     // Create from ASCII digit (0-9)
     public static func fromDigit(d: UInt32) -> Optional[CodePoint] {
         if d <= UInt32(intLiteral: 9) {
-            .Some(CodePoint(value: d + UInt32(intLiteral: 48)))
+            .Some(CodePoint(d + UInt32(intLiteral: 48)))
         } else {
             .None
         }
@@ -125,12 +125,12 @@ public struct CodePoint: Equatable, Comparable {
 public struct Char: Equatable {
     private var _codePoints: Array[CodePoint]
 
-    public init(codePoint: CodePoint) {
+    public init(codePoint codePoint: CodePoint) {
         self._codePoints = Array();
         self._codePoints.append(codePoint);
     }
 
-    public init(codePoints: Array[CodePoint]) {
+    public init(codePoints codePoints: Array[CodePoint]) {
         self._codePoints = codePoints;
     }
 
@@ -186,19 +186,19 @@ public struct Char: Equatable {
 
 // Common ASCII code points as constants
 public struct AsciiChars {
-    public static func space() -> CodePoint { CodePoint(value: UInt32(intLiteral: 32)) }
-    public static func newline() -> CodePoint { CodePoint(value: UInt32(intLiteral: 10)) }
-    public static func carriageReturn() -> CodePoint { CodePoint(value: UInt32(intLiteral: 13)) }
-    public static func tab() -> CodePoint { CodePoint(value: UInt32(intLiteral: 9)) }
-    public static func nul() -> CodePoint { CodePoint(value: UInt32(intLiteral: 0)) }
-    public static func slash() -> CodePoint { CodePoint(value: UInt32(intLiteral: 47)) }
-    public static func backslash() -> CodePoint { CodePoint(value: UInt32(intLiteral: 92)) }
-    public static func dot() -> CodePoint { CodePoint(value: UInt32(intLiteral: 46)) }
-    public static func comma() -> CodePoint { CodePoint(value: UInt32(intLiteral: 44)) }
-    public static func colon() -> CodePoint { CodePoint(value: UInt32(intLiteral: 58)) }
-    public static func semicolon() -> CodePoint { CodePoint(value: UInt32(intLiteral: 59)) }
-    public static func quote() -> CodePoint { CodePoint(value: UInt32(intLiteral: 34)) }
-    public static func apostrophe() -> CodePoint { CodePoint(value: UInt32(intLiteral: 39)) }
+    public static func space() -> CodePoint { CodePoint(UInt32(intLiteral: 32)) }
+    public static func newline() -> CodePoint { CodePoint(UInt32(intLiteral: 10)) }
+    public static func carriageReturn() -> CodePoint { CodePoint(UInt32(intLiteral: 13)) }
+    public static func tab() -> CodePoint { CodePoint(UInt32(intLiteral: 9)) }
+    public static func nul() -> CodePoint { CodePoint(UInt32(intLiteral: 0)) }
+    public static func slash() -> CodePoint { CodePoint(UInt32(intLiteral: 47)) }
+    public static func backslash() -> CodePoint { CodePoint(UInt32(intLiteral: 92)) }
+    public static func dot() -> CodePoint { CodePoint(UInt32(intLiteral: 46)) }
+    public static func comma() -> CodePoint { CodePoint(UInt32(intLiteral: 44)) }
+    public static func colon() -> CodePoint { CodePoint(UInt32(intLiteral: 58)) }
+    public static func semicolon() -> CodePoint { CodePoint(UInt32(intLiteral: 59)) }
+    public static func quote() -> CodePoint { CodePoint(UInt32(intLiteral: 34)) }
+    public static func apostrophe() -> CodePoint { CodePoint(UInt32(intLiteral: 39)) }
 }
 
 // UTF-8 decoding result
@@ -206,7 +206,7 @@ public struct Utf8DecodeResult {
     public var codePoint: CodePoint
     public var bytesConsumed: Int64
 
-    public init(codePoint: CodePoint, bytesConsumed: Int64) {
+    public init(codePoint codePoint: CodePoint, bytesConsumed bytesConsumed: Int64) {
         self.codePoint = codePoint;
         self.bytesConsumed = bytesConsumed;
     }
@@ -240,7 +240,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
 
     if lang.i32_unsigned_lt(firstU, 0x80) {
         // Single byte (ASCII): 0xxxxxxx
-        let cp = CodePoint(value: UInt32(raw: firstU));
+        let cp = CodePoint(UInt32(raw: firstU));
         return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 1)))
     } else if lang.i32_unsigned_lt(firstU, 0xC0) {
         // Continuation byte as start - invalid
@@ -255,7 +255,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             lang.i32_shl(lang.i32_and(firstU, 0x1F), 6),
             lang.i32_and(second, 0x3F)
         );
-        let cp = CodePoint(value: UInt32(raw: v));
+        let cp = CodePoint(UInt32(raw: v));
         return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 2)))
     } else if lang.i32_unsigned_lt(firstU, 0xF0) {
         // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
@@ -273,7 +273,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             ),
             lang.i32_and(third, 0x3F)
         );
-        let cp = CodePoint(value: UInt32(raw: v));
+        let cp = CodePoint(UInt32(raw: v));
         return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 3)))
     } else if lang.i32_unsigned_lt(firstU, 0xF8) {
         // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
@@ -297,7 +297,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             ),
             lang.i32_and(fourth, 0x3F)
         );
-        let cp = CodePoint(value: UInt32(raw: v));
+        let cp = CodePoint(UInt32(raw: v));
         return .Some(Utf8DecodeResult(codePoint: cp, bytesConsumed: Int64(intLiteral: 4)))
     } else {
         // Invalid start byte

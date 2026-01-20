@@ -17,7 +17,7 @@ public struct Error {
 
     // Create from current errno
     public static func last() -> Error {
-        Error(code: libc.errno())
+        Error(libc.errno())
     }
 
     public func description() -> String {
@@ -48,10 +48,10 @@ public struct Error {
 }
 
 // Common error constructors
-public func notFound() -> Error { Error(code: 2) }
-public func permissionDenied() -> Error { Error(code: 13) }
-public func alreadyExists() -> Error { Error(code: 17) }
-public func invalidInput() -> Error { Error(code: 22) }
-public func wouldBlock() -> Error { Error(code: 11) }
-public func interrupted() -> Error { Error(code: 4) }
-public func brokenPipe() -> Error { Error(code: 32) }
+public func notFound() -> Error { Error(2) }
+public func permissionDenied() -> Error { Error(13) }
+public func alreadyExists() -> Error { Error(17) }
+public func invalidInput() -> Error { Error(22) }
+public func wouldBlock() -> Error { Error(11) }
+public func interrupted() -> Error { Error(4) }
+public func brokenPipe() -> Error { Error(32) }

@@ -46,7 +46,7 @@ public struct File: Read, Write, not Copyable {
         if fd < 0 {
             return .Err(Error.last())
         }
-        .Ok(File(fd: fd))
+        .Ok(File(fd))
     }
 
     // Create file for writing (truncates if exists)
@@ -65,7 +65,7 @@ public struct File: Read, Write, not Copyable {
         if fd < 0 {
             return .Err(Error.last())
         }
-        .Ok(File(fd: fd))
+        .Ok(File(fd))
     }
 
     // Open for read and write
@@ -83,7 +83,7 @@ public struct File: Read, Write, not Copyable {
         if fd < 0 {
             return .Err(Error.last())
         }
-        .Ok(File(fd: fd))
+        .Ok(File(fd))
     }
 
     // Open for appending
@@ -102,7 +102,7 @@ public struct File: Read, Write, not Copyable {
         if fd < 0 {
             return .Err(Error.last())
         }
-        .Ok(File(fd: fd))
+        .Ok(File(fd))
     }
 
     // Read implementation

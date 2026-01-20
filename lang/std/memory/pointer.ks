@@ -12,11 +12,11 @@ import std.num.(Int64, UInt64)
 public struct RawPointer: Equatable, FFISafe {
     public var raw: lang.ptr[lang.i8]
 
-    public init(raw: lang.ptr[lang.i8]) {
+    public init(raw raw: lang.ptr[lang.i8]) {
         self.raw = raw;
     }
 
-    public init(address: UInt64) {
+    public init(address address: UInt64) {
         self.raw = lang.ptr_from_address(address)
     }
 
@@ -52,7 +52,7 @@ public struct Pointer[T]: Equatable {
     // Public getter for FFI interop
     public var raw: lang.ptr[T] { self._raw }
 
-    public init(raw: lang.ptr[T]) {
+    public init(raw raw: lang.ptr[T]) {
         self._raw = raw;
     }
 
@@ -87,7 +87,7 @@ public struct Pointer[T]: Equatable {
 
     public func offset(by n: Int64) -> Pointer[T] {
         let byteOffset = n * Int64(intLiteral: lang.sizeof[T]());
-        Pointer(raw: lang.ptr_offset[T](self._raw, byteOffset.raw))
+        Pointer[T](raw: lang.ptr_offset[T](self._raw, byteOffset.raw))
     }
 
     public func asRaw() -> RawPointer {
@@ -111,7 +111,7 @@ public struct Slice[T]: Equatable {
     private var ptr: Pointer[T]
     private var len: Int64
 
-    public init(pointer: Pointer[T], count: Int64) {
+    public init(pointer pointer: Pointer[T], count count: Int64) {
         self.ptr = pointer;
         self.len = count;
     }

@@ -14,7 +14,7 @@ public struct LiteralSliceIterator[T]: Iterator {
     private var ptr: lang.ptr[T]
     private var remaining: lang.i64
 
-    public init(ptr: lang.ptr[T], remaining: lang.i64) {
+    public init(ptr ptr: lang.ptr[T], remaining remaining: lang.i64) {
         self.ptr = ptr;
         self.remaining = remaining;
     }
@@ -40,7 +40,7 @@ public struct LiteralSlice[T]: Iterable {
     private var ptr: lang.ptr[T]
     private var len: lang.i64
 
-    public init(pointer: lang.ptr[T], count: lang.i64) {
+    public init(pointer pointer: lang.ptr[T], count count: lang.i64) {
         self.ptr = pointer;
         self.len = count;
     }

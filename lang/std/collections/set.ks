@@ -23,13 +23,13 @@ public struct SetEntry[T] {
     public var element: T
     public var occupied: Bool
 
-    public init(element: T, occupied: Bool) {
+    public init(element element: T, occupied occupied: Bool) {
         self.element = element;
         self.occupied = occupied;
     }
 
     // Create an unoccupied entry with placeholder element
-    public init(placeholder: T) {
+    public init(placeholder placeholder: T) {
         self.element = placeholder;
         self.occupied = false;
     }
@@ -43,7 +43,7 @@ public struct SetIterator[T]: Iterator {
     private var capacity: Int64
     private var index: Int64
 
-    public init(entries: Pointer[SetEntry[T]], capacity: Int64) {
+    public init(entries entries: Pointer[SetEntry[T]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
         self.index = Int64(intLiteral: 0);
@@ -81,7 +81,7 @@ public struct Set[T]: Iterable where T: Equatable {
     }
 
     // Create with initial capacity - requires a placeholder element for initialization
-    public init(capacity: Int64, placeholder: T) {
+    public init(capacity capacity: Int64, placeholder placeholder: T) {
         let actualCap = setNextPowerOfTwo(capacity);
         if actualCap > Int64(intLiteral: 0) {
             let layout = Layout.array[SetEntry[T]](actualCap);

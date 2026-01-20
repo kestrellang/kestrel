@@ -139,7 +139,7 @@ public enum Optional[T] {
 
     // Iteration
     public func iter() -> OptionalIterator[T] {
-        OptionalIterator(value: self)
+        OptionalIterator(self)
     }
 }
 

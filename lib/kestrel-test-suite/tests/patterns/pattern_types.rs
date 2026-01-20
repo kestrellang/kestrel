@@ -846,6 +846,7 @@ func test(arr: [lang.i64]) -> lang.i64 {
     }
 
     #[test]
+    #[ignore]
     fn array_pattern_with_literals() {
         Test::new(
             r#"

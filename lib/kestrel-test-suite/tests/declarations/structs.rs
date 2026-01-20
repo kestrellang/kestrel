@@ -265,7 +265,7 @@ mod instantiation {
                 var x: lang.i64
                 var y: lang.i64
 
-                init(x: lang.i64, y: lang.i64) {
+                init(x x: lang.i64, y y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -326,9 +326,9 @@ mod instantiation {
             }
 
             func test() {
-                let p1 = Point(x: 1, y: 2);
+                let p1 = Point(1, 2);
                 let p2 = Point();
-                let p3 = Point(value: 5);
+                let p3 = Point(5);
             }
         "#,
         )
@@ -580,7 +580,7 @@ mod instantiation_errors {
                 var x: lang.i64
                 var y: lang.i64
 
-                init(x: lang.i64, y: lang.i64) {
+                init(x x: lang.i64, y y: lang.i64) {
                     self.x = x;
                     self.y = y;
                 }
@@ -632,7 +632,7 @@ mod initializer_edge_cases {
             }
 
             func test() -> Point {
-                Point(xVal: 1, yVal: 2)
+                Point(1, 2)
             }
         "#,
         )
@@ -658,7 +658,7 @@ mod initializer_edge_cases {
             }
 
             func test() -> Point {
-                Point(x: getInt(), y: getInt())
+                Point(getInt(), getInt())
             }
         "#,
         )

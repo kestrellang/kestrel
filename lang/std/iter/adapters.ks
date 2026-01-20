@@ -415,7 +415,7 @@ public struct RepeatNIterator[T]: Iterator where T: Cloneable {
     private var value: T
     private var remaining: Int64
 
-    public init(value: T, count: Int64) {
+    public init(value value: T, count count: Int64) {
         self.value = value;
         self.remaining = count;
     }
@@ -436,11 +436,11 @@ public func empty[T]() -> EmptyIterator[T] {
 }
 
 public func once[T](value: T) -> OnceIterator[T] {
-    OnceIterator(value: value)
+    OnceIterator(value)
 }
 
 public func repeatValue[T](value: T) -> RepeatIterator[T] where T: Cloneable {
-    RepeatIterator(value: value)
+    RepeatIterator(value)
 }
 
 public func repeatN[T](value: T, count: Int64) -> RepeatNIterator[T] where T: Cloneable {

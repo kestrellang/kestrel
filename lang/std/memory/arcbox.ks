@@ -25,15 +25,15 @@ public struct ArcBox[T] {
         let result: Optional[RawPointer] = allocator.allocate(layout);
         if result.isSome() {
             self.ptr = result.unwrap().cast[ArcBoxStorage[T]]();
-            self.ptr.write(ArcBoxStorage(refCount: Int64(intLiteral: 1), value: value))
+            self.ptr.write(ArcBoxStorage(refCount: Int64(intLiteral: 1), value: value));
         } else {
             lang.panic("ArcBox allocation failed")
         }
     }
 
     // Private init for clone (shares storage)
-    private init(ptr: Pointer[ArcBoxStorage[T]]) {
-        self.ptr = ptr;
+    private init(inner inner: Pointer[ArcBoxStorage[T]]) {
+        self.ptr = inner;
     }
 
     // Access the stored value
@@ -57,12 +57,12 @@ public struct ArcBox[T] {
         var storage = self.ptr.read();
         storage.refCount = storage.refCount + Int64(intLiteral: 1);
         self.ptr.write(storage);
-        ArcBox(ptr: self.ptr)
+        ArcBox(inner: self.ptr)
     }
 
     // Deep clone - creates new storage with cloned value
     public func deepClone() -> ArcBox[T] where T: Cloneable {
-        ArcBox(value: self.ptr.read().value.clone())
+        ArcBox(self.ptr.read().value.clone())
     }
 
     // Release reference (called by deinit)

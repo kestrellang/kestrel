@@ -156,7 +156,7 @@ public enum Result[T, E]: Tryable, Returnable[T] {
 
     // Iteration
     public func iter() -> ResultIterator[T, E] {
-        ResultIterator(result: self)
+        ResultIterator(self)
     }
 }
 

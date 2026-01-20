@@ -17,7 +17,7 @@ public struct BytesIterator: Iterator {
     private var length: Int64
     private var index: Int64
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64, index: Int64) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, index index: Int64) {
         self.ptr = ptr;
         self.length = length;
         self.index = index;
@@ -44,7 +44,7 @@ public struct BytesView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
@@ -84,7 +84,7 @@ public struct CodePointsIterator: Iterator {
     private var length: Int64
     private var byteIndex: Int64
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, byteIndex byteIndex: Int64) {
         self.ptr = ptr;
         self.length = length;
         self.byteIndex = byteIndex;
@@ -104,7 +104,7 @@ public struct CodePointsIterator: Iterator {
             // Invalid UTF-8 - skip byte and return replacement character
             self.byteIndex = self.byteIndex + Int64(intLiteral: 1);
             let replacementValue = UInt32(raw: 0xFFFD);
-            .Some(CodePoint(value: replacementValue))
+            .Some(CodePoint(replacementValue))
         }
     }
 }
@@ -117,7 +117,7 @@ public struct CodePointsView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
@@ -177,13 +177,13 @@ public struct CharsView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }
 
     public func iter() -> CharsIterator {
-        CharsIterator(codePointsIter: CodePointsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0)))
+        CharsIterator(CodePointsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0)))
     }
 
     // Count is O(n) - must process all grapheme clusters
@@ -214,7 +214,7 @@ public struct LinesIterator: Iterator {
     private var byteIndex: Int64
     private var done: Bool
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64, done: Bool) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, byteIndex byteIndex: Int64, done done: Bool) {
         self.ptr = ptr;
         self.length = length;
         self.byteIndex = byteIndex;
@@ -306,7 +306,7 @@ public struct LinesView: Iterable {
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
 
-    public init(ptr: lang.ptr[lang.i8], length: Int64) {
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
     }

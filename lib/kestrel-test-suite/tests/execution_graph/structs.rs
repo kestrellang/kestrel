@@ -580,7 +580,7 @@ mod initializers {
             }
 
             func main() -> lang.i64 {
-                let c = Counter(start: 42);
+                let c = Counter(42);
                 c.read()
             }
         "#,

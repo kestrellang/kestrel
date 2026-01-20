@@ -522,7 +522,7 @@ extend Foo {
 }
 
 public func test() {
-    let f = Foo(value: 42);
+    let f = Foo(42);
 }
 "#,
         )
@@ -554,8 +554,8 @@ extend Point {
 }
 
 public func test() {
-    let p1 = Point(x: 1, y: 2);
-    let p2 = Point(value: 5);
+    let p1 = Point(1, 2);
+    let p2 = Point(5);
 }
 "#,
         )

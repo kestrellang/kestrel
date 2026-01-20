@@ -1477,19 +1477,38 @@ pub fn resolve_method_call(
                     use kestrel_semantic_tree::behavior::typed::TypedBehavior;
                     let resolved_receiver_ty = match &receiver.kind {
                         ExprKind::TypeRef(type_symbol_id) => {
-                            // For static methods, get the actual struct type from the symbol
-                            if let Some(type_sym) = ctx.model.query(SymbolFor {
-                                id: *type_symbol_id,
-                            }) {
-                                if let Some(typed) =
-                                    type_sym.metadata().get_behavior::<TypedBehavior>()
-                                {
-                                    typed.ty().clone()
+                            // For TypeRef, check if receiver.ty has explicit type arguments
+                            // (from qualified path like Box[lang.i64].wrap)
+                            // This is indicated by non-empty substitutions with at least one concrete type
+                            let has_explicit_type_args = match receiver.ty.kind() {
+                                TyKind::Struct { substitutions, .. } |
+                                TyKind::Enum { substitutions, .. } => {
+                                    // Check if ANY substitution contains a concrete (non-type-param, non-infer) type
+                                    substitutions.iter().any(|(_, ty)| {
+                                        !matches!(ty.kind(), TyKind::TypeParameter(_) | TyKind::Infer)
+                                    })
+                                }
+                                _ => false,
+                            };
+
+                            if has_explicit_type_args {
+                                // Use receiver.ty directly - it has the qualified type with explicit type args
+                                receiver.ty.clone()
+                            } else {
+                                // Get the base type from the symbol (for initializers, unspecialized generics, etc.)
+                                if let Some(type_sym) = ctx.model.query(SymbolFor {
+                                    id: *type_symbol_id,
+                                }) {
+                                    if let Some(typed) =
+                                        type_sym.metadata().get_behavior::<TypedBehavior>()
+                                    {
+                                        typed.ty().clone()
+                                    } else {
+                                        receiver.ty.clone()
+                                    }
                                 } else {
                                     receiver.ty.clone()
                                 }
-                            } else {
-                                receiver.ty.clone()
                             }
                         }
                         _ => resolve_self_type_to_concrete(&receiver.ty, ctx), // Instance method
@@ -1499,20 +1518,152 @@ pub fn resolve_method_call(
                     let mut return_ty =
                         substitute_self(callable.return_type(), &resolved_receiver_ty);
                     let mut call_substitutions = Substitutions::new();
-                    // Handle struct receiver types (e.g., Box[Int])
-                    if let Some((_, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
-                        // Add receiver's substitutions to call_substitutions
-                        for (param_id, ty) in substitutions.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
+                    let mut resolved_receiver_ty = resolved_receiver_ty;
+
+                    // Helper: collect type parameters from the callable's parameter types
+                    fn collect_callable_type_params(callable: &CallableBehavior) -> Vec<Arc<TypeParameterSymbol>> {
+                        let mut type_params = Vec::new();
+                        for param in callable.parameters() {
+                            collect_type_params_from_ty(&param.ty, &mut type_params);
                         }
-                        return_ty = return_ty.apply_substitutions(substitutions);
+                        type_params
+                    }
+
+                    fn collect_type_params_from_ty(ty: &Ty, params: &mut Vec<Arc<TypeParameterSymbol>>) {
+                        match ty.kind() {
+                            TyKind::TypeParameter(tp) => {
+                                if !params.iter().any(|p| p.metadata().id() == tp.metadata().id()) {
+                                    params.push(tp.clone());
+                                }
+                            }
+                            TyKind::Struct { substitutions, .. } | TyKind::Enum { substitutions, .. } => {
+                                for (_, sub_ty) in substitutions.iter() {
+                                    collect_type_params_from_ty(sub_ty, params);
+                                }
+                            }
+                            TyKind::Array(elem) => collect_type_params_from_ty(elem, params),
+                            TyKind::Tuple(elems) => {
+                                for elem in elems {
+                                    collect_type_params_from_ty(elem, params);
+                                }
+                            }
+                            TyKind::Function { params: fn_params, return_type } => {
+                                for p in fn_params {
+                                    collect_type_params_from_ty(p, params);
+                                }
+                                collect_type_params_from_ty(return_type, params);
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // Check if this is a static method call (TypeRef receiver)
+                    let is_static_method = matches!(&receiver.kind, ExprKind::TypeRef(_));
+
+                    // Handle struct receiver types (e.g., Box[Int])
+                    if let Some((struct_sym, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
+                        // Check if we need type inference (only for static methods):
+                        // 1. Substitutions map contains unresolved type parameters (T -> T)
+                        // 2. Struct is generic but has empty substitutions (Box.wrap case)
+                        let has_unresolved = substitutions.iter().any(|(_, ty)| {
+                            matches!(ty.kind(), TyKind::TypeParameter(_))
+                        });
+                        let needs_inference = is_static_method && (has_unresolved ||
+                            (substitutions.is_empty() && !struct_sym.type_parameters().is_empty()));
+
+                        if needs_inference {
+                            // Get type parameters from the callable's parameter types
+                            // These are the extension's type params, not the struct's
+                            let callable_type_params = collect_callable_type_params(&callable);
+
+                            if !callable_type_params.is_empty() {
+                                // Infer type params from method arguments
+                                let arg_types: Vec<Ty> =
+                                    arguments.iter().map(|a| a.value.ty.clone()).collect();
+                                let inferred = infer_type_arguments(&callable_type_params, &callable, &arg_types);
+
+                                // Build new substitutions with inferred types
+                                for (param_id, ty) in inferred.iter() {
+                                    call_substitutions.insert(*param_id, ty.clone());
+                                }
+
+                                if !substitutions.is_empty() {
+                                    // Map struct type params through the substitution chain
+                                    // substitutions maps: struct's T -> extension's T
+                                    // inferred maps: extension's T -> concrete type
+                                    // We need: struct's T -> concrete type
+                                    for (struct_param_id, ext_ty) in substitutions.iter() {
+                                        let resolved_ty = ext_ty.apply_substitutions(&call_substitutions);
+                                        call_substitutions.insert(*struct_param_id, resolved_ty);
+                                    }
+                                } else {
+                                    // Empty substitutions (generic struct without explicit type args)
+                                    // Map callable type params to struct type params positionally
+                                    let struct_type_params = struct_sym.type_parameters();
+                                    for (callable_tp, struct_tp) in callable_type_params.iter().zip(struct_type_params.iter()) {
+                                        if let Some(inferred_ty) = inferred.get(callable_tp.metadata().id()) {
+                                            call_substitutions.insert(struct_tp.metadata().id(), inferred_ty.clone());
+                                        }
+                                    }
+                                }
+
+                                // Update resolved_receiver_ty with inferred types
+                                resolved_receiver_ty = resolved_receiver_ty.apply_substitutions(&call_substitutions);
+                                return_ty = callable.return_type().apply_substitutions(&call_substitutions);
+                            }
+                        } else {
+                            // Add receiver's substitutions to call_substitutions
+                            for (param_id, ty) in substitutions.iter() {
+                                call_substitutions.insert(*param_id, ty.clone());
+                            }
+                            return_ty = return_ty.apply_substitutions(substitutions);
+                        }
                     }
                     // Handle enum receiver types (e.g., Optional[Int])
-                    else if let Some((_, substitutions)) = resolved_receiver_ty.as_enum_with_subs() {
-                        for (param_id, ty) in substitutions.iter() {
-                            call_substitutions.insert(*param_id, ty.clone());
+                    else if let Some((enum_sym, substitutions)) = resolved_receiver_ty.as_enum_with_subs() {
+                        // Check if we need type inference (only for static methods)
+                        let has_unresolved = substitutions.iter().any(|(_, ty)| {
+                            matches!(ty.kind(), TyKind::TypeParameter(_))
+                        });
+                        let needs_inference = is_static_method && (has_unresolved ||
+                            (substitutions.is_empty() && !enum_sym.type_parameters().is_empty()));
+
+                        if needs_inference {
+                            let callable_type_params = collect_callable_type_params(&callable);
+
+                            if !callable_type_params.is_empty() {
+                                let arg_types: Vec<Ty> =
+                                    arguments.iter().map(|a| a.value.ty.clone()).collect();
+                                let inferred = infer_type_arguments(&callable_type_params, &callable, &arg_types);
+
+                                for (param_id, ty) in inferred.iter() {
+                                    call_substitutions.insert(*param_id, ty.clone());
+                                }
+
+                                if !substitutions.is_empty() {
+                                    for (enum_param_id, ext_ty) in substitutions.iter() {
+                                        let resolved_ty = ext_ty.apply_substitutions(&call_substitutions);
+                                        call_substitutions.insert(*enum_param_id, resolved_ty);
+                                    }
+                                } else {
+                                    // Empty substitutions - map positionally
+                                    let enum_type_params = enum_sym.type_parameters();
+                                    for (callable_tp, enum_tp) in callable_type_params.iter().zip(enum_type_params.iter()) {
+                                        if let Some(inferred_ty) = inferred.get(callable_tp.metadata().id()) {
+                                            call_substitutions.insert(enum_tp.metadata().id(), inferred_ty.clone());
+                                        }
+                                    }
+                                }
+
+                                resolved_receiver_ty = resolved_receiver_ty.apply_substitutions(&call_substitutions);
+                                return_ty = callable.return_type().apply_substitutions(&call_substitutions);
+                            }
+                        } else {
+                            for (param_id, ty) in substitutions.iter() {
+                                call_substitutions.insert(*param_id, ty.clone());
+                            }
+                            return_ty = return_ty.apply_substitutions(substitutions);
                         }
-                        return_ty = return_ty.apply_substitutions(substitutions);
                     }
 
                     // Infer type parameters from argument types if method has its own type parameters

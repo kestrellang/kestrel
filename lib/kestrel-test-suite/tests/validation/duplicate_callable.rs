@@ -165,8 +165,8 @@ mod duplicate_initializers {
             struct Point {
                 let x: ()
 
-                init(value: ()) { x = value }
-                init(from: ()) { x = from }
+                init(value value: ()) { x = value }
+                init(from from: ()) { x = from }
             }
         "#,
         )
@@ -201,8 +201,8 @@ mod duplicate_subscripts {
             struct Container {
                 let items: ()
 
-                subscript(index: ()) -> () { items }
-                subscript(at: ()) -> () { items }
+                subscript(index index: ()) -> () { items }
+                subscript(at at: ()) -> () { items }
             }
         "#,
         )

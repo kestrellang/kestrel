@@ -18,7 +18,7 @@ public struct StringIterator: Iterator {
     private var length: Int64
     private var index: Int64
 
-    public init(ptr: Pointer[UInt8], length: Int64) {
+    public init(ptr ptr: Pointer[UInt8], length length: Int64) {
         self.ptr = ptr;
         self.length = length;
         self.index = Int64(intLiteral: 0);
@@ -54,7 +54,7 @@ public struct SplitIterator: Iterator {
     private var index: Int64
     private var done: Bool
 
-    public init(ptr: Pointer[UInt8], length: Int64, sepPtr: Pointer[UInt8], sepLen: Int64) {
+    public init(ptr ptr: Pointer[UInt8], length length: Int64, sepPtr sepPtr: Pointer[UInt8], sepLen sepLen: Int64) {
         self.ptr = ptr;
         self.length = length;
         self.sepPtr = sepPtr;
@@ -144,7 +144,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     // Create with capacity
-    public init(capacity: Int64) {
+    public init(capacity capacity: Int64) {
         if capacity > Int64(intLiteral: 0) {
             let layout = Layout.array[UInt8](capacity);
             var allocator = SystemAllocator();
@@ -189,7 +189,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     // Private: create from byte pointer without copying (takes ownership)
-    private init(ptr: Pointer[UInt8], len: Int64, cap: Int64) {
+    private init(ptr ptr: Pointer[UInt8], len len: Int64, cap cap: Int64) {
         self.ptr = ptr;
         self.len = len;
         self.cap = cap;

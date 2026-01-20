@@ -30,7 +30,7 @@ public struct DictionaryEntry[K, V] {
     public var hash: UInt64
     public var occupied: Bool
 
-    public init(key: K, value: V, hash: UInt64, occupied: Bool) {
+    public init(key key: K, value value: V, hash hash: UInt64, occupied occupied: Bool) {
         self.key = key;
         self.value = value;
         self.hash = hash;
@@ -38,7 +38,7 @@ public struct DictionaryEntry[K, V] {
     }
 
     // Create an unoccupied entry with placeholder key/value
-    public init(placeholderKey: K, placeholderValue: V) {
+    public init(placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
         self.key = placeholderKey;
         self.value = placeholderValue;
         self.hash = UInt64(intLiteral: 0);
@@ -54,7 +54,7 @@ public struct DictionaryIterator[K, V]: Iterator {
     private var capacity: Int64
     private var index: Int64
 
-    public init(entries: Pointer[DictionaryEntry[K, V]], capacity: Int64) {
+    public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
         self.index = Int64(intLiteral: 0);
@@ -97,7 +97,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     }
 
     // Create with initial capacity - requires a placeholder key/value for initialization
-    public init(capacity: Int64, placeholderKey: K, placeholderValue: V) {
+    public init(capacity capacity: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
         let actualCap = nextPowerOfTwo(capacity);
         self.placeholderKey = placeholderKey;
         self.placeholderValue = placeholderValue;
@@ -403,7 +403,7 @@ extend Dictionary[K, V]: Cloneable where K: Cloneable, V: Cloneable {
         let selfEntries = self.getEntries();
 
         if selfCount == Int64(intLiteral: 0) {
-            return Dictionary(placeholderKey: self.placeholderKey.clone(), placeholderValue: self.placeholderValue.clone())
+            return Dictionary(self.placeholderKey.clone(), self.placeholderValue.clone())
         }
 
         // Find first entry to use as placeholder
@@ -462,13 +462,13 @@ public struct KeysView[K, V]: Iterable where K: Equatable {
     private var entries: Pointer[DictionaryEntry[K, V]]
     private var capacity: Int64
 
-    public init(entries: Pointer[DictionaryEntry[K, V]], capacity: Int64) {
+    public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
     }
 
     public func iter() -> KeysIterator[K, V] {
-        KeysIterator(dictIter: DictionaryIterator(entries: self.entries, capacity: self.capacity))
+        KeysIterator(DictionaryIterator(entries: self.entries, capacity: self.capacity))
     }
 }
 
@@ -500,13 +500,13 @@ public struct ValuesView[K, V]: Iterable where K: Equatable {
     private var entries: Pointer[DictionaryEntry[K, V]]
     private var capacity: Int64
 
-    public init(entries: Pointer[DictionaryEntry[K, V]], capacity: Int64) {
+    public init(entries entries: Pointer[DictionaryEntry[K, V]], capacity capacity: Int64) {
         self.entries = entries;
         self.capacity = capacity;
     }
 
     public func iter() -> ValuesIterator[K, V] {
-        ValuesIterator(dictIter: DictionaryIterator(entries: self.entries, capacity: self.capacity))
+        ValuesIterator(DictionaryIterator(entries: self.entries, capacity: self.capacity))
     }
 }
 

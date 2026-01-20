@@ -32,7 +32,7 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
     private var current: T
     private var end: T
 
-    public init(current: T, end: T) {
+    public init(current current: T, end end: T) {
         self.current = current;
         self.end = end;
     }
@@ -86,7 +86,7 @@ public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable
     private var end: T
     private var finished: Bool
 
-    public init(current: T, end: T, finished: Bool) {
+    public init(current current: T, end end: T, finished finished: Bool) {
         self.current = current;
         self.end = end;
         self.finished = finished;

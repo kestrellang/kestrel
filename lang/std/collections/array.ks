@@ -16,9 +16,9 @@ public struct ArrayIterator[T]: Iterator {
     private var ptr: Pointer[T]
     private var remaining: Int64
 
-    public init(ptr: Pointer[T], count: Int64) {
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
         self.ptr = ptr;
-        self.remaining = count;
+        self.remaining = remaining;
     }
 
     public mutating func next() -> Optional[T] {
@@ -44,7 +44,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     private var cap: Int64
 
     // Private init for internal use
-    private init(ptr: Pointer[T], len: Int64, cap: Int64) {
+    private init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64) {
         self.ptr = ptr;
         self.len = len;
         self.cap = cap;
@@ -58,7 +58,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     // Create with capacity
-    public init(capacity: Int64) {
+    public init(capacity capacity: Int64) {
         if capacity > Int64(intLiteral: 0) {
             let layout = Layout.array[T](capacity);
             var allocator = SystemAllocator();
@@ -281,7 +281,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
     // Iterable
     public func iter() -> ArrayIterator[T] {
-        ArrayIterator(ptr: self.ptr, count: self.len)
+        ArrayIterator(ptr: self.ptr, remaining: self.len)
     }
 
     // Reverse in place

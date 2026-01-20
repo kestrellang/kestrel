@@ -36,7 +36,7 @@ struct Pong {
     // Frame counter for timing
     var frameCount: Int64
 
-    init(width: Int64, height: Int64, paddleSize: Int64) {
+    init(width width: Int64, height height: Int64, paddleSize paddleSize: Int64) {
         self.width = width;
         self.height = height;
         self.paddleSize = paddleSize;

@@ -1,6 +1,33 @@
 use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
 use kestrel_span::Span;
 
+/// Error when a type alias definition contains an unresolved (inferred) type.
+/// Type aliases must have fully specified types - they cannot contain inference placeholders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeAliasContainsInferError {
+    /// The span of the type alias definition
+    pub span: Span,
+    /// The name of the type alias
+    pub alias_name: String,
+}
+
+impl IntoDiagnostic for TypeAliasContainsInferError {
+    fn into_diagnostic(&self) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type alias '{}' contains unresolved type argument",
+                self.alias_name
+            ))
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("type argument required"),
+            ])
+            .with_notes(vec![
+                "type alias definitions must have fully specified types".to_string(),
+            ])
+    }
+}
+
 /// A participant in a circular type alias chain
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CycleParticipant {

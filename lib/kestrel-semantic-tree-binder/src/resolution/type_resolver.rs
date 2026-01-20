@@ -289,12 +289,11 @@ impl<'a> TypeResolver<'a> {
                     // Check for lang.ptr[T] generic pointer type
                     if segments[1] == lang::PTR {
                         match self.extract_type_arguments(ty_path_node) {
-                            // No brackets: treat as lang.ptr[_]
-                            None => return Ty::pointer(Ty::infer(ty_span.clone()), ty_span),
-                            // Brackets present (including empty): require exact arity (1)
+                            // Brackets present with exactly 1 type argument - valid
                             Some(type_args) if type_args.len() == 1 => {
                                 return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
                             }
+                            // Brackets present with wrong arity (including empty) - error
                             Some(type_args) => {
                                 self.diagnostics.throw(LangPtrArityError {
                                     span: ty_span.clone(),
@@ -302,41 +301,90 @@ impl<'a> TypeResolver<'a> {
                                 });
                                 return Ty::error(ty_span);
                             }
+                            // No brackets - lang.ptr requires explicit type argument
+                            None => {
+                                self.diagnostics.throw(LangPtrArityError {
+                                    span: ty_span.clone(),
+                                    got: 0,
+                                });
+                                return Ty::error(ty_span);
+                            }
                         }
                     }
 
+                    // Helper to check if type args were provided for a non-generic primitive
+                    let reject_type_args = |resolver: &mut Self, type_name: &str| -> Option<Ty> {
+                        if let Some(type_args) = resolver.extract_type_arguments(ty_path_node) {
+                            if !type_args.is_empty() {
+                                resolver.diagnostics.throw(NotGenericError {
+                                    span: ty_span.clone(),
+                                    type_name: type_name.to_string(),
+                                });
+                                return Some(Ty::error(ty_span.clone()));
+                            }
+                        }
+                        None
+                    };
+
                     // Check for lang.i* signed integer types
                     if segments[1] == lang::I8 {
+                        if let Some(err) = reject_type_args(self, "lang.i8") {
+                            return err;
+                        }
                         return Ty::int(IntBits::I8, ty_span);
                     }
                     if segments[1] == lang::I16 {
+                        if let Some(err) = reject_type_args(self, "lang.i16") {
+                            return err;
+                        }
                         return Ty::int(IntBits::I16, ty_span);
                     }
                     if segments[1] == lang::I32 {
+                        if let Some(err) = reject_type_args(self, "lang.i32") {
+                            return err;
+                        }
                         return Ty::int(IntBits::I32, ty_span);
                     }
                     if segments[1] == lang::I64 {
+                        if let Some(err) = reject_type_args(self, "lang.i64") {
+                            return err;
+                        }
                         return Ty::int(IntBits::I64, ty_span);
                     }
 
                     // Check for lang.i1 boolean type
                     if segments[1] == lang::I1 {
+                        if let Some(err) = reject_type_args(self, "lang.i1") {
+                            return err;
+                        }
                         return Ty::bool(ty_span);
                     }
 
                     // Check for lang.f* float types
                     if segments[1] == lang::F16 {
+                        if let Some(err) = reject_type_args(self, "lang.f16") {
+                            return err;
+                        }
                         return Ty::float(FloatBits::F16, ty_span);
                     }
                     if segments[1] == lang::F32 {
+                        if let Some(err) = reject_type_args(self, "lang.f32") {
+                            return err;
+                        }
                         return Ty::float(FloatBits::F32, ty_span);
                     }
                     if segments[1] == lang::F64 {
+                        if let Some(err) = reject_type_args(self, "lang.f64") {
+                            return err;
+                        }
                         return Ty::float(FloatBits::F64, ty_span);
                     }
 
                     // Check for lang.str string type
                     if segments[1] == lang::STR {
+                        if let Some(err) = reject_type_args(self, "lang.str") {
+                            return err;
+                        }
                         return Ty::string(ty_span);
                     }
                 }
