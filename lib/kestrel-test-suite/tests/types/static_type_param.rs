@@ -39,14 +39,14 @@ mod basic_init {
 
     #[test]
     fn init_with_arguments() {
-        // T(x: 1) with labeled argument
+        // T(v) with positional argument
         Test::new(
             r#"module Test
             protocol Factory {
                 init(value: lang.i64)
             }
             func make[T](v: lang.i64) -> T where T: Factory {
-                return T(value: v)
+                return T(v)
             }
         "#,
         )
@@ -55,14 +55,14 @@ mod basic_init {
 
     #[test]
     fn init_with_multiple_arguments() {
-        // T(a: 1, b: 2) with multiple arguments
+        // T(a, b) with multiple positional arguments
         Test::new(
             r#"module Test
             protocol Factory {
                 init(x: lang.i64, y: lang.i64)
             }
             func make[T](a: lang.i64, b: lang.i64) -> T where T: Factory {
-                return T(x: a, y: b)
+                return T(a, b)
             }
         "#,
         )
@@ -82,7 +82,7 @@ mod basic_init {
                 return T()
             }
             func makeWithValue[T](v: lang.i64) -> T where T: Factory {
-                return T(value: v)
+                return T(v)
             }
         "#,
         )

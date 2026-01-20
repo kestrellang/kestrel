@@ -1189,7 +1189,7 @@ mod regression {
         Test::new(
             r#"module Test
             public enum Option[T] {
-                case Some(value: T)
+                case Some(T)
                 case None
             }
 

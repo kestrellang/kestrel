@@ -1381,7 +1381,7 @@ mod regression {
 module Main
 
 enum Option[T] {
-    case Some(value: T)
+    case Some(T)
     case None
 }
 

@@ -325,7 +325,7 @@ mod while_let {
             }
 
             func sumAll() -> lang.i64 {
-                var counter = Counter(start: 5);
+                var counter = Counter(5);
                 var sum: lang.i64 = 0;
                 while let .Some(v) = counter.next() {
                     sum = lang.i64_add(sum, v);

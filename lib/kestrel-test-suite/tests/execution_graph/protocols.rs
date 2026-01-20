@@ -715,7 +715,7 @@ mod witness_method_calls {
 
     #[test]
     fn init_with_arguments_on_type_parameter() {
-        // T(value: v) where T: Factory
+        // T(v) where T: Factory
         Test::new(
             r#"
             module Test
@@ -725,7 +725,7 @@ mod witness_method_calls {
             }
 
             func make[T](v: lang.i64) -> T where T: Factory {
-                return T(value: v)
+                return T(v)
             }
         "#,
         )

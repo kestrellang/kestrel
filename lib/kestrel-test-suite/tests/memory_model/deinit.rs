@@ -452,16 +452,16 @@ mod automatic_deinit {
 
     #[test]
     fn basic_scope_exit_deinit() {
-        // A non-copyable local with deinit should get a Deinit statement at scope exit
+        // A non-copyable local with deinit should get a deinit call at scope exit
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
                 deinit {}
             }
-            
+
             func example() {
                 let handle = Handle(fd: 42);
             }
@@ -469,8 +469,11 @@ mod automatic_deinit {
         )
         .expect(Compiles)
         .expect(
-            MirFunction::new("Test.example")
-                .any_block(|b| b.has_statement(StatementPattern::AnyDeinit)),
+            MirFunction::new("Test.example").any_block(|b| {
+                b.has_statement(StatementPattern::DeinitCall {
+                    ty: "Test.Handle".to_string(),
+                })
+            }),
         );
     }
 

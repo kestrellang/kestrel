@@ -554,7 +554,7 @@ mod initializers {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_function("Main.Counter.init")
+            Mir::mir_function("Main.Counter.init$start")
                 .returns(MirTy::Unit)
                 .has_param("self", MirTy::ref_mut(MirTy::named("Main.Counter")))
                 .has_param("start", MirTy::ref_(MirTy::I64)),
@@ -589,7 +589,7 @@ mod initializers {
         .expect(Mir::compiles())
         .expect(
             Mir::mir_function("Main.main")
-                .calls("Main.Counter.init")
+                .calls("Main.Counter.init$start")
                 .calls("Main.Counter.read"),
         );
     }

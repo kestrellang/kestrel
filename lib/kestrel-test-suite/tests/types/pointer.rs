@@ -613,7 +613,7 @@ mod regression {
             }
 
             public func testCastPtr[T]() -> Pointer[T] {
-                Pointer(raw: lang.cast_ptr[T](lang.ptr_null()))
+                Pointer(lang.cast_ptr[T](lang.ptr_null()))
             }
         "#,
         )

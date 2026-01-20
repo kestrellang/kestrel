@@ -432,7 +432,7 @@ mod regression {
                 }
 
                 static func zero() -> Counter {
-                    Counter(c: 0)
+                    Counter(0)
                 }
             }
 
@@ -465,7 +465,7 @@ mod regression {
             type C = Counter
 
             func test() -> lang.i64 {
-                let c = C(c: 42);
+                let c = C(42);
                 c.count
             }
         "#,
@@ -496,7 +496,7 @@ mod regression {
             type C = Counter
 
             func test() -> lang.i64 {
-                let c: C = Counter(c: 42);
+                let c: C = Counter(42);
                 c.getCount()
             }
         "#,

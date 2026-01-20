@@ -1080,15 +1080,11 @@ fn resolve_implicit_member(
                 let expected_label = param.label.as_ref().map(|l| l.value.as_str());
                 let actual_label = label.as_deref();
 
-                // Allow unlabeled arguments to match any parameter (positional matching)
-                // If a label is provided, it must match the expected label
-                if let Some(actual) = actual_label {
-                    if Some(actual) != expected_label {
-                        labels_match = false;
-                        break;
-                    }
+                // Labels must match exactly: if param has label, arg must provide it
+                if actual_label != expected_label {
+                    labels_match = false;
+                    break;
                 }
-                // If actual_label is None, it's positional - always matches
             }
 
             if !labels_match {
