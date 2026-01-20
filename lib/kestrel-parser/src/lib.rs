@@ -78,6 +78,7 @@ pub mod stmt;
 pub mod r#struct;
 pub mod ty;
 pub mod type_alias;
+pub mod type_decl;
 pub mod type_param;
 
 use event::{EventSink, TreeBuilder};

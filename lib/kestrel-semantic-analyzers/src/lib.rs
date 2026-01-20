@@ -14,12 +14,13 @@ pub use runner::{run, run_all};
 /// This list grows as validators are migrated from the builder.
 pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
     use analyzers::{
-        AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer, ConstraintCycleAnalyzer,
-        DeadCodeAnalyzer, DefiniteAssignmentAnalyzer, DuplicateCaseAnalyzer, DuplicateLabelAnalyzer,
-        DuplicateSymbolAnalyzer, ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer,
-        ExtensionConflictAnalyzer, FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer,
-        ImportAnalyzer, InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer,
-        ProtocolMethodAnalyzer, RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
+        AssignmentValidationAnalyzer, ClosureAnalyzer, ConformanceAnalyzer,
+        ConstraintCycleAnalyzer, DeadCodeAnalyzer, DefiniteAssignmentAnalyzer,
+        DuplicateCaseAnalyzer, DuplicateLabelAnalyzer, DuplicateSymbolAnalyzer,
+        ExhaustiveReturnAnalyzer, ExhaustivenessAnalyzer, ExtensionConflictAnalyzer,
+        FunctionBodyAnalyzer, GenericsAnalyzer, GuardLetDivergenceAnalyzer, ImportAnalyzer,
+        InitializerVerificationAnalyzer, IrrefutablePatternAnalyzer, ProtocolMethodAnalyzer,
+        RecursiveEnumAnalyzer, RefutablePatternAnalyzer, StaticContextAnalyzer,
         StructCycleAnalyzer, TypeAliasCycleAnalyzer, TypeCheckAnalyzer, TypeInferenceAnalyzer,
         VisibilityConsistencyAnalyzer,
     };

@@ -105,7 +105,7 @@ impl<'a> InferenceContext<'a> {
 
         // Recursively register nested types
         match ty.kind() {
-            TyKind::Array(elem_ty) => {
+            TyKind::Array(elem_ty) | TyKind::Pointer(elem_ty) => {
                 self.register_type(elem_ty);
             }
             TyKind::Tuple(elem_tys) => {
@@ -169,7 +169,9 @@ impl<'a> InferenceContext<'a> {
     /// Get a registered type by ID.
     pub fn get_type(&self, id: TyId) -> Option<&Ty> {
         // First check substitutions, then registry
-        self.substitutions.get(&id).or_else(|| self.type_registry.get(&id))
+        self.substitutions
+            .get(&id)
+            .or_else(|| self.type_registry.get(&id))
     }
 
     // === Constraint Addition Methods ===
@@ -227,7 +229,11 @@ impl<'a> InferenceContext<'a> {
         span: Span,
     ) {
         self.constraints.push(Constraint::implicit_member(
-            expr_ty, member_name, argument_tys, expr_id, span,
+            expr_ty,
+            member_name,
+            argument_tys,
+            expr_id,
+            span,
         ));
     }
 
@@ -243,7 +249,10 @@ impl<'a> InferenceContext<'a> {
         span: Span,
     ) {
         self.constraints.push(Constraint::enum_pattern_binding(
-            enum_ty, case_name, binding_tys, span,
+            enum_ty,
+            case_name,
+            binding_tys,
+            span,
         ));
     }
 
@@ -260,7 +269,11 @@ impl<'a> InferenceContext<'a> {
         span: Span,
     ) {
         self.constraints.push(Constraint::struct_pattern_binding(
-            struct_ty, struct_name, field_bindings, has_rest, span,
+            struct_ty,
+            struct_name,
+            field_bindings,
+            has_rest,
+            span,
         ));
     }
 

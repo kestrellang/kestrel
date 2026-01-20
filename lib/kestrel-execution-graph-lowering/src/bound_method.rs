@@ -298,10 +298,7 @@ fn create_bound_method_function(
     let deref_env = Place::deref(env_place);
     let receiver_field = Place::field(deref_env, "receiver".to_string());
 
-    ctx.emit_assign(
-        Place::local(receiver_local),
-        Rvalue::Copy(receiver_field),
-    );
+    ctx.emit_assign(Place::local(receiver_local), Rvalue::Copy(receiver_field));
 
     // Build arguments for the method call: receiver first, then the passed parameters
     let mut all_args = vec![Value::Place(Place::local(receiver_local))];

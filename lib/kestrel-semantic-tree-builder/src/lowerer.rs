@@ -53,8 +53,10 @@ impl SemanticModelBuilder {
             _ => root.clone(),
         };
 
-        let file_name_spanned =
-            Spanned::new(file_name.to_string(), Span::new(file_id, 0..file_name.len()));
+        let file_name_spanned = Spanned::new(
+            file_name.to_string(),
+            Span::new(file_id, 0..file_name.len()),
+        );
         let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(SourceFileSymbol::new(
             file_name_spanned,
             Span::new(file_id, 0..source.len()),
@@ -78,6 +80,7 @@ impl SemanticModelBuilder {
         SemanticModel::new(self.root, self.syntax_map, self.sources)
     }
 
+    /// Walk syntax tree and build symbols (iterative to avoid stack overflow on deep trees)
     fn walk_node(
         &mut self,
         syntax: &SyntaxNode,
@@ -86,26 +89,56 @@ impl SemanticModelBuilder {
         parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        if let Some(builder) = builder_for(syntax.kind()) {
-            if let Some(symbol) = builder.build_declaration(syntax, source, file_id, parent, root) {
-                self.syntax_map
-                    .insert(symbol.metadata().id(), syntax.clone());
+        // Use an explicit stack to avoid stack overflow on deeply nested declarations.
+        // Each stack entry is (syntax_node, parent_symbol).
+        let mut stack: Vec<(SyntaxNode, Option<Arc<dyn Symbol<KestrelLanguage>>>)> =
+            vec![(syntax.clone(), parent.cloned())];
 
-                if !builder.is_terminal() {
-                    for child in syntax.children() {
-                        self.walk_node(&child, source, file_id, Some(&symbol), root);
+        let mut first_result: Option<Arc<dyn Symbol<KestrelLanguage>>> = None;
+
+        while let Some((current_syntax, current_parent)) = stack.pop() {
+            let built_symbol = if let Some(builder) = builder_for(current_syntax.kind()) {
+                if let Some(symbol) = builder.build_declaration(
+                    &current_syntax,
+                    source,
+                    file_id,
+                    current_parent.as_ref(),
+                    root,
+                ) {
+                    self.syntax_map
+                        .insert(symbol.metadata().id(), current_syntax.clone());
+
+                    if !builder.is_terminal() {
+                        // Add children in reverse order so they're processed left-to-right
+                        let children: Vec<_> = current_syntax.children().collect();
+                        for child in children.into_iter().rev() {
+                            stack.push((child, Some(symbol.clone())));
+                        }
                     }
-                }
 
-                return Some(symbol);
+                    // Remember the first symbol built (for return value)
+                    if first_result.is_none() {
+                        first_result = Some(symbol.clone());
+                    }
+
+                    Some(symbol)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // If no symbol was built for this node, still process its children
+            if built_symbol.is_none() {
+                let children: Vec<_> = current_syntax.children().collect();
+                for child in children.into_iter().rev() {
+                    stack.push((child, current_parent.clone()));
+                }
             }
         }
 
-        for child in syntax.children() {
-            self.walk_node(&child, source, file_id, parent, root);
-        }
-
-        None
+        first_result
     }
 }
 
@@ -123,7 +156,13 @@ where
     let mut builder = SemanticModelBuilder::new();
 
     for file in files {
-        builder.add_file(file.file_name, file.syntax, file.source, file.file_id, diagnostics);
+        builder.add_file(
+            file.file_name,
+            file.syntax,
+            file.source,
+            file.file_id,
+            diagnostics,
+        );
     }
 
     builder.build()

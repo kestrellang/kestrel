@@ -4,8 +4,8 @@ use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use crate::symbol::type_parameter::TypeParameterSymbol;
-use crate::ty::substitutions::Substitutions;
 use crate::ty::Ty;
+use crate::ty::substitutions::Substitutions;
 use std::sync::Arc;
 
 /// Integer bit widths
@@ -74,6 +74,9 @@ pub enum TyKind {
 
     /// Array type: [T]
     Array(Box<Ty>),
+
+    /// Raw pointer type: lang.ptr[T]
+    Pointer(Box<Ty>),
 
     /// Function type: (P1, P2, ...) -> R
     Function {

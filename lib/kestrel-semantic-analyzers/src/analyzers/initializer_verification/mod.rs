@@ -214,7 +214,10 @@ fn analyze_statement(
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
         }
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Analyze each condition
             for condition in conditions {
                 match condition {
@@ -227,7 +230,11 @@ fn analyze_statement(
                 }
             }
             // Analyze the else block (it diverges so we don't merge state)
-            let else_state = analyze_block(&else_block.statements, else_block.yield_expr.as_deref(), ctx);
+            let else_state = analyze_block(
+                &else_block.statements,
+                else_block.yield_expr.as_deref(),
+                ctx,
+            );
             let _ = else_state;
         }
         StatementKind::Deinit { .. } => {
@@ -292,6 +299,9 @@ fn analyze_expression(
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
         }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            state = analyze_expression(receiver, state, false, ctx);
+        }
         ExprKind::TupleIndex { tuple, .. } => {
             state = analyze_expression(tuple, state, false, ctx);
         }
@@ -310,6 +320,16 @@ fn analyze_expression(
             state = analyze_expression(inner, state, false, ctx);
         }
         ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            state = analyze_expression(receiver, state, false, ctx);
+            for arg in arguments {
+                state = analyze_expression(&arg.value, state, false, ctx);
+            }
+        }
+        ExprKind::DeferredMethodCall {
             receiver,
             arguments,
             ..
@@ -489,7 +509,9 @@ fn analyze_expression(
             }
             state.diverged = true;
         }
-        ExprKind::Closure { body, tail_expr, .. } => {
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             // Analyze closure body - closures capture variables but don't affect init state
             for stmt in body {
                 let _ = analyze_statement(stmt, state.clone(), ctx);
@@ -517,6 +539,19 @@ fn analyze_expression(
                 arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
             }
         }
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                if state.diverged {
+                    break;
+                }
+                state = analyze_statement(stmt, state, ctx);
+            }
+            if !state.diverged {
+                if let Some(val) = value {
+                    state = analyze_expression(val, state, false, ctx);
+                }
+            }
+        }
         ExprKind::Error => {}
     }
     state
@@ -529,7 +564,10 @@ fn contains_break_at_top_level(kind: &StatementKind) -> bool {
             value: Some(expr), ..
         } => expr_contains_break_at_top_level(&expr.kind),
         StatementKind::Binding { value: None, .. } => false,
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             for condition in conditions {
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {

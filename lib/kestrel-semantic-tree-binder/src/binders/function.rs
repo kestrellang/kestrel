@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
-use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::callable::{
+    CallableBehavior, ParameterAccessMode, ReceiverKind,
+};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::builtins::{BuiltinKind, LanguageFeature};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -12,14 +14,20 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
+use crate::binders::utils::attributes::{
+    BuiltinParseResult, ExternParseResult, parse_builtin_attribute, parse_extern_attribute,
+};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinMethodNotInProtocolError, BuiltinMethodWrongSignatureError, BuiltinWrongKindError,
-    DuplicateBuiltinError,
+    DuplicateBuiltinError, ExternFunctionCannotBeGenericError, ExternFunctionCannotHaveBodyError,
+    ExternParameterNotConsumingError, TypeNotFFISafeError,
 };
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::resolution::LocalScope;
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
+use kestrel_semantic_tree::attributes::AttributeKind;
+use kestrel_semantic_tree::behavior::extern_fn::ExternBehavior;
+use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Binder for function declarations
@@ -160,18 +168,18 @@ impl FunctionBinder {
         }
     }
 
-    /// Validate the signature for @builtin(.Clone): `func clone(self) -> Self`
+    /// Validate the signature for @builtin(.Clone): `func clone() -> Self`
     ///
     /// Requirements:
     /// - Must be an instance method (has a receiver)
-    /// - Must take no parameters besides self
+    /// - Must take no parameters (self is implicit)
     /// - Must return Self
     fn validate_clone_signature(
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         syntax: &SyntaxNode,
         source: &str,
     ) -> Result<(), String> {
-        let expected = "func clone(self) -> Self".to_string();
+        let expected = "func clone() -> Self".to_string();
 
         // Check for receiver (must be an instance method)
         let is_static = syntax
@@ -229,6 +237,115 @@ impl FunctionBinder {
 
         Ok(())
     }
+
+    /// Process @extern attribute on a function.
+    ///
+    /// Validates that:
+    /// - The function is not generic
+    /// - The function has no body (implementation is external)
+    ///
+    /// If valid, attaches an ExternBehavior to the symbol.
+    fn process_extern_attribute(
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        attributes: &AttributesBehavior,
+        source: &str,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        let result = parse_extern_attribute(attributes, source, context.diagnostics);
+
+        let (calling_convention, mangle_name) = match result {
+            ExternParseResult::Success {
+                calling_convention,
+                mangle_name,
+            } => (calling_convention, mangle_name),
+            ExternParseResult::NotExtern | ExternParseResult::Error => return,
+        };
+
+        let attr_span = attributes
+            .get_kind(AttributeKind::Extern)
+            .map(|a| a.span.clone())
+            .unwrap_or_else(|| symbol.metadata().span().clone());
+
+        // Validation 1: Cannot be generic
+        if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
+            if generics.is_generic() {
+                context
+                    .diagnostics
+                    .throw(ExternFunctionCannotBeGenericError {
+                        span: attr_span.clone(),
+                    });
+                return;
+            }
+        }
+
+        // Validation 2: Cannot have a body
+        // Check for FunctionBody in syntax (non-empty braces or expression body)
+        if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
+            // Check if body has actual content
+            // A FunctionBody contains either a CodeBlock or a single Expression
+            // An empty body `{}` has an empty CodeBlock
+            let has_content = body_node.children().any(|child| {
+                match child.kind() {
+                    SyntaxKind::CodeBlock => {
+                        // Check if the code block has any statements or trailing expression
+                        child.children().any(|grandchild| {
+                            matches!(
+                                grandchild.kind(),
+                                SyntaxKind::Statement | SyntaxKind::Expression
+                            )
+                        })
+                    }
+                    SyntaxKind::Expression => true, // Expression body like `func foo() -> Int = 42`
+                    _ => false,
+                }
+            });
+
+            if has_content {
+                context
+                    .diagnostics
+                    .throw(ExternFunctionCannotHaveBodyError { span: attr_span });
+                return;
+            }
+        }
+
+        // Validation 3 (mutating param check) is now done in bind_members before
+        // CallableBehavior is created, so we can check the original access modes.
+
+        // Validation 4: All parameter types and return type must conform to FFISafe
+        if let Some(ffi_safe_id) = context
+            .model
+            .builtin_registry()
+            .protocol(LanguageFeature::FFISafe)
+        {
+            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
+                // Check each parameter type
+                for param in callable.parameters() {
+                    if !context.model.conforms_to(&param.ty, ffi_safe_id) {
+                        context.diagnostics.throw(TypeNotFFISafeError {
+                            span: param.ty.span().clone(),
+                            ty: param.ty.to_string(),
+                            context: "parameter".to_string(),
+                        });
+                    }
+                }
+
+                // Check return type (skip if Unit - void is always valid for extern)
+                let return_ty = callable.return_type();
+                if !return_ty.is_unit() && !context.model.conforms_to(return_ty, ffi_safe_id) {
+                    context.diagnostics.throw(TypeNotFFISafeError {
+                        span: return_ty.span().clone(),
+                        ty: return_ty.to_string(),
+                        context: "return type".to_string(),
+                    });
+                }
+            }
+        }
+
+        // Attach ExternBehavior to the symbol
+        let extern_behavior = ExternBehavior::new(calling_convention, mangle_name);
+        symbol.metadata().add_behavior(extern_behavior);
+    }
 }
 
 impl DeclarationBinder for FunctionBinder {
@@ -280,6 +397,37 @@ impl DeclarationBinder for FunctionBinder {
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
 
+        // Check if this is an extern function - extern functions always use consuming params
+        // because FFI can't handle Kestrel's borrowing semantics
+        let is_extern = attributes_behavior
+            .get_kind(AttributeKind::Extern)
+            .is_some();
+
+        // For extern functions, validate that no parameter uses 'mutating' access mode,
+        // then force all parameters to Consuming access mode
+        let resolved_params = if is_extern {
+            // Validate: error if user explicitly wrote 'mutating'
+            for param in &resolved_params {
+                if param.access_mode == ParameterAccessMode::Mutating {
+                    context.diagnostics.throw(ExternParameterNotConsumingError {
+                        span: param.bind_name.span.clone(),
+                        param_name: param.bind_name.value.clone(),
+                    });
+                }
+            }
+
+            // Transform: force all params to Consuming for FFI compatibility
+            resolved_params
+                .into_iter()
+                .map(|mut p| {
+                    p.access_mode = ParameterAccessMode::Consuming;
+                    p
+                })
+                .collect()
+        } else {
+            resolved_params
+        };
+
         // Add a new CallableBehavior with resolved types
         let resolved_callable = match receiver_kind {
             Some(kind) => CallableBehavior::with_receiver(
@@ -291,6 +439,10 @@ impl DeclarationBinder for FunctionBinder {
             None => CallableBehavior::new(resolved_params.clone(), resolved_return, span),
         };
         symbol.metadata().add_behavior(resolved_callable);
+
+        // Process @extern attribute if present (must be after CallableBehavior is added
+        // so we can check parameter types and access modes)
+        Self::process_extern_attribute(symbol, &attributes_behavior, &source, syntax, context);
 
         // NOTE: Body resolution is deferred to bind_body() to handle forward references
     }
@@ -338,10 +490,10 @@ fn resolve_function_body(
     source: &str,
     file_id: usize,
 ) {
+    use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
         create_local_scope_for_body, resolve_body_and_attach_executable,
     };
-    use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 

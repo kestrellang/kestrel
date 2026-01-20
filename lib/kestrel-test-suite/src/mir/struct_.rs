@@ -1,7 +1,7 @@
 //! Struct expectations for MIR testing.
 
 use crate::mir::context::MirTestContext;
-use crate::mir::types::{format_actual_ty, MirTy};
+use crate::mir::types::{MirTy, format_actual_ty};
 use crate::{Expectable, TestContext};
 use kestrel_execution_graph::StructDef;
 

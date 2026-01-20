@@ -90,9 +90,7 @@ pub fn is_irrefutable(pattern: &Pattern) -> bool {
         PatternKind::Range { .. } => false,
 
         // Struct patterns are irrefutable if all field patterns are irrefutable
-        PatternKind::Struct { fields, .. } => {
-            fields.iter().all(|f| is_irrefutable(&f.pattern))
-        }
+        PatternKind::Struct { fields, .. } => fields.iter().all(|f| is_irrefutable(&f.pattern)),
 
         // Array patterns are REFUTABLE - they check array length
         PatternKind::Array { .. } => false,
@@ -229,7 +227,8 @@ mod tests {
 
     #[test]
     fn test_bool_literal_is_refutable() {
-        let pattern = Pattern::literal(LiteralValue::Bool(true), Ty::bool(test_span()), test_span());
+        let pattern =
+            Pattern::literal(LiteralValue::Bool(true), Ty::bool(test_span()), test_span());
         assert!(!is_irrefutable(&pattern));
     }
 
@@ -249,7 +248,8 @@ mod tests {
             test_span(),
         );
         let binding = EnumPatternBinding::unlabeled(inner_pattern, test_span());
-        let pattern = Pattern::unresolved_enum_variant("Some".to_string(), vec![binding], test_span());
+        let pattern =
+            Pattern::unresolved_enum_variant("Some".to_string(), vec![binding], test_span());
         assert!(!is_irrefutable(&pattern));
     }
 

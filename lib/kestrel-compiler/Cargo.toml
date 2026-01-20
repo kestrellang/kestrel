@@ -14,3 +14,7 @@ kestrel-semantic-model = { path = "../kestrel-semantic-model" }
 kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-span = { path = "../kestrel-span" }
+kestrel-execution-graph = { path = "../kestrel-execution-graph" }
+kestrel-execution-graph-lowering = { path = "../kestrel-execution-graph-lowering" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }

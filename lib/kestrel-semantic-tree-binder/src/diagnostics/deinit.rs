@@ -52,11 +52,10 @@ impl IntoDiagnostic for CopyableWithDeinitWarning {
                 "struct `{}` is Copyable but has deinit",
                 self.struct_name
             ))
-            .with_labels(vec![Label::primary(
-                self.deinit_span.file_id,
-                self.deinit_span.range(),
-            )
-            .with_message("deinit will run for each copy")])
+            .with_labels(vec![
+                Label::primary(self.deinit_span.file_id, self.deinit_span.range())
+                    .with_message("deinit will run for each copy"),
+            ])
             .with_notes(vec![
                 "consider marking the struct as `not Copyable` if it manages resources".to_string(),
             ])
@@ -79,8 +78,10 @@ impl IntoDiagnostic for DeinitUndeclaredError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("cannot deinit undeclared variable `{}`", self.name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("not found in this scope")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("not found in this scope"),
+            ])
     }
 }
 

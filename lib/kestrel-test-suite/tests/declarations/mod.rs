@@ -13,6 +13,7 @@
 mod associated_types;
 mod enums;
 mod extensions;
+mod extern_functions;
 mod functions;
 mod imports;
 mod protocol_method_linking;

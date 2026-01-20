@@ -105,6 +105,8 @@ fn validate_assignment_target(
         | ExprKind::Grouping(_)
         | ExprKind::Call { .. }
         | ExprKind::PrimitiveMethodCall { .. }
+        | ExprKind::PrimitiveMethodRef { .. }
+        | ExprKind::DeferredMethodCall { .. }
         | ExprKind::ImplicitStructInit { .. }
         | ExprKind::MethodRef { .. }
         | ExprKind::SymbolRef(_)
@@ -124,6 +126,7 @@ fn validate_assignment_target(
         | ExprKind::Return { .. }
         | ExprKind::Closure { .. }
         | ExprKind::Match { .. }
+        | ExprKind::Block { .. }
         | ExprKind::Error => {
             out.push(AssignmentError::InvalidTarget(
                 CannotAssignToExpressionError {

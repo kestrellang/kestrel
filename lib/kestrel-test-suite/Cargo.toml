@@ -15,5 +15,7 @@ kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-execution-graph = { path = "../kestrel-execution-graph" }
 kestrel-execution-graph-lowering = { path = "../kestrel-execution-graph-lowering" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = { workspace = true }

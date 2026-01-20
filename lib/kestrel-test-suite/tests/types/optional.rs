@@ -28,4 +28,3 @@ fn non_optional_type_cannot_be_null() {
     )
     .expect(HasError("cannot assign null to non-optional type"));
 }
-

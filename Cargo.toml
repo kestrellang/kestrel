@@ -6,16 +6,8 @@ edition.workspace = true
 [dependencies]
 kestrel-lexer = { path = "lib/kestrel-lexer" }
 kestrel-parser = { path = "lib/kestrel-parser" }
-kestrel-syntax-tree = { path = "lib/kestrel-syntax-tree" }
-kestrel-semantic-tree = { path = "lib/kestrel-semantic-tree" }
-kestrel-semantic-tree-builder = { path = "lib/kestrel-semantic-tree-builder" }
-kestrel-semantic-tree-binder = { path = "lib/kestrel-semantic-tree-binder" }
 kestrel-compiler = { path = "lib/kestrel-compiler" }
-kestrel-execution-graph = { path = "lib/kestrel-execution-graph" }
 kestrel-execution-graph-lowering = { path = "lib/kestrel-execution-graph-lowering" }
-kestrel-reporting = { path = "lib/kestrel-reporting" }
-kestrel-span = { path = "lib/kestrel-span" }
-semantic-tree = { path = "lib/semantic-tree" }
 clap = { workspace = true }
 
 [workspace.package]
@@ -52,5 +44,14 @@ members = [
     "lib/kestrel-compiler",
     "lib/kestrel-execution-graph",
     "lib/kestrel-execution-graph-lowering",
+    "lib/kestrel-codegen",
+    "lib/kestrel-codegen-cranelift",
     "lib/kestrel-test-suite"
 ]
+
+# Reduce stack frame size in debug builds for recursive parsers
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.kestrel-parser]
+opt-level = 2

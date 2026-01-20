@@ -180,6 +180,17 @@ pub enum InferenceError {
         /// Where the pattern is
         span: Span,
     },
+
+    /// A primitive method was referenced but not called.
+    /// Primitive methods cannot be used as first-class values.
+    PrimitiveMethodNotCalled {
+        /// The method name
+        method_name: String,
+        /// The receiver type
+        receiver_type: String,
+        /// Where the error is
+        span: Span,
+    },
 }
 
 impl InferenceError {
@@ -255,12 +266,7 @@ impl InferenceError {
     }
 
     /// Create a closure parameter type mismatch error.
-    pub fn closure_param_type_mismatch(
-        index: usize,
-        actual: Ty,
-        expected: Ty,
-        span: Span,
-    ) -> Self {
+    pub fn closure_param_type_mismatch(index: usize, actual: Ty, expected: Ty, span: Span) -> Self {
         InferenceError::ClosureParamTypeMismatch {
             index,
             actual,
@@ -309,7 +315,11 @@ impl InferenceError {
     }
 
     /// Create a missing struct fields error.
-    pub fn missing_struct_fields(struct_name: String, missing_fields: Vec<String>, span: Span) -> Self {
+    pub fn missing_struct_fields(
+        struct_name: String,
+        missing_fields: Vec<String>,
+        span: Span,
+    ) -> Self {
         InferenceError::MissingStructFields {
             struct_name,
             missing_fields,
@@ -337,6 +347,7 @@ impl InferenceError {
             InferenceError::MissingStructFields { span, .. } => Some(span),
             InferenceError::UnknownEnumCase { span, .. } => Some(span),
             InferenceError::TupleArityMismatch { span, .. } => Some(span),
+            InferenceError::PrimitiveMethodNotCalled { span, .. } => Some(span),
         }
     }
 }
@@ -356,6 +367,19 @@ impl InferenceError {
         InferenceError::TupleArityMismatch {
             expected,
             found,
+            span,
+        }
+    }
+
+    /// Create a primitive method not called error.
+    pub fn primitive_method_not_called(
+        method_name: String,
+        receiver_type: String,
+        span: Span,
+    ) -> Self {
+        InferenceError::PrimitiveMethodNotCalled {
+            method_name,
+            receiver_type,
             span,
         }
     }
@@ -445,31 +469,32 @@ impl std::fmt::Display for InferenceError {
                 expected_labels,
                 ..
             } => {
-                let provided: Vec<_> = provided_labels.iter().map(|l| l.as_deref().unwrap_or("_")).collect();
-                let expected: Vec<_> = expected_labels.iter().map(|l| l.as_deref().unwrap_or("_")).collect();
+                let provided: Vec<_> = provided_labels
+                    .iter()
+                    .map(|l| l.as_deref().unwrap_or("_"))
+                    .collect();
+                let expected: Vec<_> = expected_labels
+                    .iter()
+                    .map(|l| l.as_deref().unwrap_or("_"))
+                    .collect();
                 write!(
                     f,
                     "no matching overload for '{}' on {}: provided ({}) but expected ({})",
-                    name, receiver_ty, provided.join(", "), expected.join(", ")
+                    name,
+                    receiver_ty,
+                    provided.join(", "),
+                    expected.join(", ")
                 )
             }
             InferenceError::CannotInferEnumType { member_name, .. } => {
-                write!(
-                    f,
-                    "cannot infer enum type for shorthand '.{}'",
-                    member_name
-                )
+                write!(f, "cannot infer enum type for shorthand '.{}'", member_name)
             }
             InferenceError::UnknownStructField {
                 struct_name,
                 field_name,
                 ..
             } => {
-                write!(
-                    f,
-                    "struct `{}` has no field `{}`",
-                    struct_name, field_name
-                )
+                write!(f, "struct `{}` has no field `{}`", struct_name, field_name)
             }
             InferenceError::MissingStructFields {
                 struct_name,
@@ -488,21 +513,26 @@ impl std::fmt::Display for InferenceError {
                 case_name,
                 ..
             } => {
-                write!(
-                    f,
-                    "enum `{}` has no case `{}`",
-                    enum_name, case_name
-                )
+                write!(f, "enum `{}` has no case `{}`", enum_name, case_name)
             }
             InferenceError::TupleArityMismatch {
-                expected,
-                found,
-                ..
+                expected, found, ..
             } => {
                 write!(
                     f,
                     "tuple pattern arity mismatch: expected {} elements, found {}",
                     expected, found
+                )
+            }
+            InferenceError::PrimitiveMethodNotCalled {
+                method_name,
+                receiver_type,
+                ..
+            } => {
+                write!(
+                    f,
+                    "primitive method '{}' on '{}' must be called",
+                    method_name, receiver_type
                 )
             }
         }

@@ -1,7 +1,7 @@
 //! Builders for constructing MIR.
 
-mod function;
 mod block;
+mod function;
 
-pub use function::*;
 pub use block::*;
+pub use function::*;

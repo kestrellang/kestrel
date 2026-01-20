@@ -1,7 +1,7 @@
 //! Values (places or immediates).
 
-use crate::function::{Immediate, Place};
 use crate::MirContext;
+use crate::function::{Immediate, Place};
 use std::fmt;
 
 /// A value is either a place or an immediate.

@@ -106,10 +106,10 @@ fn resolve_deinit_body(
     source: &str,
     file_id: usize,
 ) {
+    use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
         create_local_scope_for_body, resolve_body_and_attach_executable,
     };
-    use crate::body_resolver::BodyResolutionContext;
 
     // Downcast to DeinitSymbol
     let Some(_) = symbol.as_ref().downcast_ref::<DeinitSymbol>() else {

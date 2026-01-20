@@ -587,7 +587,11 @@ mod initializer_declarations {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point.init").is(SymbolKind::Initializer).has(Behavior::HasAttribute("dummy")));
+        .expect(
+            Symbol::new("Point.init")
+                .is(SymbolKind::Initializer)
+                .has(Behavior::HasAttribute("dummy")),
+        );
     }
 
     #[test]

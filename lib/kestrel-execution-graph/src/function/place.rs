@@ -1,8 +1,8 @@
 //! Place expressions (memory locations).
 
+use crate::MirContext;
 use crate::id::{Id, Local};
 use crate::metadata::Metadata;
-use crate::MirContext;
 use std::fmt;
 
 /// A place is a memory location that can be read, written, or referenced.

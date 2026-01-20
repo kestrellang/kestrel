@@ -60,7 +60,7 @@ impl Analyzer for GuardLetDivergenceAnalyzer {
 
         // Check all statements in the body
         check_statements(&body.statements, ctx);
-        
+
         // Check yield expression if present
         if let Some(yield_expr) = &body.yield_expr {
             check_expression(yield_expr, ctx);
@@ -83,14 +83,16 @@ fn check_statement(stmt: &Statement, ctx: &mut AnalysisContext) {
                     span: stmt.span.clone(),
                 });
             }
-            
+
             // Also check nested statements in the else block
             check_statements(&else_block.statements, ctx);
             if let Some(yield_expr) = &else_block.yield_expr {
                 check_expression(yield_expr, ctx);
             }
         }
-        StatementKind::Binding { value: Some(expr), .. } => {
+        StatementKind::Binding {
+            value: Some(expr), ..
+        } => {
             check_expression(expr, ctx);
         }
         StatementKind::Binding { value: None, .. } => {}
@@ -105,7 +107,12 @@ fn check_statement(stmt: &Statement, ctx: &mut AnalysisContext) {
 
 fn check_expression(expr: &kestrel_semantic_tree::expr::Expression, ctx: &mut AnalysisContext) {
     match &expr.kind {
-        ExprKind::If { then_branch, then_value, else_branch, .. } => {
+        ExprKind::If {
+            then_branch,
+            then_value,
+            else_branch,
+            ..
+        } => {
             check_statements(then_branch, ctx);
             if let Some(val) = then_value {
                 check_expression(val, ctx);
@@ -130,7 +137,9 @@ fn check_expression(expr: &kestrel_semantic_tree::expr::Expression, ctx: &mut An
         ExprKind::Loop { body, .. } => {
             check_statements(body, ctx);
         }
-        ExprKind::Closure { body, tail_expr, .. } => {
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             check_statements(body, ctx);
             if let Some(tail) = tail_expr {
                 check_expression(tail, ctx);
@@ -156,26 +165,28 @@ fn block_diverges(
             return true;
         }
     }
-    
+
     // Check yield expression
     if let Some(expr) = yield_expr {
         return expression_diverges(expr);
     }
-    
+
     // Check if last statement is an expression statement that diverges
     if let Some(last) = statements.last() {
         if let StatementKind::Expr(expr) = &last.kind {
             return expression_diverges(expr);
         }
     }
-    
+
     false
 }
 
 fn statement_diverges(stmt: &Statement) -> bool {
     match &stmt.kind {
         StatementKind::Expr(expr) => expression_diverges(expr),
-        StatementKind::Binding { value: Some(expr), .. } => expression_diverges(expr),
+        StatementKind::Binding {
+            value: Some(expr), ..
+        } => expression_diverges(expr),
         StatementKind::Binding { value: None, .. } => false,
         StatementKind::GuardLet { conditions, .. } => {
             // Any condition might diverge
@@ -209,7 +220,12 @@ fn expression_diverges(expr: &kestrel_semantic_tree::expr::Expression) -> bool {
         ExprKind::Return { .. } => true,
         ExprKind::Break { .. } => true,
         ExprKind::Continue { .. } => true,
-        ExprKind::If { then_branch, then_value, else_branch, .. } => {
+        ExprKind::If {
+            then_branch,
+            then_value,
+            else_branch,
+            ..
+        } => {
             // If both branches diverge, the if diverges
             let then_diverges = block_diverges(then_branch, then_value.as_deref());
             let else_diverges = match else_branch {

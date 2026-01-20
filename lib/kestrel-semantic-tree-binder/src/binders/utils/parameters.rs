@@ -5,7 +5,7 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::declaration_binder::BindingContext;
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{extract_identifier_from_name, find_child, get_node_span};
 
 pub(crate) fn resolve_parameters_from_syntax(
@@ -25,7 +25,14 @@ pub(crate) fn resolve_parameters_from_syntax(
         .children()
         .filter(|child| child.kind() == SyntaxKind::Parameter)
         .filter_map(|param_node| {
-            resolve_single_parameter(&param_node, source, file_id, context_id, ctx, implicit_labels)
+            resolve_single_parameter(
+                &param_node,
+                source,
+                file_id,
+                context_id,
+                ctx,
+                implicit_labels,
+            )
         })
         .collect()
 }
@@ -85,7 +92,8 @@ fn resolve_single_parameter(
     };
 
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         Ty::infer(get_node_span(param_node, file_id))
@@ -98,4 +106,3 @@ fn resolve_single_parameter(
         ty,
     })
 }
-

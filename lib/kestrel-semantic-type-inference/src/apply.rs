@@ -4,11 +4,13 @@
 //! placeholders with their resolved types from the solution.
 
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
-use kestrel_semantic_tree::expr::{CallArgument, ElseBranch, ExprKind, Expression};
+use kestrel_semantic_tree::expr::{
+    CallArgument, ElseBranch, ExprKind, Expression, PrimitiveMethod,
+};
 use kestrel_semantic_tree::pattern::Pattern;
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::local::LocalContainer;
-use kestrel_semantic_tree::ty::{ParamInfo, Ty, TyKind};
+use kestrel_semantic_tree::ty::{ParamInfo, Substitutions, Ty, TyKind};
 
 use crate::solution::Solution;
 
@@ -39,21 +41,21 @@ fn apply_to_statement(stmt: &Statement, solution: &Solution) -> Statement {
     let kind = match &stmt.kind {
         StatementKind::Binding { pattern, value } => {
             let resolved_pattern = apply_to_pattern(pattern, solution);
-            let resolved_value = value
-                .as_ref()
-                .map(|v| apply_to_expression(v, solution));
+            let resolved_value = value.as_ref().map(|v| apply_to_expression(v, solution));
             StatementKind::Binding {
                 pattern: resolved_pattern,
                 value: resolved_value,
             }
         }
-        StatementKind::Expr(expr) => {
-            StatementKind::Expr(apply_to_expression(expr, solution))
-        }
-        StatementKind::GuardLet { conditions, else_block } => {
-            let resolved_conditions = conditions.iter().map(|cond| {
-                apply_to_if_condition(cond, solution)
-            }).collect();
+        StatementKind::Expr(expr) => StatementKind::Expr(apply_to_expression(expr, solution)),
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
+            let resolved_conditions = conditions
+                .iter()
+                .map(|cond| apply_to_if_condition(cond, solution))
+                .collect();
             let resolved_else_block = apply_solution(else_block, solution);
             StatementKind::GuardLet {
                 conditions: resolved_conditions,
@@ -89,12 +91,42 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         ExprKind::ImplicitMemberAccess {
             member_name,
             arguments,
-        } => ExprKind::ImplicitMemberAccess {
-            member_name: member_name.clone(),
-            arguments: arguments
-                .as_ref()
-                .map(|args| args.iter().map(|arg| apply_to_argument(arg, solution)).collect()),
-        },
+        } => {
+            let resolved_arguments: Option<Vec<CallArgument>> = arguments.as_ref().map(|args| {
+                args.iter()
+                    .map(|arg| apply_to_argument(arg, solution))
+                    .collect()
+            });
+
+            // Check if we have a resolved case for this expression
+            if let Some(value_resolution) = solution.get_value(expr.id) {
+                // Transform into EnumCase (with arguments if present)
+                if let Some(args) = resolved_arguments {
+                    // Case with associated values - create a Call to the enum case
+                    let case_expr = Expression::enum_case(
+                        value_resolution.symbol_id,
+                        resolved_ty.clone(),
+                        expr.span.clone(),
+                    );
+                    ExprKind::Call {
+                        callee: Box::new(case_expr),
+                        arguments: args,
+                        substitutions: value_resolution.substitutions.clone(),
+                    }
+                } else {
+                    // Simple case - just create EnumCase
+                    ExprKind::EnumCase {
+                        case_id: value_resolution.symbol_id,
+                    }
+                }
+            } else {
+                // No resolution found - keep as implicit (will error during lowering)
+                ExprKind::ImplicitMemberAccess {
+                    member_name: member_name.clone(),
+                    arguments: resolved_arguments,
+                }
+            }
+        }
         ExprKind::Error => ExprKind::Error,
         ExprKind::Break { loop_id, label } => ExprKind::Break {
             loop_id: *loop_id,
@@ -106,13 +138,19 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         },
 
         // Compound expressions - recurse
-        ExprKind::Array(elements) => {
-            ExprKind::Array(elements.iter().map(|e| apply_to_expression(e, solution)).collect())
-        }
+        ExprKind::Array(elements) => ExprKind::Array(
+            elements
+                .iter()
+                .map(|e| apply_to_expression(e, solution))
+                .collect(),
+        ),
 
-        ExprKind::Tuple(elements) => {
-            ExprKind::Tuple(elements.iter().map(|e| apply_to_expression(e, solution)).collect())
-        }
+        ExprKind::Tuple(elements) => ExprKind::Tuple(
+            elements
+                .iter()
+                .map(|e| apply_to_expression(e, solution))
+                .collect(),
+        ),
 
         ExprKind::Grouping(inner) => {
             ExprKind::Grouping(Box::new(apply_to_expression(inner, solution)))
@@ -138,6 +176,11 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             method_name: method_name.clone(),
         },
 
+        ExprKind::PrimitiveMethodRef { receiver, method } => ExprKind::PrimitiveMethodRef {
+            receiver: Box::new(apply_to_expression(receiver, solution)),
+            method: *method,
+        },
+
         ExprKind::Call {
             callee,
             arguments,
@@ -155,14 +198,61 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             receiver,
             method,
             arguments,
-        } => ExprKind::PrimitiveMethodCall {
-            receiver: Box::new(apply_to_expression(receiver, solution)),
-            method: *method,
-            arguments: arguments
+        } => {
+            let resolved_receiver = apply_to_expression(receiver, solution);
+            let resolved_arguments: Vec<CallArgument> = arguments
                 .iter()
                 .map(|arg| apply_to_argument(arg, solution))
-                .collect(),
-        },
+                .collect();
+
+            // If the receiver type was inferred, we may need to correct the method.
+            // For example, if a placeholder IntGt was used but the receiver is Float,
+            // we need to resolve it to FloatGt to generate the correct comparison.
+            let resolved_method =
+                PrimitiveMethod::lookup(&resolved_receiver.ty, method.name()).unwrap_or(*method);
+
+            ExprKind::PrimitiveMethodCall {
+                receiver: Box::new(resolved_receiver),
+                method: resolved_method,
+                arguments: resolved_arguments,
+            }
+        }
+
+        ExprKind::DeferredMethodCall {
+            receiver,
+            method_name,
+            arguments,
+        } => {
+            let resolved_receiver = apply_to_expression(receiver, solution);
+            let resolved_arguments: Vec<CallArgument> = arguments
+                .iter()
+                .map(|arg| apply_to_argument(arg, solution))
+                .collect();
+
+            // Check if we have a resolved symbol for this expression
+            if let Some(value_resolution) = solution.get_value(expr.id) {
+                // Create a MethodRef with the resolved method symbol
+                let method_ref = Expression::method_ref(
+                    resolved_receiver.clone(),
+                    vec![value_resolution.symbol_id],
+                    method_name.clone(),
+                    expr.span.clone(),
+                );
+                // Create a Call expression with the method ref as callee
+                ExprKind::Call {
+                    callee: Box::new(method_ref),
+                    arguments: resolved_arguments,
+                    substitutions: value_resolution.substitutions.clone(),
+                }
+            } else {
+                // No resolution found - keep as deferred (will error during lowering)
+                ExprKind::DeferredMethodCall {
+                    receiver: Box::new(resolved_receiver),
+                    method_name: method_name.clone(),
+                    arguments: resolved_arguments,
+                }
+            }
+        }
 
         ExprKind::ImplicitStructInit {
             struct_type,
@@ -197,7 +287,9 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             then_value: then_value
                 .as_ref()
                 .map(|v| Box::new(apply_to_expression(v, solution))),
-            else_branch: else_branch.as_ref().map(|eb| apply_to_else_branch(eb, solution)),
+            else_branch: else_branch
+                .as_ref()
+                .map(|eb| apply_to_else_branch(eb, solution)),
         },
 
         ExprKind::While {
@@ -209,7 +301,10 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             loop_id: *loop_id,
             label: label.clone(),
             condition: Box::new(apply_to_expression(condition, solution)),
-            body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
+            body: body
+                .iter()
+                .map(|s| apply_to_statement(s, solution))
+                .collect(),
         },
 
         ExprKind::WhileLet {
@@ -220,8 +315,14 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         } => ExprKind::WhileLet {
             loop_id: *loop_id,
             label: label.clone(),
-            conditions: conditions.iter().map(|c| apply_to_if_condition(c, solution)).collect(),
-            body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
+            conditions: conditions
+                .iter()
+                .map(|c| apply_to_if_condition(c, solution))
+                .collect(),
+            body: body
+                .iter()
+                .map(|s| apply_to_statement(s, solution))
+                .collect(),
         },
 
         ExprKind::Loop {
@@ -231,7 +332,10 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
         } => ExprKind::Loop {
             loop_id: *loop_id,
             label: label.clone(),
-            body: body.iter().map(|s| apply_to_statement(s, solution)).collect(),
+            body: body
+                .iter()
+                .map(|s| apply_to_statement(s, solution))
+                .collect(),
         },
 
         ExprKind::Return { value } => ExprKind::Return {
@@ -262,7 +366,10 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             });
 
             // Apply solution to body statements
-            let resolved_body = body.iter().map(|s| apply_to_statement(s, solution)).collect();
+            let resolved_body = body
+                .iter()
+                .map(|s| apply_to_statement(s, solution))
+                .collect();
 
             // Apply solution to tail expression
             let resolved_tail = tail_expr
@@ -282,9 +389,9 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
                 .collect();
 
             // Apply solution to implicit_param
-            let resolved_implicit_param = implicit_param.as_ref().map(|(id, ty, span)| {
-                (*id, resolve_type(ty, solution), span.clone())
-            });
+            let resolved_implicit_param = implicit_param
+                .as_ref()
+                .map(|(id, ty, span)| (*id, resolve_type(ty, solution), span.clone()));
 
             ExprKind::Closure {
                 params: resolved_params,
@@ -305,6 +412,20 @@ fn apply_to_expression(expr: &Expression, solution: &Solution) -> Expression {
             ExprKind::Match {
                 scrutinee: resolved_scrutinee,
                 arms: resolved_arms,
+            }
+        }
+
+        ExprKind::Block { statements, value } => {
+            let resolved_statements = statements
+                .iter()
+                .map(|stmt| apply_to_statement(stmt, solution))
+                .collect();
+            let resolved_value = value
+                .as_ref()
+                .map(|v| Box::new(apply_to_expression(v, solution)));
+            ExprKind::Block {
+                statements: resolved_statements,
+                value: resolved_value,
             }
         }
     };
@@ -348,7 +469,11 @@ fn apply_to_if_condition(
 
     match condition {
         IfCondition::Expr(expr) => IfCondition::Expr(apply_to_expression(expr, solution)),
-        IfCondition::Let { pattern, value, span } => IfCondition::Let {
+        IfCondition::Let {
+            pattern,
+            value,
+            span,
+        } => IfCondition::Let {
             pattern: apply_to_pattern(pattern, solution),
             value: apply_to_expression(value, solution),
             span: span.clone(),
@@ -381,23 +506,43 @@ fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
 
     let kind = match &pattern.kind {
         // Simple patterns - just clone
-        PatternKind::Local { local_id, mutability, name } => PatternKind::Local {
+        PatternKind::Local {
+            local_id,
+            mutability,
+            name,
+        } => PatternKind::Local {
             local_id: *local_id,
             mutability: *mutability,
             name: name.clone(),
         },
         PatternKind::Wildcard => PatternKind::Wildcard,
-        PatternKind::Literal { value } => PatternKind::Literal { value: value.clone() },
+        PatternKind::Literal { value } => PatternKind::Literal {
+            value: value.clone(),
+        },
         PatternKind::Rest => PatternKind::Rest,
         PatternKind::Error => PatternKind::Error,
 
         // Compound patterns - recurse
-        PatternKind::Tuple { prefix, has_rest, suffix } => PatternKind::Tuple {
-            prefix: prefix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+        PatternKind::Tuple {
+            prefix,
+            has_rest,
+            suffix,
+        } => PatternKind::Tuple {
+            prefix: prefix
+                .iter()
+                .map(|p| apply_to_pattern(p, solution))
+                .collect(),
             has_rest: *has_rest,
-            suffix: suffix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+            suffix: suffix
+                .iter()
+                .map(|p| apply_to_pattern(p, solution))
+                .collect(),
         },
-        PatternKind::EnumVariant { case_id, case_name, bindings } => PatternKind::EnumVariant {
+        PatternKind::EnumVariant {
+            case_id,
+            case_name,
+            bindings,
+        } => PatternKind::EnumVariant {
             case_id: *case_id,
             case_name: case_name.clone(),
             bindings: bindings
@@ -409,12 +554,21 @@ fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
                 })
                 .collect(),
         },
-        PatternKind::Range { start, end, inclusive } => PatternKind::Range {
+        PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } => PatternKind::Range {
             start: start.clone(),
             end: end.clone(),
             inclusive: *inclusive,
         },
-        PatternKind::Struct { struct_id, struct_name, fields, has_rest } => PatternKind::Struct {
+        PatternKind::Struct {
+            struct_id,
+            struct_name,
+            fields,
+            has_rest,
+        } => PatternKind::Struct {
             struct_id: *struct_id,
             struct_name: struct_name.clone(),
             fields: fields
@@ -427,15 +581,33 @@ fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
                 .collect(),
             has_rest: *has_rest,
         },
-        PatternKind::Array { prefix, rest, suffix } => PatternKind::Array {
-            prefix: prefix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+        PatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => PatternKind::Array {
+            prefix: prefix
+                .iter()
+                .map(|p| apply_to_pattern(p, solution))
+                .collect(),
             rest: rest.clone(),
-            suffix: suffix.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+            suffix: suffix
+                .iter()
+                .map(|p| apply_to_pattern(p, solution))
+                .collect(),
         },
         PatternKind::Or { alternatives } => PatternKind::Or {
-            alternatives: alternatives.iter().map(|p| apply_to_pattern(p, solution)).collect(),
+            alternatives: alternatives
+                .iter()
+                .map(|p| apply_to_pattern(p, solution))
+                .collect(),
         },
-        PatternKind::At { name, local_id, mutability, subpattern } => PatternKind::At {
+        PatternKind::At {
+            name,
+            local_id,
+            mutability,
+            subpattern,
+        } => PatternKind::At {
             name: name.clone(),
             local_id: *local_id,
             mutability: *mutability,
@@ -460,10 +632,8 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
     // For compound types, recursively resolve components
     match ty.kind() {
         TyKind::Tuple(elements) => {
-            let resolved_elements: Vec<_> = elements
-                .iter()
-                .map(|e| resolve_type(e, solution))
-                .collect();
+            let resolved_elements: Vec<_> =
+                elements.iter().map(|e| resolve_type(e, solution)).collect();
             Ty::tuple(resolved_elements, ty.span().clone())
         }
         TyKind::Array(elem) => {
@@ -474,10 +644,8 @@ fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
             params,
             return_type,
         } => {
-            let resolved_params: Vec<_> = params
-                .iter()
-                .map(|p| resolve_type(p, solution))
-                .collect();
+            let resolved_params: Vec<_> =
+                params.iter().map(|p| resolve_type(p, solution)).collect();
             let resolved_return = resolve_type(return_type, solution);
             Ty::function(resolved_params, resolved_return, ty.span().clone())
         }

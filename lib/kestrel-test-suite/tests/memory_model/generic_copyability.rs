@@ -19,8 +19,7 @@ mod parsing {
         // Basic syntax: where T: not Copyable
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             func process[T](consuming x: T) where T: not Copyable { }
         "#,
@@ -33,8 +32,7 @@ mod parsing {
         // Mix of positive and negative bounds
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             protocol Displayable {}
             
             func process[T, U](consuming x: T, y: U) where T: not Copyable, U: Displayable { }
@@ -48,8 +46,7 @@ mod parsing {
         // Struct with generic type parameter that can accept non-copyable types
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Box[T] where T: not Copyable {
                 var value: T
@@ -85,12 +82,11 @@ mod semantic {
         // With `not Copyable`, using a value twice should be an error
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             func process[T](consuming x: T) where T: not Copyable {
-                let a = x
-                let b = x  // Error: use after move
+                let a = x;
+                let b = x;  // Error: use after move
             }
         "#,
         )
@@ -102,13 +98,12 @@ mod semantic {
         // With `not Copyable`, moving once is fine
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             func accept[T](consuming x: T) where T: not Copyable { }
             
             func forward[T](consuming x: T) where T: not Copyable {
-                accept(x)  // x is moved here, that's fine
+                accept(x);  // x is moved here, that's fine
             }
         "#,
         )
@@ -120,14 +115,13 @@ mod semantic {
         // With `not Copyable`, using after move should error
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             func accept[T](consuming x: T) where T: not Copyable { }
             
             func forward[T](consuming x: T) where T: not Copyable {
-                accept(x)  // x is moved here
-                accept(x)  // Error: use after move
+                accept(x);  // x is moved here
+                accept(x);  // Error: use after move
             }
         "#,
         )
@@ -147,8 +141,7 @@ mod function_calls {
         // A non-copyable struct should be passable to a function with `where T: not Copyable`
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -157,8 +150,8 @@ mod function_calls {
             func process[T](consuming x: T) where T: not Copyable { }
             
             func test() {
-                var h = Handle(fd: 1)
-                process(h)  // This should work
+                var h = Handle(fd: 1);
+                process(h);  // This should work
             }
         "#,
         )
@@ -171,8 +164,7 @@ mod function_calls {
         // (the constraint relaxes the requirement, doesn't mandate non-copyability)
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Point {
                 var x: Int
@@ -182,8 +174,8 @@ mod function_calls {
             func process[T](consuming x: T) where T: not Copyable { }
             
             func test() {
-                var p = Point(x: 1, y: 2)
-                process(p)  // Copyable types work too
+                var p = Point(x: 1, y: 2);
+                process(p);  // Copyable types work too
             }
         "#,
         )
@@ -202,8 +194,7 @@ mod struct_generics {
     fn struct_with_not_copyable_generic_accepts_non_copyable_field() {
         Test::new(
             r#"module Test
-            @builtin(.Copyable)
-            protocol Copyable {}
+            import Prelude
             
             struct Handle: not Copyable {
                 var fd: Int
@@ -214,8 +205,8 @@ mod struct_generics {
             }
             
             func test() {
-                var h = Handle(fd: 1)
-                var w = Wrapper(value: h)
+                var h = Handle(fd: 1);
+                var w = Wrapper(value: h);
             }
         "#,
         )

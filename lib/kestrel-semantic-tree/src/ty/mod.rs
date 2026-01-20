@@ -91,6 +91,7 @@ impl fmt::Display for Ty {
                 f.write_char(')')
             }
             TyKind::Array(elem) => write!(f, "[{}]", elem),
+            TyKind::Pointer(elem) => write!(f, "lang.ptr[{}]", elem),
             TyKind::Function {
                 params,
                 return_type,
@@ -309,6 +310,11 @@ impl Ty {
     /// Create an array type: [T]
     pub fn array(element_type: Ty, span: Span) -> Self {
         Self::new(TyKind::Array(Box::new(element_type)), span)
+    }
+
+    /// Create a raw pointer type: lang.ptr[T]
+    pub fn pointer(element_type: Ty, span: Span) -> Self {
+        Self::new(TyKind::Pointer(Box::new(element_type)), span)
     }
 
     /// Create a function type: (P1, P2, ...) -> R
@@ -579,6 +585,11 @@ impl Ty {
                 Ty::array(new_element, self.span.clone())
             }
 
+            TyKind::Pointer(element_type) => {
+                let new_element = element_type.substitute_self(replacement);
+                Ty::pointer(new_element, self.span.clone())
+            }
+
             TyKind::Function {
                 params,
                 return_type,
@@ -708,6 +719,11 @@ impl Ty {
             // Arrays
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_specialization_of(b_elem),
 
+            // Pointers
+            (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => {
+                a_elem.is_specialization_of(b_elem)
+            }
+
             // Functions
             (
                 TyKind::Function {
@@ -809,6 +825,9 @@ impl Ty {
 
             // Arrays
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.overlaps_with(b_elem),
+
+            // Pointers
+            (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => a_elem.overlaps_with(b_elem),
 
             // Functions
             (
@@ -935,6 +954,9 @@ impl Ty {
 
             // Arrays - element type comparison
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_assignable_to(b_elem),
+
+            // Pointers - element type comparison
+            (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => a_elem.is_assignable_to(b_elem),
 
             // Functions - contravariant params, covariant return
             // For now, we use simple equality (no variance)
@@ -1066,6 +1088,8 @@ impl Ty {
         is_tuple => TyKind::Tuple(_),
         /// Check if this is an array type
         is_array => TyKind::Array(_),
+        /// Check if this is a raw pointer type
+        is_pointer => TyKind::Pointer(_),
         /// Check if this is a function type
         is_function => TyKind::Function { .. },
         /// Check if this is an error type
@@ -1120,6 +1144,14 @@ impl Ty {
     pub fn as_array(&self) -> Option<&Ty> {
         match &self.kind {
             TyKind::Array(element_type) => Some(element_type),
+            _ => None,
+        }
+    }
+
+    /// Get pointer element type if this is a pointer type
+    pub fn as_pointer(&self) -> Option<&Ty> {
+        match &self.kind {
+            TyKind::Pointer(element_type) => Some(element_type),
             _ => None,
         }
     }
@@ -1274,6 +1306,9 @@ impl Ty {
             TyKind::Tuple(elements) => elements.iter().all(|e| e.is_copyable()),
             TyKind::Array(element) => element.is_copyable(),
 
+            // Pointers are always copyable (they're just addresses)
+            TyKind::Pointer(_) => true,
+
             // Functions are always copyable
             TyKind::Function { .. } => true,
             TyKind::UnresolvedFunction { .. } => true,
@@ -1336,6 +1371,9 @@ impl Ty {
             // Composites: cloneable if any part is cloneable
             TyKind::Tuple(elements) => elements.iter().any(|e| e.is_cloneable()),
             TyKind::Array(element) => element.is_cloneable(),
+
+            // Pointers are copyable, not cloneable
+            TyKind::Pointer(_) => false,
 
             // Functions are copyable, not cloneable
             TyKind::Function { .. } => false,

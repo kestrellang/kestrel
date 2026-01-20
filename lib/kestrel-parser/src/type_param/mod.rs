@@ -14,7 +14,7 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use crate::common::skip_trivia;
 use crate::event::EventSink;
-use crate::input::{to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 /// Raw parsed data for a single type parameter
 /// Syntax: T or T = Default
@@ -92,8 +92,8 @@ pub struct WhereClauseData {
 }
 
 /// Parser for a path (used in type positions): Ident or Ident.Ident.Ident
-fn path_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
+fn path_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         select! {
             Token::Identifier = e => to_kestrel_span(e.span()),
@@ -105,8 +105,8 @@ fn path_parser<'tokens>(
 }
 
 /// Parser for a single type argument (recursive to handle nested generics)
-fn type_argument_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeArgumentData, ParserExtra<'tokens>> + Clone {
+fn type_argument_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeArgumentData, ParserExtra<'tokens>> + Clone {
     recursive(|type_arg| {
         // A single type argument: Path optionally followed by [Args]
         path_parser()
@@ -130,9 +130,8 @@ fn type_argument_parser<'tokens>(
 
 /// Parser for type arguments: [Type, Type, ...]
 /// Handles nested type arguments like Foo[Bar[Baz]]
-pub fn type_argument_list_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<TypeArgumentData>, ParserExtra<'tokens>> + Clone
-{
+pub fn type_argument_list_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<TypeArgumentData>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket))
         .ignore_then(
@@ -147,12 +146,9 @@ pub fn type_argument_list_parser<'tokens>(
 
 /// Parser for type arguments with bracket spans: [Type, Type, ...]
 /// Returns (lbracket, args, rbracket)
-pub fn type_argument_list_with_spans_parser<'tokens>() -> impl Parser<
-    'tokens,
-    ParserInput<'tokens>,
-    (Span, Vec<TypeArgumentData>, Span),
-    ParserExtra<'tokens>,
-> + Clone {
+pub fn type_argument_list_with_spans_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<TypeArgumentData>, Span), ParserExtra<'tokens>>
++ Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -168,16 +164,16 @@ pub fn type_argument_list_with_spans_parser<'tokens>() -> impl Parser<
 
 /// Parser for optional type arguments after a path
 /// Returns (path, optional args)
-pub fn path_with_optional_args_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeArgumentData, ParserExtra<'tokens>> + Clone {
+pub fn path_with_optional_args_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeArgumentData, ParserExtra<'tokens>> + Clone {
     path_parser()
         .then(type_argument_list_parser().or_not())
         .map(|(path, args)| TypeArgumentData { path, args })
 }
 
 /// Parser for a single type parameter: T or T = Default
-fn type_parameter_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeParameterData, ParserExtra<'tokens>> + Clone {
+fn type_parameter_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeParameterData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(select! {
             Token::Identifier = e => to_kestrel_span(e.span()),
@@ -193,12 +189,9 @@ fn type_parameter_parser<'tokens>(
 }
 
 /// Parser for type parameter list: [T, U, V] or [T, U = String]
-pub fn type_parameter_list_parser<'tokens>() -> impl Parser<
-    'tokens,
-    ParserInput<'tokens>,
-    (Span, Vec<TypeParameterData>, Span),
-    ParserExtra<'tokens>,
-> + Clone {
+pub fn type_parameter_list_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<TypeParameterData>, Span), ParserExtra<'tokens>>
++ Clone {
     skip_trivia()
         .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -215,8 +208,8 @@ pub fn type_parameter_list_parser<'tokens>() -> impl Parser<
 }
 
 /// Parser for a single positive type bound: T: Proto and Proto2 or T.Item: Proto
-fn positive_type_bound_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeBoundData, ParserExtra<'tokens>> + Clone {
+fn positive_type_bound_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeBoundData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
@@ -238,9 +231,8 @@ fn positive_type_bound_parser<'tokens>(
 }
 
 /// Parser for a negative type bound: T: not Copyable
-fn negative_type_bound_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, NegativeTypeBoundData, ParserExtra<'tokens>> + Clone
-{
+fn negative_type_bound_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, NegativeTypeBoundData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
@@ -257,8 +249,8 @@ fn negative_type_bound_parser<'tokens>(
 }
 
 /// Parser for a type equality constraint: T.Item = Type
-fn type_equality_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TypeEqualityData, ParserExtra<'tokens>> + Clone {
+fn type_equality_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TypeEqualityData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
@@ -273,8 +265,8 @@ fn type_equality_parser<'tokens>(
 }
 
 /// Parser for a single where clause constraint (bound, negative bound, or equality)
-fn where_constraint_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, WhereConstraintData, ParserExtra<'tokens>> + Clone {
+fn where_constraint_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, WhereConstraintData, ParserExtra<'tokens>> + Clone {
     // Try equality first (T.Item = Type), then negative bound (T: not Proto),
     // then positive bound (T: Proto)
     // This order matters because path_parser is greedy and negative bounds
@@ -286,8 +278,8 @@ fn where_constraint_parser<'tokens>(
 }
 
 /// Parser for where clause: where T: Proto, U: Other, T.Item = Int
-pub fn where_clause_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, WhereClauseData, ParserExtra<'tokens>> + Clone {
+pub fn where_clause_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, WhereClauseData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Where).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -303,12 +295,9 @@ pub fn where_clause_parser<'tokens>(
 }
 
 /// Parser for a single conformance item: Proto or not Proto
-fn conformance_item_parser<'tokens>() -> impl Parser<
-    'tokens,
-    ParserInput<'tokens>,
-    crate::common::ConformanceItemData,
-    ParserExtra<'tokens>,
-> + Clone {
+fn conformance_item_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, crate::common::ConformanceItemData, ParserExtra<'tokens>>
++ Clone {
     skip_trivia()
         .ignore_then(
             just(Token::Not)

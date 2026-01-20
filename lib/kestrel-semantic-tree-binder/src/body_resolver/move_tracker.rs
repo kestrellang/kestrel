@@ -57,7 +57,8 @@ impl MoveTracker {
 
     /// Mark a variable as moved.
     pub fn mark_moved(&mut self, local_id: LocalId, span: Span) {
-        self.states.insert(local_id, MoveState::Moved { moved_at: span });
+        self.states
+            .insert(local_id, MoveState::Moved { moved_at: span });
     }
 
     /// Check if a variable has been definitely moved. Returns the move span if so.
@@ -105,10 +106,7 @@ impl MoveTracker {
     /// After calling this, `self` contains the merged state.
     pub fn merge(&mut self, other: &MoveSnapshot) {
         // Collect all variables that might have changed
-        let all_ids: HashSet<LocalId> = self.states.keys()
-            .chain(other.keys())
-            .copied()
-            .collect();
+        let all_ids: HashSet<LocalId> = self.states.keys().chain(other.keys()).copied().collect();
 
         for id in all_ids {
             let state_self = self.states.get(&id);
@@ -122,26 +120,28 @@ impl MoveTracker {
 
                 // Both definitely moved → stays moved (use first span)
                 (Some(MoveState::Moved { moved_at }), Some(MoveState::Moved { .. })) => {
-                    MoveState::Moved { moved_at: moved_at.clone() }
+                    MoveState::Moved {
+                        moved_at: moved_at.clone(),
+                    }
                 }
 
                 // One moved, one not (or valid) → maybe moved
-                (Some(MoveState::Moved { moved_at }), Some(MoveState::Valid)) |
-                (Some(MoveState::Moved { moved_at }), None) => {
-                    MoveState::MaybeMoved { moved_at: moved_at.clone() }
-                }
-                (Some(MoveState::Valid), Some(MoveState::Moved { moved_at })) |
-                (None, Some(MoveState::Moved { moved_at })) => {
-                    MoveState::MaybeMoved { moved_at: moved_at.clone() }
-                }
+                (Some(MoveState::Moved { moved_at }), Some(MoveState::Valid))
+                | (Some(MoveState::Moved { moved_at }), None) => MoveState::MaybeMoved {
+                    moved_at: moved_at.clone(),
+                },
+                (Some(MoveState::Valid), Some(MoveState::Moved { moved_at }))
+                | (None, Some(MoveState::Moved { moved_at })) => MoveState::MaybeMoved {
+                    moved_at: moved_at.clone(),
+                },
 
                 // Any maybe-moved → stays maybe-moved
-                (Some(MoveState::MaybeMoved { moved_at }), _) => {
-                    MoveState::MaybeMoved { moved_at: moved_at.clone() }
-                }
-                (_, Some(MoveState::MaybeMoved { moved_at })) => {
-                    MoveState::MaybeMoved { moved_at: moved_at.clone() }
-                }
+                (Some(MoveState::MaybeMoved { moved_at }), _) => MoveState::MaybeMoved {
+                    moved_at: moved_at.clone(),
+                },
+                (_, Some(MoveState::MaybeMoved { moved_at })) => MoveState::MaybeMoved {
+                    moved_at: moved_at.clone(),
+                },
             };
 
             self.states.insert(id, merged);
@@ -176,7 +176,9 @@ impl MoveTracker {
     pub fn promote_maybe_to_moved(&mut self) {
         for state in self.states.values_mut() {
             if let MoveState::MaybeMoved { moved_at } = state {
-                *state = MoveState::Moved { moved_at: moved_at.clone() };
+                *state = MoveState::Moved {
+                    moved_at: moved_at.clone(),
+                };
             }
         }
     }

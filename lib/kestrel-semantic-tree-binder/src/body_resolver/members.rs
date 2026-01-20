@@ -36,9 +36,9 @@ use crate::diagnostics::{
 use super::calls::{collect_overload_descriptions, validate_argument_access_modes};
 use super::context::BodyResolutionContext;
 use super::utils::{
-    format_symbol_kind, get_callable_behavior, get_type_container,
-    get_type_parameter_bounds_by_id, get_type_parameter_bounds_from_context, infer_type_arguments,
-    matches_signature, substitute_self, substitute_type,
+    format_symbol_kind, get_callable_behavior, get_type_container, get_type_parameter_bounds_by_id,
+    get_type_parameter_bounds_from_context, infer_type_arguments, matches_signature,
+    substitute_self, substitute_type,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -97,17 +97,11 @@ pub fn resolve_member_access(
     }
 
     // 1. Check for primitive method (e.g., 5.toString, "hello".length)
-    // Primitive methods can only be called, not used as first-class values
+    // Primitive methods can only be called, not used as first-class values.
+    // Return a PrimitiveMethodRef that call resolution can convert to a call.
+    // If this expression is NOT called, call resolution will emit an error.
     if let Some(primitive_method) = PrimitiveMethod::lookup(base_ty, member_name) {
-        // Primitive methods cannot be used as first-class values.
-        // Report an error - they must be called directly.
-        let error = PrimitiveMethodNotCallableError {
-            span: full_span.clone(),
-            method_name: primitive_method.name().to_string(),
-            receiver_type: base_ty.to_string(),
-        };
-        ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-        return Expression::error(full_span);
+        return Expression::primitive_method_ref(base, primitive_method, full_span);
     }
 
     // 2. Handle type parameter specially - we can't access fields, only methods
@@ -124,7 +118,19 @@ pub fn resolve_member_access(
         );
     }
 
-    // 3. Get container from base type
+    // 3. If base type is Infer, don't emit error yet - type inference will resolve it.
+    // Create a field access with inferred type and let type inference resolve the actual field type.
+    if matches!(base_ty.kind(), TyKind::Infer) {
+        return Expression::field_access(
+            base,
+            member_name.to_string(),
+            false, // field_mutable - conservative default, type inference may correct this
+            Ty::infer(member_span.clone()),
+            full_span,
+        );
+    }
+
+    // 4. Get container from base type
     let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
         None => {
@@ -461,6 +467,18 @@ pub fn resolve_member_call(
         );
     }
 
+    // If base type is Infer, don't emit error yet - type inference will resolve it.
+    // Create a deferred method call with inferred return type.
+    if matches!(base_ty.kind(), TyKind::Infer) {
+        return Expression::deferred_method_call(
+            object.clone(),
+            member_name.to_string(),
+            arguments,
+            Ty::infer(span.clone()),
+            span,
+        );
+    }
+
     // Get container from type (for Struct, Protocol, Self types)
     let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
@@ -547,11 +565,14 @@ pub fn resolve_member_call(
                 let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
                 if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
                     return_ty = return_ty.apply_substitutions(substitutions);
-                } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs() {
+                } else if let Some((enum_sym, substitutions)) = resolved_base_ty.as_enum_with_subs()
+                {
                     // Check if base type already has concrete substitutions
-                    let has_concrete_subs = !substitutions.is_empty() 
-                        && substitutions.iter().all(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
-                    
+                    let has_concrete_subs = !substitutions.is_empty()
+                        && substitutions
+                            .iter()
+                            .all(|(_, ty)| !matches!(ty.kind(), TyKind::TypeParameter(_)));
+
                     if has_concrete_subs {
                         // Base type has concrete type args (e.g., Option[Int].Some)
                         return_ty = return_ty.apply_substitutions(substitutions);
@@ -560,8 +581,10 @@ pub fn resolve_member_call(
                         // e.g., Option.Some(value: 42) should infer T = Int from the argument
                         let type_params = enum_sym.type_parameters();
                         if !type_params.is_empty() {
-                            let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-                            let inferred_subs = infer_type_arguments(&type_params, &callable, &arg_types);
+                            let arg_types: Vec<Ty> =
+                                arguments.iter().map(|a| a.value.ty.clone()).collect();
+                            let inferred_subs =
+                                infer_type_arguments(&type_params, &callable, &arg_types);
                             return_ty = substitute_type(&return_ty, &inferred_subs);
                         }
                     }
@@ -919,13 +942,9 @@ fn resolve_type_parameter_static_member(
 
     // First, check if member_name is an associated type in any protocol bound
     // This enables chained associated type access like T.Next.Next.baseValue()
-    if let Some(assoc_type_expr) = find_associated_type_in_bounds(
-        &bounds,
-        member_name,
-        &type_param_ty,
-        full_span.clone(),
-        ctx,
-    ) {
+    if let Some(assoc_type_expr) =
+        find_associated_type_in_bounds(&bounds, member_name, &type_param_ty, full_span.clone(), ctx)
+    {
         return assoc_type_expr;
     }
 
@@ -1012,7 +1031,10 @@ fn find_associated_type_in_bounds(
     ctx: &BodyResolutionContext,
 ) -> Option<Expression> {
     for bound in bounds {
-        if let TyKind::Protocol { symbol: protocol, .. } = bound.kind() {
+        if let TyKind::Protocol {
+            symbol: protocol, ..
+        } = bound.kind()
+        {
             // Check direct children of protocol for associated types
             let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
             for child in protocol_dyn.metadata().children() {
@@ -1038,7 +1060,10 @@ fn find_associated_type_in_bounds(
             }
 
             // Check inherited protocols (via FlattenedProtocolBehavior)
-            if let Some(flattened) = protocol.metadata().get_behavior::<FlattenedProtocolBehavior>() {
+            if let Some(flattened) = protocol
+                .metadata()
+                .get_behavior::<FlattenedProtocolBehavior>()
+            {
                 if let Some(flattened_assoc) = flattened.associated_types().get(member_name) {
                     let qualified_ty = Ty::qualified_associated_type(
                         flattened_assoc.symbol.clone(),
@@ -1066,7 +1091,11 @@ fn resolve_associated_type_member_access(
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     // Extract the associated type symbol and container from base.ty
-    let TyKind::AssociatedType { symbol: assoc_type, container } = base.ty.kind() else {
+    let TyKind::AssociatedType {
+        symbol: assoc_type,
+        container,
+    } = base.ty.kind()
+    else {
         // Should not happen - AssociatedTypeRef should always have AssociatedType ty
         return Expression::error(full_span);
     };
@@ -1097,18 +1126,16 @@ fn resolve_associated_type_member_access(
     // The container type for nested lookups is the qualified associated type itself
     // e.g., for T.Next.Next, the container for the second Next is T.Next
     let container_ty = match container {
-        Some(c) => Ty::qualified_associated_type(assoc_type.clone(), (**c).clone(), full_span.clone()),
+        Some(c) => {
+            Ty::qualified_associated_type(assoc_type.clone(), (**c).clone(), full_span.clone())
+        }
         None => base.ty.clone(),
     };
 
     // First, check if member_name is an associated type in any protocol bound
-    if let Some(assoc_type_expr) = find_associated_type_in_bounds(
-        &bounds,
-        member_name,
-        &container_ty,
-        full_span.clone(),
-        ctx,
-    ) {
+    if let Some(assoc_type_expr) =
+        find_associated_type_in_bounds(&bounds, member_name, &container_ty, full_span.clone(), ctx)
+    {
         return assoc_type_expr;
     }
 
@@ -1170,12 +1197,7 @@ fn resolve_associated_type_member_access(
     let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
 
     // Clone the base expression for the receiver
-    Expression::method_ref(
-        base.clone(),
-        method_ids,
-        member_name.to_string(),
-        full_span,
-    )
+    Expression::method_ref(base.clone(), method_ids, member_name.to_string(), full_span)
 }
 
 /// Candidate for static method resolution on type parameter

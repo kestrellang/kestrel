@@ -953,7 +953,7 @@ mod error_wrong_arity {
             }
         "#,
         )
-        .expect(Compiles);  // Color.Red() is valid - empty parens are allowed
+        .expect(Compiles); // Color.Red() is valid - empty parens are allowed
     }
 
     #[test]

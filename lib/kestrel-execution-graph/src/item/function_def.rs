@@ -1,10 +1,30 @@
 //! Function definitions in MIR.
 
+use crate::MirContext;
 use crate::id::{Block, Id, Local, Param, QualifiedName, Ty, TypeParam};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::collections::HashMap;
 use std::fmt;
+
+/// Calling conventions for extern functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CallingConvention {
+    /// C calling convention (cdecl on most platforms)
+    C,
+}
+
+/// Information about an extern function.
+///
+/// When present, indicates that this function has no body and
+/// will be linked from external code at compile time.
+#[derive(Debug, Clone)]
+pub struct ExternInfo {
+    /// The calling convention for this extern function.
+    pub calling_convention: CallingConvention,
+    /// The symbol name to use for linking.
+    /// This may differ from the function's Kestrel name if `mangleName` was specified.
+    pub symbol_name: String,
+}
 
 /// A function definition.
 ///
@@ -45,6 +65,9 @@ pub struct FunctionDef {
     pub blocks: Vec<Id<Block>>,
     /// Entry block (first block).
     pub entry_block: Option<Id<Block>>,
+    /// Extern function info (if this is an @extern function).
+    /// When Some, the function has no body and will be linked externally.
+    pub extern_info: Option<ExternInfo>,
 }
 
 impl FunctionDef {
@@ -62,7 +85,13 @@ impl FunctionDef {
             locals_by_name: HashMap::new(),
             blocks: Vec::new(),
             entry_block: None,
+            extern_info: None,
         }
+    }
+
+    /// Check if this is an extern function (has no body, linked externally).
+    pub fn is_extern(&self) -> bool {
+        self.extern_info.is_some()
     }
 
     /// Add a local variable to this function.
@@ -228,7 +257,11 @@ impl fmt::Display for FunctionDefDisplay<'_> {
         for (i, block_id) in self.def.blocks.iter().enumerate() {
             let block = &self.ctx.blocks[*block_id];
             writeln!(f, "    bb{}:", i)?;
-            write!(f, "{}", block.display(self.ctx, "        ", &self.def.blocks))?;
+            write!(
+                f,
+                "{}",
+                block.display(self.ctx, "        ", &self.def.blocks)
+            )?;
             if i < self.def.blocks.len() - 1 {
                 writeln!(f)?;
             }

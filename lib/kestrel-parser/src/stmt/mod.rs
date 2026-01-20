@@ -91,8 +91,8 @@ pub enum StmtVariant {
 }
 
 /// Parser that skips trivia tokens
-fn skip_trivia<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+fn skip_trivia<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
     any()
         .filter(|token: &Token| {
             matches!(
@@ -107,8 +107,8 @@ fn skip_trivia<'tokens>(
 /// Parser for variable declaration
 ///
 /// Syntax: let/var pattern (: Type)? (= expr)? ;
-fn variable_declaration_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, VariableDeclarationData, ParserExtra<'tokens>> + Clone
+fn variable_declaration_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, VariableDeclarationData, ParserExtra<'tokens>> + Clone
 {
     skip_trivia()
         .ignore_then(
@@ -157,8 +157,8 @@ fn variable_declaration_parser<'tokens>(
 /// Parser for expression statement
 ///
 /// Syntax: expr ;
-fn expression_statement_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (ExprVariant, Span), ParserExtra<'tokens>> + Clone {
+fn expression_statement_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (ExprVariant, Span), ParserExtra<'tokens>> + Clone {
     expr_parser().then(
         skip_trivia()
             .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
@@ -168,8 +168,8 @@ fn expression_statement_parser<'tokens>(
 /// Parser for deinit statement
 ///
 /// Syntax: deinit identifier ;
-fn deinit_statement_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, DeinitStatementData, ParserExtra<'tokens>> + Clone {
+fn deinit_statement_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, DeinitStatementData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -180,11 +180,13 @@ fn deinit_statement_parser<'tokens>(
             skip_trivia()
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
-        .map(|((deinit_span, identifier_span), semicolon)| DeinitStatementData {
-            deinit_span,
-            identifier_span,
-            semicolon,
-        })
+        .map(
+            |((deinit_span, identifier_span), semicolon)| DeinitStatementData {
+                deinit_span,
+                identifier_span,
+                semicolon,
+            },
+        )
 }
 
 /// Parser for statements
@@ -193,8 +195,8 @@ fn deinit_statement_parser<'tokens>(
 /// - Variable declarations: let/var name: Type = expr;
 /// - Expression statements: expr;
 /// - Deinit statements: deinit identifier;
-pub fn stmt_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone {
+pub fn stmt_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone {
     // Variable declaration starts with let or var
     let var_decl = variable_declaration_parser().map(StmtVariant::VariableDeclaration);
 

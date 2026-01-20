@@ -17,7 +17,9 @@ impl IntoDiagnostic for UnknownAttributeWarning {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::warning()
             .with_message(format!("unknown attribute '{}'", self.name))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("unknown attribute")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("unknown attribute"),
+            ])
     }
 }

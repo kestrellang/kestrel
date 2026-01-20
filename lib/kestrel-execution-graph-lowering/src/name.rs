@@ -35,13 +35,13 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
 
     // Then add this symbol's name (if it has one that should appear in the path)
     let kind = symbol.metadata().kind();
-    
+
     // Skip the root symbol (named "<root>")
     let name_value = &symbol.metadata().name().value;
     if name_value == "<root>" {
         return;
     }
-    
+
     match kind {
         // Skip source files - they don't contribute to the qualified name
         KestrelSymbolKind::SourceFile => {}
@@ -68,15 +68,21 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
                 if let Some(target_type) = ext_symbol.target_type() {
                     // Extract the symbol from the target type and use its name
                     match target_type.kind() {
-                        TyKind::Struct { symbol: target_sym, .. } => {
+                        TyKind::Struct {
+                            symbol: target_sym, ..
+                        } => {
                             let name = target_sym.metadata().name();
                             segments.push(name.value.clone());
                         }
-                        TyKind::Enum { symbol: target_sym, .. } => {
+                        TyKind::Enum {
+                            symbol: target_sym, ..
+                        } => {
                             let name = target_sym.metadata().name();
                             segments.push(name.value.clone());
                         }
-                        TyKind::Protocol { symbol: target_sym, .. } => {
+                        TyKind::Protocol {
+                            symbol: target_sym, ..
+                        } => {
                             let name = target_sym.metadata().name();
                             segments.push(name.value.clone());
                         }
@@ -125,7 +131,9 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
             segments.push(name.value.clone());
         }
 
-        KestrelSymbolKind::Import | KestrelSymbolKind::TypeParameter | KestrelSymbolKind::AssociatedType => {
+        KestrelSymbolKind::Import
+        | KestrelSymbolKind::TypeParameter
+        | KestrelSymbolKind::AssociatedType => {
             // These don't contribute to qualified names
         }
 

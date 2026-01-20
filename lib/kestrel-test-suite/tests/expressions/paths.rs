@@ -143,8 +143,7 @@ mod complex_expressions {
     #[test]
     fn empty_array_requires_type_annotation() {
         // Empty array without context cannot infer element type
-        Test::new("module Test\nfunc test() {\n[];\n}")
-            .expect(HasError("could not infer type"));
+        Test::new("module Test\nfunc test() {\n[];\n}").expect(HasError("could not infer type"));
     }
     compiles!(empty_tuple_is_unit, "();");
     compiles!(single_element_tuple, "(42,);");

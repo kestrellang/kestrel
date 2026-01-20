@@ -45,34 +45,35 @@
 //! println!("{}", ctx.display());
 //! ```
 
+pub mod builder;
+pub mod function;
 pub mod id;
+pub mod item;
 pub mod metadata;
+pub mod pass;
 pub mod qualified_name;
 pub mod ty;
-pub mod item;
-pub mod function;
-pub mod builder;
-pub mod pass;
 
 // Re-export main types at crate root
-pub use id::{
-    Arena, AssociatedType, Block, Enum, EnumCase, Field, Function, Id, Local, Param, Protocol,
-    ProtocolMethod, QualifiedName, Static, Statement, Struct, Ty, TypeParam, Witness,
-};
-pub use metadata::{Metadata, Origin, Prior};
-pub use qualified_name::QualifiedNameData;
-pub use ty::MirTy;
-pub use item::{
-    AssociatedTypeDef, EnumCaseDef, EnumDef, FieldDef, FunctionDef, ParamDef, ProtocolDef,
-    ProtocolMethodDef, StaticDef, StructDef, WhereClause, WhereConstraint, WitnessDef,
-};
+pub use builder::{BlockBuilder, FunctionBuilder};
 pub use function::{
-    BasicBlock, BinOp, Callee, CallArg, CastKind, FloatBits, Immediate, ImmediateKind, IntBits,
+    BasicBlock, BinOp, CallArg, Callee, CastKind, FloatBits, Immediate, ImmediateKind, IntBits,
     LocalDef, PassingMode, Place, PlaceKind, Rvalue, Statement as StatementData, StatementKind,
     Terminator, TerminatorKind, TypeParamDef, TypeParamOwner, UnOp, Value,
 };
-pub use builder::{BlockBuilder, FunctionBuilder};
+pub use id::{
+    Arena, AssociatedType, Block, Enum, EnumCase, Field, Function, Id, Local, Param, Protocol,
+    ProtocolMethod, QualifiedName, Statement, Static, Struct, Ty, TypeParam, Witness,
+};
+pub use item::{
+    AssociatedTypeDef, CallingConvention, EnumCaseDef, EnumDef, ExternInfo, FieldDef, FunctionDef,
+    ParamDef, ProtocolDef, ProtocolMethodDef, StaticDef, StructDef, WhereClause, WhereConstraint,
+    WitnessDef,
+};
+pub use metadata::{Metadata, Origin, Prior};
 pub use pass::{FunctionPass, FunctionPassAdapter, MirPass, PassManager, PassResult};
+pub use qualified_name::QualifiedNameData;
+pub use ty::MirTy;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -138,6 +139,15 @@ impl MirContext {
     /// Get a type by its ID.
     pub fn ty(&self, id: Id<Ty>) -> &MirTy {
         &self.types[id]
+    }
+
+    /// Look up an already-interned type by its structure.
+    ///
+    /// Returns `None` if the type has not been interned.
+    /// This is used during codegen when we need to look up types
+    /// without mutating the context.
+    pub fn lookup_type(&self, ty: &MirTy) -> Option<Id<Ty>> {
+        self.type_lookup.get(ty).copied()
     }
 
     // === Primitive type helpers ===

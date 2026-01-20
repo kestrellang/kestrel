@@ -25,6 +25,9 @@ pub enum LanguageFeature {
     ExpressibleByFloatLiteral,
     ExpressibleByStringLiteral,
     ExpressibleByBoolLiteral,
+
+    // Protocol builtins - FFI
+    FFISafe,
     // Future: Operator protocols
     // Add, Sub, Mul, Div, Rem, Neg,
     // BitAnd, BitOr, BitXor, BitNot,
@@ -43,6 +46,7 @@ impl LanguageFeature {
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
+            "FFISafe" => Some(Self::FFISafe),
             _ => None,
         }
     }
@@ -57,6 +61,7 @@ impl LanguageFeature {
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
+            Self::FFISafe => "FFISafe",
         }
     }
 
@@ -68,6 +73,9 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: true,
                     must_be_marker: true,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
                 },
             },
             Self::Cloneable => BuiltinDefinition {
@@ -75,6 +83,9 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
                     must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
                 },
             },
             Self::Clone => BuiltinDefinition {
@@ -88,6 +99,9 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
                     must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
                 },
             },
             Self::ExpressibleByFloatLiteral => BuiltinDefinition {
@@ -95,6 +109,9 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
                     must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
                 },
             },
             Self::ExpressibleByStringLiteral => BuiltinDefinition {
@@ -102,6 +119,9 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
                     must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
                 },
             },
             Self::ExpressibleByBoolLiteral => BuiltinDefinition {
@@ -109,6 +129,19 @@ impl LanguageFeature {
                 kind: BuiltinKind::Protocol {
                     implicit_conformance: false,
                     must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
+                },
+            },
+            Self::FFISafe => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: true,
+                    tuple_conformance_propagation: true,
+                    requires_fields_conform: true,
+                    disallow_enum_conformance: true,
                 },
             },
         }
@@ -124,6 +157,12 @@ pub enum BuiltinKind {
         implicit_conformance: bool,
         /// If true, must be a marker protocol (no required methods/types).
         must_be_marker: bool,
+        /// If true, tuples conform to this protocol if all elements conform.
+        tuple_conformance_propagation: bool,
+        /// If true, structs/enums conforming to this protocol must have all fields conform.
+        requires_fields_conform: bool,
+        /// If true, enums cannot conform to this protocol.
+        disallow_enum_conformance: bool,
     },
     /// A builtin protocol method.
     ProtocolMethod {

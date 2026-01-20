@@ -126,8 +126,8 @@ fn is_trivia(token: &Token) -> bool {
 }
 
 /// Parser that skips trivia tokens
-fn skip_trivia<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
+fn skip_trivia<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
     any()
         .filter(|token: &Token| is_trivia(token))
         .repeated()
@@ -136,15 +136,15 @@ fn skip_trivia<'tokens>(
 
 /// Internal parser for never type: !
 /// Skips leading whitespace
-fn never_type_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+fn never_type_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(just(Token::Bang).map_with(|_, e| to_kestrel_span(e.span())))
 }
 
 /// Internal parser for path segments: Ident or Ident.Ident.Ident
 /// Skips leading whitespace before the first identifier
-fn path_segments_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
+fn path_segments_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         select! {
             Token::Identifier = e => to_kestrel_span(e.span()),
@@ -157,8 +157,8 @@ fn path_segments_parser<'tokens>(
 
 /// Combined type parser that returns a variant
 /// Supports: !, (), (T1, T2), (T1) -> T2, Path, Path[Args]
-pub(crate) fn ty_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, TyVariant, ParserExtra<'tokens>> + Clone {
+pub(crate) fn ty_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, TyVariant, ParserExtra<'tokens>> + Clone {
     recursive(|ty| {
         // Never type: !
         let never = never_type_parser().map(TyVariant::Never);
@@ -220,7 +220,10 @@ pub(crate) fn ty_parser<'tokens>(
         let array = skip_trivia()
             .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(ty.clone())
-            .then(skip_trivia().ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
+            )
             .map(|((lbracket, element_ty), rbracket)| {
                 TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
             });

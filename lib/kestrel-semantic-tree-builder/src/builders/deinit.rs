@@ -28,7 +28,7 @@ impl Builder for DeinitBuilder {
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let parent = parent?;
         let parent_kind = parent.metadata().kind();
-        
+
         // Deinit can only appear in struct bodies (not protocol or enum)
         if parent_kind != KestrelSymbolKind::Struct {
             return None;
@@ -48,11 +48,7 @@ impl Builder for DeinitBuilder {
             })
             .unwrap_or_else(|| full_span.clone());
 
-        let deinit_symbol = DeinitSymbol::new(
-            full_span,
-            deinit_token_span,
-            Some(parent.clone()),
-        );
+        let deinit_symbol = DeinitSymbol::new(full_span, deinit_token_span, Some(parent.clone()));
         let deinit_arc = Arc::new(deinit_symbol);
         let deinit_arc_dyn = deinit_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 

@@ -1,9 +1,9 @@
 //! Basic blocks.
 
+use crate::MirContext;
 use crate::function::Terminator;
 use crate::id::{Block, Id, Statement};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::fmt;
 
 /// A basic block is a sequence of statements ending in a terminator.

@@ -1,11 +1,11 @@
 //! Function builder.
 
+use crate::MirContext;
 use crate::builder::BlockBuilder;
 use crate::function::{BasicBlock, LocalDef, TypeParamDef, TypeParamOwner};
 use crate::id::{Block, Function, Id, Local, Ty, TypeParam};
 use crate::item::{FunctionDef, ParamDef, WhereClause, WhereConstraint};
 use crate::metadata::Metadata;
-use crate::MirContext;
 
 /// Builder for constructing functions.
 pub struct FunctionBuilder<'ctx> {
@@ -81,7 +81,10 @@ impl<'ctx> FunctionBuilder<'ctx> {
         if def.where_clause.is_none() {
             def.where_clause = Some(WhereClause::new());
         }
-        def.where_clause.as_mut().unwrap().add_constraint(constraint);
+        def.where_clause
+            .as_mut()
+            .unwrap()
+            .add_constraint(constraint);
     }
 
     /// Add a new basic block to this function.

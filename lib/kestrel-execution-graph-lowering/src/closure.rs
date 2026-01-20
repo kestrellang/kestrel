@@ -324,10 +324,20 @@ fn create_closure_function(
     let saved_temp_counter = ctx.get_temp_counter();
 
     // Pre-compute types for env parameter and regular parameters to avoid borrow issues
-    let env_param_ty = env_info.as_ref().map(|(_, env_struct_name)| {
-        let env_struct_ty = ctx.mir.ty_named(*env_struct_name, vec![]);
-        ctx.mir.ty_ref(env_struct_ty)
-    });
+    // All closures get an env parameter for ABI consistency with thick calls.
+    // For capturing closures, it's a reference to the env struct.
+    // For non-capturing closures, it's a raw pointer (unused but required for calling convention).
+    let env_param_ty = match env_info.as_ref() {
+        Some((_, env_struct_name)) => {
+            let env_struct_ty = ctx.mir.ty_named(*env_struct_name, vec![]);
+            ctx.mir.ty_ref(env_struct_ty)
+        }
+        None => {
+            // Non-capturing closure: use a raw pointer type for the unused env parameter
+            let i8_ty = ctx.mir.intern_type(MirTy::I8);
+            ctx.mir.ty_ptr(i8_ty)
+        }
+    };
 
     let param_types: Vec<_> = params
         .iter()
@@ -338,10 +348,8 @@ fn create_closure_function(
     let func_id = {
         let mut func = ctx.mir.add_function(name, mir_ret_ty);
 
-        // Add env parameter if there are captures
-        if let Some(env_ty) = env_param_ty {
-            func.param("env", env_ty);
-        }
+        // Always add env parameter (for ABI consistency with thick calls)
+        func.param("env", env_param_ty);
 
         // Add regular parameters
         for (param_name, param_ty) in &param_types {
@@ -365,8 +373,8 @@ fn create_closure_function(
     // Get the locals that were created for the function parameters
     let mir_locals: Vec<_> = ctx.mir.function(func_id).locals.clone();
 
-    // Calculate the offset for regular params (skip env param if present)
-    let param_offset = if env_info.is_some() { 1 } else { 0 };
+    // Calculate the offset for regular params (always skip env param at index 0)
+    let param_offset = 1;
 
     // Map regular parameters to their MIR locals
     for (i, param) in params.iter().enumerate() {

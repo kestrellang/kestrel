@@ -1,8 +1,8 @@
 //! Immediate values (constants).
 
+use crate::MirContext;
 use crate::id::{Id, QualifiedName, Ty};
 use crate::metadata::Metadata;
-use crate::MirContext;
 use std::fmt;
 
 /// An immediate (constant) value.

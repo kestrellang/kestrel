@@ -615,17 +615,18 @@ impl Pattern {
         match &self.kind {
             PatternKind::Local { .. } => true,
             PatternKind::Wildcard => true,
-            PatternKind::Tuple { prefix, suffix, .. } => {
-                prefix.iter().chain(suffix.iter()).all(|e| e.is_irrefutable())
-            }
+            PatternKind::Tuple { prefix, suffix, .. } => prefix
+                .iter()
+                .chain(suffix.iter())
+                .all(|e| e.is_irrefutable()),
             PatternKind::Struct { fields, .. } => {
                 // A struct pattern is irrefutable if all field patterns are irrefutable
                 fields.iter().all(|f| f.pattern.is_irrefutable())
             }
             PatternKind::Literal { .. } => false,
             PatternKind::EnumVariant { .. } => false, // TODO: single-case enums are irrefutable
-            PatternKind::Range { .. } => false, // Ranges don't cover all values
-            PatternKind::Array { .. } => false, // Array patterns check length
+            PatternKind::Range { .. } => false,       // Ranges don't cover all values
+            PatternKind::Array { .. } => false,       // Array patterns check length
             // Or-patterns are irrefutable if ANY alternative is irrefutable
             PatternKind::Or { alternatives } => alternatives.iter().any(|a| a.is_irrefutable()),
             // At-patterns are irrefutable if the subpattern is irrefutable
@@ -815,10 +816,7 @@ mod tests {
 
     #[test]
     fn test_wildcard_pattern() {
-        let pattern = Pattern::wildcard(
-            Ty::int(IntBits::I64, Span::from(0..1)),
-            Span::from(0..1),
-        );
+        let pattern = Pattern::wildcard(Ty::int(IntBits::I64, Span::from(0..1)), Span::from(0..1));
         assert!(pattern.is_wildcard());
         assert!(pattern.is_irrefutable());
     }
@@ -862,11 +860,8 @@ mod tests {
 
     #[test]
     fn test_enum_variant_pattern() {
-        let pattern = Pattern::unresolved_enum_variant(
-            "None".to_string(),
-            vec![],
-            Span::from(0..5),
-        );
+        let pattern =
+            Pattern::unresolved_enum_variant("None".to_string(), vec![], Span::from(0..5));
         assert!(pattern.is_enum_variant());
         assert_eq!(pattern.case_name(), Some("None"));
         assert_eq!(pattern.case_id(), None);

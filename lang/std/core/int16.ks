@@ -1,6 +1,8 @@
 // Int16 - 16-bit signed integer
 // Generated from templates/integer.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Int16:
     SignedInteger,
     Numeric,
@@ -17,7 +19,8 @@ public struct Int16:
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.i16
 
@@ -60,4 +63,29 @@ public struct Int16:
     public func bitwiseNot() -> Int16 { Int16(value: lang.i16_not(self.value)) }
     public func shiftLeft(by count: Int) -> Int16 { Int16(value: lang.i16_shl(self.value, count as lang.i16)) }
     public func shiftRight(by count: Int) -> Int16 { Int16(value: lang.i16_shr(self.value, count as lang.i16)) }
+
+    // Type conversions
+    public func toInt() -> Int {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toInt8() -> Int8 {
+        Int8(value: self.value as lang.i8)
+    }
+
+    public func toInt32() -> Int32 {
+        Int32(value: self.value as lang.i32)
+    }
+
+    public func toInt64() -> Int64 {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toFloat32() -> Float32 {
+        Float32(value: self.value as lang.f32)
+    }
+
+    public func toFloat64() -> Float64 {
+        Float64(value: self.value as lang.f64)
+    }
 }

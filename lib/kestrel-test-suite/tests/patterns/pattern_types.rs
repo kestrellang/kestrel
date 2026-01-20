@@ -819,7 +819,9 @@ func test(arr: [Int]) -> Int {
 }
 "#,
         )
-        .expect(HasError("array patterns with suffix elements are not yet supported"));
+        .expect(HasError(
+            "array patterns with suffix elements are not yet supported",
+        ));
     }
 
     #[test]
@@ -838,7 +840,9 @@ func test(arr: [Int]) -> Int {
 }
 "#,
         )
-        .expect(HasError("array patterns with suffix elements are not yet supported"));
+        .expect(HasError(
+            "array patterns with suffix elements are not yet supported",
+        ));
     }
 
     #[test]
@@ -947,7 +951,7 @@ func test(x: Int) -> Int {
 "#,
         )
         .expect(Fails)
-        .expect(HasError("At"));  // Parser error reports token name 'At' for the @ symbol
+        .expect(HasError("At")); // Parser error reports token name 'At' for the @ symbol
     }
 
     #[test]

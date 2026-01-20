@@ -162,7 +162,9 @@ fn find_less_visible_type(
             }
             None
         }
-        TyKind::Array(element_type) => find_less_visible_type(element_type, required_level),
+        TyKind::Array(element_type) | TyKind::Pointer(element_type) => {
+            find_less_visible_type(element_type, required_level)
+        }
         TyKind::Function {
             params,
             return_type,

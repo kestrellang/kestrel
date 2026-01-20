@@ -66,7 +66,10 @@ impl ConformancesBehavior {
     }
 
     /// Check if this type has explicitly opted out of a specific protocol
-    pub fn has_negative_conformance_to(&self, protocol_id: semantic_tree::symbol::SymbolId) -> bool {
+    pub fn has_negative_conformance_to(
+        &self,
+        protocol_id: semantic_tree::symbol::SymbolId,
+    ) -> bool {
         use crate::ty::TyKind;
         self.negative_conformances.iter().any(|ty| {
             if let TyKind::Protocol { symbol, .. } = ty.kind() {

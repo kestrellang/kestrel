@@ -4,6 +4,7 @@
 
 use kestrel_semantic_model::HasBody;
 use kestrel_semantic_model::queries::AncestorOfKind;
+use kestrel_semantic_tree::behavior::extern_fn::ExternBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
@@ -48,6 +49,11 @@ impl Analyzer for FunctionBodyAnalyzer {
             })
             .is_some()
         {
+            return;
+        }
+
+        // Skip extern functions - their body is provided externally
+        if symbol.metadata().get_behavior::<ExternBehavior>().is_some() {
             return;
         }
 

@@ -90,7 +90,7 @@ impl ParseError {
         error: &chumsky::error::Rich<'a, T>,
     ) -> Self {
         use crate::input::to_kestrel_span;
-        
+
         let span = Some(to_kestrel_span(*error.span()));
 
         // Determine error kind based on what was found
@@ -178,7 +178,10 @@ impl Parser {
         let mut sink = EventSink::new();
 
         // Parse and collect events
-        parse_fn(source, tokens, &mut sink);
+        // Use stacker to grow the stack if needed for deeply nested types
+        stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+            parse_fn(source, tokens, &mut sink);
+        });
 
         // Extract errors from events
         let events = sink.events();

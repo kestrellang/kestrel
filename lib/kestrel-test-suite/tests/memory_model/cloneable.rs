@@ -28,10 +28,11 @@ mod parsing {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Cloneable")
@@ -51,10 +52,11 @@ mod parsing {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Cloneable.clone")
@@ -73,10 +75,11 @@ mod parsing {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Symbol::new("Cloneable").is(SymbolKind::Protocol));
     }
@@ -91,18 +94,19 @@ mod parsing {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct MyData: Cloneable {
                 var value: Int
                 
-                func clone(self) -> MyData {
+                func clone() -> MyData {
                     MyData(value: self.value)
                 }
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("MyData")
@@ -129,18 +133,19 @@ mod copy_semantics {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct MyData: Cloneable {
                 var value: Int
                 
-                func clone(self) -> MyData {
+                func clone() -> MyData {
                     MyData(value: self.value)
                 }
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("MyData")
@@ -163,6 +168,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Point")
@@ -182,13 +188,13 @@ mod copy_semantics {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Inner: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Inner {
+                func clone() -> Inner {
                     Inner(value: self.value)
                 }
             }
@@ -198,6 +204,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("Cloneable"));
     }
 
@@ -211,13 +218,13 @@ mod copy_semantics {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Inner: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Inner {
+                func clone() -> Inner {
                     Inner(value: self.value)
                 }
             }
@@ -228,6 +235,7 @@ mod copy_semantics {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("Cloneable"));
     }
 
@@ -241,13 +249,13 @@ mod copy_semantics {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Inner: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Inner {
+                func clone() -> Inner {
                     Inner(value: self.value)
                 }
             }
@@ -255,12 +263,13 @@ mod copy_semantics {
             struct Outer: Cloneable {
                 var inner: Inner
                 
-                func clone(self) -> Outer {
+                func clone() -> Outer {
                     Outer(inner: self.inner.clone())
                 }
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("Outer")
@@ -290,18 +299,19 @@ mod conflicting_conformance {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Invalid: Cloneable, not Copyable {
                 var value: Int
                 
-                func clone(self) -> Invalid {
+                func clone() -> Invalid {
                     Invalid(value: self.value)
                 }
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError(
             "cannot conform to `Cloneable` and opt out of `Copyable`",
         ));
@@ -326,13 +336,13 @@ mod mir_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -345,11 +355,10 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.test").calls_witness("std.core.protocols.Cloneable", "clone"),
-        );
+        .expect(Mir::mir_function("Test.test").calls_witness("Test.Cloneable", "clone"));
     }
 
     #[test]
@@ -363,13 +372,13 @@ mod mir_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -382,12 +391,13 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // The witness call should use Ref mode for the self parameter
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWitness {
-                protocol: "std.core.protocols.Cloneable".to_string(),
+                protocol: "Test.Cloneable".to_string(),
                 method: "clone".to_string(),
             })
         }));
@@ -404,13 +414,13 @@ mod mir_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -423,6 +433,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // The final call to consume should use Move mode
@@ -445,13 +456,13 @@ mod mir_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -464,15 +475,20 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // No witness call should be made for borrowing
+        // Reference is created first, then copied to the call
         .expect(Mir::mir_function("Test.test").any_block(|b| {
             b.has_statement(StatementPattern::CallWithModes {
                 callee: "Test.borrow".to_string(),
-                arg_modes: vec![PassingMode::Ref],
+                arg_modes: vec![PassingMode::Copy],
             })
-        }));
+        }))
+        .expect(
+            Mir::mir_function("Test.test").any_block(|b| b.has_statement(StatementPattern::Ref)),
+        );
     }
 
     #[test]
@@ -493,6 +509,7 @@ mod mir_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // Simple copyable uses Copy mode, not Move after clone
@@ -522,7 +539,7 @@ mod generic_tests {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             func duplicate[T](item: T) -> (T, T) where T: Cloneable {
@@ -531,6 +548,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(
             Symbol::new("duplicate")
@@ -549,7 +567,7 @@ mod generic_tests {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             func makeClone[T](item: T) -> T where T: Cloneable {
@@ -557,6 +575,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -571,7 +590,7 @@ mod generic_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             func makeClone[T](item: T) -> T where T: Cloneable {
@@ -579,12 +598,10 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Test.makeClone")
-                .calls_witness("std.core.protocols.Cloneable", "clone"),
-        );
+        .expect(Mir::mir_function("Test.makeClone").calls_witness("Test.Cloneable", "clone"));
     }
 
     #[test]
@@ -597,13 +614,13 @@ mod generic_tests {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -618,6 +635,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles);
     }
 
@@ -631,7 +649,7 @@ mod generic_tests {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Point {
@@ -649,6 +667,7 @@ mod generic_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(HasError("")); // Should error about Point not conforming to Cloneable
     }
 }
@@ -670,22 +689,23 @@ mod witness_tests {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(
-            Mir::mir_witness("Test.Data", "std.core.protocols.Cloneable")
+            Mir::mir_witness("Test.Data", "Test.Cloneable")
                 .has_method("clone")
                 .has_method_mapping("clone", "Test.Data.clone"),
         );
@@ -710,13 +730,13 @@ mod multiple_args_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -730,6 +750,7 @@ mod multiple_args_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Test.test").any_block(|b| {
@@ -751,7 +772,7 @@ mod multiple_args_tests {
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
                 @builtin(.Clone)
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Point {
@@ -762,7 +783,7 @@ mod multiple_args_tests {
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -776,6 +797,7 @@ mod multiple_args_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles)
         .expect(Mir::compiles())
         // Point is simple Copyable → Copy, Data is Cloneable → Move (after clone)
@@ -805,13 +827,13 @@ mod value_preservation_tests {
             
             @builtin(.Cloneable)
             protocol Cloneable: Copyable {
-                func clone(self) -> Self
+                func clone() -> Self
             }
             
             struct Data: Cloneable {
                 var value: Int
                 
-                func clone(self) -> Data {
+                func clone() -> Data {
                     Data(value: self.value)
                 }
             }
@@ -825,6 +847,7 @@ mod value_preservation_tests {
             }
         "#,
         )
+        .without_prelude()
         .expect(Compiles); // Should compile - data is cloned each time
     }
 }

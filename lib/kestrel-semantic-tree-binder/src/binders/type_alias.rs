@@ -18,7 +18,7 @@ use crate::diagnostics::{
     AssociatedTypeBoundsInWrongContextError, NotAProtocolContext, NotAProtocolError,
     TypeAliasContext as DiagTypeAliasContext, TypeAliasRequiresTypeError,
 };
-use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::resolution::type_resolver::{TypeSyntaxContext, resolve_type_from_ty_node};
 use kestrel_syntax_tree::utils::{find_child, get_node_span};
 
 /// Determines the context in which a type alias declaration appears
@@ -298,6 +298,7 @@ fn get_type_display_name(ty: &Ty) -> String {
         TyKind::String => "String".to_string(),
         TyKind::Tuple(_) => "tuple".to_string(),
         TyKind::Array(_) => "array".to_string(),
+        TyKind::Pointer(_) => "pointer".to_string(),
         TyKind::Function { .. } => "function".to_string(),
         TyKind::Error => "error".to_string(),
         TyKind::SelfType => "Self".to_string(),

@@ -109,10 +109,10 @@ fn resolve_initializer_body(
     source: &str,
     file_id: usize,
 ) {
+    use crate::body_resolver::BodyResolutionContext;
     use crate::body_resolver::context::{
         create_local_scope_for_body, resolve_body_and_attach_executable,
     };
-    use crate::body_resolver::BodyResolutionContext;
     use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 
     // Downcast to InitializerSymbol

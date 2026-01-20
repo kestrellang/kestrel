@@ -311,9 +311,7 @@ fn resolve_if_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> 
     ctx.move_tracker.restore(pre_if_moves.clone());
 
     // Find optional else clause (resolved without the if-let bindings)
-    let else_clause_node = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::ElseClause);
+    let else_clause_node = node.children().find(|c| c.kind() == SyntaxKind::ElseClause);
 
     let else_branch = else_clause_node
         .as_ref()
@@ -385,12 +383,18 @@ fn resolve_if_then_block(
     let mut trailing_expr = None;
 
     let children: Vec<_> = block_node.children().collect();
-
     for (i, child) in children.iter().enumerate() {
         let is_last = i == children.len() - 1;
 
         match child.kind() {
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                // Check if this is a trailing expression wrapped in a statement
+                if is_last {
+                    if let Some(expr) = try_extract_trailing_expression(child, ctx) {
+                        trailing_expr = Some(expr);
+                        continue;
+                    }
+                }
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
@@ -444,12 +448,18 @@ fn resolve_if_block(
     let mut trailing_expr = None;
 
     let children: Vec<_> = block_node.children().collect();
-
     for (i, child) in children.iter().enumerate() {
         let is_last = i == children.len() - 1;
 
         match child.kind() {
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                // Check if this is a trailing expression wrapped in a statement
+                if is_last {
+                    if let Some(expr) = try_extract_trailing_expression(child, ctx) {
+                        trailing_expr = Some(expr);
+                        continue;
+                    }
+                }
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
@@ -494,6 +504,117 @@ fn resolve_if_block(
 fn has_trailing_semicolon(node: &SyntaxNode) -> bool {
     node.children_with_tokens()
         .any(|elem| elem.kind() == SyntaxKind::Semicolon)
+}
+
+/// Try to extract a trailing expression from a Statement or ExpressionStatement node.
+/// Returns Some(expression) if this is a trailing expression (no semicolon, value-producing),
+/// None otherwise.
+fn try_extract_trailing_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Expression> {
+    // Don't extract if this node has a semicolon at its level
+    if has_trailing_semicolon(node) {
+        return None;
+    }
+
+    // Look for the inner content
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::ExpressionStatement => {
+                // Recurse into ExpressionStatement
+                return try_extract_trailing_expression(&child, ctx);
+            }
+            SyntaxKind::Expression => {
+                // Found the expression wrapper - look inside for the actual expression
+                if !has_trailing_semicolon(&child) {
+                    // Check if the inner expression can produce a value
+                    if can_be_trailing_expression(&child) {
+                        return Some(resolve_expression(&child, ctx));
+                    }
+                }
+            }
+            // Also handle direct expression kinds (ExprIf, ExprMatch without Expression wrapper)
+            SyntaxKind::ExprIf => {
+                if !has_trailing_semicolon(&child) && has_value_else_branch(&child) {
+                    return Some(resolve_expression(&child, ctx));
+                }
+            }
+            SyntaxKind::ExprMatch => {
+                if !has_trailing_semicolon(&child) {
+                    return Some(resolve_expression(&child, ctx));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+/// Check if an expression can be a trailing expression (produces a value).
+fn can_be_trailing_expression(expr_node: &SyntaxNode) -> bool {
+    // Look for the actual expression type inside the Expression wrapper
+    for child in expr_node.children() {
+        match child.kind() {
+            SyntaxKind::ExprIf => {
+                // If-expression can be a trailing expression only if it has an else branch
+                return has_value_else_branch(&child);
+            }
+            SyntaxKind::ExprMatch => {
+                // Match expressions are always exhaustive and can be trailing expressions
+                return true;
+            }
+            SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
+                // Loops cannot be trailing expressions - they return () or Never
+                return false;
+            }
+            _ => {
+                // Other expressions can be trailing expressions
+                return true;
+            }
+        }
+    }
+    // If we found nothing inside, it's probably a simple expression
+    true
+}
+
+/// Check if an if-expression has a complete else branch (can produce a value).
+fn has_value_else_branch(if_node: &SyntaxNode) -> bool {
+    // Find the ElseClause
+    let else_clause = if_node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::ElseClause);
+
+    match else_clause {
+        None => false, // No else at all
+        Some(else_node) => {
+            // Check what's inside the else clause
+            for child in else_node.children() {
+                match child.kind() {
+                    SyntaxKind::ExprIf => {
+                        // It's an "else if" - recursively check
+                        return has_value_else_branch(&child);
+                    }
+                    SyntaxKind::CodeBlock => {
+                        // It's a final "else { ... }" - it exists, so we have a value
+                        return true;
+                    }
+                    SyntaxKind::Expression => {
+                        // The else if might be wrapped in an Expression node
+                        // Look inside for ExprIf
+                        for inner in child.children() {
+                            if inner.kind() == SyntaxKind::ExprIf {
+                                return has_value_else_branch(&inner);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+    }
 }
 
 /// Resolve an else clause, which can be either a block or an else-if expression
@@ -683,7 +804,10 @@ fn resolve_while_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
 /// Resolve the body of a while-let loop.
 /// This creates a nested scope for the loop body while keeping pattern bindings visible.
-fn resolve_while_let_body(block_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Vec<Statement> {
+fn resolve_while_let_body(
+    block_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<Statement> {
     // Push a nested scope for local variables declared in the body
     ctx.local_scope.push_scope();
 
@@ -1030,7 +1154,10 @@ fn statement_references_local(
             }
         }
         StatementKind::Expr(expr) => expression_references_local(expr, local_id),
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Check all conditions
             for condition in conditions {
                 match condition {
@@ -1059,7 +1186,10 @@ fn statement_references_local(
             }
             false
         }
-        StatementKind::Deinit { local_id: deinit_id, .. } => {
+        StatementKind::Deinit {
+            local_id: deinit_id,
+            ..
+        } => {
             // The deinit statement references the variable being deinited
             *deinit_id == local_id
         }
@@ -1071,16 +1201,16 @@ fn expression_references_local(
     expr: &Expression,
     local_id: kestrel_semantic_tree::symbol::local::LocalId,
 ) -> bool {
-    use kestrel_semantic_tree::expr::{ExprKind, ElseBranch, IfCondition};
+    use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, IfCondition};
 
     match &expr.kind {
         // Direct reference to the local
         ExprKind::LocalRef(id) => *id == local_id,
 
         // Recursively check compound expressions
-        ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
-            elements.iter().any(|e| expression_references_local(e, local_id))
-        }
+        ExprKind::Array(elements) | ExprKind::Tuple(elements) => elements
+            .iter()
+            .any(|e| expression_references_local(e, local_id)),
 
         ExprKind::Grouping(inner) => expression_references_local(inner, local_id),
 
@@ -1090,26 +1220,56 @@ fn expression_references_local(
 
         ExprKind::MethodRef { receiver, .. } => expression_references_local(receiver, local_id),
 
-        ExprKind::Call { callee, arguments, .. } => {
-            expression_references_local(callee, local_id)
-                || arguments.iter().any(|arg| expression_references_local(&arg.value, local_id))
-        }
-
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
             expression_references_local(receiver, local_id)
-                || arguments.iter().any(|arg| expression_references_local(&arg.value, local_id))
         }
 
-        ExprKind::ImplicitStructInit { arguments, .. } => {
-            arguments.iter().any(|arg| expression_references_local(&arg.value, local_id))
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
+            expression_references_local(callee, local_id)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
         }
+
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expression_references_local(receiver, local_id)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expression_references_local(receiver, local_id)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
+        }
+
+        ExprKind::ImplicitStructInit { arguments, .. } => arguments
+            .iter()
+            .any(|arg| expression_references_local(&arg.value, local_id)),
 
         ExprKind::Assignment { target, value } => {
             expression_references_local(target, local_id)
                 || expression_references_local(value, local_id)
         }
 
-        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             // Check conditions
             for condition in conditions {
                 match condition {
@@ -1163,7 +1323,9 @@ fn expression_references_local(
             false
         }
 
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             if expression_references_local(condition, local_id) {
                 return true;
             }
@@ -1175,7 +1337,9 @@ fn expression_references_local(
             false
         }
 
-        ExprKind::WhileLet { conditions, body, .. } => {
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
             // Check all conditions
             for condition in conditions {
                 match condition {
@@ -1208,7 +1372,9 @@ fn expression_references_local(
             false
         }
 
-        ExprKind::Closure { body, tail_expr, .. } => {
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             // Check nested closure body
             for stmt in body {
                 if statement_references_local(stmt, local_id) {
@@ -1234,7 +1400,8 @@ fn expression_references_local(
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
-                args.iter().any(|arg| expression_references_local(&arg.value, local_id))
+                args.iter()
+                    .any(|arg| expression_references_local(&arg.value, local_id))
             } else {
                 false
             }
@@ -1249,6 +1416,20 @@ fn expression_references_local(
                         .unwrap_or(false)
                         || expression_references_local(&arm.body, local_id)
                 })
+        }
+
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                if statement_references_local(stmt, local_id) {
+                    return true;
+                }
+            }
+            if let Some(val) = value {
+                if expression_references_local(val, local_id) {
+                    return true;
+                }
+            }
+            false
         }
 
         // Leaf expressions - no references
@@ -1284,12 +1465,14 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
         // Create an infer type for `it`
         let it_ty = kestrel_semantic_tree::ty::Ty::infer(span.clone());
         // Bind `it` as an immutable local in the closure scope
-        let local_id = ctx.local_scope.bind("it".to_string(), it_ty.clone(), false, span.clone());
+        let local_id = ctx
+            .local_scope
+            .bind("it".to_string(), it_ty.clone(), false, span.clone());
         Some((local_id, it_ty, span.clone()))
     } else {
         None
     };
-    
+
     let has_it = implicit_param.is_some();
 
     // Resolve the closure body (statements and trailing expression)
@@ -1330,7 +1513,9 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
             // Uses implicit `it` - exactly 1 param
             let it_ty = implicit_param.as_ref().unwrap().1.clone();
             kestrel_semantic_tree::ty::Ty::unresolved_function(
-                ParamInfo::ImplicitIt { it_type: Box::new(it_ty) },
+                ParamInfo::ImplicitIt {
+                    it_type: Box::new(it_ty),
+                },
                 return_ty,
                 span.clone(),
             )
@@ -1345,9 +1530,23 @@ fn resolve_closure_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext
     };
 
     // Collect captured variables from the closure body
-    let captures = collect_captures(&body, tail_expr.as_ref(), closure_entry_depth, &ctx.local_scope);
+    let captures = collect_captures(
+        &body,
+        tail_expr.as_ref(),
+        closure_entry_depth,
+        &ctx.local_scope,
+    );
 
-    Expression::closure(params, body, tail_expr, captures, it_was_used, implicit_param, closure_ty, span)
+    Expression::closure(
+        params,
+        body,
+        tail_expr,
+        captures,
+        it_was_used,
+        implicit_param,
+        closure_ty,
+        span,
+    )
 }
 
 /// Resolve closure parameters from the syntax tree.
@@ -1388,7 +1587,10 @@ fn resolve_closure_params(
                     let resolved_ty = resolver.resolve(&tn);
                     (resolved_ty, true)
                 }
-                None => (kestrel_semantic_tree::ty::Ty::infer(param_span.clone()), false),
+                None => (
+                    kestrel_semantic_tree::ty::Ty::infer(param_span.clone()),
+                    false,
+                ),
             };
 
             // Bind parameter as local
@@ -1531,7 +1733,10 @@ fn collect_captures(
     let mut seen_ids: HashSet<LocalId> = HashSet::new();
 
     // Helper to process a single LocalRef
-    let mut process_local_ref = |local_id: LocalId, _name: &str, ty: &kestrel_semantic_tree::ty::Ty, span: &kestrel_span::Span| {
+    let mut process_local_ref = |local_id: LocalId,
+                                 _name: &str,
+                                 ty: &kestrel_semantic_tree::ty::Ty,
+                                 span: &kestrel_span::Span| {
         // Check if already captured
         if seen_ids.contains(&local_id) {
             return;
@@ -1575,7 +1780,12 @@ fn collect_captures(
 /// Walk a statement to find LocalRef expressions.
 fn collect_captures_from_statement<F>(stmt: &Statement, process: &mut F)
 where
-    F: FnMut(kestrel_semantic_tree::symbol::local::LocalId, &str, &kestrel_semantic_tree::ty::Ty, &kestrel_span::Span),
+    F: FnMut(
+        kestrel_semantic_tree::symbol::local::LocalId,
+        &str,
+        &kestrel_semantic_tree::ty::Ty,
+        &kestrel_span::Span,
+    ),
 {
     use kestrel_semantic_tree::stmt::StatementKind;
 
@@ -1589,7 +1799,10 @@ where
                 collect_captures_from_expression(expr, process);
             }
         }
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             // Walk all conditions
             for condition in conditions {
                 match condition {
@@ -1618,7 +1831,12 @@ where
 /// Walk an expression to find LocalRef expressions.
 fn collect_captures_from_expression<F>(expr: &Expression, process: &mut F)
 where
-    F: FnMut(kestrel_semantic_tree::symbol::local::LocalId, &str, &kestrel_semantic_tree::ty::Ty, &kestrel_span::Span),
+    F: FnMut(
+        kestrel_semantic_tree::symbol::local::LocalId,
+        &str,
+        &kestrel_semantic_tree::ty::Ty,
+        &kestrel_span::Span,
+    ),
 {
     use kestrel_semantic_tree::expr::ExprKind;
 
@@ -1636,19 +1854,38 @@ where
         ExprKind::Grouping(inner) => {
             collect_captures_from_expression(inner, process);
         }
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             collect_captures_from_expression(callee, process);
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
         }
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_captures_from_expression(receiver, process);
+            for arg in arguments {
+                collect_captures_from_expression(&arg.value, process);
+            }
+        }
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             collect_captures_from_expression(receiver, process);
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
         }
         ExprKind::MethodRef { receiver, .. } => {
+            collect_captures_from_expression(receiver, process);
+        }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
         }
         ExprKind::FieldAccess { object, .. } => {
@@ -1676,7 +1913,12 @@ where
                 collect_captures_from_expression(elem, process);
             }
         }
-        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             // Collect from conditions
             for condition in conditions {
                 match condition {
@@ -1698,13 +1940,21 @@ where
                 collect_captures_from_else_branch(else_br, process);
             }
         }
-        ExprKind::While { condition, body: while_body, .. } => {
+        ExprKind::While {
+            condition,
+            body: while_body,
+            ..
+        } => {
             collect_captures_from_expression(condition, process);
             for stmt in while_body {
                 collect_captures_from_statement(stmt, process);
             }
         }
-        ExprKind::WhileLet { conditions, body: while_body, .. } => {
+        ExprKind::WhileLet {
+            conditions,
+            body: while_body,
+            ..
+        } => {
             // Walk all conditions
             for condition in conditions {
                 match condition {
@@ -1720,7 +1970,9 @@ where
                 collect_captures_from_statement(stmt, process);
             }
         }
-        ExprKind::Loop { body: loop_body, .. } => {
+        ExprKind::Loop {
+            body: loop_body, ..
+        } => {
             for stmt in loop_body {
                 collect_captures_from_statement(stmt, process);
             }
@@ -1734,7 +1986,9 @@ where
                 collect_captures_from_expression(val, process);
             }
         }
-        ExprKind::Closure { body, tail_expr, .. } => {
+        ExprKind::Closure {
+            body, tail_expr, ..
+        } => {
             // For nested closures, we still walk their bodies to find captures
             // These will be captures from the outer closure's perspective
             for stmt in body {
@@ -1766,6 +2020,16 @@ where
             }
         }
 
+        // Block expression - walk statements and value
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                collect_captures_from_statement(stmt, process);
+            }
+            if let Some(val) = value {
+                collect_captures_from_expression(val, process);
+            }
+        }
+
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
@@ -1779,9 +2043,16 @@ where
 }
 
 /// Walk an else branch to find LocalRef expressions.
-fn collect_captures_from_else_branch<F>(else_branch: &kestrel_semantic_tree::expr::ElseBranch, process: &mut F)
-where
-    F: FnMut(kestrel_semantic_tree::symbol::local::LocalId, &str, &kestrel_semantic_tree::ty::Ty, &kestrel_span::Span),
+fn collect_captures_from_else_branch<F>(
+    else_branch: &kestrel_semantic_tree::expr::ElseBranch,
+    process: &mut F,
+) where
+    F: FnMut(
+        kestrel_semantic_tree::symbol::local::LocalId,
+        &str,
+        &kestrel_semantic_tree::ty::Ty,
+        &kestrel_span::Span,
+    ),
 {
     match else_branch {
         kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
@@ -1852,8 +2123,8 @@ fn resolve_match_arm(
     scrutinee_ty: &kestrel_semantic_tree::ty::Ty,
     ctx: &mut BodyResolutionContext,
 ) -> Option<kestrel_semantic_tree::expr::MatchArm> {
-    use kestrel_semantic_tree::expr::MatchArm;
     use super::patterns::resolve_pattern;
+    use kestrel_semantic_tree::expr::MatchArm;
 
     let span = get_node_span(node, ctx.file_id);
 
@@ -1861,7 +2132,9 @@ fn resolve_match_arm(
     ctx.local_scope.push_scope();
 
     // Find and resolve the pattern with the scrutinee type as expected type
-    let pattern_node = node.children().find(|c| super::patterns::is_pattern_kind(c.kind()))?;
+    let pattern_node = node
+        .children()
+        .find(|c| super::patterns::is_pattern_kind(c.kind()))?;
     let pattern = resolve_pattern(&pattern_node, ctx, Some(scrutinee_ty));
 
     // Find optional guard (MatchArmGuard node containing an expression)
@@ -1898,15 +2171,12 @@ fn resolve_match_arm(
     })
 }
 
-/// Resolve a match arm body, handling closures specially.
+/// Resolve a match arm body, handling block syntax specially.
 ///
-/// When the body is a closure expression without explicit parameters (i.e., just `{ ... }`),
-/// we resolve it as an inline block rather than a closure. This prevents outer variables
-/// from being treated as captures (which would disallow assignment).
-fn resolve_match_arm_body(
-    body_node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+/// When the body is a block (closure syntax without explicit parameters, i.e., just `{ ... }`),
+/// we resolve it as an inline block expression rather than a closure. This ensures that
+/// pattern bindings from the match arm remain visible in the block without capture analysis.
+fn resolve_match_arm_body(body_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     // Unwrap Expression wrapper if present
     let inner_node = if body_node.kind() == SyntaxKind::Expression {
         body_node.children().next().unwrap_or(body_node.clone())
@@ -1914,7 +2184,7 @@ fn resolve_match_arm_body(
         body_node.clone()
     };
 
-    // Check if it's a closure without explicit parameters
+    // Check if it's a block (closure syntax without explicit parameters)
     if inner_node.kind() == SyntaxKind::ExprClosure {
         // Check if it has ClosureParams - if so, it's a real closure with explicit params
         let has_explicit_params = inner_node
@@ -1922,7 +2192,7 @@ fn resolve_match_arm_body(
             .any(|c| c.kind() == SyntaxKind::ClosureParams);
 
         if !has_explicit_params {
-            // It's a block-like closure (no params). Resolve the body inline.
+            // It's a block (no params). Resolve the body inline.
             // Don't push a new scope - we're already in the match arm's scope.
             let (statements, tail_expr) = resolve_closure_body(&inner_node, ctx);
             let body_span = get_node_span(&inner_node, ctx.file_id);
@@ -1932,29 +2202,21 @@ fn resolve_match_arm_body(
                 if let Some(expr) = tail_expr {
                     return expr;
                 }
-                // Empty closure body - return unit
+                // Empty block body - return unit
                 return Expression::unit(body_span);
             }
 
-            // If there are statements, wrap them in a closure without captures.
-            // This maintains the semantic structure while avoiding capture issues.
-            let result_ty = tail_expr.as_ref()
+            // Create a block expression (NOT a closure).
+            // Pattern bindings from the match arm remain visible.
+            let result_ty = tail_expr
+                .as_ref()
                 .map(|e| e.ty.clone())
                 .unwrap_or_else(|| Ty::unit(body_span.clone()));
-            return Expression::closure(
-                None,           // no params
-                statements,
-                tail_expr,
-                Vec::new(),     // no captures - this is the key fix!
-                false,          // doesn't use `it`
-                None,           // no implicit param
-                result_ty,
-                body_span,
-            );
+            return Expression::block(statements, tail_expr, result_ty, body_span);
         }
     }
 
-    // For all other cases (non-closure, or closure with explicit params),
+    // For all other cases (non-block, or closure with explicit params),
     // resolve normally using the exact same code path as before
     resolve_expression(body_node, ctx)
 }

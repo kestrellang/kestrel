@@ -8,56 +8,58 @@ use kestrel_lexer::Token;
 
 use crate::common::data::{AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData};
 use crate::common::parsers::{identifier, skip_trivia, token};
-use crate::input::{to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 // =============================================================================
 // Attribute Argument Value Parsers
 // =============================================================================
 
 /// Parser for string literal in attribute arguments
-fn string_literal_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn string_literal_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         just(Token::String).map_with(|_, e| AttributeArgValue::String(to_kestrel_span(e.span()))),
     )
 }
 
 /// Parser for integer literal in attribute arguments
-fn integer_literal_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn integer_literal_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        just(Token::Integer)
-            .map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
+        just(Token::Integer).map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
     )
 }
 
 /// Parser for float literal in attribute arguments
-fn float_literal_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn float_literal_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         just(Token::Float).map_with(|_, e| AttributeArgValue::Float(to_kestrel_span(e.span()))),
     )
 }
 
 /// Parser for boolean literal in attribute arguments
-fn bool_literal_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn bool_literal_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         just(Token::Boolean).map_with(|_, e| AttributeArgValue::Bool(to_kestrel_span(e.span()))),
     )
 }
 
 /// Parser for implicit member access in attribute arguments: `.option`
-fn implicit_member_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn implicit_member_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     token(Token::Dot)
         .then(identifier())
-        .map(|(dot_span, name_span)| AttributeArgValue::ImplicitMember { dot_span, name_span })
+        .map(|(dot_span, name_span)| AttributeArgValue::ImplicitMember {
+            dot_span,
+            name_span,
+        })
 }
 
 /// Parser for path in attribute arguments: `SomeType` or `Module.Type`
-fn path_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn path_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     identifier()
         .separated_by(token(Token::Dot))
         .at_least(1)
@@ -68,10 +70,10 @@ fn path_parser<'tokens>(
 /// Parser for attribute argument value
 ///
 /// Accepts: string, integer, float, boolean, implicit member access, or path
-fn attribute_arg_value_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
+fn attribute_arg_value_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     string_literal_parser()
-        .or(float_literal_parser())    // Float before integer to handle "3.14" correctly
+        .or(float_literal_parser()) // Float before integer to handle "3.14" correctly
         .or(integer_literal_parser())
         .or(bool_literal_parser())
         .or(implicit_member_parser())
@@ -85,8 +87,8 @@ fn attribute_arg_value_parser<'tokens>(
 /// Parser for a single attribute argument
 ///
 /// Syntax: `value` or `label: value`
-fn attribute_arg_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgData, ParserExtra<'tokens>> + Clone {
+fn attribute_arg_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgData, ParserExtra<'tokens>> + Clone {
     // Try labeled argument first: `label: value`
     let labeled = identifier()
         .then(token(Token::Colon))
@@ -108,8 +110,8 @@ fn attribute_arg_parser<'tokens>(
 }
 
 /// Parser for attribute arguments list: `(arg1, arg2, ...)`
-fn attribute_args_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgsData, ParserExtra<'tokens>> + Clone {
+fn attribute_args_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgsData, ParserExtra<'tokens>> + Clone {
     token(Token::LParen)
         .then(
             attribute_arg_parser()
@@ -130,8 +132,8 @@ fn attribute_args_parser<'tokens>(
 // =============================================================================
 
 /// Parser for a single attribute: `@name` or `@name(args)`
-pub fn attribute_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, AttributeData, ParserExtra<'tokens>> + Clone {
+pub fn attribute_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AttributeData, ParserExtra<'tokens>> + Clone {
     token(Token::At)
         .then(identifier())
         .then(attribute_args_parser().or_not())
@@ -145,8 +147,8 @@ pub fn attribute_parser<'tokens>(
 /// Parser for a list of attributes (zero or more)
 ///
 /// This parser is used before declaration parsers to collect any attributes.
-pub fn attribute_list_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<AttributeData>, ParserExtra<'tokens>> + Clone {
+pub fn attribute_list_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<AttributeData>, ParserExtra<'tokens>> + Clone {
     attribute_parser().repeated().collect()
 }
 

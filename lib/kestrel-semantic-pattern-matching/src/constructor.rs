@@ -33,39 +33,25 @@ pub enum Constructor {
     False,
 
     /// Enum case with name and arity (number of associated values)
-    Variant {
-        name: String,
-        arity: usize,
-    },
+    Variant { name: String, arity: usize },
 
     /// Tuple with given arity
-    Tuple {
-        arity: usize,
-    },
+    Tuple { arity: usize },
 
     /// Struct with given number of fields
-    Struct {
-        name: String,
-        arity: usize,
-    },
+    Struct { name: String, arity: usize },
 
     /// Integer literal
     IntLiteral(i64),
 
     /// Integer range (inclusive on both ends after normalization)
-    IntRange {
-        start: i64,
-        end: i64,
-    },
+    IntRange { start: i64, end: i64 },
 
     /// Character literal
     CharLiteral(char),
 
     /// Character range (inclusive on both ends after normalization)
-    CharRange {
-        start: char,
-        end: char,
-    },
+    CharRange { start: char, end: char },
 
     /// String literal
     StringLiteral(String),
@@ -144,20 +130,28 @@ impl Constructor {
                 LiteralValue::Unit => Constructor::Unit,
             },
 
-            PatternKind::EnumVariant { case_name, bindings, .. } => Constructor::Variant {
+            PatternKind::EnumVariant {
+                case_name,
+                bindings,
+                ..
+            } => Constructor::Variant {
                 name: case_name.clone(),
                 arity: bindings.len(),
             },
 
-            PatternKind::Tuple { prefix, has_rest, suffix } => {
+            PatternKind::Tuple {
+                prefix,
+                has_rest,
+                suffix,
+            } => {
                 // For tuple patterns with rest, get arity from the type
                 let arity = if *has_rest {
                     match pattern.ty.kind() {
                         TyKind::Tuple(elems) => elems.len(),
-                        _ => prefix.len() + suffix.len(),  // Fallback
+                        _ => prefix.len() + suffix.len(), // Fallback
                     }
                 } else {
-                    prefix.len()  // No rest, suffix should be empty
+                    prefix.len() // No rest, suffix should be empty
                 };
                 Constructor::Tuple { arity }
             }
@@ -172,14 +166,12 @@ impl Constructor {
                 // The pattern may only match some fields (with `..` for rest)
                 // We use the pattern's type to get the full field count for proper matching
                 let full_arity = match pattern.ty.kind() {
-                    TyKind::Struct { symbol, .. } => {
-                        symbol
-                            .metadata()
-                            .children()
-                            .iter()
-                            .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
-                            .count()
-                    }
+                    TyKind::Struct { symbol, .. } => symbol
+                        .metadata()
+                        .children()
+                        .iter()
+                        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+                        .count(),
                     _ => fields.len(), // Fallback if type isn't resolved
                 };
                 Constructor::Struct {
@@ -325,7 +317,10 @@ impl Constructor {
     ///
     /// Returns `None` if the type has infinite constructors and no wildcard
     /// covers them all.
-    pub fn missing_constructors(ty: &Ty, covered: &HashSet<Constructor>) -> Option<Vec<Constructor>> {
+    pub fn missing_constructors(
+        ty: &Ty,
+        covered: &HashSet<Constructor>,
+    ) -> Option<Vec<Constructor>> {
         // If there's a wildcard in covered, everything is covered
         if covered.contains(&Constructor::Wildcard) {
             return Some(vec![]);
@@ -333,10 +328,7 @@ impl Constructor {
 
         match Self::all_constructors(ty) {
             Some(all) => {
-                let missing: Vec<_> = all
-                    .into_iter()
-                    .filter(|c| !covered.contains(c))
-                    .collect();
+                let missing: Vec<_> = all.into_iter().filter(|c| !covered.contains(c)).collect();
                 Some(missing)
             }
             None => {
@@ -345,7 +337,7 @@ impl Constructor {
                 if matches!(ty.kind(), TyKind::Array(_)) {
                     return Self::missing_array_constructors(covered);
                 }
-                
+
                 // Other infinite constructor types need a wildcard to be exhaustive
                 // Return NonExhaustive marker to indicate uncovered values exist
                 Some(vec![Constructor::NonExhaustive])
@@ -354,22 +346,27 @@ impl Constructor {
     }
 
     /// Check if array patterns cover all possible lengths.
-    /// 
+    ///
     /// Array patterns can have:
     /// - Fixed length: `[a, b]` matches only length 2
     /// - Rest at end: `[a, ..]` matches length >= 1
     /// - Rest at beginning: `[.., a]` matches length >= 1
     /// - Rest in middle: `[a, .., b]` matches length >= 2
-    /// 
+    ///
     /// To be exhaustive, we need to cover all lengths from 0 to infinity.
     fn missing_array_constructors(covered: &HashSet<Constructor>) -> Option<Vec<Constructor>> {
         // Collect information about covered lengths
         let mut has_rest_pattern = false;
         let mut min_len_for_rest = usize::MAX;
         let mut fixed_lengths: HashSet<usize> = HashSet::new();
-        
+
         for ctor in covered {
-            if let Constructor::Array { prefix_len, suffix_len, has_rest } = ctor {
+            if let Constructor::Array {
+                prefix_len,
+                suffix_len,
+                has_rest,
+            } = ctor
+            {
                 let min_len = prefix_len + suffix_len;
                 if *has_rest {
                     has_rest_pattern = true;
@@ -379,7 +376,7 @@ impl Constructor {
                 }
             }
         }
-        
+
         // If we have a rest pattern with min_len N, it covers all lengths >= N
         // We need fixed patterns to cover lengths 0, 1, ..., N-1
         if has_rest_pattern {
@@ -426,7 +423,11 @@ impl Constructor {
             Constructor::StringLiteral(s) => format!("\"{}\"", s),
             Constructor::Unit => "()".to_string(),
             Constructor::Wildcard => "_".to_string(),
-            Constructor::Array { prefix_len, suffix_len, has_rest } => {
+            Constructor::Array {
+                prefix_len,
+                suffix_len,
+                has_rest,
+            } => {
                 let mut parts = vec!["_"; *prefix_len];
                 if *has_rest {
                     parts.push("..");
@@ -491,7 +492,10 @@ mod tests {
             Ty::int(IntBits::I64, test_span()),
             test_span(),
         );
-        assert_eq!(Constructor::from_pattern(&pattern), Constructor::IntLiteral(42));
+        assert_eq!(
+            Constructor::from_pattern(&pattern),
+            Constructor::IntLiteral(42)
+        );
     }
 
     #[test]

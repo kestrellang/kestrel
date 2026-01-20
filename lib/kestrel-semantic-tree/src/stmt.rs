@@ -184,13 +184,16 @@ impl Statement {
             }
             StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
             StatementKind::GuardLet { conditions, .. } => {
-                let conds: Vec<_> = conditions.iter().map(|c| match c {
-                    IfCondition::Let { pattern, value, .. } => {
-                        let name = pattern.name().unwrap_or("<pattern>");
-                        format!("let {} = {}", name, value.debug_compact())
-                    }
-                    IfCondition::Expr(e) => e.debug_compact(),
-                }).collect();
+                let conds: Vec<_> = conditions
+                    .iter()
+                    .map(|c| match c {
+                        IfCondition::Let { pattern, value, .. } => {
+                            let name = pattern.name().unwrap_or("<pattern>");
+                            format!("let {} = {}", name, value.debug_compact())
+                        }
+                        IfCondition::Expr(e) => e.debug_compact(),
+                    })
+                    .collect();
                 format!("guard {} else {{ ... }}", conds.join(", "))
             }
             StatementKind::Deinit { name, .. } => {

@@ -26,10 +26,7 @@ pub enum AttributeArgValue {
     /// Boolean literal: `true` or `false`
     Bool(Span),
     /// Implicit member access: `.option`
-    ImplicitMember {
-        dot_span: Span,
-        name_span: Span,
-    },
+    ImplicitMember { dot_span: Span, name_span: Span },
     /// Path: `SomeType` or `Module.Type`
     Path(Vec<Span>), // segments (identifiers only, dots are implicit between them)
 }
@@ -218,12 +215,12 @@ pub enum TypeDeclarationBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
     Initializer(InitializerDeclarationData),
-    Deinit(DeinitDeclarationData),        // deinit { } - only valid in struct bodies
-    Struct(Box<StructDeclarationData>),   // Boxed to avoid infinite size
-    Enum(Box<EnumDeclarationData>),       // Boxed to avoid infinite size
-    EnumCase(EnumCaseDeclarationData),    // Only valid in enum bodies
-    TypeAlias(TypeAliasDeclarationData),  // Associated type bindings
-    Module(Span, Vec<Span>),              // module_span, path_segments
+    Deinit(DeinitDeclarationData), // deinit { } - only valid in struct bodies
+    Struct(Box<StructDeclarationData>), // Boxed to avoid infinite size
+    Enum(Box<EnumDeclarationData>), // Boxed to avoid infinite size
+    EnumCase(EnumCaseDeclarationData), // Only valid in enum bodies
+    TypeAlias(TypeAliasDeclarationData), // Associated type bindings
+    Module(Span, Vec<Span>),       // module_span, path_segments
     Import(
         Span,
         Vec<Span>,

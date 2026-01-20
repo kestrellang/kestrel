@@ -44,11 +44,9 @@ impl IntoDiagnostic for NotAProtocolError {
             ),
         };
 
-        Diagnostic::error()
-            .with_message(main_msg)
-            .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message(label_msg)
-            ])
+        Diagnostic::error().with_message(main_msg).with_labels(vec![
+            Label::primary(self.span.file_id, self.span.range()).with_message(label_msg),
+        ])
     }
 }
 
@@ -69,8 +67,10 @@ impl IntoDiagnostic for CircularProtocolInheritanceError {
                 "protocol '{}' has circular inheritance",
                 self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("circular inheritance detected")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("circular inheritance detected"),
+            ])
             .with_notes(vec![format!("inheritance cycle: {}", cycle_str)])
     }
 }
@@ -90,8 +90,10 @@ impl IntoDiagnostic for AmbiguousAssociatedTypeError {
                 "ambiguous associated type '{}' - use qualified syntax to disambiguate",
                 self.type_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("ambiguous binding")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("ambiguous binding"),
+            ])
             .with_notes(vec![
                 format!(
                     "'{}' is declared in protocols: '{}'",
@@ -119,11 +121,12 @@ impl IntoDiagnostic for QualifiedBindingNotConformingError {
                 "'{}' does not conform to '{}'",
                 self.struct_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "struct does not conform to '{}'",
                     self.protocol_name
-                ))])
+                )),
+            ])
     }
 }
 
@@ -141,11 +144,12 @@ impl IntoDiagnostic for QualifiedBindingWrongProtocolError {
                 "protocol '{}' does not have associated type '{}'",
                 self.protocol_name, self.type_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "'{}' not found in '{}'",
                     self.type_name, self.protocol_name
-                ))])
+                )),
+            ])
     }
 }
 
@@ -164,11 +168,12 @@ impl IntoDiagnostic for WhereClauseAssociatedTypeNotFoundError {
                 "no associated type '{}' in protocol '{}'",
                 self.assoc_type_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "'{}.{}' does not exist",
                     self.type_param, self.assoc_type_name
-                ))])
+                )),
+            ])
     }
 }
 
@@ -184,11 +189,12 @@ impl IntoDiagnostic for AssociatedTypeConstraintNotSatisfiedError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("type '{}' does not satisfy bound", self.bound_type))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "type '{}' does not conform to required protocol '{}'",
                     self.bound_type, self.required_protocol
-                ))])
+                )),
+            ])
             .with_notes(vec![format!(
                 "associated type '{}' requires conformance to '{}'",
                 self.type_name, self.required_protocol
@@ -244,11 +250,10 @@ impl IntoDiagnostic for MissingParentProtocolConformanceError {
                 "'{}' conforms to '{}' but not its parent protocol '{}'",
                 self.struct_name, self.child_protocol, self.parent_protocol
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
-                    "must also conform to '{}'",
-                    self.parent_protocol
-                ))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("must also conform to '{}'", self.parent_protocol)),
+            ])
             .with_notes(vec![
                 format!(
                     "protocol '{}' inherits from '{}', so '{}' must explicitly conform to both",

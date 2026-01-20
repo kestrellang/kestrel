@@ -1,8 +1,8 @@
 //! Witness definitions (protocol implementations).
 
+use crate::MirContext;
 use crate::id::{Id, QualifiedName, Ty, TypeParam};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::collections::HashMap;
 use std::fmt;
 

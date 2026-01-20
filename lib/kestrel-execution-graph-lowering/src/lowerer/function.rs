@@ -3,9 +3,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use kestrel_execution_graph::CallingConvention as MirCallingConvention;
 use kestrel_execution_graph::TypeParamOwner;
-use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::callable::{
+    CallableBehavior, ParameterAccessMode, ReceiverKind,
+};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ResolvedExecutableBehavior};
+use kestrel_semantic_tree::behavior::extern_fn::{CallingConvention, ExternBehavior};
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind, Expression, IfCondition};
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
@@ -25,20 +29,31 @@ use crate::ty::lower_type;
 
 /// Lower a function to MIR.
 pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbol>) {
-    // Skip functions without bodies (e.g., protocol methods)
-    if !func_symbol.has_body() {
+    // Check if this is an extern function
+    let extern_behavior = func_symbol.metadata().get_behavior::<ExternBehavior>();
+
+    // For non-extern functions without bodies (e.g., protocol methods), skip
+    if extern_behavior.is_none() && !func_symbol.has_body() {
         return;
     }
 
-    // Get the resolved body
-    let body = match func_symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
-        Some(behavior) => behavior.body().clone(),
-        None => {
-            ctx.emit_error(LoweringError::missing_body(
-                func_symbol.metadata().name().value.clone(),
-                func_symbol.metadata().span().clone(),
-            ));
-            return;
+    // Get the resolved body (not required for extern functions)
+    let body = if extern_behavior.is_some() {
+        // Extern functions have no body
+        None
+    } else {
+        match func_symbol
+            .metadata()
+            .get_behavior::<ResolvedExecutableBehavior>()
+        {
+            Some(behavior) => Some(behavior.body().clone()),
+            None => {
+                ctx.emit_error(LoweringError::missing_body(
+                    func_symbol.metadata().name().value.clone(),
+                    func_symbol.metadata().span().clone(),
+                ));
+                return;
+            }
         }
     };
 
@@ -61,7 +76,8 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     let parent_type_params = get_parent_type_parameters(func_symbol);
     for tp in &parent_type_params {
         let tp_name = tp.metadata().name().value.clone();
-        let tp_def = kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
         let tp_id = ctx.mir.type_params.alloc(tp_def);
         ctx.mir.function_mut(func_id).type_params.push(tp_id);
         ctx.map_type_param(tp.metadata().id(), tp_id);
@@ -70,7 +86,8 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // Then register the function's own type parameters
     for tp in func_symbol.type_parameters() {
         let tp_name = tp.metadata().name().value.clone();
-        let tp_def = kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
         let tp_id = ctx.mir.type_params.alloc(tp_def);
         ctx.mir.function_mut(func_id).type_params.push(tp_id);
         ctx.map_type_param(tp.metadata().id(), tp_id);
@@ -86,20 +103,52 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     // Prepare and add self parameter if this is a method
     if let Some(ref callable) = callable {
         if let Some(receiver) = callable.receiver() {
-            if let Some(self_ty) = compute_self_param_type(ctx, receiver, func_symbol, &parent_type_params) {
+            if let Some(self_ty) =
+                compute_self_param_type(ctx, receiver, func_symbol, &parent_type_params)
+            {
                 ctx.mir.function_builder(func_id).param("self", self_ty);
             }
         }
     }
 
     // Add other parameters
+    // Parameters are wrapped in reference types based on their access mode:
+    // - Borrow: parameter has type &T (caller passes Rvalue::Ref)
+    // - Mutating: parameter has type &var T (caller passes Rvalue::RefMut)
+    // - Consuming: parameter has type T (caller passes value)
+    // When accessing a reference-typed parameter, the LocalRef handler in expr.rs
+    // automatically dereferences it.
     if let Some(ref callable) = callable {
         for param in callable.parameters() {
             let param_name = param.internal_name().to_string();
-            let mir_ty = lower_type(ctx, &param.ty);
+            let base_mir_ty = lower_type(ctx, &param.ty);
+            let mir_ty = match param.access_mode() {
+                ParameterAccessMode::Borrow => ctx.mir.ty_ref(base_mir_ty),
+                ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
+                ParameterAccessMode::Consuming => base_mir_ty,
+            };
             ctx.mir.function_builder(func_id).param(param_name, mir_ty);
         }
     }
+
+    // For extern functions, set the extern_info and skip body lowering
+    if let Some(extern_behavior) = extern_behavior {
+        let func_name = func_symbol.metadata().name().value.clone();
+        let symbol_name = extern_behavior.symbol_name(&func_name).to_string();
+        let calling_convention = match extern_behavior.calling_convention() {
+            CallingConvention::C => MirCallingConvention::C,
+        };
+        ctx.mir.function_mut(func_id).extern_info = Some(kestrel_execution_graph::ExternInfo {
+            calling_convention,
+            symbol_name,
+        });
+        // Clear type param mappings and return - no body to lower
+        ctx.clear_type_params();
+        return;
+    }
+
+    // Get the body (we know it's Some because we checked above)
+    let body = body.unwrap();
 
     // Enter the function context
     ctx.enter_function(func_id);
@@ -184,7 +233,10 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
 /// `func Type.init(self: &var Type, params...) -> ()`
 pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<InitializerSymbol>) {
     // Get the resolved body
-    let body = match init_symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+    let body = match init_symbol
+        .metadata()
+        .get_behavior::<ResolvedExecutableBehavior>()
+    {
         Some(behavior) => behavior.body().clone(),
         None => {
             ctx.emit_error(LoweringError::missing_body(
@@ -212,7 +264,8 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
     let parent_type_params = get_initializer_parent_type_parameters(init_symbol);
     for tp in &parent_type_params {
         let tp_name = tp.metadata().name().value.clone();
-        let tp_def = kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
         let tp_id = ctx.mir.type_params.alloc(tp_def);
         ctx.mir.function_mut(func_id).type_params.push(tp_id);
         ctx.map_type_param(tp.metadata().id(), tp_id);
@@ -227,8 +280,10 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
         let type_args: Vec<_> = parent_type_params
             .iter()
             .filter_map(|tp| {
-                ctx.get_type_param(tp.metadata().id())
-                    .map(|mir_tp| ctx.mir.intern_type(kestrel_execution_graph::MirTy::TypeParam(mir_tp)))
+                ctx.get_type_param(tp.metadata().id()).map(|mir_tp| {
+                    ctx.mir
+                        .intern_type(kestrel_execution_graph::MirTy::TypeParam(mir_tp))
+                })
             })
             .collect();
         let parent_ty = ctx.mir.ty_named(parent_name, type_args);
@@ -243,10 +298,16 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
     }
 
     // Add other parameters
+    // Parameters are wrapped in reference types based on their access mode
     if let Some(ref callable) = callable {
         for param in callable.parameters() {
             let param_name = param.internal_name().to_string();
-            let mir_ty = lower_type(ctx, &param.ty);
+            let base_mir_ty = lower_type(ctx, &param.ty);
+            let mir_ty = match param.access_mode() {
+                ParameterAccessMode::Borrow => ctx.mir.ty_ref(base_mir_ty),
+                ParameterAccessMode::Mutating => ctx.mir.ty_ref_mut(base_mir_ty),
+                ParameterAccessMode::Consuming => base_mir_ty,
+            };
             ctx.mir.function_builder(func_id).param(param_name, mir_ty);
         }
     }
@@ -309,17 +370,19 @@ fn compute_self_param_type(
     let parent = func_symbol.metadata().parent()?;
 
     let parent_name = qualified_name_for_symbol(ctx, &parent);
-    
+
     // Build type arguments from parent's type parameters
     // These are now registered in ctx, so we can look them up
     let type_args: Vec<_> = parent_type_params
         .iter()
         .filter_map(|tp| {
-            ctx.get_type_param(tp.metadata().id())
-                .map(|mir_tp| ctx.mir.intern_type(kestrel_execution_graph::MirTy::TypeParam(mir_tp)))
+            ctx.get_type_param(tp.metadata().id()).map(|mir_tp| {
+                ctx.mir
+                    .intern_type(kestrel_execution_graph::MirTy::TypeParam(mir_tp))
+            })
         })
         .collect();
-    
+
     let parent_ty = ctx.mir.ty_named(parent_name, type_args);
 
     // Create the self parameter type based on receiver kind
@@ -349,7 +412,9 @@ fn get_parent_type_parameters(func_symbol: &Arc<FunctionSymbol>) -> Vec<Arc<Type
 }
 
 /// Get type parameters from the parent struct or enum (for initializers).
-fn get_initializer_parent_type_parameters(init_symbol: &Arc<InitializerSymbol>) -> Vec<Arc<TypeParameterSymbol>> {
+fn get_initializer_parent_type_parameters(
+    init_symbol: &Arc<InitializerSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
     if let Some(parent) = init_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
         if let Ok(struct_symbol) = parent.clone().downcast_arc::<StructSymbol>() {
@@ -364,7 +429,7 @@ fn get_initializer_parent_type_parameters(init_symbol: &Arc<InitializerSymbol>) 
 }
 
 /// Collect all LocalIds that belong to closures in a code block.
-/// 
+///
 /// This includes:
 /// - Explicit closure parameters (`{ x in ... }`)
 /// - Implicit `it` parameters (`{ $0 + 1 }`)
@@ -373,15 +438,15 @@ fn get_initializer_parent_type_parameters(init_symbol: &Arc<InitializerSymbol>) 
 /// created when the closure function is lowered.
 fn collect_closure_local_ids(body: &CodeBlock) -> HashSet<LocalId> {
     let mut ids = HashSet::new();
-    
+
     for stmt in &body.statements {
         collect_closure_local_ids_from_stmt(stmt, &mut ids);
     }
-    
+
     if let Some(expr) = &body.yield_expr {
         collect_closure_local_ids_from_expr(expr, &mut ids);
     }
-    
+
     ids
 }
 
@@ -395,7 +460,10 @@ fn collect_closure_local_ids_from_stmt(stmt: &Statement, ids: &mut HashSet<Local
         StatementKind::Expr(expr) => {
             collect_closure_local_ids_from_expr(expr, ids);
         }
-        StatementKind::GuardLet { conditions, else_block } => {
+        StatementKind::GuardLet {
+            conditions,
+            else_block,
+        } => {
             for cond in conditions {
                 collect_closure_local_ids_from_condition(cond, ids);
             }
@@ -421,7 +489,13 @@ fn collect_closure_local_ids_from_condition(cond: &IfCondition, ids: &mut HashSe
 
 fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<LocalId>) {
     match &expr.kind {
-        ExprKind::Closure { params, body, tail_expr, implicit_param, .. } => {
+        ExprKind::Closure {
+            params,
+            body,
+            tail_expr,
+            implicit_param,
+            ..
+        } => {
             // Collect explicit parameter LocalIds
             if let Some(param_list) = params {
                 for param in param_list {
@@ -440,15 +514,31 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(tail, ids);
             }
         }
-        
+
         // Recurse into all expression kinds that can contain sub-expressions
-        ExprKind::Call { callee, arguments, .. } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             collect_closure_local_ids_from_expr(callee, ids);
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
         }
-        ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+            for arg in arguments {
+                collect_closure_local_ids_from_expr(&arg.value, ids);
+            }
+        }
+        ExprKind::DeferredMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
             collect_closure_local_ids_from_expr(receiver, ids);
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
@@ -463,7 +553,12 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             collect_closure_local_ids_from_expr(target, ids);
             collect_closure_local_ids_from_expr(value, ids);
         }
-        ExprKind::If { conditions, then_branch, then_value, else_branch } => {
+        ExprKind::If {
+            conditions,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
             for cond in conditions {
                 collect_closure_local_ids_from_condition(cond, ids);
             }
@@ -498,13 +593,25 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 collect_closure_local_ids_from_expr(&arm.body, ids);
             }
         }
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::Block { statements, value } => {
+            for stmt in statements {
+                collect_closure_local_ids_from_stmt(stmt, ids);
+            }
+            if let Some(val) = value {
+                collect_closure_local_ids_from_expr(val, ids);
+            }
+        }
+        ExprKind::While {
+            condition, body, ..
+        } => {
             collect_closure_local_ids_from_expr(condition, ids);
             for stmt in body {
                 collect_closure_local_ids_from_stmt(stmt, ids);
             }
         }
-        ExprKind::WhileLet { conditions, body, .. } => {
+        ExprKind::WhileLet {
+            conditions, body, ..
+        } => {
             for cond in conditions {
                 collect_closure_local_ids_from_condition(cond, ids);
             }
@@ -534,6 +641,9 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         ExprKind::MethodRef { receiver, .. } => {
             collect_closure_local_ids_from_expr(receiver, ids);
         }
+        ExprKind::PrimitiveMethodRef { receiver, .. } => {
+            collect_closure_local_ids_from_expr(receiver, ids);
+        }
         ExprKind::Return { value } => {
             if let Some(e) = value {
                 collect_closure_local_ids_from_expr(e, ids);
@@ -546,7 +656,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 }
             }
         }
-        
+
         // Leaf expressions that don't contain sub-expressions
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)

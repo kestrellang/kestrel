@@ -1,8 +1,8 @@
 //! Struct definitions in MIR.
 
+use crate::MirContext;
 use crate::id::{Field, Id, QualifiedName, TypeParam};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::collections::HashMap;
 use std::fmt;
 

@@ -4,7 +4,9 @@
 //! references, qualified names) including local variable lookup and module path resolution.
 
 use kestrel_reporting::IntoDiagnostic;
-use kestrel_semantic_model::{ResolveTypePath, ResolveValuePath, SymbolFor, TypePathResolution, ValuePathResolution};
+use kestrel_semantic_model::{
+    ResolveTypePath, ResolveValuePath, SymbolFor, TypePathResolution, ValuePathResolution,
+};
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -105,7 +107,10 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             .as_ref()
             .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.ty().clone())
             .unwrap_or_else(|| Ty::error(span.clone()));
-        let is_mutable = local.as_ref().map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable()).unwrap_or(false);
+        let is_mutable = local
+            .as_ref()
+            .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable())
+            .unwrap_or(false);
 
         let base_expr = Expression::local_ref(local_id, local_ty, is_mutable, first_span);
 
@@ -153,11 +158,16 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                                 // Apply substitutions to the type (callable type for cases with values,
                                 // or enum type for simple cases)
                                 let substituted_ty = ty.apply_substitutions(substitutions);
-                                
+
                                 if get_callable_behavior(&symbol).is_some() {
                                     // Enum case with associated values (like Ok, Some)
                                     // Return SymbolRef with substituted callable type
-                                    return Expression::symbol_ref(symbol_id, substituted_ty, false, span);
+                                    return Expression::symbol_ref(
+                                        symbol_id,
+                                        substituted_ty,
+                                        false,
+                                        span,
+                                    );
                                 } else {
                                     // Simple enum case (like None)
                                     return Expression::enum_case(symbol_id, substituted_ty, span);
@@ -165,14 +175,14 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             }
                         }
                     }
-                    
+
                     // No explicit type args - handle simple cases without CallableBehavior
                     if get_callable_behavior(&symbol).is_none() {
                         return Expression::enum_case(symbol_id, ty, span);
                     }
                 }
             }
-            
+
             // Check if this is a static method accessed via a qualified type path
             // e.g., Box[Int].wrap where wrap is a static method
             if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
@@ -265,10 +275,18 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             .as_ref()
                             .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.ty().clone())
                             .unwrap_or_else(|| Ty::error(span.clone()));
-                        let self_mutable = self_local.as_ref().map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable()).unwrap_or(false);
+                        let self_mutable = self_local
+                            .as_ref()
+                            .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable())
+                            .unwrap_or(false);
 
                         // Create self reference
-                        let self_expr = Expression::local_ref(self_local_id, self_ty, self_mutable, span.clone());
+                        let self_expr = Expression::local_ref(
+                            self_local_id,
+                            self_ty,
+                            self_mutable,
+                            span.clone(),
+                        );
 
                         // Get field type and mutability from FieldSymbol
                         use kestrel_semantic_tree::symbol::field::FieldSymbol;
@@ -278,7 +296,13 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             .unwrap_or_else(|| (Ty::error(span.clone()), false));
 
                         let field_name = symbol.metadata().name().value.clone();
-                        return Expression::field_access(self_expr, field_name, field_mutable, field_ty, span);
+                        return Expression::field_access(
+                            self_expr,
+                            field_name,
+                            field_mutable,
+                            field_ty,
+                            span,
+                        );
                     }
                     // If no self, fall through to create type_ref
                 }
@@ -287,16 +311,27 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             // For generic types, create struct type with inference variables for each type param
             // This enables proper type inference when the struct is used without explicit type args
             use super::utils::create_struct_type_with_type_args;
-            let ty = ctx.model.query(SymbolFor { id: symbol_id })
+            let ty = ctx
+                .model
+                .query(SymbolFor { id: symbol_id })
                 .and_then(|symbol| {
-                    symbol.clone().downcast_arc::<StructSymbol>().ok().map(|struct_sym| {
-                        create_struct_type_with_type_args(
-                            &(struct_sym as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
-                            &[],
-                            span.clone(),
-                            ctx
-                        )
-                    })
+                    symbol
+                        .clone()
+                        .downcast_arc::<StructSymbol>()
+                        .ok()
+                        .map(|struct_sym| {
+                            create_struct_type_with_type_args(
+                                &(struct_sym
+                                    as std::sync::Arc<
+                                        dyn Symbol<
+                                            kestrel_semantic_tree::language::KestrelLanguage,
+                                        >,
+                                    >),
+                                &[],
+                                span.clone(),
+                                ctx,
+                            )
+                        })
                 })
                 .unwrap_or_else(|| Ty::infer(span.clone()));
             Expression::type_ref(symbol_id, ty, span)
@@ -673,8 +708,13 @@ fn extract_type_arguments_from_path(
 
     for child in type_arg_list.children() {
         if child.kind() == SyntaxKind::Ty {
-            let mut resolver =
-                TypeResolver::new(ctx.model, ctx.diagnostics, ctx.source, ctx.file_id, ctx.function_id);
+            let mut resolver = TypeResolver::new(
+                ctx.model,
+                ctx.diagnostics,
+                ctx.source,
+                ctx.file_id,
+                ctx.function_id,
+            );
             let ty = resolver.resolve(&child);
             type_args.push(ty);
         }

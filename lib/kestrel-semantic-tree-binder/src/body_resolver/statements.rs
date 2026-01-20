@@ -3,12 +3,13 @@
 //! This module handles resolving statements from syntax nodes into semantic
 //! Statement representations, including variable declarations and expression statements.
 
+use super::context::resolve_code_block;
 use kestrel_semantic_tree::behavior::executable::CodeBlock;
+use kestrel_semantic_tree::expr::ExprKind;
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use super::context::resolve_code_block;
 
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -99,6 +100,18 @@ pub fn resolve_variable_declaration(
             let expr = resolve_expression(&expr_node, ctx);
             validate_not_standalone_type_param(expr, ctx)
         });
+
+    // Track moves for non-copyable types
+    // If the value is a LocalRef to a non-copyable type, mark the source as moved
+    if let Some(ref value_expr) = value {
+        if let ExprKind::LocalRef(source_local_id) = &value_expr.kind {
+            // Use context-aware check that considers `T: not Copyable` bounds
+            if !value_expr.ty.is_copyable_in_context(ctx.where_clause()) {
+                ctx.move_tracker
+                    .mark_moved(*source_local_id, value_expr.span.clone());
+            }
+        }
+    }
 
     // Determine the expected type from annotation or initializer
     let expected_ty = ty.or_else(|| value.as_ref().map(|e| e.ty.clone()));
@@ -210,14 +223,19 @@ pub fn resolve_guard_let_statement(
 
     // Ensure we have at least one condition
     if conditions.is_empty() {
-        conditions.push(IfCondition::Expr(kestrel_semantic_tree::expr::Expression::error(span.clone())));
+        conditions.push(IfCondition::Expr(
+            kestrel_semantic_tree::expr::Expression::error(span.clone()),
+        ));
     }
 
     Some(Statement::guard_let(conditions, else_block, span))
 }
 
 /// Resolve a single guard-let condition: let pattern = expr
-fn resolve_guard_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> kestrel_semantic_tree::expr::IfCondition {
+fn resolve_guard_let_condition(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> kestrel_semantic_tree::expr::IfCondition {
     use kestrel_semantic_tree::expr::IfCondition;
 
     let span = get_node_span(node, ctx.file_id);
@@ -233,9 +251,7 @@ fn resolve_guard_let_condition(node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
     // Find and resolve the pattern
     // Pattern bindings will be added to the current scope for subsequent conditions
-    let pattern_node = node
-        .children()
-        .find(|c| is_pattern_kind(c.kind()));
+    let pattern_node = node.children().find(|c| is_pattern_kind(c.kind()));
 
     let pattern = pattern_node
         .map(|n| resolve_pattern_with_mutability(&n, ctx, Some(&value.ty), false))
@@ -256,7 +272,7 @@ pub fn resolve_deinit_statement(
     deinit_node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Option<Statement> {
-    use crate::diagnostics::{DeinitUndeclaredError, DeinitAlreadyMovedError};
+    use crate::diagnostics::{DeinitAlreadyMovedError, DeinitUndeclaredError};
     use kestrel_reporting::IntoDiagnostic;
 
     let span = get_node_span(deinit_node, ctx.file_id);

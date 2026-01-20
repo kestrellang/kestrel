@@ -338,9 +338,12 @@ fn desugar_binary_op(
         // - Logical ops (&& ||): result is Bool
         let result_ty = match op {
             // Comparison operators always return Bool
-            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                Ty::bool(full_span.clone())
-            }
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Le
+            | BinaryOp::Gt
+            | BinaryOp::Ge => Ty::bool(full_span.clone()),
             // Logical operators return Bool
             BinaryOp::And | BinaryOp::Or => Ty::bool(full_span.clone()),
             // Arithmetic operators return the same type as operands

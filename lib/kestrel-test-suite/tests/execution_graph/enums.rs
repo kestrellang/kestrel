@@ -169,13 +169,12 @@ mod enum_construction {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(
-            Mir::mir_function("Main.makeNone").returns(MirTy::named("Main.Option")),
-        );
+        .expect(Mir::mir_function("Main.makeNone").returns(MirTy::named("Main.Option")));
     }
 
     #[test]
     fn construct_case_with_payload() {
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -195,7 +194,7 @@ mod enum_construction {
         .expect(
             Mir::mir_function("Main.makeSome")
                 .returns(MirTy::named("Main.Option"))
-                .has_param("x", MirTy::I64),
+                .has_param("x", MirTy::ref_(MirTy::I64)),
         );
     }
 
@@ -262,6 +261,7 @@ mod match_on_enums {
 
     #[test]
     fn match_with_payload_binding() {
+        // Note: Parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -284,8 +284,8 @@ mod match_on_enums {
         .expect(
             Mir::mir_function("Main.unwrapOr")
                 .returns(MirTy::I64)
-                .has_param("opt", MirTy::named("Main.Option"))
-                .has_param("default", MirTy::I64)
+                .has_param("opt", MirTy::ref_(MirTy::named("Main.Option")))
+                .has_param("default", MirTy::ref_(MirTy::I64))
                 .any_block(|b| b.terminates_with(TerminatorPattern::Switch)),
         );
     }

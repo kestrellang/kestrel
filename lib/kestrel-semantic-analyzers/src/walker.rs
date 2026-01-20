@@ -108,14 +108,19 @@ fn walk_statement(
             StatementKind::Expr(expr) => {
                 walk_expression(expr, analyzers, model, ctx);
             }
-            StatementKind::GuardLet { conditions, else_block } => {
+            StatementKind::GuardLet {
+                conditions,
+                else_block,
+            } => {
                 // Walk each condition
                 for condition in conditions {
                     match condition {
                         kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                             walk_expression(expr, analyzers, model, ctx);
                         }
-                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        kestrel_semantic_tree::expr::IfCondition::Let {
+                            pattern, value, ..
+                        } => {
                             walk_pattern(pattern, analyzers, model, ctx);
                             walk_expression(value, analyzers, model, ctx);
                         }
@@ -196,6 +201,9 @@ fn walk_expression(
             ExprKind::MethodRef { receiver, .. } => {
                 walk_expression(receiver, analyzers, model, ctx);
             }
+            ExprKind::PrimitiveMethodRef { receiver, .. } => {
+                walk_expression(receiver, analyzers, model, ctx);
+            }
             ExprKind::Call {
                 callee, arguments, ..
             } => {
@@ -208,6 +216,19 @@ fn walk_expression(
                 }
             }
             ExprKind::PrimitiveMethodCall {
+                receiver,
+                arguments,
+                ..
+            } => {
+                walk_expression(receiver, analyzers, model, ctx);
+                for arg in arguments {
+                    walk_expression(&arg.value, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+            }
+            ExprKind::DeferredMethodCall {
                 receiver,
                 arguments,
                 ..
@@ -246,7 +267,9 @@ fn walk_expression(
                                 return;
                             }
                         }
-                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        kestrel_semantic_tree::expr::IfCondition::Let {
+                            pattern, value, ..
+                        } => {
                             walk_pattern(pattern, analyzers, model, ctx);
                             if ctx.stopped {
                                 return;
@@ -305,7 +328,9 @@ fn walk_expression(
                         kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                             walk_expression(expr, analyzers, model, ctx);
                         }
-                        kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
+                        kestrel_semantic_tree::expr::IfCondition::Let {
+                            pattern, value, ..
+                        } => {
                             walk_pattern(pattern, analyzers, model, ctx);
                             walk_expression(value, analyzers, model, ctx);
                         }
@@ -318,7 +343,9 @@ fn walk_expression(
                     }
                 }
             }
-            ExprKind::Closure { body, tail_expr, .. } => {
+            ExprKind::Closure {
+                body, tail_expr, ..
+            } => {
                 // Walk closure body statements
                 for stmt in body {
                     walk_statement(stmt, analyzers, model, ctx);
@@ -364,6 +391,17 @@ fn walk_expression(
                         walk_expression(guard, analyzers, model, ctx);
                     }
                     walk_expression(&arm.body, analyzers, model, ctx);
+                }
+            }
+            ExprKind::Block { statements, value } => {
+                for stmt in statements {
+                    walk_statement(stmt, analyzers, model, ctx);
+                    if ctx.stopped {
+                        return;
+                    }
+                }
+                if let Some(val) = value {
+                    walk_expression(val, analyzers, model, ctx);
                 }
             }
         }
@@ -416,7 +454,10 @@ fn get_executable_body(
 ) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
     // Prefer ResolvedExecutableBehavior if available (after type inference).
     // This ensures analyzers running after type inference see resolved types.
-    if let Some(resolved) = symbol.metadata().get_behavior::<ResolvedExecutableBehavior>() {
+    if let Some(resolved) = symbol
+        .metadata()
+        .get_behavior::<ResolvedExecutableBehavior>()
+    {
         return Some(resolved.body().clone());
     }
     // Fall back to unresolved ExecutableBehavior.

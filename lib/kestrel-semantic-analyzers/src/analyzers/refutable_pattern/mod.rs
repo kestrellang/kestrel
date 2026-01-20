@@ -73,9 +73,10 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
         PatternKind::Local { .. } => true,
 
         // Tuple is irrefutable if ALL elements (prefix + suffix) are irrefutable
-        PatternKind::Tuple { prefix, suffix, .. } => {
-            prefix.iter().chain(suffix.iter()).all(is_pattern_irrefutable)
-        }
+        PatternKind::Tuple { prefix, suffix, .. } => prefix
+            .iter()
+            .chain(suffix.iter())
+            .all(is_pattern_irrefutable),
 
         // Literal patterns are REFUTABLE - they only match one specific value
         PatternKind::Literal { .. } => false,
@@ -87,9 +88,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
                 let cases = symbol.cases();
                 if cases.len() == 1 {
                     // Single-case enum is irrefutable if all bindings are irrefutable
-                    return bindings
-                        .iter()
-                        .all(|b| is_pattern_irrefutable(&b.pattern));
+                    return bindings.iter().all(|b| is_pattern_irrefutable(&b.pattern));
                 }
             }
             // Multi-case enum or unresolved type - refutable
@@ -137,7 +136,11 @@ fn describe_pattern(pattern: &Pattern) -> String {
     match &pattern.kind {
         PatternKind::Wildcard => "_".to_string(),
         PatternKind::Local { name, .. } => name.clone(),
-        PatternKind::Tuple { prefix, has_rest, suffix } => {
+        PatternKind::Tuple {
+            prefix,
+            has_rest,
+            suffix,
+        } => {
             let mut parts: Vec<String> = prefix.iter().map(describe_pattern).collect();
             if *has_rest {
                 parts.push("..".to_string());

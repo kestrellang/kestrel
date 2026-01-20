@@ -452,12 +452,14 @@ mod closure_as_parameter {
         .expect(Compiles)
         .expect(Mir::compiles())
         .expect(Mir::mir_function("Main.main").calls("Main.apply"))
-        .expect(Mir::mir_closure("Main.main", 0).any_block(|b| {
-            b.has_statement(StatementPattern::BinOp(BinOp::MulSigned))
-        }))
-        .expect(Mir::mir_closure("Main.main", 1).any_block(|b| {
-            b.has_statement(StatementPattern::BinOp(BinOp::AddSigned))
-        }));
+        .expect(
+            Mir::mir_closure("Main.main", 0)
+                .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::MulSigned))),
+        )
+        .expect(
+            Mir::mir_closure("Main.main", 1)
+                .any_block(|b| b.has_statement(StatementPattern::BinOp(BinOp::AddSigned))),
+        );
     }
 }
 
@@ -471,6 +473,7 @@ mod make_adder {
     #[test]
     fn make_adder_returns_closure() {
         // Based on tmp/13_closure_capture.ks
+        // Note: Function parameters default to borrow mode
         Test::new(
             r#"
             module Main
@@ -484,8 +487,8 @@ mod make_adder {
         .expect(Mir::compiles())
         .expect(
             Mir::mir_function("Main.makeAdder")
-                .returns(MirTy::func(vec![MirTy::I64], MirTy::I64))
-                .has_param("n", MirTy::I64),
+                .returns(MirTy::func_thick(vec![MirTy::I64], MirTy::I64))
+                .has_param("n", MirTy::ref_(MirTy::I64)),
         )
         .expect(
             Mir::mir_closure("Main.makeAdder", 0)

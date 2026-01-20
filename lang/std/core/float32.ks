@@ -1,6 +1,8 @@
 // Float32 - 32-bit floating point
 // Generated from templates/float.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct Float32:
     FloatingPoint,
     Numeric,
@@ -10,7 +12,8 @@ public struct Float32:
     Divisible,
     Negatable,
     ExpressibleByFloatLiteral,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.f32
 
@@ -67,4 +70,29 @@ public struct Float32:
     public func round() -> Float32 { Float32(value: lang.f32_round(self.value)) }
     public func sqrt() -> Float32 { Float32(value: lang.f32_sqrt(self.value)) }
     public func pow(exponent: Float32) -> Float32 { Float32(value: lang.f32_pow(self.value, exponent.value)) }
+
+    // Type conversions
+    public func toInt() -> Int {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toInt8() -> Int8 {
+        Int8(value: self.value as lang.i8)
+    }
+
+    public func toInt16() -> Int16 {
+        Int16(value: self.value as lang.i16)
+    }
+
+    public func toInt32() -> Int32 {
+        Int32(value: self.value as lang.i32)
+    }
+
+    public func toInt64() -> Int64 {
+        Int64(value: self.value as lang.i64)
+    }
+
+    public func toFloat64() -> Float64 {
+        Float64(value: self.value as lang.f64)
+    }
 }

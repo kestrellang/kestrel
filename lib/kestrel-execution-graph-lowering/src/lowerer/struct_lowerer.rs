@@ -27,7 +27,8 @@ pub fn lower_struct(ctx: &mut LoweringContext, struct_symbol: &Arc<StructSymbol>
     // This ensures that type parameters like A, B are in scope when lowering fields.
     for tp in struct_symbol.type_parameters() {
         let tp_name = tp.metadata().name().value.clone();
-        let tp_def = kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Struct(struct_id));
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Struct(struct_id));
         let tp_id = ctx.mir.type_params.alloc(tp_def);
         ctx.mir.structs[struct_id].type_params.push(tp_id);
         ctx.map_type_param(tp.metadata().id(), tp_id);
@@ -55,7 +56,7 @@ fn lower_field(
 ) {
     let name = field_symbol.metadata().name().value.clone();
 
-    // Get the resolved type from TypedBehavior (set during binding), 
+    // Get the resolved type from TypedBehavior (set during binding),
     // falling back to field_type() if not available
     let field_ty = field_symbol
         .metadata()

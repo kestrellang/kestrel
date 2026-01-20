@@ -12,9 +12,11 @@
 //! - `instantiation/` - Creating instances of types
 //! - `inference/` - Type inference
 //! - `framework/` - Test framework features
+//! - `codegen/` - Code generation integration tests
 
 mod attributes;
 mod builtins;
+mod codegen;
 mod declarations;
 mod execution_graph;
 mod expressions;

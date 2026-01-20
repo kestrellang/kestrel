@@ -1,6 +1,8 @@
 // UInt16 - 16-bit unsigned integer
 // Generated from templates/integer.ks.template
 
+import std.ffi.(FFISafe)
+
 public struct UInt16:
     UnsignedInteger,
     Numeric,
@@ -16,7 +18,8 @@ public struct UInt16:
     BitwiseNot,
     LeftShift,
     RightShift,
-    ExpressibleByIntLiteral
+    ExpressibleByIntLiteral,
+    FFISafe
 {
     private var value: lang.u16
 

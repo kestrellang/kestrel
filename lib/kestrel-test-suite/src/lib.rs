@@ -14,6 +14,28 @@
 //! }
 //! ```
 //!
+//! # Test Prelude
+//!
+//! By default, tests include a prelude module with builtin protocols (`Copyable`, `Cloneable`).
+//! Tests can import these with `import Prelude` or `import Prelude.(Copyable, Cloneable)`.
+//!
+//! ```
+//! use kestrel_test_suite::*;
+//!
+//! // Uses prelude (default)
+//! fn test_with_prelude() {
+//!     Test::new("module Test\nimport Prelude\nstruct Handle: not Copyable {}")
+//!         .expect(Compiles);
+//! }
+//!
+//! // Opt-out for tests that define their own builtin protocols
+//! fn test_without_prelude() {
+//!     Test::new("module Test\n@builtin(.Copyable)\nprotocol Copyable {}")
+//!         .without_prelude()
+//!         .expect(Compiles);
+//! }
+//! ```
+//!
 //! # Symbol Path Matching
 //!
 //! Symbols can be found by simple name or by dot-separated path:
@@ -51,11 +73,34 @@
 pub mod mir;
 
 use std::cell::OnceCell;
+
+/// Prelude source containing builtin protocols.
+///
+/// This module is automatically included in tests (unless `.without_prelude()` is called)
+/// and provides the `Copyable` and `Cloneable` protocols that tests can import.
+pub const PRELUDE_SOURCE: (&str, &str) = (
+    "prelude.ks",
+    r#"module Prelude
+
+@builtin(.Copyable)
+public protocol Copyable {}
+
+@builtin(.Cloneable)
+public protocol Cloneable: Copyable {
+    @builtin(.Clone)
+    func clone() -> Self
+}
+
+@builtin(.FFISafe)
+public protocol FFISafe {}
+"#,
+);
 use std::sync::Arc;
 
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser};
+use kestrel_parser::{Parser, parse_source_file};
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::ReceiverKind;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
@@ -63,7 +108,6 @@ use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_binder::{SemanticBinder, SemanticModel};
 use kestrel_semantic_tree_builder::SemanticModelBuilder;
@@ -106,18 +150,28 @@ impl TestContext {
 pub struct Test {
     files: Vec<(String, String)>,
     context: Option<TestContext>,
+    /// Whether to include the prelude module with builtin protocols.
+    /// Default is `true`. Use `.without_prelude()` to opt out.
+    include_prelude: bool,
 }
 
 impl Test {
-    /// Create a new test from a single source string
+    /// Create a new test from a single source string.
+    ///
+    /// By default, includes the prelude module with builtin protocols.
+    /// Use `.without_prelude()` to opt out.
     pub fn new(source: &str) -> Self {
         Test {
             files: vec![("test.ks".to_string(), source.to_string())],
             context: None,
+            include_prelude: true,
         }
     }
 
-    /// Create a test from multiple source files
+    /// Create a test from multiple source files.
+    ///
+    /// By default, includes the prelude module with builtin protocols.
+    /// Use `.without_prelude()` to opt out.
     pub fn with_files(files: &[(&str, &str)]) -> Self {
         Test {
             files: files
@@ -125,7 +179,26 @@ impl Test {
                 .map(|(name, content)| (name.to_string(), content.to_string()))
                 .collect(),
             context: None,
+            include_prelude: true,
         }
+    }
+
+    /// Include the prelude module with builtin protocols (default behavior).
+    ///
+    /// The prelude provides `Copyable` and `Cloneable` protocols that can be
+    /// imported with `import Prelude` or `import Prelude.(Copyable, Cloneable)`.
+    pub fn with_prelude(mut self) -> Self {
+        self.include_prelude = true;
+        self
+    }
+
+    /// Exclude the prelude module.
+    ///
+    /// Use this for tests that define their own builtin protocols or
+    /// specifically test prelude-related behavior.
+    pub fn without_prelude(mut self) -> Self {
+        self.include_prelude = false;
+        self
     }
 
     /// Compile the test files and store the result
@@ -138,9 +211,18 @@ impl Test {
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
 
+        // Collect all files to compile (prelude first if enabled, then test files)
+        let mut all_files: Vec<(&str, &str)> = Vec::new();
+        if self.include_prelude {
+            all_files.push((PRELUDE_SOURCE.0, PRELUDE_SOURCE.1));
+        }
+        for (name, content) in &self.files {
+            all_files.push((name.as_str(), content.as_str()));
+        }
+
         // Parse and add all files
-        for (file_name, content) in &self.files {
-            let file_id = diagnostics.add_file(file_name.clone(), content.clone());
+        for (file_name, content) in all_files {
+            let file_id = diagnostics.add_file(file_name.to_string(), content.to_string());
             let tokens: Vec<_> = lex(content, file_id)
                 .filter_map(|t| t.ok())
                 .map(|spanned| (spanned.value, spanned.span))
@@ -175,7 +257,7 @@ impl Test {
         // Run analyzers (during migration we mirror builder validations here)
         {
             use kestrel_semantic_analyzers::{
-                default_analyzers, run_all, AnalysisContext, Analyzer,
+                AnalysisContext, Analyzer, default_analyzers, run_all,
             };
             let mut owned = default_analyzers();
             let mut analyzers: Vec<&mut dyn Analyzer> = Vec::new();
@@ -427,21 +509,25 @@ impl Symbol {
         self.find_by_path(root, &segments)
     }
 
-    /// Find a symbol by simple name anywhere in the tree (depth-first)
+    /// Find a symbol by simple name anywhere in the tree (depth-first, iterative)
     fn find_by_name(
         &self,
-        symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+        root: &Arc<dyn SymbolTrait<KestrelLanguage>>,
         name: &str,
     ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-        // Check if this symbol matches
-        if symbol.metadata().name().value == name {
-            return Some(symbol.clone());
-        }
+        // Use an explicit stack to avoid stack overflow on deep trees
+        let mut stack = vec![root.clone()];
 
-        // Search children
-        for child in symbol.metadata().children() {
-            if let Some(found) = self.find_by_name(&child, name) {
-                return Some(found);
+        while let Some(symbol) = stack.pop() {
+            // Check if this symbol matches
+            if symbol.metadata().name().value == name {
+                return Some(symbol);
+            }
+
+            // Add children to stack (in reverse order for left-to-right traversal)
+            let children = symbol.metadata().children();
+            for child in children.into_iter().rev() {
+                stack.push(child);
             }
         }
 
@@ -474,19 +560,24 @@ impl Symbol {
         Some(current)
     }
 
-    /// Find a child symbol by name (searches only within the given parent)
+    /// Find a child symbol by name (searches only within the given parent, iterative)
     fn find_child_by_name(
         &self,
         parent: &Arc<dyn SymbolTrait<KestrelLanguage>>,
         name: &str,
     ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-        for child in parent.metadata().children() {
+        // Use an explicit stack to avoid stack overflow on deep trees
+        let mut stack: Vec<Arc<dyn SymbolTrait<KestrelLanguage>>> =
+            parent.metadata().children().into_iter().rev().collect();
+
+        while let Some(child) = stack.pop() {
             if child.metadata().name().value == name {
                 return Some(child);
             }
-            // Also search nested children (for cases like methods inside structs)
-            if let Some(found) = self.find_child_by_name(&child, name) {
-                return Some(found);
+            // Add nested children to stack (in reverse order for left-to-right traversal)
+            let nested_children = child.metadata().children();
+            for nested in nested_children.into_iter().rev() {
+                stack.push(nested);
             }
         }
         None
@@ -1032,8 +1123,8 @@ fn get_function_data_behavior(
 fn get_implements_protocol_info(
     symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
 ) -> Option<(String, String)> {
-    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
 
     // Look for ImplementsBehavior in the symbol's behaviors
     let impl_behavior = symbol
@@ -1063,18 +1154,23 @@ fn get_implements_protocol_info(
     ))
 }
 
-/// Helper to find a symbol by ID in the tree
+/// Helper to find a symbol by ID in the tree (iterative to avoid stack overflow)
 fn find_symbol_by_id(
-    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    root: &Arc<dyn SymbolTrait<KestrelLanguage>>,
     id: semantic_tree::symbol::SymbolId,
 ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-    if symbol.metadata().id() == id {
-        return Some(symbol.clone());
-    }
+    // Use an explicit stack to avoid stack overflow on deep trees
+    let mut stack = vec![root.clone()];
 
-    for child in symbol.metadata().children() {
-        if let Some(found) = find_symbol_by_id(&child, id) {
-            return Some(found);
+    while let Some(symbol) = stack.pop() {
+        if symbol.metadata().id() == id {
+            return Some(symbol);
+        }
+
+        // Add children to stack
+        let children = symbol.metadata().children();
+        for child in children.into_iter().rev() {
+            stack.push(child);
         }
     }
 

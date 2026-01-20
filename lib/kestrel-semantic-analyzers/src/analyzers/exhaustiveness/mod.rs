@@ -37,7 +37,9 @@ use kestrel_semantic_pattern_matching::ExhaustivenessChecker;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 
 mod diagnostics;
-use diagnostics::{EmptyMatchError, NonExhaustiveMatchError, OverlappingRangeWarning, UnreachablePatternWarning};
+use diagnostics::{
+    EmptyMatchError, NonExhaustiveMatchError, OverlappingRangeWarning, UnreachablePatternWarning,
+};
 
 pub struct ExhaustivenessAnalyzer;
 

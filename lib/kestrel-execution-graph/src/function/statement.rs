@@ -1,9 +1,9 @@
 //! Statements (operations within basic blocks).
 
+use crate::MirContext;
 use crate::function::{Immediate, Place, Value};
 use crate::id::{Id, Local, QualifiedName, Ty};
 use crate::metadata::{Metadata, Prior};
-use crate::MirContext;
 use std::fmt;
 
 /// How an argument is passed to a function.
@@ -283,6 +283,8 @@ pub enum BinOp {
     // Boolean
     BoolAnd,
     BoolOr,
+    // String comparison
+    StrEq,
 }
 
 /// Unary operations.
@@ -497,7 +499,10 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 write!(f, ")")
             }
-            Rvalue::Array { element_ty, elements } => {
+            Rvalue::Array {
+                element_ty,
+                elements,
+            } => {
                 write!(f, "array[{}] [", self.ctx.ty(*element_ty).display(self.ctx))?;
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -507,8 +512,17 @@ impl fmt::Display for RvalueDisplay<'_> {
                 }
                 write!(f, "]")
             }
-            Rvalue::EnumVariant { enum_ty, variant, payload } => {
-                write!(f, "enum {}.{}", self.ctx.ty(*enum_ty).display(self.ctx), variant)?;
+            Rvalue::EnumVariant {
+                enum_ty,
+                variant,
+                payload,
+            } => {
+                write!(
+                    f,
+                    "enum {}.{}",
+                    self.ctx.ty(*enum_ty).display(self.ctx),
+                    variant
+                )?;
                 if !payload.is_empty() {
                     write!(f, "(")?;
                     for (i, val) in payload.iter().enumerate() {
@@ -644,6 +658,7 @@ impl BinOp {
             BinOp::FGe => "f64.ge",
             BinOp::BoolAnd => "bool.and",
             BinOp::BoolOr => "bool.or",
+            BinOp::StrEq => "str.eq",
         }
     }
 }

@@ -17,7 +17,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens, to_kestrel_span, ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 
 /// Represents a pattern syntax node
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,8 +187,8 @@ pub enum LiteralPatternKind {
 /// Parser for patterns
 ///
 /// Uses boxed() on recursive sub-parsers to manage compile time.
-pub fn pattern_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, PatternVariant, ParserExtra<'tokens>> + Clone {
+pub fn pattern_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, PatternVariant, ParserExtra<'tokens>> + Clone {
     recursive(|pattern| {
         // Wildcard pattern: _
         let wildcard = skip_trivia()
@@ -229,19 +229,27 @@ pub fn pattern_parser<'tokens>(
                 LiteralPatternKind::String(span)
             }}));
 
-        let range_pattern = range_start.clone()
+        let range_pattern = range_start
+            .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::DotDotEquals).map_with(|_, e| (to_kestrel_span(e.span()), true)))
-                    .or(skip_trivia().ignore_then(just(Token::DotDotLess).map_with(|_, e| (to_kestrel_span(e.span()), false))))
+                    .ignore_then(
+                        just(Token::DotDotEquals)
+                            .map_with(|_, e| (to_kestrel_span(e.span()), true)),
+                    )
+                    .or(skip_trivia().ignore_then(
+                        just(Token::DotDotLess).map_with(|_, e| (to_kestrel_span(e.span()), false)),
+                    )),
             )
             .then(range_end)
-            .map(|((start, (operator, inclusive)), end)| PatternVariant::Range {
-                start,
-                operator,
-                inclusive,
-                end,
-            });
+            .map(
+                |((start, (operator, inclusive)), end)| PatternVariant::Range {
+                    start,
+                    operator,
+                    inclusive,
+                    end,
+                },
+            );
 
         let literal = float_literal
             .or(integer_literal)
@@ -266,21 +274,19 @@ pub fn pattern_parser<'tokens>(
                 skip_trivia()
                     .ignore_then(just(Token::At).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(pattern.clone())
-                    .or_not()
+                    .or_not(),
             )
-            .map(|((var_span, name_span), at_opt)| {
-                match at_opt {
-                    Some((at_span, subpattern)) => PatternVariant::At {
-                        var_span: Some(var_span),
-                        name_span,
-                        at_span,
-                        subpattern: Box::new(subpattern),
-                    },
-                    None => PatternVariant::Binding {
-                        var_span: Some(var_span),
-                        name_span,
-                    },
-                }
+            .map(|((var_span, name_span), at_opt)| match at_opt {
+                Some((at_span, subpattern)) => PatternVariant::At {
+                    var_span: Some(var_span),
+                    name_span,
+                    at_span,
+                    subpattern: Box::new(subpattern),
+                },
+                None => PatternVariant::Binding {
+                    var_span: Some(var_span),
+                    name_span,
+                },
             });
 
         let immutable_binding = skip_trivia()
@@ -289,21 +295,19 @@ pub fn pattern_parser<'tokens>(
                 skip_trivia()
                     .ignore_then(just(Token::At).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(pattern.clone())
-                    .or_not()
+                    .or_not(),
             )
-            .map(|(name_span, at_opt)| {
-                match at_opt {
-                    Some((at_span, subpattern)) => PatternVariant::At {
-                        var_span: None,
-                        name_span,
-                        at_span,
-                        subpattern: Box::new(subpattern),
-                    },
-                    None => PatternVariant::Binding {
-                        var_span: None,
-                        name_span,
-                    },
-                }
+            .map(|(name_span, at_opt)| match at_opt {
+                Some((at_span, subpattern)) => PatternVariant::At {
+                    var_span: None,
+                    name_span,
+                    at_span,
+                    subpattern: Box::new(subpattern),
+                },
+                None => PatternVariant::Binding {
+                    var_span: None,
+                    name_span,
+                },
             });
 
         // Tuple pattern: (p1, p2, ...)
@@ -313,8 +317,9 @@ pub fn pattern_parser<'tokens>(
                 pattern
                     .clone()
                     .separated_by(
-                        skip_trivia()
-                            .ignore_then(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span()))),
+                        skip_trivia().ignore_then(
+                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                        ),
                     )
                     .allow_trailing()
                     .collect::<Vec<_>>(),
@@ -348,9 +353,9 @@ pub fn pattern_parser<'tokens>(
             match &p {
                 // Plain immutable binding looks like a label, so reject it here
                 // to let labeled_arg handle it
-                PatternVariant::Binding { var_span: None, .. } => {
-                    Err(chumsky::error::Rich::custom(span, "expected labeled argument"))
-                }
+                PatternVariant::Binding { var_span: None, .. } => Err(
+                    chumsky::error::Rich::custom(span, "expected labeled argument"),
+                ),
                 // Everything else is an unlabeled pattern
                 _ => Ok(EnumPatternArgData::Unlabeled(p)),
             }
@@ -371,19 +376,15 @@ pub fn pattern_parser<'tokens>(
                     .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
                         enum_arg
-                            .separated_by(
-                                skip_trivia().ignore_then(
-                                    just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                                ),
-                            )
+                            .separated_by(skip_trivia().ignore_then(
+                                just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                            ))
                             .allow_trailing()
                             .collect::<Vec<_>>(),
                     )
-                    .then(
-                        skip_trivia().ignore_then(
-                            just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
-                        ),
-                    )
+                    .then(skip_trivia().ignore_then(
+                        just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                    ))
                     .map(|((lparen, args), rparen)| (lparen, args, rparen))
                     .or_not(),
             )
@@ -402,14 +403,19 @@ pub fn pattern_parser<'tokens>(
                     .then(pattern.clone())
                     .or_not(),
             )
-            .map(|(field_name, binding)| StructPatternFieldData { field_name, binding });
+            .map(|(field_name, binding)| StructPatternFieldData {
+                field_name,
+                binding,
+            });
 
         // Rest pattern in struct: `..`
         let struct_rest = skip_trivia()
             .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())));
 
         // Either a field or rest pattern
-        let struct_field_or_rest = struct_rest.clone().map(|span| (None, Some(span)))
+        let struct_field_or_rest = struct_rest
+            .clone()
+            .map(|span| (None, Some(span)))
             .or(struct_field.map(|f| (Some(f), None)));
 
         // Struct pattern: `TypeName { field1, field2: binding, .. }`
@@ -460,7 +466,7 @@ pub fn pattern_parser<'tokens>(
             .then(
                 skip_trivia()
                     .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
-                    .or_not()
+                    .or_not(),
             )
             .map(|(dotdot_span, name_span)| (dotdot_span, name_span));
 
@@ -469,17 +475,21 @@ pub fn pattern_parser<'tokens>(
             .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 // Parse elements: either rest patterns or regular patterns
-                array_rest.clone().map(|(dotdot, name)| (None, Some((dotdot, name))))
+                array_rest
+                    .clone()
+                    .map(|(dotdot, name)| (None, Some((dotdot, name))))
                     .or(pattern.clone().map(|p| (Some(p), None)))
                     .separated_by(
-                        skip_trivia().ignore_then(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
+                        skip_trivia().ignore_then(
+                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                        ),
                     )
                     .allow_trailing()
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())))
+                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|((lbracket, elements), rbracket)| {
                 // Split elements into prefix, rest, suffix
@@ -570,7 +580,10 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             sink.add_token(SyntaxKind::Underscore, span.clone());
             sink.finish_node();
         }
-        PatternVariant::Binding { var_span, name_span } => {
+        PatternVariant::Binding {
+            var_span,
+            name_span,
+        } => {
             sink.start_node(SyntaxKind::BindingPattern);
             if let Some(var) = var_span {
                 sink.add_token(SyntaxKind::Var, var.clone());
@@ -802,7 +815,10 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             sink.add_token(SyntaxKind::Underscore, span.clone());
             sink.finish_node();
         }
-        PatternVariant::Binding { var_span, name_span } => {
+        PatternVariant::Binding {
+            var_span,
+            name_span,
+        } => {
             sink.start_node(SyntaxKind::BindingPattern);
             if let Some(var) = var_span {
                 sink.add_token(SyntaxKind::Var, var.clone());
@@ -1180,62 +1196,98 @@ mod tests {
     fn test_empty_array_pattern() {
         let source = "[]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_single_element() {
         let source = "[x]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_multiple_elements() {
         let source = "[a, b, c]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_with_rest() {
         let source = "[first, ..]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_with_named_rest() {
         let source = "[first, ..rest]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_rest_at_beginning() {
         let source = "[.., last]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_rest_in_middle() {
         let source = "[first, .., last]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_with_wildcard() {
         let source = "[_, x]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 
     #[test]
     fn test_array_pattern_with_literals() {
         let source = "[1, 2, x]";
         let pattern = parse_pattern_from_source(source);
-        assert!(is_array_pattern(&pattern), "Expected ArrayPattern, got {:?}", pattern.kind());
+        assert!(
+            is_array_pattern(&pattern),
+            "Expected ArrayPattern, got {:?}",
+            pattern.kind()
+        );
     }
 }

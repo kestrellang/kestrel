@@ -9,7 +9,7 @@ use kestrel_syntax_tree::SyntaxNode;
 use semantic_tree::symbol::Symbol;
 
 use crate::binders::flatten_protocol;
-use crate::binders::utils::attributes::{parse_builtin_attribute, BuiltinParseResult};
+use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
     BuiltinMustBeMarkerError, BuiltinWrongKindError, DuplicateBuiltinError, NotAProtocolContext,
@@ -37,8 +37,11 @@ impl DeclarationBinder for ProtocolBinder {
         let file_id = context.file_id_for_symbol(symbol);
 
         // Resolve attributes
-        let attributes_behavior =
-            crate::binders::utils::attributes::resolve_attributes(syntax, &source, context.diagnostics);
+        let attributes_behavior = crate::binders::utils::attributes::resolve_attributes(
+            syntax,
+            &source,
+            context.diagnostics,
+        );
         symbol.metadata().add_behavior(attributes_behavior.clone());
 
         // Process @builtin attribute if present
@@ -59,8 +62,9 @@ impl DeclarationBinder for ProtocolBinder {
 
         // Extract type parameters and resolve where clause bounds
         // Now inherited protocols are available for associated type path resolution
-        let generics_behavior =
-            crate::binders::utils::generics::resolve_generics(syntax, &source, file_id, symbol_id, context);
+        let generics_behavior = crate::binders::utils::generics::resolve_generics(
+            syntax, &source, file_id, symbol_id, context,
+        );
 
         // Add GenericsBehavior
         symbol.metadata().add_behavior(generics_behavior);
@@ -123,7 +127,11 @@ impl ProtocolBinder {
 
         // Register the builtin
         let symbol_id = symbol.metadata().id();
-        if !context.model.builtin_registry().register_protocol(feature, symbol_id) {
+        if !context
+            .model
+            .builtin_registry()
+            .register_protocol(feature, symbol_id)
+        {
             context.diagnostics.throw(DuplicateBuiltinError {
                 span: attr_span,
                 feature_name: feature.name().to_string(),

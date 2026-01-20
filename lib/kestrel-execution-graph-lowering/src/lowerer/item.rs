@@ -4,9 +4,9 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 

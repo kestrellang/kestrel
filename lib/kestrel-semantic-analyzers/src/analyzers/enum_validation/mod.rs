@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
-use kestrel_semantic_model::queries::StructFieldTypes;
 use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_model::queries::StructFieldTypes;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;

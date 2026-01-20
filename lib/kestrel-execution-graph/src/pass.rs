@@ -1,7 +1,7 @@
 //! MIR pass system.
 
-use crate::id::{Function, Id};
 use crate::MirContext;
+use crate::id::{Function, Id};
 use kestrel_reporting::{Diagnostic, Severity};
 
 /// Result of running a pass.
@@ -37,9 +37,9 @@ impl PassResult {
 
     /// Check if there are any errors.
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| {
-            d.severity == Severity::Error || d.severity == Severity::Bug
-        })
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error || d.severity == Severity::Bug)
     }
 
     /// Merge another result into this one.

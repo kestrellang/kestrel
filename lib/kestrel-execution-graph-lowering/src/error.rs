@@ -142,44 +142,60 @@ impl IntoDiagnostic for LoweringError {
         match self {
             LoweringError::UnsupportedConstruct { construct, span } => Diagnostic::warning()
                 .with_message(format!("unsupported construct: {}", construct))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("this construct is not yet supported in MIR lowering")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this construct is not yet supported in MIR lowering"),
+                ]),
 
             LoweringError::MissingFunctionBody { name, span } => Diagnostic::error()
                 .with_message(format!("function '{}' is missing a body", name))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("expected a function body")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("expected a function body"),
+                ]),
 
             LoweringError::UnsupportedType { type_desc, span } => Diagnostic::warning()
                 .with_message(format!("unsupported type: {}", type_desc))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("this type is not yet supported in MIR lowering")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this type is not yet supported in MIR lowering"),
+                ]),
 
             LoweringError::UnsupportedExpression { expr_kind, span } => Diagnostic::warning()
                 .with_message(format!("unsupported expression: {}", expr_kind))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("this expression kind is not yet supported in MIR lowering")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this expression kind is not yet supported in MIR lowering"),
+                ]),
 
             LoweringError::UnsupportedStatement { stmt_kind, span } => Diagnostic::warning()
                 .with_message(format!("unsupported statement: {}", stmt_kind))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("this statement kind is not yet supported in MIR lowering")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this statement kind is not yet supported in MIR lowering"),
+                ]),
 
             LoweringError::UnsupportedPattern { pattern_kind, span } => Diagnostic::warning()
                 .with_message(format!("unsupported pattern: {}", pattern_kind))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("this pattern kind is not yet supported in MIR lowering")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this pattern kind is not yet supported in MIR lowering"),
+                ]),
 
             LoweringError::UnsupportedItem { item_kind, span } => Diagnostic::warning()
                 .with_message(format!("unsupported item: {}", item_kind))
-                .with_labels(vec![Label::primary(span.file_id, span.range())
-                    .with_message("this item kind is not yet supported in MIR lowering")]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this item kind is not yet supported in MIR lowering"),
+                ]),
 
             LoweringError::Internal { message, span } => {
-                let diag = Diagnostic::bug().with_message(format!("internal lowering error: {}", message));
+                let diag =
+                    Diagnostic::bug().with_message(format!("internal lowering error: {}", message));
                 if let Some(span) = span {
                     diag.with_labels(vec![
-                        Label::primary(span.file_id, span.range()).with_message("error occurred here")
+                        Label::primary(span.file_id, span.range())
+                            .with_message("error occurred here"),
                     ])
                 } else {
                     diag

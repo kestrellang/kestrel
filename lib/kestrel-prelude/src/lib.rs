@@ -3,6 +3,14 @@
 //! This crate defines the primitive types and built-in names for the Kestrel language.
 //! It serves as the single source of truth for all primitive type names and their mappings.
 
+/// Lang module intrinsic names
+pub mod lang {
+    /// The "lang" module name
+    pub const LANG: &str = "lang";
+    /// Pointer type name
+    pub const PTR: &str = "ptr";
+}
+
 /// Primitive type name constants
 pub mod primitives {
     // Integer types

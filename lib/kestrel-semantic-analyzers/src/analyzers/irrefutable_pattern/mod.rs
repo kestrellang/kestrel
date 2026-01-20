@@ -123,9 +123,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
         PatternKind::Local { .. } => true,
 
         // Tuple is irrefutable if ALL elements (prefix + suffix) are irrefutable
-        PatternKind::Tuple {
-            prefix, suffix, ..
-        } => prefix
+        PatternKind::Tuple { prefix, suffix, .. } => prefix
             .iter()
             .chain(suffix.iter())
             .all(is_pattern_irrefutable),
@@ -140,9 +138,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
                 let cases = symbol.cases();
                 if cases.len() == 1 {
                     // Single-case enum is irrefutable if all bindings are irrefutable
-                    return bindings
-                        .iter()
-                        .all(|b| is_pattern_irrefutable(&b.pattern));
+                    return bindings.iter().all(|b| is_pattern_irrefutable(&b.pattern));
                 }
             }
             // Multi-case enum or unresolved type - refutable

@@ -82,8 +82,8 @@ impl ExtensionDeclaration {
 /// Internal parser for extension body items
 ///
 /// Extension bodies can contain: functions and initializers
-fn extension_body_item_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
+fn extension_body_item_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
         initializer_declaration_parser_internal().map(ExtensionBodyItem::Initializer);
 
@@ -96,8 +96,8 @@ fn extension_body_item_parser_internal<'tokens>(
 ///
 /// This is the single source of truth for extension declaration parsing.
 /// Syntax: extend Type: Protocol where ... { ... }
-pub fn extension_declaration_parser_internal<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionDeclarationData, ParserExtra<'tokens>> + Clone
+pub fn extension_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ExtensionDeclarationData, ParserExtra<'tokens>> + Clone
 {
     token(Token::Extend)
         .then(ty_parser())
@@ -139,7 +139,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match extension_declaration_parser_internal().parse(input).into_result() {
+    match extension_declaration_parser_internal()
+        .parse(input)
+        .into_result()
+    {
         Ok(data) => {
             emit_extension_declaration(sink, data);
         }

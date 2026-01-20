@@ -1,12 +1,15 @@
 // Bool type
 
+import std.ffi.(FFISafe)
+
 public struct Bool:
     Equatable,
     Hashable,
     And[Bool],
     Or[Bool],
     Not,
-    ExpressibleByBoolLiteral
+    ExpressibleByBoolLiteral,
+    FFISafe
 {
     private var value: lang.bool
 

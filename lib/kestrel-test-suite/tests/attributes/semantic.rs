@@ -225,10 +225,7 @@ mod argument_count {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            Symbol::new("Foo")
-                .has(Behavior::AttributeArgCount("dummy", 0)),
-        );
+        .expect(Symbol::new("Foo").has(Behavior::AttributeArgCount("dummy", 0)));
     }
 
     #[test]
@@ -240,10 +237,7 @@ mod argument_count {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            Symbol::new("Foo")
-                .has(Behavior::AttributeArgCount("dummy", 0)),
-        );
+        .expect(Symbol::new("Foo").has(Behavior::AttributeArgCount("dummy", 0)));
     }
 
     #[test]
@@ -255,10 +249,7 @@ mod argument_count {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            Symbol::new("Foo")
-                .has(Behavior::AttributeArgCount("dummy", 1)),
-        );
+        .expect(Symbol::new("Foo").has(Behavior::AttributeArgCount("dummy", 1)));
     }
 
     #[test]
@@ -270,10 +261,7 @@ mod argument_count {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            Symbol::new("Foo")
-                .has(Behavior::AttributeArgCount("dummy", 2)),
-        );
+        .expect(Symbol::new("Foo").has(Behavior::AttributeArgCount("dummy", 2)));
     }
 
     #[test]
@@ -285,10 +273,7 @@ mod argument_count {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            Symbol::new("Foo")
-                .has(Behavior::AttributeArgCount("dummy", 3)),
-        );
+        .expect(Symbol::new("Foo").has(Behavior::AttributeArgCount("dummy", 3)));
     }
 }
 
@@ -307,7 +292,7 @@ mod unknown_attribute_warnings {
             struct Foo {}
         "#,
         )
-        .expect(Compiles)  // Should still compile
+        .expect(Compiles) // Should still compile
         .expect(HasWarning("unknown attribute"));
     }
 

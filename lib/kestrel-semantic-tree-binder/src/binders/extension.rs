@@ -8,9 +8,9 @@ use std::sync::Arc;
 use kestrel_semantic_model::{ResolveTypePath, TypePathResolution};
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind, WhereClause};
@@ -135,12 +135,7 @@ fn resolve_extension_target(
     file_id: usize,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
-) -> Option<(
-    Ty,
-    ExtendableSymbol,
-    Vec<Ty>,
-    Vec<Arc<TypeParameterSymbol>>,
-)> {
+) -> Option<(Ty, ExtendableSymbol, Vec<Ty>, Vec<Arc<TypeParameterSymbol>>)> {
     // Find the Ty node (target type expression)
     let ty_node = find_child(syntax, SyntaxKind::Ty)?;
     let ty_span = get_node_span(&ty_node, file_id);

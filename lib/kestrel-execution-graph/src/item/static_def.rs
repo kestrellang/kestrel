@@ -1,9 +1,9 @@
 //! Static variable definitions.
 
-use crate::id::{Id, QualifiedName, Ty};
-use crate::metadata::{Metadata, Prior};
 use crate::MirContext;
 use crate::function::Immediate;
+use crate::id::{Id, QualifiedName, Ty};
+use crate::metadata::{Metadata, Prior};
 use std::fmt;
 
 /// A static variable (global constant or mutable static).
