@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral)
+import std.core.(Bool, Equatable, Comparable, Cloneable, Formattable, Ordering, Addable, ExpressibleByStringLiteral)
 import std.num.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator)
@@ -127,7 +127,7 @@ public struct SplitIterator: Iterator {
 }
 
 // String - UTF-8 encoded, dynamically sized string
-public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, ExpressibleByStringLiteral {
+public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral {
     type Item = CodePoint
     type Iter = StringIterator
     type Output = String
@@ -637,5 +637,10 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Addable, Expre
             return String()
         }
         String.fromBytesUnchecked(self.ptr, self.len)
+    }
+
+    // Formattable
+    public func format() -> String {
+        self.clone()
     }
 }

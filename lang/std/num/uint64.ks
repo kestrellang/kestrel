@@ -5,11 +5,12 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
 )
+import std.text.(String)
 
 public struct UInt64:
     UnsignedInteger,
@@ -17,6 +18,7 @@ public struct UInt64:
     Comparable,
     Equatable,
     Matchable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -107,7 +109,32 @@ public struct UInt64:
     public func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_shl(self.raw, count)) }
     public func shiftRight(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.raw, count)) }
-}
+
+    // Formattable
+    public func format() -> String {
+        if self == UInt64.zero {
+            return "0"
+        }
+
+        var result = String();
+        var n = self;
+
+        let ten: UInt64 = 10;
+        while n != UInt64.zero {
+            let digit: UInt64 = n % ten;
+            result.appendByte(UInt8(from: digit + 48));
+            n = n / ten
+        }
+
+        // Reverse the string
+        var reversed = String();
+        var i = result.byteCount() - 1;
+        while i >= 0 {
+            reversed.appendByte(result.byteAtUnchecked(i));
+            i = i - 1
+        }
+        reversed
+    }}
 
 // UInt - platform-sized unsigned integer (alias to UInt64 on 64-bit platforms)
 public type UInt = UInt64

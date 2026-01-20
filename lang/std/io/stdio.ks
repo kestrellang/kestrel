@@ -7,7 +7,7 @@ import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
-import std.core.(Bool)
+import std.core.(Bool, Formattable)
 import std.io.libc
 import std.io.error.(Error)
 import std.io.read.(Read)
@@ -75,16 +75,16 @@ public func stderr() -> Stderr {
     Stderr()
 }
 
-// Print string to stdout (no newline)
-public func print(s: String) -> Result[(), Error] {
+// Print to stdout (no newline)
+public func print[F](value: F) -> Result[(), Error] where F: Formattable {
     var out = stdout();
-    writeStr(out, s)
+    writeStr(out, value.format())
 }
 
-// Print string to stdout with newline
-public func println(s: String) -> Result[(), Error] {
+// Print to stdout with newline
+public func println[F](value: F) -> Result[(), Error] where F: Formattable {
     var out = stdout();
-    writeLine(out, s)
+    writeLine(out, value.format())
 }
 
 // Print empty line
@@ -94,15 +94,15 @@ public func printlnEmpty() -> Result[(), Error] {
 }
 
 // Print to stderr (no newline)
-public func eprint(s: String) -> Result[(), Error] {
+public func eprint[F](value: F) -> Result[(), Error] where F: Formattable {
     var err = stderr();
-    writeStr(err, s)
+    writeStr(err, value.format())
 }
 
 // Print to stderr with newline
-public func eprintln(s: String) -> Result[(), Error] {
+public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
     var err = stderr();
-    writeLine(err, s)
+    writeLine(err, value.format())
 }
 
 // Read line from stdin

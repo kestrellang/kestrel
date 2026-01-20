@@ -3,10 +3,12 @@
 module std.core
 
 import std.ffi.(FFISafe)
+import std.text.(String)
 
 public struct Bool:
     Equatable,
     Matchable,
+    Formattable,
     And[Bool],
     Or[Bool],
     Not,
@@ -59,5 +61,10 @@ public struct Bool:
     // BooleanConditional
     public func boolValue() -> lang.i1 {
         self.value
+    }
+
+    // Formattable
+    public func format() -> String {
+        if self.value { "true" } else { "false" }
     }
 }

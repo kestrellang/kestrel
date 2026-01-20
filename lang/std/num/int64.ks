@@ -5,11 +5,12 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
 )
+import std.text.(String)
 
 public struct Int64:
     SignedInteger,
@@ -17,6 +18,7 @@ public struct Int64:
     Comparable,
     Equatable,
     Matchable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -107,7 +109,40 @@ public struct Int64:
     public func bitwiseNot() -> Int64 { Int64(raw: lang.i64_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> Int64 { Int64(raw: lang.i64_shl(self.raw, count)) }
     public func shiftRight(by count: lang.i64) -> Int64 { Int64(raw: lang.i64_signed_shr(self.raw, count)) }
-}
+
+    // Formattable
+    public func format() -> String {
+        if self == Int64.zero {
+            return "0"
+        }
+
+        var result = String();
+        var n = self;
+        let isNegative = n < 0;
+        if isNegative {
+            n = n.negate()
+        }
+
+        let ten: Int64 = 10;
+        while n != Int64.zero {
+            let digit: Int64 = n % ten;
+            result.appendByte(UInt8(from: digit + 48));
+            n = n / ten
+        }
+
+        if isNegative {
+            result.appendByte(45)  // '-'
+        }
+
+        // Reverse the string
+        var reversed = String();
+        var i = result.byteCount() - 1;
+        while i >= 0 {
+            reversed.appendByte(result.byteAtUnchecked(i));
+            i = i - 1
+        }
+        reversed
+    }}
 
 // Int - platform-sized signed integer (alias to Int64 on 64-bit platforms)
 public type Int = Int64

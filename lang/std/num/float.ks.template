@@ -5,14 +5,16 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool,
+    Equatable, Comparable, Ordering, Bool, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral
 )
+import std.text.(String)
 
 public struct {{TYPE_NAME}}:
     Comparable,
     Equatable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -91,5 +93,6 @@ public struct {{TYPE_NAME}}:
     public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.raw)) }
     public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.raw)) }
     public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.raw)) }
-}
+
+{{FORMAT_METHOD}}}
 {{TYPE_ALIAS}}

@@ -5,14 +5,16 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool,
+    Equatable, Comparable, Ordering, Bool, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral
 )
+import std.text.(String)
 
 public struct Float32:
     Comparable,
     Equatable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -91,5 +93,70 @@ public struct Float32:
     public func round() -> Float32 { Float32(raw: lang.f32_round(self.raw)) }
     public func trunc() -> Float32 { Float32(raw: lang.f32_trunc(self.raw)) }
     public func sqrt() -> Float32 { Float32(raw: lang.f32_sqrt(self.raw)) }
-}
+
+    // Formattable
+    public func format() -> String {
+        // Handle special cases
+        if self.isNaN() {
+            return "NaN"
+        }
+        if self.isInfinite() {
+            if self < 0.0 {
+                return "-Infinity"
+            } else {
+                return "Infinity"
+            }
+        }
+
+        var result = String();
+        var value = self;
+
+        // Handle negative
+        let isNegative = value < 0.0;
+        if isNegative {
+            result.appendByte(45);  // '-'
+            value = value.negate()
+        }
+
+        // Get integer part
+        let intPart = value.trunc();
+        var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
+
+        // Format integer part
+        if intVal == 0 {
+            result.appendByte(48)  // '0'
+        } else {
+            var digits = String();
+            while intVal > 0 {
+                let digit: Int64 = intVal % 10;
+                digits.appendByte(UInt8(from: digit + 48));
+                intVal = intVal / 10
+            }
+            // Reverse digits
+            var i = digits.byteCount() - 1;
+            while i >= 0 {
+                result.appendByte(digits.byteAtUnchecked(i));
+                i = i - 1
+            }
+        }
+
+        // Add decimal point
+        result.appendByte(46);  // '.'
+
+        // Get fractional part (6 digits of precision)
+        var fracPart = value - intPart;
+        var digitCount: Int64 = 0;
+        let maxDigits: Int64 = 6;
+        let ten: Float32 = 10.0;
+
+        while digitCount < maxDigits {
+            fracPart = fracPart * ten;
+            let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
+            result.appendByte(UInt8(from: digit + 48));
+            fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
+            digitCount = digitCount + 1
+        }
+
+        result
+    }}
 

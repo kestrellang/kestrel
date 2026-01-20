@@ -2,7 +2,8 @@
 
 module std.result
 
-import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual)
+import std.text.(String)
 // Note: Iterator import creates circular dependency - Iterator imports Optional
 // import std.iter.(Iterator)
 
@@ -170,6 +171,16 @@ extend Optional[T]: Tryable {
 extend Optional[T]: FromResidual[()] {
     public static func fromResidual(residual: ()) -> Optional[T] {
         .None
+    }
+}
+
+// Formattable when T is Formattable
+extend Optional[T]: Formattable where T: Formattable {
+    public func format() -> String {
+        match self {
+            .Some(value) => "Some(" + value.format() + ")",
+            .None => "None"
+        }
     }
 }
 

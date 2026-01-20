@@ -2,10 +2,12 @@
 
 module std.core
 
+import std.text.(String)
+
 // Note: Equal[Self] and NotEqual[Self] are automatically provided by
 // the extension `extend Equatable: Equal[Self], NotEqual[Self]`
 
-public enum Ordering: Equatable {
+public enum Ordering: Equatable, Formattable {
     case Less
     case Equal
     case Greater
@@ -42,6 +44,15 @@ public enum Ordering: Equatable {
         match self {
             .Equal => compare(),
             _ => self
+        }
+    }
+
+    // Formattable
+    public func format() -> String {
+        match self {
+            .Less => "Less",
+            .Equal => "Equal",
+            .Greater => "Greater"
         }
     }
 }

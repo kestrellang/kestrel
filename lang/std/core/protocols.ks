@@ -3,6 +3,7 @@
 module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
+import std.text.(String)
 
 // Equatable - types that can be compared for equality
 public protocol Equatable {
@@ -73,4 +74,9 @@ public protocol Hasher {
 // Defaultable - types with a default value
 public protocol Defaultable {
     init()
+}
+
+// Formattable - types that can be formatted as a string
+public protocol Formattable {
+    func format() -> String
 }

@@ -2,7 +2,8 @@
 
 module std.result
 
-import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, Returnable)
+import std.core.(Equatable, Formattable, Bool, ControlFlow, Tryable, FromResidual, Returnable)
+import std.text.(String)
 import std.result.(Optional)
 
 public enum Result[T, E]: Tryable, Returnable[T] {
@@ -173,6 +174,16 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
             (.Ok(a), .Ok(b)) => a == b,
             (.Err(a), .Err(b)) => a == b,
             _ => false
+        }
+    }
+}
+
+// Formattable when T and E are Formattable
+extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
+    public func format() -> String {
+        match self {
+            .Ok(value) => "Ok(" + value.format() + ")",
+            .Err(error) => "Err(" + error.format() + ")"
         }
     }
 }

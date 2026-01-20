@@ -5,11 +5,12 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
 )
+import std.text.(String)
 
 public struct {{TYPE_NAME}}:
     {{SIGNEDNESS_PROTOCOL}},
@@ -17,6 +18,7 @@ public struct {{TYPE_NAME}}:
     Comparable,
     Equatable,
     Matchable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -93,5 +95,6 @@ public struct {{TYPE_NAME}}:
     public func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.raw, {{SHIFT_CAST}})) }
     public func shiftRight(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.raw, {{SHIFT_CAST}})) }
-}
+
+{{FORMAT_METHOD}}}
 {{TYPE_ALIAS}}

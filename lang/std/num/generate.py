@@ -54,6 +54,78 @@ def get_cast(from_bits: int, to_bits: int) -> str:
         return f"lang.cast_i{from_bits}_i{to_bits}(other.raw)"
 
 
+def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> str:
+    """Generate the format() method for integer types."""
+
+    # For converting digit to Int64 for UInt8 conversion
+    if bits == 64:
+        digit_as_i64 = "digit"
+    else:
+        digit_as_i64 = f"Int64(from: digit)"
+
+    # For signed types, we need to handle negative numbers
+    if signed:
+        return f'''    // Formattable
+    public func format() -> String {{
+        if self == {type_name}.zero {{
+            return "0"
+        }}
+
+        var result = String();
+        var n = self;
+        let isNegative = n < 0;
+        if isNegative {{
+            n = n.negate()
+        }}
+
+        let ten: {type_name} = 10;
+        while n != {type_name}.zero {{
+            let digit: {type_name} = n % ten;
+            result.appendByte(UInt8(from: {digit_as_i64} + 48));
+            n = n / ten
+        }}
+
+        if isNegative {{
+            result.appendByte(45)  // '-'
+        }}
+
+        // Reverse the string
+        var reversed = String();
+        var i = result.byteCount() - 1;
+        while i >= 0 {{
+            reversed.appendByte(result.byteAtUnchecked(i));
+            i = i - 1
+        }}
+        reversed
+    }}'''
+    else:
+        return f'''    // Formattable
+    public func format() -> String {{
+        if self == {type_name}.zero {{
+            return "0"
+        }}
+
+        var result = String();
+        var n = self;
+
+        let ten: {type_name} = 10;
+        while n != {type_name}.zero {{
+            let digit: {type_name} = n % ten;
+            result.appendByte(UInt8(from: {digit_as_i64} + 48));
+            n = n / ten
+        }}
+
+        // Reverse the string
+        var reversed = String();
+        var i = result.byteCount() - 1;
+        while i >= 0 {{
+            reversed.appendByte(result.byteAtUnchecked(i));
+            i = i - 1
+        }}
+        reversed
+    }}'''
+
+
 def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) -> str:
     template = (SCRIPT_DIR / "integer.ks.template").read_text()
 
@@ -116,6 +188,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     else:
         type_alias = ""
 
+    # Generate format method
+    format_method = generate_integer_format_method(type_name, bits, signed)
+
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
     result = result.replace("{{BITS}}", str(bits))
@@ -135,8 +210,80 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{TYPE_ALIAS}}", type_alias)
     result = result.replace("{{CONVERTIBLE_CONFORMANCES}}", convertible_conformances)
     result = result.replace("{{CONVERTIBLE_INITS}}", convertible_inits)
+    result = result.replace("{{FORMAT_METHOD}}", format_method)
 
     return result
+
+
+def generate_float_format_method(type_name: str, bits: int) -> str:
+    """Generate the format() method for float types."""
+    lang_type = f"f{bits}"
+
+    return f'''    // Formattable
+    public func format() -> String {{
+        // Handle special cases
+        if self.isNaN() {{
+            return "NaN"
+        }}
+        if self.isInfinite() {{
+            if self < 0.0 {{
+                return "-Infinity"
+            }} else {{
+                return "Infinity"
+            }}
+        }}
+
+        var result = String();
+        var value = self;
+
+        // Handle negative
+        let isNegative = value < 0.0;
+        if isNegative {{
+            result.appendByte(45);  // '-'
+            value = value.negate()
+        }}
+
+        // Get integer part
+        let intPart = value.trunc();
+        var intVal: Int64 = Int64(raw: lang.cast_{lang_type}_i64(intPart.raw));
+
+        // Format integer part
+        if intVal == 0 {{
+            result.appendByte(48)  // '0'
+        }} else {{
+            var digits = String();
+            while intVal > 0 {{
+                let digit: Int64 = intVal % 10;
+                digits.appendByte(UInt8(from: digit + 48));
+                intVal = intVal / 10
+            }}
+            // Reverse digits
+            var i = digits.byteCount() - 1;
+            while i >= 0 {{
+                result.appendByte(digits.byteAtUnchecked(i));
+                i = i - 1
+            }}
+        }}
+
+        // Add decimal point
+        result.appendByte(46);  // '.'
+
+        // Get fractional part (6 digits of precision)
+        var fracPart = value - intPart;
+        var digitCount: Int64 = 0;
+        let maxDigits: Int64 = 6;
+        let ten: {type_name} = 10.0;
+
+        while digitCount < maxDigits {{
+            fracPart = fracPart * ten;
+            let digit: Int64 = Int64(raw: lang.cast_{lang_type}_i64(fracPart.trunc().raw));
+            result.appendByte(UInt8(from: digit + 48));
+            fracPart = fracPart - {type_name}(raw: lang.cast_i64_{lang_type}(digit.raw));
+            digitCount = digitCount + 1
+        }}
+
+        result
+    }}'''
 
 
 def generate_float(type_name: str, bits: int, is_default: bool) -> str:
@@ -158,6 +305,9 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     else:
         type_alias = ""
 
+    # Generate format method
+    format_method = generate_float_format_method(type_name, bits)
+
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
     result = result.replace("{{BITS}}", str(bits))
@@ -165,6 +315,7 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     result = result.replace("{{FLOAT_LITERAL_INIT}}", float_literal_init)
     result = result.replace("{{ZERO_LITERAL}}", zero_literal)
     result = result.replace("{{TYPE_ALIAS}}", type_alias)
+    result = result.replace("{{FORMAT_METHOD}}", format_method)
 
     return result
 

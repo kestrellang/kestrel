@@ -5,11 +5,12 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
 )
+import std.text.(String)
 
 public struct Int32:
     SignedInteger,
@@ -17,6 +18,7 @@ public struct Int32:
     Comparable,
     Equatable,
     Matchable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -107,5 +109,38 @@ public struct Int32:
     public func bitwiseNot() -> Int32 { Int32(raw: lang.i32_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> Int32 { Int32(raw: lang.i32_shl(self.raw, lang.cast_i64_i32(count))) }
     public func shiftRight(by count: lang.i64) -> Int32 { Int32(raw: lang.i32_signed_shr(self.raw, lang.cast_i64_i32(count))) }
-}
+
+    // Formattable
+    public func format() -> String {
+        if self == Int32.zero {
+            return "0"
+        }
+
+        var result = String();
+        var n = self;
+        let isNegative = n < 0;
+        if isNegative {
+            n = n.negate()
+        }
+
+        let ten: Int32 = 10;
+        while n != Int32.zero {
+            let digit: Int32 = n % ten;
+            result.appendByte(UInt8(from: Int64(from: digit) + 48));
+            n = n / ten
+        }
+
+        if isNegative {
+            result.appendByte(45)  // '-'
+        }
+
+        // Reverse the string
+        var reversed = String();
+        var i = result.byteCount() - 1;
+        while i >= 0 {
+            reversed.appendByte(result.byteAtUnchecked(i));
+            i = i - 1
+        }
+        reversed
+    }}
 

@@ -5,11 +5,12 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable,
+    Equatable, Comparable, Ordering, Bool, Matchable, Formattable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
 )
+import std.text.(String)
 
 public struct UInt8:
     UnsignedInteger,
@@ -17,6 +18,7 @@ public struct UInt8:
     Comparable,
     Equatable,
     Matchable,
+    Formattable,
     Addable,
     Subtractable,
     Multipliable,
@@ -107,5 +109,30 @@ public struct UInt8:
     public func bitwiseNot() -> UInt8 { UInt8(raw: lang.i8_not(self.raw)) }
     public func shiftLeft(by count: lang.i64) -> UInt8 { UInt8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count))) }
     public func shiftRight(by count: lang.i64) -> UInt8 { UInt8(raw: lang.i8_unsigned_shr(self.raw, lang.cast_i64_i8(count))) }
-}
+
+    // Formattable
+    public func format() -> String {
+        if self == UInt8.zero {
+            return "0"
+        }
+
+        var result = String();
+        var n = self;
+
+        let ten: UInt8 = 10;
+        while n != UInt8.zero {
+            let digit: UInt8 = n % ten;
+            result.appendByte(UInt8(from: Int64(from: digit) + 48));
+            n = n / ten
+        }
+
+        // Reverse the string
+        var reversed = String();
+        var i = result.byteCount() - 1;
+        while i >= 0 {
+            reversed.appendByte(result.byteAtUnchecked(i));
+            i = i - 1
+        }
+        reversed
+    }}
 

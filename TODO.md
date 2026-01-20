@@ -7,7 +7,7 @@
 - [x] Move IO into standard library
 - [x] Build with std by default, add --no-std flag.
 - [x] Fix matches on non-primitive types 
-- [ ] Add display protocol
+- [ ] Add Formattable protocol
 - [ ] Reference counting
 - [ ] Web server
 - [ ] Add tests
