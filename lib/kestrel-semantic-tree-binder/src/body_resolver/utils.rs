@@ -977,6 +977,83 @@ pub fn replace_unsubstituted_type_params(ty: &Ty, span: &Span) -> Ty {
     }
 }
 
+/// Replace type parameters with inference placeholders, except for those in the preserved set.
+///
+/// This is used when initializer parameter types might contain type parameters
+/// that weren't in the substitution map, but we want to preserve type parameters
+/// that came from explicit type arguments (e.g., Pointer[T] where T is from the caller's scope).
+pub fn replace_type_params_except(
+    ty: &Ty,
+    preserved: &std::collections::HashSet<SymbolId>,
+    span: &Span,
+) -> Ty {
+    match ty.kind() {
+        // Type parameter - replace with inference placeholder unless preserved
+        TyKind::TypeParameter(tp) => {
+            if preserved.contains(&tp.metadata().id()) {
+                ty.clone() // Preserve this type parameter
+            } else {
+                Ty::infer(span.clone()) // Replace with inference
+            }
+        }
+
+        // Composite types - recursively process
+        TyKind::Tuple(elements) => {
+            let new_elements: Vec<Ty> = elements
+                .iter()
+                .map(|e| replace_type_params_except(e, preserved, span))
+                .collect();
+            Ty::tuple(new_elements, ty.span().clone())
+        }
+
+        TyKind::Array(element) => {
+            let new_element = replace_type_params_except(element, preserved, span);
+            Ty::array(new_element, ty.span().clone())
+        }
+
+        TyKind::Pointer(element) => {
+            let new_element = replace_type_params_except(element, preserved, span);
+            Ty::pointer(new_element, ty.span().clone())
+        }
+
+        TyKind::Function { params, return_type } => {
+            let new_params: Vec<Ty> = params
+                .iter()
+                .map(|p| replace_type_params_except(p, preserved, span))
+                .collect();
+            let new_return = replace_type_params_except(return_type, preserved, span);
+            Ty::function(new_params, new_return, ty.span().clone())
+        }
+
+        TyKind::Struct { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_type_params_except(sub_ty, preserved, span));
+            }
+            Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        TyKind::Enum { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_type_params_except(sub_ty, preserved, span));
+            }
+            Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        TyKind::Protocol { symbol, substitutions } => {
+            let mut new_subs = Substitutions::new();
+            for (key, sub_ty) in substitutions.iter() {
+                new_subs.insert(*key, replace_type_params_except(sub_ty, preserved, span));
+            }
+            Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+        }
+
+        // Other types - return as-is
+        _ => ty.clone(),
+    }
+}
+
 // =============================================================================
 // Type-Directed Conformance Helpers
 // =============================================================================

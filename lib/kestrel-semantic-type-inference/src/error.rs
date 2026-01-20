@@ -69,8 +69,8 @@ pub enum InferenceError {
     /// This means some inference placeholders couldn't be determined
     /// from the available constraints.
     Ambiguous {
-        /// The type IDs that remained unresolved
-        unresolved: Vec<TyId>,
+        /// The type IDs and their spans that remained unresolved
+        unresolved: Vec<(TyId, Span)>,
     },
 
     /// Internal solver error (shouldn't happen in normal use).
@@ -236,7 +236,7 @@ impl InferenceError {
     }
 
     /// Create an ambiguous error.
-    pub fn ambiguous(unresolved: Vec<TyId>) -> Self {
+    pub fn ambiguous(unresolved: Vec<(TyId, Span)>) -> Self {
         InferenceError::Ambiguous { unresolved }
     }
 
@@ -335,7 +335,7 @@ impl InferenceError {
             InferenceError::ConformanceFailure { span, .. } => Some(span),
             InferenceError::MemberNotFound { span, .. } => Some(span),
             InferenceError::AssociatedTypeNotFound { span, .. } => Some(span),
-            InferenceError::Ambiguous { .. } => None,
+            InferenceError::Ambiguous { unresolved } => unresolved.first().map(|(_, span)| span),
             InferenceError::Internal { .. } => None,
             InferenceError::ClosureArityMismatch { span, .. } => Some(span),
             InferenceError::ClosureReturnTypeMismatch { span, .. } => Some(span),

@@ -78,14 +78,24 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                         .with_message("associated type not found"),
                 ]),
 
-            InferenceError::Ambiguous { unresolved } => Diagnostic::error()
-                .with_message(format!(
-                    "could not infer type for {} placeholder(s)",
-                    unresolved.len()
-                ))
-                .with_notes(vec![
-                    "try adding explicit type annotations to help the compiler".to_string(),
-                ]),
+            InferenceError::Ambiguous { unresolved } => {
+                let labels: Vec<_> = unresolved
+                    .iter()
+                    .map(|(_, span)| {
+                        Label::primary(span.file_id, span.range())
+                            .with_message("cannot infer type")
+                    })
+                    .collect();
+                Diagnostic::error()
+                    .with_message(format!(
+                        "could not infer type for {} placeholder(s)",
+                        unresolved.len()
+                    ))
+                    .with_labels(labels)
+                    .with_notes(vec![
+                        "try adding explicit type annotations to help the compiler".to_string(),
+                    ])
+            }
 
             InferenceError::Internal { message } => {
                 Diagnostic::error().with_message(format!("internal inference error: {}", message))

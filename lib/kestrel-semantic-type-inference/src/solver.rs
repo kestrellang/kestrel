@@ -1450,7 +1450,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     // Check all registered types
     for (id, ty) in ctx.type_registry() {
         if matches!(ty.kind(), TyKind::Infer) && !ctx.substitutions().contains_key(id) {
-            unresolved.push(*id);
+            unresolved.push((*id, ty.span().clone()));
         }
     }
 
@@ -1508,17 +1508,17 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
     }
 
     if !unresolved.is_empty() {
-        // Deduplicate
-        unresolved.sort_by_key(|id| id.raw());
-        unresolved.dedup();
+        // Deduplicate by TyId
+        unresolved.sort_by_key(|(id, _)| id.raw());
+        unresolved.dedup_by_key(|(id, _)| id.raw());
         ctx.add_error(InferenceError::ambiguous(unresolved));
     }
 }
 
-fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<TyId>) {
+fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<(TyId, Span)>) {
     let ty = resolve_type(ctx, id);
     if matches!(ty.kind(), TyKind::Infer) {
-        unresolved.push(id);
+        unresolved.push((id, ty.span().clone()));
     }
 }
 

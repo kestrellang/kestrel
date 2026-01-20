@@ -52,7 +52,7 @@ use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     find_type_directed_match, get_callable_behavior, get_type_container,
     get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind, matches_signature,
-    replace_unsubstituted_type_params, substitute_self, substitute_type,
+    replace_type_params_except, replace_unsubstituted_type_params, substitute_self, substitute_type,
     validate_not_standalone_type_param, verify_type_argument_constraints,
 };
 
@@ -1274,14 +1274,32 @@ fn resolve_explicit_init_call(
         // We also need to replace any type parameters that aren't in the substitution
         // map with inference placeholders - this handles cases where the callable's
         // parameter types use different TypeParameter symbols than the struct's.
+        //
+        // However, if the substitution maps to a TypeParameter (e.g., Pointer[T] where T
+        // is from the caller's scope), we should NOT replace that with Infer - it's a
+        // valid type parameter that should be preserved.
+        //
+        // Collect the IDs of type parameters that are substitution values - these should
+        // be preserved (not replaced with Infer) after substitution.
+        let preserved_type_params: std::collections::HashSet<SymbolId> = struct_subs
+            .iter()
+            .filter_map(|(_, ty)| {
+                if let TyKind::TypeParameter(tp) = ty.kind() {
+                    Some(tp.metadata().id())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let param_tys: Vec<Ty> = callable
             .parameters()
             .iter()
             .map(|p| {
                 let ty = p.ty.apply_substitutions(&struct_subs);
-                // If the type is still a TypeParameter after substitution,
-                // replace it with an inference placeholder
-                replace_unsubstituted_type_params(&ty, &span)
+                // Replace unsubstituted type params with Infer, but preserve type params
+                // that came from substitution values (they're valid in the caller's scope)
+                replace_type_params_except(&ty, &preserved_type_params, &span)
             })
             .collect();
         let init_fn_ty = Ty::function(param_tys, struct_ty.clone(), span.clone());
@@ -1478,15 +1496,15 @@ pub fn resolve_method_call(
                     let resolved_receiver_ty = match &receiver.kind {
                         ExprKind::TypeRef(type_symbol_id) => {
                             // For TypeRef, check if receiver.ty has explicit type arguments
-                            // (from qualified path like Box[lang.i64].wrap)
-                            // This is indicated by non-empty substitutions with at least one concrete type
+                            // (from qualified path like Box[lang.i64].wrap or Pointer[T](...))
+                            // ANY non-empty substitutions means type args were explicitly written,
+                            // even if those types are type parameters (like T in a generic context)
                             let has_explicit_type_args = match receiver.ty.kind() {
                                 TyKind::Struct { substitutions, .. } |
                                 TyKind::Enum { substitutions, .. } => {
-                                    // Check if ANY substitution contains a concrete (non-type-param, non-infer) type
-                                    substitutions.iter().any(|(_, ty)| {
-                                        !matches!(ty.kind(), TyKind::TypeParameter(_) | TyKind::Infer)
-                                    })
+                                    // Non-empty substitutions = explicit type args were provided
+                                    // This includes both concrete types (lang.i64) and type params (T)
+                                    !substitutions.is_empty()
                                 }
                                 _ => false,
                             };
@@ -1563,13 +1581,10 @@ pub fn resolve_method_call(
                     // Handle struct receiver types (e.g., Box[Int])
                     if let Some((struct_sym, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Check if we need type inference (only for static methods):
-                        // 1. Substitutions map contains unresolved type parameters (T -> T)
-                        // 2. Struct is generic but has empty substitutions (Box.wrap case)
-                        let has_unresolved = substitutions.iter().any(|(_, ty)| {
-                            matches!(ty.kind(), TyKind::TypeParameter(_))
-                        });
-                        let needs_inference = is_static_method && (has_unresolved ||
-                            (substitutions.is_empty() && !struct_sym.type_parameters().is_empty()));
+                        // Only when struct is generic but has EMPTY substitutions (Box.wrap case)
+                        // If substitutions are non-empty (even with type params like T), we use them directly
+                        let needs_inference = is_static_method &&
+                            substitutions.is_empty() && !struct_sym.type_parameters().is_empty();
 
                         if needs_inference {
                             // Get type parameters from the callable's parameter types
@@ -1621,12 +1636,10 @@ pub fn resolve_method_call(
                     }
                     // Handle enum receiver types (e.g., Optional[Int])
                     else if let Some((enum_sym, substitutions)) = resolved_receiver_ty.as_enum_with_subs() {
-                        // Check if we need type inference (only for static methods)
-                        let has_unresolved = substitutions.iter().any(|(_, ty)| {
-                            matches!(ty.kind(), TyKind::TypeParameter(_))
-                        });
-                        let needs_inference = is_static_method && (has_unresolved ||
-                            (substitutions.is_empty() && !enum_sym.type_parameters().is_empty()));
+                        // Check if we need type inference (only for static methods):
+                        // Only when enum is generic but has EMPTY substitutions
+                        let needs_inference = is_static_method &&
+                            substitutions.is_empty() && !enum_sym.type_parameters().is_empty();
 
                         if needs_inference {
                             let callable_type_params = collect_callable_type_params(&callable);

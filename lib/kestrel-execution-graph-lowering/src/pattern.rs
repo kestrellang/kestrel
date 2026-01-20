@@ -52,8 +52,8 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
                 ctx.map_local(*local_id, new_local);
                 new_local
             };
-            // Use emit_move_value to transfer ownership and mark source temp as moved
-            ctx.emit_move_value(Place::local(mir_local), value);
+            // Use copy for copyable types, move for non-copyable types
+            ctx.emit_copy_or_move_value(Place::local(mir_local), value, &pattern.ty);
         }
 
         PatternKind::Wildcard => {

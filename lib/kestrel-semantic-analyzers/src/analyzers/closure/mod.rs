@@ -5,10 +5,12 @@ mod diagnostics;
 pub use diagnostics::*;
 
 use crate::analyzer::Analyzer;
+use crate::analyzers::type_assignability::is_assignable_with_constraints;
 use crate::context::AnalysisContext;
 use kestrel_semantic_model::LocalName;
 use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::ty::TyKind;
+use semantic_tree::symbol::Symbol;
 
 pub struct ClosureAnalyzer;
 
@@ -53,7 +55,7 @@ impl Analyzer for ClosureAnalyzer {
         }
 
         // Validate closure type matches expected type
-        validate_closure_type(expr, params, tail_expr, ctx);
+        validate_closure_type(expr, params, tail_expr, container_id, ctx);
 
         // Check for assignment to captured variables
         validate_capture_assignments(body, tail_expr.as_deref(), captures, container_id, ctx);
@@ -84,6 +86,7 @@ fn validate_closure_type(
     expr: &Expression,
     params: &Option<Vec<kestrel_semantic_tree::expr::ClosureParam>>,
     tail_expr: &Option<Box<Expression>>,
+    context_id: Option<semantic_tree::symbol::SymbolId>,
     ctx: &mut AnalysisContext,
 ) {
     // Extract the closure's function type
@@ -109,13 +112,22 @@ fn validate_closure_type(
             // Check parameter types match
             for (i, (param, expected_ty)) in param_list.iter().zip(param_tys.iter()).enumerate() {
                 // Only check if the parameter has a concrete type (not Infer)
-                if !param.ty.is_infer() && param.ty.id() != expected_ty.id() {
-                    ctx.report(ClosureParamTypeMismatchError {
-                        span: param.span.clone(),
-                        index: i,
-                        actual: param.ty.to_string(),
-                        expected: expected_ty.to_string(),
-                    });
+                if !param.ty.is_infer() {
+                    // Use constraint-aware type checking if we have a context
+                    let types_match = if let Some(id) = context_id {
+                        is_assignable_with_constraints(&param.ty, expected_ty, ctx.model, id)
+                    } else {
+                        param.ty.is_assignable_to(expected_ty)
+                    };
+
+                    if !types_match {
+                        ctx.report(ClosureParamTypeMismatchError {
+                            span: param.span.clone(),
+                            index: i,
+                            actual: param.ty.to_string(),
+                            expected: expected_ty.to_string(),
+                        });
+                    }
                 }
             }
         }

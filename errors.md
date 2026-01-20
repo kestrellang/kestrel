@@ -57,14 +57,14 @@
 
 ---
 
-### 8. init_with_parameter
+### 8. init_with_parameter (Fixed)
 **Location:** `lib/kestrel-test-suite/tests/execution_graph/structs.rs:537`
 
 **Issue:** Initializer methods with parameters aren't being recognized properly - the parameter access mode isn't set to borrow by default.
 
 ---
 
-### 9. calling_init
+### 9. calling_init (Fixed)
 **Location:** `lib/kestrel-test-suite/tests/execution_graph/structs.rs:565`
 
 **Issue:** Calling initializers with named parameters isn't working (`Counter(start: 42)`).
@@ -110,7 +110,7 @@
 
 ## Memory Model (3 failures)
 
-### 15. assignment_of_copyable_uses_copy
+### 15. assignment_of_copyable_uses_copy (Fixed)
 **Location:** `lib/kestrel-test-suite/tests/memory_model/copy_semantics.rs:435`
 
 **Issue:** MIR is using `move` instead of `copy` for assignments of copyable types.
@@ -124,10 +124,10 @@
 
 ---
 
-### 17. consuming_parameter_is_mutable
+### 17. consuming_parameter_is_mutable (Fixed)
 **Location:** `lib/kestrel-test-suite/tests/memory_model/parameter_access_modes.rs:502`
 
-**Issue:** Consuming parameters aren't being marked as mutable - the compiler is rejecting mutations like `p.x = ...`.
+**Issue:** Test was using `*` operator on `lang.i64` instead of `lang.i64_mul()` intrinsic.
 
 ---
 

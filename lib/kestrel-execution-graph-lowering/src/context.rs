@@ -410,6 +410,38 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// Emit a copy or move assignment based on the type's copyability.
+    ///
+    /// - Copyable types: emits `Rvalue::Copy` (value is duplicated, source remains valid)
+    /// - Non-copyable types: emits `Rvalue::Move` (ownership transferred, source invalidated)
+    ///
+    /// This should be used for let bindings and other places where the semantic
+    /// copy/move distinction matters.
+    pub fn emit_copy_or_move_value(
+        &mut self,
+        dest: Place,
+        value: Value,
+        ty: &kestrel_semantic_tree::ty::Ty,
+    ) {
+        match value {
+            Value::Place(ref p) => {
+                if ty.is_copyable() {
+                    self.emit_assign(dest, Rvalue::Copy(p.clone()));
+                } else {
+                    self.emit_assign(dest, Rvalue::Move(p.clone()));
+                    // Mark the source local as moved
+                    if let Some(local) = p.as_local() {
+                        self.mark_moved(local);
+                    }
+                }
+            }
+            Value::Immediate(i) => self.emit_imm(dest, i),
+            Value::Unreachable => {
+                // Expression diverged, no value to assign.
+            }
+        }
+    }
+
     // === Terminator Emission ===
 
     /// Set the terminator for the current block.
