@@ -5,7 +5,7 @@ module std.num
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool,
+    Equatable, Comparable, Ordering, Bool, Matchable,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     ExpressibleByIntLiteral, Convertible
@@ -16,6 +16,7 @@ public struct Int16:
     Steppable,
     Comparable,
     Equatable,
+    Matchable,
     Addable,
     Subtractable,
     Multipliable,
@@ -63,6 +64,10 @@ public struct Int16:
     public init(from other: UInt64) { self.raw = lang.cast_i64_i16(other.raw) }
 
     public func equals(other: Int16) -> Bool {
+        Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
+    }
+
+    public func matches(other: Int16) -> Bool {
         Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
     }
 

@@ -273,6 +273,19 @@ impl Constructor {
             }]),
 
             TyKind::Struct { symbol, .. } => {
+                // Check if this struct conforms to ExpressibleByBoolLiteral
+                // If so, use True/False constructors for exhaustiveness checking
+                use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+                if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
+                    for conf in conformances.conformances() {
+                        if let TyKind::Protocol { symbol: proto, .. } = conf.kind() {
+                            if proto.metadata().name().value == "ExpressibleByBoolLiteral" {
+                                return Some(vec![Constructor::True, Constructor::False]);
+                            }
+                        }
+                    }
+                }
+
                 // Count Field children
                 let field_count = symbol
                     .metadata()

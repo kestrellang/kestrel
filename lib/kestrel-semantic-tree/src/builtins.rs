@@ -20,6 +20,9 @@ pub enum LanguageFeature {
     Cloneable,
     Clone,
 
+    // Protocol builtins - pattern matching
+    Matchable,
+
     // Protocol builtins - literal expressibility
     ExpressibleByIntLiteral,
     ExpressibleByFloatLiteral,
@@ -113,6 +116,7 @@ impl LanguageFeature {
             "Copyable" => Some(Self::Copyable),
             "Cloneable" => Some(Self::Cloneable),
             "Clone" => Some(Self::Clone),
+            "Matchable" => Some(Self::Matchable),
             "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntLiteral),
             "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
             "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
@@ -194,6 +198,7 @@ impl LanguageFeature {
             Self::Copyable => "Copyable",
             Self::Cloneable => "Cloneable",
             Self::Clone => "Clone",
+            Self::Matchable => "Matchable",
             Self::ExpressibleByIntLiteral => "ExpressibleByIntLiteral",
             Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
             Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
@@ -295,6 +300,16 @@ impl LanguageFeature {
                 feature: *self,
                 kind: BuiltinKind::ProtocolMethod {
                     protocol_feature: LanguageFeature::Cloneable,
+                },
+            },
+            Self::Matchable => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::Protocol {
+                    implicit_conformance: false,
+                    must_be_marker: false,
+                    tuple_conformance_propagation: false,
+                    requires_fields_conform: false,
+                    disallow_enum_conformance: false,
                 },
             },
             Self::ExpressibleByIntLiteral => BuiltinDefinition {
@@ -784,6 +799,11 @@ impl BuiltinRegistry {
     /// Convenience: Get the Cloneable protocol.
     pub fn cloneable_protocol(&self) -> Option<SymbolId> {
         self.protocol(LanguageFeature::Cloneable)
+    }
+
+    /// Convenience: Get the Matchable protocol.
+    pub fn matchable_protocol(&self) -> Option<SymbolId> {
+        self.protocol(LanguageFeature::Matchable)
     }
 
     // =========================================================================

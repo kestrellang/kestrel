@@ -6,6 +6,7 @@ import std.ffi.(FFISafe)
 
 public struct Bool:
     Equatable,
+    Matchable,
     And[Bool],
     Or[Bool],
     Not,
@@ -22,6 +23,11 @@ public struct Bool:
 
     // Equatable
     public func equals(other: Bool) -> Bool {
+        Bool(boolLiteral: lang.i1_eq(self.value, other.value))
+    }
+
+    // Matchable
+    public func matches(other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
 

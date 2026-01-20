@@ -5,8 +5,8 @@
 - [x] Cleanup
 - [x] Remove old STD
 - [x] Move IO into standard library
-- [ ] Build with std by default, add --no-std flag.
-- [ ] Fix dictionary / mutating
+- [x] Build with std by default, add --no-std flag.
+- [x] Fix matches on non-primitive types 
 - [ ] Add display protocol
 - [ ] Reference counting
 - [ ] Web server

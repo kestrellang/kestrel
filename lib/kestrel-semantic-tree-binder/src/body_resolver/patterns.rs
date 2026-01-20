@@ -399,7 +399,9 @@ fn resolve_literal_pattern(
                 }
                 SyntaxKind::Boolean => {
                     let value = text == "true";
-                    let ty = Ty::bool(span.clone());
+                    // Use infer type so type inference can unify with scrutinee type
+                    // based on the scrutinee type and ExpressibleByBoolLiteral conformance
+                    let ty = Ty::infer(span.clone());
                     return Pattern::literal(LiteralValue::Bool(value), ty, span);
                 }
                 _ => {}

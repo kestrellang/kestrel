@@ -9,6 +9,12 @@ public protocol Equatable {
     func equals(other: Self) -> Bool
 }
 
+// Matchable - types that can be matched in match expressions
+@builtin(.Matchable)
+public protocol Matchable {
+    func matches(other: Self) -> Bool
+}
+
 // Default operator implementation for Equatable (provides ==)
 extend Equatable: Equal[Self] {
     type Equal.Output = Bool
