@@ -131,7 +131,7 @@ pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bo
     )
 }
 
-fn get_wrapper_primitive(ctx: &MirContext, ty: Id<Ty>) -> Option<Id<Ty>> {
+pub fn get_wrapper_primitive(ctx: &MirContext, ty: Id<Ty>) -> Option<Id<Ty>> {
     if let MirTy::Named { name, .. } = ctx.ty(ty) {
         if let Some((_, struct_def)) = ctx.structs.iter().find(|(_, s)| s.name == *name) {
             if struct_def.fields.len() == 1 {

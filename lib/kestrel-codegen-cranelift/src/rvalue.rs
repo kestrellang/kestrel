@@ -4,7 +4,7 @@ use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::{Substitution, build_substitution, resolve_witness};
 use crate::place::{compile_place_read, get_enum_payload_offset};
-use crate::types::{translate_type, translate_type_ext};
+use crate::types::{get_wrapper_primitive, translate_type, translate_type_ext};
 
 use kestrel_codegen::{Layout, mangle_name};
 use kestrel_execution_graph::{
@@ -1567,6 +1567,85 @@ fn ensure_primitive_value(
     }
 }
 
+/// Wrap a primitive return value from an extern function into its wrapper struct type.
+///
+/// This is the inverse of `ensure_primitive_value`. When an extern function returns
+/// a wrapper type like Int32 (which wraps lang.i32), the C ABI returns the raw primitive.
+/// This function allocates a stack slot for the wrapper struct and stores the primitive
+/// value into the struct's single field, returning a pointer to the struct.
+///
+/// Returns the original value unchanged if the type is not a wrapper type.
+fn wrap_extern_return_value(
+    ctx: &mut CodegenContext<'_>,
+    subst: &Substitution,
+    val: CraneliftValue,
+    mir_ret_ty: Id<Ty>,
+    builder: &mut FunctionBuilder<'_>,
+) -> Result<CraneliftValue, CodegenError> {
+    let concrete_ret_ty = subst.apply_ty_readonly(ctx.mir, mir_ret_ty).unwrap_or(mir_ret_ty);
+
+    // Check if wrapper type (single-field struct wrapping primitive)
+    let Some(inner_ty) = get_wrapper_primitive(ctx.mir, concrete_ret_ty) else {
+        return Ok(val); // Not a wrapper, return as-is
+    };
+
+    // Verify inner is primitive
+    if !matches!(
+        ctx.mir.ty(inner_ty),
+        MirTy::I8
+            | MirTy::I16
+            | MirTy::I32
+            | MirTy::I64
+            | MirTy::F16
+            | MirTy::F32
+            | MirTy::F64
+            | MirTy::Bool
+    ) {
+        return Ok(val);
+    }
+
+    // Allocate stack slot for wrapper struct
+    let layout = ctx.layouts.layout_of(concrete_ret_ty);
+    let size = if layout.size == 0 { 1 } else { layout.size };
+    let align = if layout.align == 0 { 1 } else { layout.align };
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        size as u32,
+        align as u8,
+    ));
+    let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
+
+    // Find field offset and store primitive
+    if let MirTy::Named { name, .. } = ctx.mir.ty(concrete_ret_ty) {
+        if let Some((struct_id, struct_def)) = ctx.mir.structs.iter().find(|(_, s)| s.name == *name)
+        {
+            if struct_def.fields.len() == 1 {
+                let field_def = &ctx.mir.fields[struct_def.fields[0]];
+                let struct_layout = ctx.layouts.struct_layout(struct_id);
+                let field_offset = struct_layout
+                    .field_offsets
+                    .get(&field_def.name)
+                    .copied()
+                    .unwrap_or(0);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), val, struct_ptr, field_offset as i32);
+                return Ok(struct_ptr);
+            }
+        }
+    }
+
+    // Fallback: store at offset 0
+    builder.ins().store(MemFlags::new(), val, struct_ptr, 0);
+    Ok(struct_ptr)
+}
+
 /// Compile a pointer offset operation.
 fn compile_ptr_offset(
     ctx: &mut CodegenContext<'_>,
@@ -2186,7 +2265,22 @@ pub fn compile_call(
                 // Unit return - return a dummy value
                 Ok(builder.ins().iconst(cl_types::I8, 0))
             } else {
-                Ok(results[0])
+                let raw_result = results[0];
+                // For extern functions, wrap primitive returns back into wrapper structs
+                if is_extern {
+                    if let Some(def) = callee_def {
+                        let mut callee_subst =
+                            build_substitution(ctx.mir, &def.type_params, &concrete_args);
+                        if let Some(st) = self_type {
+                            callee_subst.set_self_type(st);
+                        }
+                        wrap_extern_return_value(ctx, &callee_subst, raw_result, def.ret, builder)
+                    } else {
+                        Ok(raw_result)
+                    }
+                } else {
+                    Ok(raw_result)
+                }
             }
         }
 
