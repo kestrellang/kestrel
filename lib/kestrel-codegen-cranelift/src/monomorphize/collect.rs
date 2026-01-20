@@ -51,6 +51,7 @@ impl<'a> CollectionContext<'a> {
             functions_by_name.insert(func_def.name, func_id);
         }
 
+
         Self {
             mir,
             functions_by_name,

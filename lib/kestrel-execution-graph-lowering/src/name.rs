@@ -132,17 +132,19 @@ fn collect_name_segments(symbol: &Arc<dyn Symbol<KestrelLanguage>>, segments: &m
         KestrelSymbolKind::Initializer => {
             // Initializers include parameter labels in the name for overload differentiation
             // e.g., init(intLiteral:) becomes "init$intLiteral", init() becomes "init"
+            // For unlabeled params, we use internal names (e.g., init$ptr$len$cap)
             if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-                let labels: Vec<&str> = callable
+                // Use external labels if present, otherwise fall back to internal names
+                let name_parts: Vec<&str> = callable
                     .parameters()
                     .iter()
-                    .filter_map(|p| p.external_label())
+                    .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
                     .collect();
 
-                if labels.is_empty() {
+                if name_parts.is_empty() {
                     segments.push("init".to_string());
                 } else {
-                    segments.push(format!("init${}", labels.join("$")));
+                    segments.push(format!("init${}", name_parts.join("$")));
                 }
             } else {
                 segments.push("init".to_string());

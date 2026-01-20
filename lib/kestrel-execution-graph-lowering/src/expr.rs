@@ -1607,8 +1607,18 @@ fn lower_array_literal_init_call(
     let unit_local = ctx.create_temp("init_ret", unit_ty);
     let unit_place = Place::local(unit_local);
 
+    // Extract type arguments from the struct type
+    let type_args = match extract_type_args_from_receiver(ctx, &expr.ty, Some(expr.span.clone())) {
+        Some(args) => args,
+        None => return Value::Immediate(Immediate::error()),
+    };
+
     // Call the init function
-    let mir_callee = Callee::direct(init_name);
+    let mir_callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
     ctx.emit_call_with_modes(unit_place, mir_callee, call_args);
 
     // Return the initialized struct
@@ -1761,15 +1771,16 @@ fn lower_literal_init_call(
 
     // Get all labels from the found init symbol
     let init_name_suffix = if let Some(callable) = init_sym.metadata().get_behavior::<CallableBehavior>() {
-        let labels: Vec<&str> = callable
+        // Use external labels if present, otherwise fall back to internal names
+        let name_parts: Vec<&str> = callable
             .parameters()
             .iter()
-            .filter_map(|p| p.external_label())
+            .map(|p| p.external_label().unwrap_or_else(|| p.internal_name()))
             .collect();
-        if labels.is_empty() {
+        if name_parts.is_empty() {
             "init".to_string()
         } else {
-            format!("init${}", labels.join("$"))
+            format!("init${}", name_parts.join("$"))
         }
     } else {
         format!("init${}", init_label)
@@ -2120,10 +2131,12 @@ fn lower_delegating_init(
     ctx: &mut LoweringContext,
     initializer: SymbolId,
     arguments: &[CallArgument],
-    _substitutions: &kestrel_semantic_tree::ty::Substitutions,
+    substitutions: &kestrel_semantic_tree::ty::Substitutions,
     _expr: &Expression,
 ) -> Value {
     use kestrel_semantic_tree::symbol::local::LocalId;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::symbol::EnumSymbol;
     use semantic_tree::symbol::Symbol;
 
     // Get the initializer symbol
@@ -2153,9 +2166,46 @@ fn lower_delegating_init(
     let mut all_args = vec![self_value];
     all_args.extend(arg_values);
 
+    // Get type arguments from the parent struct/enum
+    // Delegating inits need to pass the same type arguments as the enclosing generic type
+    let type_args: Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> =
+        if let Some(parent) = init_sym.metadata().parent() {
+            let param_ids: Vec<SymbolId> =
+                if let Some(struct_sym) = parent.as_ref().downcast_ref::<StructSymbol>() {
+                    struct_sym
+                        .type_parameters()
+                        .iter()
+                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                        .collect()
+                } else if let Some(enum_sym) = parent.as_ref().downcast_ref::<EnumSymbol>() {
+                    enum_sym
+                        .type_parameters()
+                        .iter()
+                        .map(|tp| Symbol::metadata(tp.as_ref()).id())
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+            if let Some(ordered_types) = substitutions.types_in_order(&param_ids) {
+                ordered_types
+                    .into_iter()
+                    .map(|ty| lower_type(ctx, ty))
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
     // Emit the call to the delegated initializer
     // Delegating inits return unit (they modify self in-place)
-    let callee = Callee::direct(init_name);
+    let callee = if type_args.is_empty() {
+        Callee::direct(init_name)
+    } else {
+        Callee::direct_generic(init_name, type_args)
+    };
     ctx.emit_call_unit(callee, all_args);
 
     // Delegating init returns unit

@@ -1850,9 +1850,23 @@ pub fn resolve_delegating_init(
                 // Validate access modes for arguments
                 validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
-                // Build substitutions from the parent struct's type parameters
-                // (if the struct is generic, we need to pass them to the delegated init)
-                let substitutions = Substitutions::new();
+                // Build substitutions from the self type
+                // For generic structs like Array[T], self has type Array[T] with substitutions {T -> TypeParameter(T)}
+                // We need to pass these substitutions to the delegated initializer
+                let substitutions = if let Some(self_local_id) = ctx.local_scope.lookup("self") {
+                    if let Some(self_local) = ctx.local_scope.get_local(self_local_id) {
+                        let self_ty = self_local.ty();
+                        if let Some((_, subs)) = self_ty.as_struct_with_subs() {
+                            subs.clone()
+                        } else {
+                            Substitutions::new()
+                        }
+                    } else {
+                        Substitutions::new()
+                    }
+                } else {
+                    Substitutions::new()
+                };
 
                 return Expression::delegating_init(init_id, arguments, substitutions, span);
             }
