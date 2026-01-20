@@ -66,6 +66,30 @@ impl WhereClause {
             .collect()
     }
 
+    /// Get all bounds for a specific type parameter along with the constraint's param span.
+    ///
+    /// Returns tuples of (bound, constraint_span) where constraint_span is the span
+    /// of the type parameter name in the where clause (e.g., span of "F" in "F: Formattable").
+    pub fn bounds_for_with_span(&self, param_id: SymbolId) -> Vec<(&Ty, &Span)> {
+        self.constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::TypeBound {
+                    param: Some(id),
+                    bounds,
+                    param_span,
+                    ..
+                } if *id == param_id => Some(bounds.iter().map(move |b| (b, param_span))),
+                Constraint::TypeBound { .. } => None,
+                Constraint::NegativeBound { .. } => None,
+                Constraint::InheritedAssociatedTypeBound { .. } => None,
+                Constraint::TypeEquality { .. } => None,
+                Constraint::SelfBound { .. } => None,
+            })
+            .flatten()
+            .collect()
+    }
+
     /// Get all negative bounds for a specific type parameter
     pub fn negative_bounds_for(&self, param_id: SymbolId) -> Vec<&Ty> {
         self.constraints

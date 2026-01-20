@@ -122,7 +122,8 @@ public struct UInt64:
         let ten: UInt64 = 10;
         while n != UInt64.zero {
             let digit: UInt64 = n % ten;
-            result.appendByte(UInt8(from: digit + 48));
+            let charCode: Int64 = Int64(from: digit) + 48;
+            result.appendByte(UInt8(from: charCode));
             n = n / ten
         }
 

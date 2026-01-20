@@ -126,7 +126,8 @@ public struct Int16:
         let ten: Int16 = 10;
         while n != Int16.zero {
             let digit: Int16 = n % ten;
-            result.appendByte(UInt8(from: Int64(from: digit) + 48));
+            let charCode: Int64 = Int64(from: digit) + 48;
+            result.appendByte(UInt8(from: charCode));
             n = n / ten
         }
 

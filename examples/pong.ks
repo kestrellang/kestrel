@@ -310,54 +310,15 @@ struct Pong {
     func renderScoreBox() {
         // Simple score line
         print("  \x1b[32mPLAYER 1:\x1b[0m \x1b[1;37m");
-        print(intToString(self.score1));
+        print(self.score1);
         print("\x1b[0m");
         print("                    ");
         print("\x1b[36mPLAYER 2:\x1b[0m \x1b[1;37m");
-        print(intToString(self.score2));
+        print(self.score2);
         println("\x1b[0m\x1b[K");
 
         println("  W/S or Arrow Keys to move | Ctrl+C to exit\x1b[K");
     }
-}
-
-// Convert Int64 to String
-func intToString(n: Int64) -> String {
-    if n == 0 {
-        return "0"
-    }
-
-    var num = n;
-    var negative = false;
-    if num < 0 {
-        negative = true;
-        num = 0 - num;
-    }
-
-    var result = "";
-    while num > 0 {
-        let digit = num % 10;
-        let ch = match digit {
-            0 => "0",
-            1 => "1",
-            2 => "2",
-            3 => "3",
-            4 => "4",
-            5 => "5",
-            6 => "6",
-            7 => "7",
-            8 => "8",
-            _ => "9",
-        };
-        result = ch + result;
-        num = num / 10;
-    }
-
-    if negative {
-        result = "-" + result;
-    }
-
-    result
 }
 
 // Import usleep from C for timing

@@ -403,9 +403,18 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             // Check if this is a field that needs implicit self access
             if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
                 if symbol.metadata().kind() == KestrelSymbolKind::Field {
+                    // Check if this is a static field - static fields don't use implicit self
+                    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                    let is_static = symbol
+                        .as_ref()
+                        .downcast_ref::<FieldSymbol>()
+                        .map(|f| f.is_static())
+                        .unwrap_or(false);
+
                     // This is a field reference like `x` that should become `self.x`
-                    // Look for 'self' in local scope
-                    if let Some(self_local_id) = ctx.local_scope.lookup("self") {
+                    // Look for 'self' in local scope (but not for static fields)
+                    if !is_static {
+                        if let Some(self_local_id) = ctx.local_scope.lookup("self") {
                         let self_local = ctx.local_scope.get_local(self_local_id);
                         let self_ty = self_local
                             .as_ref()
@@ -439,8 +448,51 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                             field_ty,
                             span,
                         );
+                        }
                     }
                     // If no self, fall through to create type_ref
+                    // For static fields, we need to handle them specially
+                    if is_static {
+                        // Get the parent (struct/enum) to create a TypeRef base
+                        if let Some(parent) = symbol.metadata().parent() {
+                            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                            use super::utils::create_struct_type_with_type_args;
+
+                            let parent_id = parent.metadata().id();
+                            let parent_ty = parent
+                                .clone()
+                                .downcast_arc::<StructSymbol>()
+                                .ok()
+                                .map(|struct_sym| {
+                                    create_struct_type_with_type_args(
+                                        &(struct_sym as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
+                                        &[],
+                                        span.clone(),
+                                        ctx,
+                                    )
+                                })
+                                .unwrap_or_else(|| Ty::infer(span.clone()));
+
+                            // Create TypeRef for the parent type
+                            let type_ref = Expression::type_ref(parent_id, parent_ty, span.clone());
+
+                            // Get field type from TypedBehavior
+                            let field_ty = symbol
+                                .metadata()
+                                .get_behavior::<TypedBehavior>()
+                                .map(|tb| tb.ty().clone())
+                                .unwrap_or_else(|| Ty::error(span.clone()));
+
+                            let field_name = symbol.metadata().name().value.clone();
+                            return Expression::field_access(
+                                type_ref,
+                                field_name,
+                                false, // static fields are not mutable through this access
+                                field_ty,
+                                span,
+                            );
+                        }
+                    }
                 }
             }
             // This is a type reference (e.g., struct name) - may be used for initialization

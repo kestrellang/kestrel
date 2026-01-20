@@ -15,6 +15,7 @@ use kestrel_semantic_tree::expr::{CallArgument, ExprId, ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::enum_case::EnumCaseSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -1351,12 +1352,21 @@ fn resolve_implicit_init(
 ) -> Expression {
     let struct_name = struct_symbol.metadata().name().value.clone();
 
-    // Collect fields in declaration order
+    // Collect stored (non-computed, non-static) fields in declaration order
+    // Only stored fields are part of the memberwise initializer
     let fields: Vec<Arc<dyn Symbol<KestrelLanguage>>> = struct_symbol
         .metadata()
         .children()
         .into_iter()
         .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .filter(|c| {
+            // Exclude computed and static fields from memberwise init
+            if let Some(field) = c.as_ref().downcast_ref::<FieldSymbol>() {
+                !field.is_computed() && !field.is_static()
+            } else {
+                true // Include if we can't downcast (shouldn't happen)
+            }
+        })
         .collect();
 
     let field_names: Vec<String> = fields

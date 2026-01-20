@@ -786,9 +786,9 @@ pub fn verify_type_argument_constraints(
         }
 
         let param_id = param.metadata().id();
-        let bounds = where_clause.bounds_for(param_id);
+        let bounds_with_spans = where_clause.bounds_for_with_span(param_id);
 
-        for bound in bounds {
+        for (bound, constraint_span) in bounds_with_spans {
             if !type_satisfies_bound(arg, bound, model) {
                 // Report constraint not satisfied
                 let param_name = param.metadata().name().value.clone();
@@ -800,7 +800,7 @@ pub fn verify_type_argument_constraints(
                     type_name,
                     constraint_name,
                     type_param_name: param_name,
-                    constraint_span: Some(bound.span().clone()),
+                    constraint_span: Some(constraint_span.clone()),
                 };
                 diagnostics.add_diagnostic(error.into_diagnostic());
                 all_satisfied = false;

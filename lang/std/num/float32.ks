@@ -129,7 +129,8 @@ public struct Float32:
             var digits = String();
             while intVal > 0 {
                 let digit: Int64 = intVal % 10;
-                digits.appendByte(UInt8(from: digit + 48));
+                let charCode: Int64 = digit + 48;
+                digits.appendByte(UInt8(from: charCode));
                 intVal = intVal / 10
             }
             // Reverse digits
@@ -152,7 +153,8 @@ public struct Float32:
         while digitCount < maxDigits {
             fracPart = fracPart * ten;
             let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
-            result.appendByte(UInt8(from: digit + 48));
+            let charCode: Int64 = digit + 48;
+            result.appendByte(UInt8(from: charCode));
             fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
             digitCount = digitCount + 1
         }

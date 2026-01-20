@@ -58,7 +58,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     """Generate the format() method for integer types."""
 
     # For converting digit to Int64 for UInt8 conversion
-    if bits == 64:
+    if bits == 64 and signed:
         digit_as_i64 = "digit"
     else:
         digit_as_i64 = f"Int64(from: digit)"
@@ -81,7 +81,8 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         let ten: {type_name} = 10;
         while n != {type_name}.zero {{
             let digit: {type_name} = n % ten;
-            result.appendByte(UInt8(from: {digit_as_i64} + 48));
+            let charCode: Int64 = {digit_as_i64} + 48;
+            result.appendByte(UInt8(from: charCode));
             n = n / ten
         }}
 
@@ -111,7 +112,8 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         let ten: {type_name} = 10;
         while n != {type_name}.zero {{
             let digit: {type_name} = n % ten;
-            result.appendByte(UInt8(from: {digit_as_i64} + 48));
+            let charCode: Int64 = {digit_as_i64} + 48;
+            result.appendByte(UInt8(from: charCode));
             n = n / ten
         }}
 
@@ -254,7 +256,8 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             var digits = String();
             while intVal > 0 {{
                 let digit: Int64 = intVal % 10;
-                digits.appendByte(UInt8(from: digit + 48));
+                let charCode: Int64 = digit + 48;
+                digits.appendByte(UInt8(from: charCode));
                 intVal = intVal / 10
             }}
             // Reverse digits
@@ -277,7 +280,8 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         while digitCount < maxDigits {{
             fracPart = fracPart * ten;
             let digit: Int64 = Int64(raw: lang.cast_{lang_type}_i64(fracPart.trunc().raw));
-            result.appendByte(UInt8(from: digit + 48));
+            let charCode: Int64 = digit + 48;
+            result.appendByte(UInt8(from: charCode));
             fracPart = fracPart - {type_name}(raw: lang.cast_i64_{lang_type}(digit.raw));
             digitCount = digitCount + 1
         }}
