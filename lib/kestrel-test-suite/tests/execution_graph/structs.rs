@@ -149,7 +149,7 @@ mod struct_construction {
 
             func main() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
-                p.x + p.y
+                lang.i64_add(p.x, p.y)
             }
         "#,
         )
@@ -308,7 +308,7 @@ mod instance_methods {
                 let y: lang.i64
                 
                 func distanceSquared() -> lang.i64 {
-                    self.x * self.x + self.y * self.y
+                    lang.i64_add(lang.i64_mul(self.x, self.x), lang.i64_mul(self.y, self.y))
                 }
             }
         "#,
@@ -335,7 +335,7 @@ mod instance_methods {
                 let y: lang.i64
                 
                 func add(dx: lang.i64, dy: lang.i64) -> Point {
-                    Point(x: self.x + dx, y: self.y + dy)
+                    Point(x: lang.i64_add(self.x, dx), y: lang.i64_add(self.y, dy))
                 }
             }
         "#,
@@ -363,11 +363,11 @@ mod instance_methods {
                 let height: lang.i64
                 
                 func area() -> lang.i64 {
-                    self.width * self.height
+                    lang.i64_mul(self.width, self.height)
                 }
-                
+
                 func perimeter() -> lang.i64 {
-                    2 * (self.width + self.height)
+                    lang.i64_mul(2, lang.i64_add(self.width, self.height))
                 }
             }
         "#,
@@ -389,7 +389,7 @@ mod instance_methods {
                 let y: lang.i64
                 
                 func sum() -> lang.i64 {
-                    self.x + self.y
+                    lang.i64_add(self.x, self.y)
                 }
             }
 
@@ -423,7 +423,7 @@ mod mutating_methods {
                 var count: lang.i64
                 
                 mutating func increment() {
-                    self.count = self.count + 1;
+                    self.count = lang.i64_add(self.count, 1);
                 }
             }
         "#,
@@ -449,7 +449,7 @@ mod mutating_methods {
                 var count: lang.i64
                 
                 mutating func add(n: lang.i64) {
-                    self.count = self.count + n;
+                    self.count = lang.i64_add(self.count, n);
                 }
             }
         "#,
@@ -474,7 +474,7 @@ mod mutating_methods {
                 var count: lang.i64
                 
                 mutating func increment() {
-                    self.count = self.count + 1;
+                    self.count = lang.i64_add(self.count, 1);
                 }
 
                 func read() -> lang.i64 {
@@ -611,7 +611,7 @@ mod static_methods {
 
             struct Math {
                 static func add(a: lang.i64, b: lang.i64) -> lang.i64 {
-                    a + b
+                    lang.i64_add(a, b)
                 }
             }
         "#,
@@ -635,7 +635,7 @@ mod static_methods {
 
             struct Math {
                 static func add(a: lang.i64, b: lang.i64) -> lang.i64 {
-                    a + b
+                    lang.i64_add(a, b)
                 }
             }
 
@@ -698,11 +698,11 @@ mod chained_methods {
                 let value: lang.i64
                 
                 func add(n: lang.i64) -> Builder {
-                    Builder(value: self.value + n)
+                    Builder(value: lang.i64_add(self.value, n))
                 }
-                
+
                 func multiply(n: lang.i64) -> Builder {
-                    Builder(value: self.value * n)
+                    Builder(value: lang.i64_mul(self.value, n))
                 }
                 
                 func build() -> lang.i64 {

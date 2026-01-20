@@ -1251,7 +1251,7 @@ mod constraint_enforcement {
                 func negate() -> Self
             }
             func compute[T](a: T, b: T) -> T where T: Add, T: Negate {
-                let sum: T = a.add(b);
+                var sum: T = a.add(b);
                 return sum.negate()
             }
             func main() {}
@@ -1403,8 +1403,8 @@ mod constraint_enforcement {
                 func multiply(other: Self) -> Self
             }
             func compute[T](a: T, b: T, c: T) -> T where T: Math {
-                let sum: T = a.add(b);
-                let diff: T = sum.subtract(c);
+                var sum: T = a.add(b);
+                var diff: T = sum.subtract(c);
                 return diff.multiply(a)
             }
             func main() {}
@@ -1477,8 +1477,8 @@ mod constraint_enforcement {
                 func doB() -> lang.i64
             }
             func both[T](x: T) -> lang.i64 where T: A and B {
-                let a: lang.i64 = x.doA();
-                let b: lang.i64 = x.doB();
+                var a: lang.i64 = x.doA();
+                var b: lang.i64 = x.doB();
                 return a
             }
             func main() {}
@@ -1654,7 +1654,8 @@ mod constraint_enforcement {
                 return x.process()
             }
             func outer[U](y: U) -> U where U: Processable {
-                return helper[U](y)
+                var result: U = helper[U](y);
+                return result
             }
             func main() {}
         "#,
@@ -1736,7 +1737,7 @@ mod constraint_enforcement {
                 return x.run()
             }
             func outer[U](y: U) -> U where U: Process {
-                let result: U = inner[U](y);
+                var result: U = inner[U](y);
                 return result
             }
             func main() {}
@@ -1754,8 +1755,8 @@ mod constraint_enforcement {
                 func value() -> lang.i64
             }
             func sumValues[T](a: T, b: T) -> lang.i64 where T: Valuable {
-                let x: lang.i64 = a.value();
-                let y: lang.i64 = b.value();
+                var x: lang.i64 = a.value();
+                var y: lang.i64 = b.value();
                 return x
             }
             func main() {}
@@ -1957,7 +1958,7 @@ mod constraint_enforcement {
             r#"module Test
             func identity[T](x: T) -> T { return x }
             func main() {
-                let x: lang.i64 = identity[lang.i64](1) + identity[lang.i64](2);
+                let x: lang.i64 = lang.i64_add(identity[lang.i64](1), identity[lang.i64](2));
             }
         "#,
         )

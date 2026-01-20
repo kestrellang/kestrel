@@ -21,7 +21,7 @@ fn test_int_widening_i8_to_i64() {
 module Test
 
 func main() -> lang.i64 {
-    let x: I8 = 42
+    let x: lang.i8 = 42
     x.toInt()
 }
 "#,
@@ -56,7 +56,7 @@ fn test_int_widening_i32_to_i64() {
 module Test
 
 func main() -> lang.i64 {
-    let x: I32 = 77
+    let x: lang.i32 = 77
     x.toInt()
 }
 "#,
@@ -72,7 +72,7 @@ fn test_int_widening_negative() {
 module Test
 
 func main() -> lang.i64 {
-    let x: I8 = -10
+    let x: lang.i8 = -10
     let y = x.toInt()
     // -10 as i64 should still be -10
     // exit code wraps to 246 (256 - 10)
@@ -268,7 +268,7 @@ fn test_chained_casts() {
 module Test
 
 func main() -> lang.i64 {
-    let x: I8 = 42
+    let x: lang.i8 = 42
     let y = x.toI32()
     let z = y.toInt()
     z
@@ -286,8 +286,8 @@ fn test_cast_in_expression() {
 module Test
 
 func main() -> lang.i64 {
-    let x: I8 = 20
-    let y: I8 = 22
+    let x: lang.i8 = 20
+    let y: lang.i8 = 22
     x.toInt() + y.toInt()
 }
 "#,

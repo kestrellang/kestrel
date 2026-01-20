@@ -26,8 +26,8 @@ mod while_loops {
 
             func countdown(n: lang.i64) -> lang.i64 {
                 var i = n;
-                while i > 0 {
-                    i = i - 1;
+                while lang.i64_signed_gt(i, 0) {
+                    i = lang.i64_sub(i, 1);
                 }
                 i
             }
@@ -53,9 +53,9 @@ mod while_loops {
             func factorial(n: lang.i64) -> lang.i64 {
                 var result = 1;
                 var i = n;
-                while i > 1 {
-                    result = result * i;
-                    i = i - 1;
+                while lang.i64_signed_gt(i, 1) {
+                    result = lang.i64_mul(result, i);
+                    i = lang.i64_sub(i, 1);
                 }
                 result
             }
@@ -80,17 +80,17 @@ mod while_loops {
             module Main
 
             func fibonacci(n: lang.i64) -> lang.i64 {
-                if n <= 1 {
+                if lang.i64_signed_le(n, 1) {
                     n
                 } else {
                     var a = 0;
                     var b = 1;
                     var i = 2;
-                    while i <= n {
-                        let temp = a + b;
+                    while lang.i64_signed_le(i, n) {
+                        let temp = lang.i64_add(a, b);
                         a = b;
                         b = temp;
-                        i = i + 1;
+                        i = lang.i64_add(i, 1);
                     }
                     b
                 }
@@ -124,8 +124,8 @@ mod infinite_loops {
             func test() -> lang.i64 {
                 var i = 0;
                 loop {
-                    i = i + 1;
-                    if i >= 10 {
+                    i = lang.i64_add(i, 1);
+                    if lang.i64_signed_ge(i, 10) {
                         break
                     }
                 }
@@ -160,10 +160,10 @@ mod break_continue {
             func findFirst(limit: lang.i64) -> lang.i64 {
                 var i = 0;
                 while true {
-                    if i >= limit {
+                    if lang.i64_signed_ge(i, limit) {
                         break
                     }
-                    i = i + 1;
+                    i = lang.i64_add(i, 1);
                 }
                 i
             }
@@ -188,12 +188,12 @@ mod break_continue {
             func sumOdd(limit: lang.i64) -> lang.i64 {
                 var sum = 0;
                 var i = 0;
-                while i < limit {
-                    i = i + 1;
-                    if i % 2 == 0 {
+                while lang.i64_signed_lt(i, limit) {
+                    i = lang.i64_add(i, 1);
+                    if lang.i64_eq(lang.i64_signed_rem(i, 2), 0) {
                         continue
                     }
-                    sum = sum + i;
+                    sum = lang.i64_add(sum, i);
                 }
                 sum
             }
@@ -220,15 +220,15 @@ mod break_continue {
                 var sum = 0;
                 var i = 0;
                 while true {
-                    if i >= limit {
+                    if lang.i64_signed_ge(i, limit) {
                         break
                     }
-                    if i % 2 == 0 {
-                        i = i + 1;
+                    if lang.i64_eq(lang.i64_signed_rem(i, 2), 0) {
+                        i = lang.i64_add(i, 1);
                         continue
                     }
-                    sum = sum + i;
-                    i = i + 1;
+                    sum = lang.i64_add(sum, i);
+                    i = lang.i64_add(i, 1);
                 }
                 sum
             }
@@ -259,16 +259,16 @@ mod early_returns {
             module Main
 
             func classify(n: lang.i64) -> lang.i64 {
-                if n < 0 {
-                    return 0 - 1
+                if lang.i64_signed_lt(n, 0) {
+                    return lang.i64_sub(0, 1)
                 }
-                if n == 0 {
+                if lang.i64_eq(n, 0) {
                     return 0
                 }
-                if n < 10 {
+                if lang.i64_signed_lt(n, 10) {
                     return 1
                 }
-                if n < 100 {
+                if lang.i64_signed_lt(n, 100) {
                     return 2
                 }
                 3
@@ -291,7 +291,7 @@ mod early_returns {
             module Main
 
             func earlyReturn(x: lang.i64) -> lang.i64 {
-                if x < 0 {
+                if lang.i64_signed_lt(x, 0) {
                     return 0
                 } else {
                     return x
@@ -325,14 +325,14 @@ mod nested_control_flow {
             module Main
 
             func nested(x: lang.i64, y: lang.i64) -> lang.i64 {
-                if x > 0 {
-                    if y > 0 {
+                if lang.i64_signed_gt(x, 0) {
+                    if lang.i64_signed_gt(y, 0) {
                         1
                     } else {
                         2
                     }
                 } else {
-                    if y > 0 {
+                    if lang.i64_signed_gt(y, 0) {
                         3
                     } else {
                         4
@@ -357,10 +357,10 @@ mod nested_control_flow {
             module Main
 
             func loopInIf(x: lang.i64) -> lang.i64 {
-                if x > 0 {
+                if lang.i64_signed_gt(x, 0) {
                     var i = 0;
-                    while i < x {
-                        i = i + 1;
+                    while lang.i64_signed_lt(i, x) {
+                        i = lang.i64_add(i, 1);
                     }
                     i
                 } else {
@@ -387,11 +387,11 @@ mod nested_control_flow {
             func ifInLoop(n: lang.i64) -> lang.i64 {
                 var count = 0;
                 var i = 0;
-                while i < n {
-                    if i % 2 == 0 {
-                        count = count + 1;
+                while lang.i64_signed_lt(i, n) {
+                    if lang.i64_eq(lang.i64_signed_rem(i, 2), 0) {
+                        count = lang.i64_add(count, 1);
                     }
-                    i = i + 1;
+                    i = lang.i64_add(i, 1);
                 }
                 count
             }
@@ -426,13 +426,13 @@ mod labeled_loops {
                 var result = 0;
                 'outer: while true {
                     var i = 0;
-                    while i < 10 {
-                        if i == 5 {
+                    while lang.i64_signed_lt(i, 10) {
+                        if lang.i64_eq(i, 5) {
                             break 'outer
                         }
-                        i = i + 1;
+                        i = lang.i64_add(i, 1);
                     }
-                    result = result + 1;
+                    result = lang.i64_add(result, 1);
                 }
                 result
             }
@@ -456,17 +456,17 @@ mod labeled_loops {
             func test() -> lang.i64 {
                 var result = 0;
                 var i = 0;
-                'outer: while i < 10 {
+                'outer: while lang.i64_signed_lt(i, 10) {
                     var j = 0;
-                    while j < 10 {
-                        if j == 5 {
-                            i = i + 1;
+                    while lang.i64_signed_lt(j, 10) {
+                        if lang.i64_eq(j, 5) {
+                            i = lang.i64_add(i, 1);
                             continue 'outer
                         }
-                        result = result + 1;
-                        j = j + 1;
+                        result = lang.i64_add(result, 1);
+                        j = lang.i64_add(j, 1);
                     }
-                    i = i + 1;
+                    i = lang.i64_add(i, 1);
                 }
                 result
             }
@@ -497,18 +497,18 @@ mod complex_control_flow {
             module Main
 
             func process(x: lang.i64) -> lang.i64 {
-                if x < 0 {
-                    return 0 - x
+                if lang.i64_signed_lt(x, 0) {
+                    return lang.i64_sub(0, x)
                 }
-                
+
                 var result = x;
-                while result > 100 {
-                    result = result - 100;
-                    if result < 10 {
-                        return result * 2
+                while lang.i64_signed_gt(result, 100) {
+                    result = lang.i64_sub(result, 100);
+                    if lang.i64_signed_lt(result, 10) {
+                        return lang.i64_mul(result, 2)
                     }
                 }
-                
+
                 result
             }
         "#,

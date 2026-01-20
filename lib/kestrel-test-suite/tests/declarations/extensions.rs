@@ -46,7 +46,7 @@ mod basic {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func sum() -> lang.i64 { return self.x + self.y; }
+                func sum() -> lang.i64 { return lang.i64_add(self.x, self.y); }
             }
             func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
@@ -63,12 +63,12 @@ mod basic {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func sum() -> lang.i64 { return self.x + self.y; }
-                func product() -> lang.i64 { return self.x * self.y; }
+                func sum() -> lang.i64 { return lang.i64_add(self.x, self.y); }
+                func product() -> lang.i64 { return lang.i64_mul(self.x, self.y); }
             }
             func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
-                return p.sum() + p.product();
+                return lang.i64_add(p.sum(), p.product());
             }
         "#,
         )
@@ -81,14 +81,14 @@ mod basic {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func sum() -> lang.i64 { return self.x + self.y; }
+                func sum() -> lang.i64 { return lang.i64_add(self.x, self.y); }
             }
             extend Point {
-                func product() -> lang.i64 { return self.x * self.y; }
+                func product() -> lang.i64 { return lang.i64_mul(self.x, self.y); }
             }
             func test() -> lang.i64 {
                 let p = Point(x: 3, y: 4);
-                return p.sum() + p.product();
+                return lang.i64_add(p.sum(), p.product());
             }
         "#,
         )
@@ -120,7 +120,7 @@ mod conformance {
             protocol Hashable { func hash() -> lang.i64 }
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Hashable {
-                func hash() -> lang.i64 { return self.x + self.y; }
+                func hash() -> lang.i64 { return lang.i64_add(self.x, self.y); }
             }
             func getHash[T](value: T) -> lang.i64 where T: Hashable { return value.hash(); }
             func test() -> lang.i64 {
@@ -152,7 +152,7 @@ mod conformance {
             protocol Describable { func describe() -> lang.str }
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point: Hashable, Describable {
-                func hash() -> lang.i64 { return self.x + self.y; }
+                func hash() -> lang.i64 { return lang.i64_add(self.x, self.y); }
                 func describe() -> lang.str { return "point"; }
             }
         "#,
@@ -220,7 +220,7 @@ mod conformance {
             protocol Hashable { func hash() -> lang.i64 }
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func hash() -> lang.i64 { return self.x + self.y; }
+                func hash() -> lang.i64 { return lang.i64_add(self.x, self.y); }
             }
             extend Point: Hashable { }
         "#,
@@ -274,7 +274,7 @@ mod generics {
             r#"module Test
             struct Box[T] { var value: T }
             extend Box[lang.i64] {
-                func doubled() -> lang.i64 { return self.value * 2; }
+                func doubled() -> lang.i64 { return lang.i64_mul(self.value, 2); }
             }
             func test() -> lang.i64 {
                 let b = Box[lang.i64](value: 21);
@@ -291,7 +291,7 @@ mod generics {
             r#"module Test
             struct Box[T] { var value: T }
             extend Box[lang.i64] {
-                func doubled() -> lang.i64 { return self.value * 2; }
+                func doubled() -> lang.i64 { return lang.i64_mul(self.value, 2); }
             }
             func test() -> lang.i64 {
                 let b = Box[lang.str](value: "hello");
@@ -541,7 +541,7 @@ mod conflicts {
             r#"module Test
             struct Point {
                 var x: lang.i64; var y: lang.i64
-                func sum() -> lang.i64 { return self.x + self.y; }
+                func sum() -> lang.i64 { return lang.i64_add(self.x, self.y); }
             }
             extend Point {
                 func sum() -> lang.i64 { return 0; }
@@ -570,7 +570,7 @@ mod errors {
         Test::new(
             r#"module Test
             extend lang.i64 {
-                func doubled() -> lang.i64 { return self * 2; }
+                func doubled() -> lang.i64 { return lang.i64_mul(self, 2); }
             }
         "#,
         )
@@ -623,7 +623,7 @@ mod visibility {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                public func sum() -> lang.i64 { return self.x + self.y; }
+                public func sum() -> lang.i64 { return lang.i64_add(self.x, self.y); }
             }
         "#,
         )
@@ -636,8 +636,8 @@ mod visibility {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                private func internalSum() -> lang.i64 { return self.x + self.y; }
-                func doubleSum() -> lang.i64 { return self.internalSum() * 2; }
+                private func internalSum() -> lang.i64 { return lang.i64_add(self.x, self.y); }
+                func doubleSum() -> lang.i64 { return lang.i64_mul(self.internalSum(), 2); }
             }
         "#,
         )
@@ -671,7 +671,7 @@ mod self_type {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             extend Point {
-                func add(other: Self) -> Self { return Point(x: self.x + other.x, y: self.y + other.y); }
+                func add(other: Self) -> Self { return Point(x: lang.i64_add(self.x, other.x), y: lang.i64_add(self.y, other.y)); }
             }
             func test() -> Point {
                 let p1 = Point(x: 1, y: 2);

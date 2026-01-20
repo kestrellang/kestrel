@@ -85,7 +85,7 @@ func test() -> (lang.i64) -> lang.i64 {
 module Main
 
 func test() -> (lang.i64, lang.i64) -> lang.i64 {
-    { (x: lang.i64, y: lang.i64) in x + y }
+    { (x: lang.i64, y: lang.i64) in lang.i64_add(x, y) }
 }
 "#,
         )
@@ -100,7 +100,7 @@ func test() -> (lang.i64, lang.i64) -> lang.i64 {
 module Main
 
 func test() -> (lang.i64, lang.i64) -> lang.i64 {
-    { (x, y) in x + y }
+    { (x, y) in lang.i64_add(x, y) }
 }
 "#,
         )
@@ -130,7 +130,7 @@ func test() -> (lang.i64, lang.str) -> lang.i64 {
 module Main
 
 func test() -> (lang.i64, lang.i64, lang.i64) -> lang.i64 {
-    { (a, b, c) in a + b + c }
+    { (a, b, c) in lang.i64_add(lang.i64_add(a, b), c) }
 }
 "#,
         )
@@ -153,7 +153,7 @@ mod implicit_it {
 module Main
 
 func test() -> (lang.i64) -> lang.i64 {
-    { it * 2 }
+    { lang.i64_mul(it, 2) }
 }
 "#,
         )
@@ -249,7 +249,7 @@ func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
 func test() -> (lang.i64) -> lang.i64 {
     {
         let outer = it;
-        apply({ it + outer })
+        apply({ lang.i64_add(it, outer) })
     }
 }
 "#,
@@ -274,7 +274,7 @@ module Main
 
 func test() -> (lang.i64) -> lang.i64 {
     { (x) in
-        let y = x * 2;
+        let y = lang.i64_mul(x, 2);
         y
     }
 }
@@ -292,9 +292,9 @@ module Main
 
 func test() -> (lang.i64, lang.i64) -> lang.i64 {
     { (x, y) in
-        let sum = x + y;
-        let doubled = sum * 2;
-        let result = doubled + 1;
+        let sum = lang.i64_add(x, y);
+        let doubled = lang.i64_mul(sum, 2);
+        let result = lang.i64_add(doubled, 1);
         result
     }
 }
@@ -313,8 +313,8 @@ module Main
 func test() -> (lang.i64) -> lang.i64 {
     { (x) in
         var acc = 0;
-        acc = acc + x;
-        acc = acc + x;
+        acc = lang.i64_add(acc, x);
+        acc = lang.i64_add(acc, x);
         acc
     }
 }
@@ -332,10 +332,10 @@ module Main
 
 func test() -> (lang.i64) -> lang.i64 {
     { (x) in
-        if x > 0 {
+        if lang.i64_signed_gt(x, 0) {
             x
         } else {
-            0 - x
+            lang.i64_sub(0, x)
         }
     }
 }
@@ -355,9 +355,9 @@ func test() -> (lang.i64) -> lang.i64 {
     { (n) in
         var i = 0;
         var sum = 0;
-        while i < n {
-            sum = sum + i;
-            i = i + 1;
+        while lang.i64_signed_lt(i, n) {
+            sum = lang.i64_add(sum, i);
+            i = lang.i64_add(i, 1);
         }
         sum
     }
@@ -384,7 +384,7 @@ module Main
 
 func test() -> () -> lang.i64 {
     let x = 10;
-    { x + 1 }
+    { lang.i64_add(x, 1) }
 }
 "#,
         )
@@ -400,7 +400,7 @@ module Main
 
 func test() -> () -> lang.i64 {
     var x = 10;
-    { x + 1 }
+    { lang.i64_add(x, 1) }
 }
 "#,
         )
@@ -418,7 +418,7 @@ func test() -> () -> lang.i64 {
     let a = 1;
     let b = 2;
     let c = 3;
-    { a + b + c }
+    { lang.i64_add(lang.i64_add(a, b), c) }
 }
 "#,
         )
@@ -433,7 +433,7 @@ func test() -> () -> lang.i64 {
 module Main
 
 func test(multiplier: lang.i64) -> (lang.i64) -> lang.i64 {
-    { it * multiplier }
+    { lang.i64_mul(it, multiplier) }
 }
 "#,
         )
@@ -451,7 +451,7 @@ func test() -> () -> lang.i64 {
     let outer = 100;
     if true {
         let inner = 10;
-        { outer + inner }
+        { lang.i64_add(outer, inner) }
     } else {
         { outer }
     }
@@ -564,7 +564,7 @@ func fold(initial: lang.i64, f: (lang.i64, lang.i64) -> lang.i64) -> lang.i64 {
 }
 
 func test() -> lang.i64 {
-    fold(0) { (acc, n) in acc + n }
+    fold(0) { (acc, n) in lang.i64_add(acc, n) }
 }
 "#,
         )
@@ -579,11 +579,11 @@ func test() -> lang.i64 {
 module Main
 
 func combine(a: lang.i64, b: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
-    f(a + b)
+    f(lang.i64_add(a, b))
 }
 
 func test() -> lang.i64 {
-    combine(1, 2) { it * 2 }
+    combine(1, 2) { lang.i64_mul(it, 2) }
 }
 "#,
         )
@@ -602,7 +602,7 @@ func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
 }
 
 func test() -> lang.i64 {
-    apply({ it * 2 })
+    apply({ lang.i64_mul(it, 2) })
 }
 "#,
         )
@@ -625,7 +625,7 @@ mod type_inference {
 module Main
 
 func test() -> (lang.i64) -> lang.i64 {
-    { (x) in x + 1 }
+    { (x) in lang.i64_add(x, 1) }
 }
 "#,
         )
@@ -640,7 +640,7 @@ func test() -> (lang.i64) -> lang.i64 {
 module Main
 
 func test() -> (lang.i64) -> lang.i64 {
-    { (x: lang.i64) in x * 2 }
+    { (x: lang.i64) in lang.i64_mul(x, 2) }
 }
 "#,
         )
@@ -659,7 +659,7 @@ func transform(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
 }
 
 func test() -> lang.i64 {
-    transform(5, { it * 2 })
+    transform(5, { lang.i64_mul(it, 2) })
 }
 "#,
         )
@@ -674,7 +674,7 @@ func test() -> lang.i64 {
 module Main
 
 func test() {
-    let f: (lang.i64, lang.i64) -> lang.i64 = { (a, b) in a + b };
+    let f: (lang.i64, lang.i64) -> lang.i64 = { (a, b) in lang.i64_add(a, b) };
 }
 "#,
         )
@@ -699,12 +699,13 @@ func test() {
     #[test]
     fn cannot_infer_it_type_without_context() {
         // Error: cannot infer `it` type without context
+        // Note: Using raw operator that doesn't provide type context
         Test::new(
             r#"
 module Main
 
 func test() {
-    let f = { it + 1 };
+    let f = { it };
 }
 "#,
         )
@@ -742,7 +743,7 @@ func test() -> (lang.i64, lang.i64) -> lang.i64 {
 module Main
 
 func test() -> (lang.i64) -> lang.i64 {
-    { (x, y) in x + y }
+    { (x, y) in lang.i64_add(x, y) }
 }
 "#,
         )
@@ -757,7 +758,7 @@ func test() -> (lang.i64) -> lang.i64 {
 module Main
 
 func test() -> (lang.i64) -> lang.str {
-    { (x) in x * 2 }
+    { (x) in lang.i64_mul(x, 2) }
 }
 "#,
         )
@@ -825,7 +826,7 @@ func test() -> lang.i64 {
 module Main
 
 func test() -> lang.i64 {
-    { (x: lang.i64, y: lang.i64) in x + y }(10, 20)
+    { (x: lang.i64, y: lang.i64) in lang.i64_add(x, y) }(10, 20)
 }
 "#,
         )
@@ -843,7 +844,7 @@ func test() -> lang.i64 {
     let result = {
         let a = 10;
         let b = 20;
-        a + b
+        lang.i64_add(a, b)
     }();
     result
 }
@@ -883,7 +884,7 @@ mod closures_as_values {
 module Main
 
 func test() -> lang.i64 {
-    let f: (lang.i64) -> lang.i64 = { it * 2 };
+    let f: (lang.i64) -> lang.i64 = { lang.i64_mul(it, 2) };
     f(21)
 }
 "#,
@@ -903,7 +904,7 @@ func apply(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
 }
 
 func test() -> lang.i64 {
-    apply(10, { it + 1 })
+    apply(10, { lang.i64_add(it, 1) })
 }
 "#,
         )
@@ -918,7 +919,7 @@ func test() -> lang.i64 {
 module Main
 
 func makeAdder(n: lang.i64) -> (lang.i64) -> lang.i64 {
-    { it + n }
+    { lang.i64_add(it, n) }
 }
 
 func test() -> lang.i64 {
@@ -962,7 +963,7 @@ struct Handler[T] {
 }
 
 func test() -> lang.i64 {
-    let h = Handler[lang.i64](handle: { it * 2 });
+    let h = Handler[lang.i64](handle: { lang.i64_mul(it, 2) });
     (h.handle)(21)
 }
 "#,
@@ -986,7 +987,7 @@ mod nested_closures {
 module Main
 
 func test() -> (lang.i64) -> (lang.i64) -> lang.i64 {
-    { (x) in { (y) in x + y } }
+    { (x) in { (y) in lang.i64_add(x, y) } }
 }
 "#,
         )
@@ -1001,7 +1002,7 @@ func test() -> (lang.i64) -> (lang.i64) -> lang.i64 {
 module Main
 
 func test() -> lang.i64 {
-    let f: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in { (y) in x + y } };
+    let f: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in { (y) in lang.i64_add(x, y) } };
     let add10 = f(10);
     add10(5)
 }
@@ -1018,7 +1019,7 @@ func test() -> lang.i64 {
 module Main
 
 func test() -> (lang.i64) -> (lang.i64) -> (lang.i64) -> lang.i64 {
-    { (a) in { (b) in { (c) in a + b + c } } }
+    { (a) in { (b) in { (c) in lang.i64_add(lang.i64_add(a, b), c) } } }
 }
 "#,
         )
@@ -1039,7 +1040,7 @@ func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
 func test() -> (lang.i64) -> lang.i64 {
     {
         let outer = it;
-        apply({ it + outer })
+        apply({ lang.i64_add(it, outer) })
     }
 }
 "#,
@@ -1208,7 +1209,7 @@ func test() -> () -> () {
 module Main
 
 func test() -> (lang.i64) -> lang.i64 {
-    { (it) in it * 2 }
+    { (it) in lang.i64_mul(it, 2) }
 }
 "#,
         )

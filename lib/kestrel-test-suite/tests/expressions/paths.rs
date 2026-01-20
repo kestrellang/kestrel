@@ -193,14 +193,14 @@ mod edge_cases {
 
     #[test]
     fn unary_operators_on_literals() {
-        Test::new("module Test\nfunc test() {\n-42;\n-3.14;\n!true;\n!!false;\n--42;\n}")
+        Test::new("module Test\nfunc test() {\nlang.i64_neg(42);\nlang.f64_neg(3.14);\nlang.i1_not(true);\nlang.i1_not(lang.i1_not(false));\nlang.i64_neg(lang.i64_neg(42));\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
     #[test]
     fn unary_operators_on_paths() {
-        Test::new("module Test\nfunc test(x: lang.i64, b: lang.i1) {\n-x;\n!b;\n-!-!x;\n}")
+        Test::new("module Test\nfunc test(x: lang.i64, b: lang.i1) {\nlang.i64_neg(x);\nlang.i1_not(b);\nlang.i64_neg(lang.i64_not(lang.i64_neg(lang.i64_not(x))));\n}")
             .expect(Compiles)
             .expect(
                 Symbol::new("Test.test")
@@ -211,7 +211,7 @@ mod edge_cases {
 
     #[test]
     fn unary_in_containers() {
-        Test::new("module Test\nfunc test() {\n[-1, -2, -3];\n(-1, -2);\n[([(-1,)],)];\n}")
+        Test::new("module Test\nfunc test() {\n[lang.i64_neg(1), lang.i64_neg(2), lang.i64_neg(3)];\n(lang.i64_neg(1), lang.i64_neg(2));\n[([(lang.i64_neg(1),)],)];\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -225,7 +225,7 @@ mod edge_cases {
 
     #[test]
     fn scientific_notation_variants() {
-        Test::new("module Test\nfunc test() {\n1.5e10;\n1.0e-10;\n1.0e+10;\n1.0E10;\n-1.0e10;\n-1.0e-10;\n}")
+        Test::new("module Test\nfunc test() {\n1.5e10;\n1.0e-10;\n1.0e+10;\n1.0E10;\nlang.f64_neg(1.0e10);\nlang.f64_neg(1.0e-10);\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
@@ -306,7 +306,7 @@ mod edge_cases {
 
     #[test]
     fn declarations_with_unary_initializers() {
-        Test::new("module Test\nfunc test(foo: lang.i64) {\nlet x: lang.i64 = -foo;\nlet y: (lang.i64, lang.i64) = (-1, -2);\nlet z: [lang.i64] = [-1, -2, -3];\nlet w: (lang.i64, lang.i1, lang.i64) = (-1, !true, --2);\n}")
+        Test::new("module Test\nfunc test(foo: lang.i64) {\nlet x: lang.i64 = lang.i64_neg(foo);\nlet y: (lang.i64, lang.i64) = (lang.i64_neg(1), lang.i64_neg(2));\nlet z: [lang.i64] = [lang.i64_neg(1), lang.i64_neg(2), lang.i64_neg(3)];\nlet w: (lang.i64, lang.i1, lang.i64) = (lang.i64_neg(1), lang.i1_not(true), lang.i64_neg(lang.i64_neg(2)));\n}")
             .expect(Compiles)
             .expect(Symbol::new("Test.test").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }

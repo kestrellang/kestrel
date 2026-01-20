@@ -148,9 +148,9 @@ func test(cond: lang.i1) -> lang.i64 {
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    if x == 1 {
+    if lang.i64_eq(x, 1) {
         return 10
-    } else if x == 2 {
+    } else if lang.i64_eq(x, 2) {
         return 20
     } else {
         return 0
@@ -168,9 +168,9 @@ func test(x: lang.i64) -> lang.i64 {
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    if x == 1 {
+    if lang.i64_eq(x, 1) {
         return 10
-    } else if x == 2 {
+    } else if lang.i64_eq(x, 2) {
         return 20
     }
 }
@@ -355,10 +355,10 @@ func test(cond: lang.i1) -> lang.i64 {
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    if x < 0 {
+    if lang.i64_signed_lt(x, 0) {
         return -1
     }
-    if x == 0 {
+    if lang.i64_eq(x, 0) {
         return 0
     }
     1
@@ -381,7 +381,7 @@ module Main
 func test() -> lang.i64 {
     let x: lang.i64 = 1;
     let y: lang.i64 = 2;
-    return x + y
+    return lang.i64_add(x, y)
 }
 "#,
         )
@@ -397,7 +397,7 @@ module Main
 func test() -> lang.i64 {
     let x: lang.i64 = 1;
     let y: lang.i64 = 2;
-    x + y
+    lang.i64_add(x, y)
 }
 "#,
         )

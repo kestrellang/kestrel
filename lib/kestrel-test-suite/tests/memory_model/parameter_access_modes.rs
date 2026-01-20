@@ -268,7 +268,7 @@ mod mutating_mode {
             r#"module Test
             struct Point { var x: lang.i64; var y: lang.i64 }
             func double(mutating p: Point) {
-                p.x = p.x * 2;
+                p.x = lang.i64_mul(p.x, 2);
             }
         "#,
         )
@@ -450,7 +450,7 @@ mod mutating_mode {
         Test::new(
             r#"module Test
             func increment(mutating n: lang.i64) {
-                n = n + 1;
+                n = lang.i64_add(n, 1);
             }
             func test() {
                 var x = 5;
@@ -466,7 +466,7 @@ mod mutating_mode {
         Test::new(
             r#"module Test
             func increment(mutating n: lang.i64) {
-                n = n + 1;
+                n = lang.i64_add(n, 1);
             }
             func test() {
                 let x = 5;
@@ -591,7 +591,7 @@ mod consuming_mode {
         Test::new(
             r#"module Test
             func take(consuming n: lang.i64) -> lang.i64 {
-                n * 2
+                lang.i64_mul(n, 2)
             }
             func test() -> lang.i64 {
                 let x = 5;
@@ -825,12 +825,12 @@ mod mir_passing_modes {
         // Method calls also create references for the receiver
         Test::new(
             r#"module Test
-            struct Point { 
+            struct Point {
                 var x: lang.i64
-                var y: lang.i64 
-                
+                var y: lang.i64
+
                 func magnitude() -> lang.i64 {
-                    self.x + self.y
+                    lang.i64_add(self.x, self.y)
                 }
             }
             func caller() -> lang.i64 {

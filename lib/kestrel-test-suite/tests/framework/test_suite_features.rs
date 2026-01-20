@@ -109,7 +109,7 @@ mod function_behaviors {
         Test::new(
             r#"module Test
             struct Math {
-                static func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
+                static func add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }
             }
         "#,
         )

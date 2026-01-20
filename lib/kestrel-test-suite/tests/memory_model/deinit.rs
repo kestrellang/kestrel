@@ -937,13 +937,13 @@ mod enum_deinit {
             protocol Copyable {}
             
             enum Value {
-                case lang.i64(val: lang.i64)
+                case Int(val: lang.i64)
                 case pair(a: lang.i64, b: lang.i64)
                 case none
             }
-            
+
             func example() {
-                let v = Value.lang.i64(val: 42);
+                let v = Value.Int(val: 42);
             }
         "#,
         )

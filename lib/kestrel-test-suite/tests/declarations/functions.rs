@@ -29,7 +29,7 @@ mod basic {
 
     #[test]
     fn function_with_parameters() {
-        Test::new("module Test\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }")
+        Test::new("module Test\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }")
             .expect(Compiles)
             .expect(
                 Symbol::new("add")
@@ -153,9 +153,9 @@ mod in_structs {
         Test::new(
             r#"module Test
             struct Calculator {
-                func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
-                func subtract(a: lang.i64, b: lang.i64) -> lang.i64 { a - b }
-                func multiply(a: lang.i64, b: lang.i64) -> lang.i64 { a * b }
+                func add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }
+                func subtract(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_sub(a, b) }
+                func multiply(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_mul(a, b) }
             }
         "#,
         )

@@ -364,7 +364,7 @@ mod recursive_enums {
             func sum(tree: Tree) -> lang.i64 {
                 match tree {
                     .Leaf(value) => value,
-                    .Node(left, right) => sum(left) + sum(right)
+                    .Node(left, right) => lang.i64_add(sum(left), sum(right))
                 }
             }
         "#,
@@ -452,18 +452,18 @@ mod enum_struct_payloads {
 
             struct Circle {
                 let radius: lang.i64
-                
+
                 func area() -> lang.i64 {
-                    self.radius * self.radius * 3
+                    lang.i64_mul(lang.i64_mul(self.radius, self.radius), 3)
                 }
             }
 
             struct Rectangle {
                 let width: lang.i64
                 let height: lang.i64
-                
+
                 func area() -> lang.i64 {
-                    self.width * self.height
+                    lang.i64_mul(self.width, self.height)
                 }
             }
 
@@ -523,8 +523,8 @@ mod nested_match {
                         .B(y) => y
                     },
                     .Right(inner) => match inner {
-                        .A(x) => x * 2,
-                        .B(y) => y * 2
+                        .A(x) => lang.i64_mul(x, 2),
+                        .B(y) => lang.i64_mul(y, 2)
                     }
                 }
             }

@@ -15,23 +15,23 @@ mod arithmetic_operators {
 module Main
 
 func sum() -> lang.i64 {
-    1 + 2
+    lang.i64_add(1, 2)
 }
 
 func diff() -> lang.i64 {
-    5 - 3
+    lang.i64_sub(5, 3)
 }
 
 func product() -> lang.i64 {
-    4 * 5
+    lang.i64_mul(4, 5)
 }
 
 func quotient() -> lang.i64 {
-    10 / 2
+    lang.i64_signed_div(10, 2)
 }
 
 func remainder() -> lang.i64 {
-    10 % 3
+    lang.i64_signed_rem(10, 3)
 }
 "#,
         )
@@ -70,11 +70,11 @@ func remainder() -> lang.i64 {
 module Main
 
 func sum() -> lang.f64 {
-    1.5 + 2.5
+    lang.f64_add(1.5, 2.5)
 }
 
 func product() -> lang.f64 {
-    2.0 * 3.0
+    lang.f64_mul(2.0, 3.0)
 }
 "#,
         )
@@ -94,27 +94,27 @@ mod comparison_operators {
 module Main
 
 func isEqual() -> lang.i1 {
-    1 == 1
+    lang.i64_eq(1, 1)
 }
 
 func isNotEqual() -> lang.i1 {
-    1 != 2
+    lang.i64_ne(1, 2)
 }
 
 func isLess() -> lang.i1 {
-    1 < 2
+    lang.i64_signed_lt(1, 2)
 }
 
 func isGreater() -> lang.i1 {
-    2 > 1
+    lang.i64_signed_gt(2, 1)
 }
 
 func isLessOrEqual() -> lang.i1 {
-    1 <= 2
+    lang.i64_signed_le(1, 2)
 }
 
 func isGreaterOrEqual() -> lang.i1 {
-    2 >= 1
+    lang.i64_signed_ge(2, 1)
 }
 "#,
         )
@@ -162,15 +162,15 @@ mod logical_operators {
 module Main
 
 func bothTrue() -> lang.i1 {
-    true and true
+    lang.i1_and(true, true)
 }
 
 func eitherTrue() -> lang.i1 {
-    true or false
+    lang.i1_or(true, false)
 }
 
 func negate() -> lang.i1 {
-    not true
+    lang.i1_not(true)
 }
 "#,
         )
@@ -203,23 +203,23 @@ mod bitwise_operators {
 module Main
 
 func bitwiseAnd() -> lang.i64 {
-    5 & 3
+    lang.i64_and(5, 3)
 }
 
 func bitwiseOr() -> lang.i64 {
-    5 | 3
+    lang.i64_or(5, 3)
 }
 
 func bitwiseXor() -> lang.i64 {
-    5 ^ 3
+    lang.i64_xor(5, 3)
 }
 
 func shiftLeft() -> lang.i64 {
-    1 << 3
+    lang.i64_shl(1, 3)
 }
 
 func shiftRight() -> lang.i64 {
-    8 >> 2
+    lang.i64_signed_shr(8, 2)
 }
 "#,
         )
@@ -262,15 +262,15 @@ mod unary_operators {
 module Main
 
 func negateInt() -> lang.i64 {
-    -42
+    lang.i64_neg(42)
 }
 
 func negateFloat() -> lang.f64 {
-    -3.14
+    lang.f64_neg(3.14)
 }
 
 func invert() -> lang.i64 {
-    !42
+    lang.i64_not(42)
 }
 "#,
         )
@@ -304,7 +304,7 @@ mod precedence {
 module Main
 
 func compute() -> lang.i64 {
-    1 + 2 * 3
+    lang.i64_add(1, lang.i64_mul(2, 3))
 }
 "#,
         )
@@ -324,7 +324,7 @@ func compute() -> lang.i64 {
 module Main
 
 func compute() -> lang.i64 {
-    10 - 6 / 2
+    lang.i64_sub(10, lang.i64_signed_div(6, 2))
 }
 "#,
         )
@@ -344,7 +344,7 @@ func compute() -> lang.i64 {
 module Main
 
 func check() -> lang.i1 {
-    1 < 2 and 3 > 2
+    lang.i1_and(lang.i64_signed_lt(1, 2), lang.i64_signed_gt(3, 2))
 }
 "#,
         )
@@ -364,7 +364,7 @@ func check() -> lang.i1 {
 module Main
 
 func check() -> lang.i1 {
-    true and false or true
+    lang.i1_or(lang.i1_and(true, false), true)
 }
 "#,
         )
@@ -385,7 +385,7 @@ func check() -> lang.i1 {
 module Main
 
 func compute() -> lang.i64 {
-    1 << 2 + 3
+    lang.i64_add(lang.i64_shl(1, 2), 3)
 }
 "#,
         )
@@ -405,7 +405,7 @@ func compute() -> lang.i64 {
 module Main
 
 func compute() -> lang.i1 {
-    1 + 2 * 3 < 10 and 5 - 1 > 2
+    lang.i1_and(lang.i64_signed_lt(lang.i64_add(1, lang.i64_mul(2, 3)), 10), lang.i64_signed_gt(lang.i64_sub(5, 1), 2))
 }
 "#,
         )
@@ -430,11 +430,11 @@ mod associativity {
 module Main
 
 func subtract() -> lang.i64 {
-    10 - 3 - 2
+    lang.i64_sub(lang.i64_sub(10, 3), 2)
 }
 
 func divide() -> lang.i64 {
-    24 / 4 / 2
+    lang.i64_signed_div(lang.i64_signed_div(24, 4), 2)
 }
 "#,
         )
@@ -459,7 +459,7 @@ func divide() -> lang.i64 {
 module Main
 
 func check() -> lang.i1 {
-    1 < 2
+    lang.i64_signed_lt(1, 2)
 }
 "#,
         )
@@ -483,23 +483,23 @@ mod edge_cases {
 module Main
 
 func deeplyNested() -> lang.i64 {
-    1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
+    lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(lang.i64_add(1, 2), 3), 4), 5), 6), 7), 8), 9), 10)
 }
 
 func mixedPrecedence() -> lang.i1 {
-    1 << 2 * 3 + 4 < 100 and true or false
+    lang.i1_or(lang.i1_and(lang.i64_signed_lt(lang.i64_add(lang.i64_mul(lang.i64_shl(1, 2), 3), 4), 100), true), false)
 }
 
 func parenthesized() -> lang.i64 {
-    (1 + 2) * 3
+    lang.i64_mul(lang.i64_add(1, 2), 3)
 }
 
 func deeplyGrouped() -> lang.i64 {
-    ((1 + 2) * (3 + 4))
+    lang.i64_mul(lang.i64_add(1, 2), lang.i64_add(3, 4))
 }
 
 func comparisonInLogical() -> lang.i1 {
-    (1 < 2) and (3 > 2)
+    lang.i1_and(lang.i64_signed_lt(1, 2), lang.i64_signed_gt(3, 2))
 }
 "#,
         )
@@ -539,15 +539,15 @@ func comparisonInLogical() -> lang.i1 {
 module Main
 
 func unaryInBinary() -> lang.i64 {
-    -1 + -2 * -3
+    lang.i64_add(lang.i64_neg(1), lang.i64_mul(lang.i64_neg(2), lang.i64_neg(3)))
 }
 
 func doubleNegation() -> lang.i64 {
-    --5
+    lang.i64_neg(lang.i64_neg(5))
 }
 
 func doubleLogicalNot() -> lang.i1 {
-    not not true
+    lang.i1_not(lang.i1_not(true))
 }
 "#,
         )
@@ -631,11 +631,11 @@ struct Values {
 }
 
 func add(p: Point) -> lang.i64 {
-    p.x + p.y
+    lang.i64_add(p.x, p.y)
 }
 
 func compute(v: Values) -> lang.i64 {
-    v.a * v.b + v.c
+    lang.i64_add(lang.i64_mul(v.a, v.b), v.c)
 }
 "#,
         )
@@ -669,11 +669,11 @@ func compute(v: Values) -> lang.i64 {
 module Main
 
 func add(x: lang.i64, y: lang.i64) -> lang.i64 {
-    x + y
+    lang.i64_add(x, y)
 }
 
 func compute(a: lang.i64, b: lang.i64, c: lang.i64) -> lang.i64 {
-    a * b + c
+    lang.i64_add(lang.i64_mul(a, b), c)
 }
 "#,
         )

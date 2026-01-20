@@ -23,7 +23,7 @@ module Main
 
 func test() -> lang.i64 {
     let (a, b) = (1, 2);
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -38,7 +38,7 @@ module Main
 
 func test() -> lang.i64 {
     let ((a, b), c) = ((1, 2), 3);
-    a + b + c
+    lang.i64_add(lang.i64_add(a, b), c)
 }
 "#,
         )
@@ -68,7 +68,7 @@ module Main
 
 func test() -> lang.i64 {
     let (a, b): (lang.i64, lang.i64) = (1, 2);
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -87,7 +87,7 @@ func pair() -> (lang.i64, lang.i64) {
 
 func test() -> lang.i64 {
     let (a, b) = pair();
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -104,7 +104,7 @@ func test() -> lang.i64 {
     var (a, b) = (1, 2);
     a = 10;
     b = 20;
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -120,7 +120,7 @@ module Main
 func test() -> lang.i64 {
     let (var a, b) = (1, 2);
     a = 10;
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -136,7 +136,7 @@ module Main
 func test() -> lang.i64 {
     let (var a, b) = (1, 2);
     b = 20;
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -152,7 +152,7 @@ module Main
 
 func test() -> lang.i64 {
     let (a, b, c) = (1, 2);
-    a + b + c
+    lang.i64_add(lang.i64_add(a, b), c)
 }
 "#,
         )
@@ -181,7 +181,7 @@ struct Point {
 func test() -> lang.i64 {
     let p = Point(x: 1, y: 2);
     let Point { x, y } = p;
-    x + y
+    lang.i64_add(x, y)
 }
 "#,
         )
@@ -202,7 +202,7 @@ struct Point {
 func test() -> lang.i64 {
     let p = Point(x: 1, y: 2);
     let Point { x: a, y: b } = p;
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -249,7 +249,7 @@ struct Line {
 func test() -> lang.i64 {
     let line = Line(start: Point(x: 0, y: 0), end: Point(x: 10, y: 10));
     let Line { start: Point { x: x1, .. }, end: Point { x: x2, .. } } = line;
-    x2 - x1
+    lang.i64_sub(x2, x1)
 }
 "#,
         )
@@ -358,7 +358,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     let (a, b) = t;
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -412,7 +412,7 @@ module Main
 
 func test() -> lang.i64 {
     let ((a, b), c) = ((1, 2), 3);
-    a + b + c
+    lang.i64_add(lang.i64_add(a, b), c)
 }
 "#,
         )
@@ -427,7 +427,7 @@ module Main
 
 func test() -> lang.i64 {
     let (a, b): (lang.i64, lang.i64) = (1, 2);
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )

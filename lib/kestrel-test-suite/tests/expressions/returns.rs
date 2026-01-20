@@ -49,7 +49,7 @@ func test() -> lang.i64 {
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    return x + 1
+    return lang.i64_add(x, 1)
 }
 "#,
         )
@@ -136,11 +136,11 @@ module Main
 
 func test() -> lang.i64 {
     var x: lang.i64 = 0;
-    while x < 10 {
-        if x == 5 {
+    while lang.i64_signed_lt(x, 10) {
+        if lang.i64_eq(x, 5) {
             return x
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
     return x
 }
@@ -159,10 +159,10 @@ module Main
 func test() -> lang.i64 {
     var x: lang.i64 = 0;
     loop {
-        if x == 10 {
+        if lang.i64_eq(x, 10) {
             return x
         }
-        x = x + 1;
+        x = lang.i64_add(x, 1);
     }
 }
 "#,
@@ -239,7 +239,7 @@ func test() -> lang.i64 {
 module Main
 
 func test(a: lang.i64, b: lang.i64) -> lang.i64 {
-    return a * b + 1
+    return lang.i64_add(lang.i64_mul(a, b), 1)
 }
 "#,
         )
@@ -270,7 +270,7 @@ func test() -> lang.i64 {
 module Main
 
 func test() -> lang.i64 {
-    return (1 + 2) * 3
+    return lang.i64_mul(lang.i64_add(1, 2), 3)
 }
 "#,
         )
@@ -313,15 +313,15 @@ module Main
 
 func test() -> lang.i64 {
     var i: lang.i64 = 0;
-    while i < 10 {
+    while lang.i64_signed_lt(i, 10) {
         var j: lang.i64 = 0;
-        while j < 10 {
-            if i * j == 25 {
-                return i + j
+        while lang.i64_signed_lt(j, 10) {
+            if lang.i64_eq(lang.i64_mul(i, j), 25) {
+                return lang.i64_add(i, j)
             }
-            j = j + 1;
+            j = lang.i64_add(j, 1);
         }
-        i = i + 1;
+        i = lang.i64_add(i, 1);
     }
     return 0
 }
@@ -338,10 +338,10 @@ func test() -> lang.i64 {
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    if x < 0 {
+    if lang.i64_signed_lt(x, 0) {
         return -1
     }
-    if x == 0 {
+    if lang.i64_eq(x, 0) {
         return 0
     }
     return 1

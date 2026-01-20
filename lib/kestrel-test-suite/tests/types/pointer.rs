@@ -499,7 +499,7 @@ mod string_intrinsics {
     fn string_unsafe_ptr_compiles() {
         Test::new(
             r#"module Test
-            func getPtr(s: lang.str) -> lang.ptr[I8] {
+            func getPtr(s: lang.str) -> lang.ptr[lang.i8] {
                 s.unsafePtr()
             }
         "#,
@@ -513,7 +513,7 @@ mod string_intrinsics {
         Test::new(
             r#"module Test
             struct Holder {
-                let ptr: lang.ptr[I8]
+                let ptr: lang.ptr[lang.i8]
             }
             func wrap(s: lang.str) -> Holder {
                 Holder(ptr: s.unsafePtr())
@@ -543,7 +543,7 @@ mod string_intrinsics {
         Test::new(
             r#"module Test
             struct StringView {
-                let ptr: lang.ptr[I8]
+                let ptr: lang.ptr[lang.i8]
                 let len: lang.i64
             }
             func makeView(s: lang.str) -> StringView {

@@ -459,12 +459,12 @@ mod usage {
             func main() -> lang.i64 {
                 let x = identity[lang.i64](42);
                 let s = identity[lang.i1](true);
-                
+
                 let p = Pair[lang.i64, lang.i64](first: 10, second: 20);
                 let a = p.getFirst();
                 let b = p.getSecond();
-                
-                x + a + b
+
+                lang.i64_add(lang.i64_add(x, a), b)
             }
         "#,
         )

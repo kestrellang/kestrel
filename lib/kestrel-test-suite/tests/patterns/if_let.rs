@@ -132,7 +132,7 @@ enum Option[T] {
 
 func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b {
-        x + y
+        lang.i64_add(x, y)
     } else {
         0
     }
@@ -154,7 +154,7 @@ enum Option[T] {
 }
 
 func test(opt: Option[lang.i64]) -> lang.i64 {
-    if let .Some(x) = opt, x > 0 {
+    if let .Some(x) = opt, lang.i64_signed_gt(x, 0) {
         x
     } else {
         0
@@ -177,8 +177,8 @@ enum Option[T] {
 }
 
 func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
-    if let .Some(x) = a, let .Some(y) = b, x < y {
-        y - x
+    if let .Some(x) = a, let .Some(y) = b, lang.i64_signed_lt(x, y) {
+        lang.i64_sub(y, x)
     } else {
         0
     }
@@ -201,7 +201,7 @@ enum Option[T] {
 
 func test(a: Option[lang.i64], b: Option[lang.i64], c: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b, let .Some(z) = c {
-        x + y + z
+        lang.i64_add(lang.i64_add(x, y), z)
     } else {
         0
     }
@@ -281,7 +281,7 @@ enum Option[T] {
 
 func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = a, let .Some(y) = b {
-        x + y
+        lang.i64_add(x, y)
     } else {
         0
     }
@@ -307,7 +307,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     if let (a, b) = t {
-        a + b
+        lang.i64_add(a, b)
     } else {
         0
     }
@@ -356,7 +356,7 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> lang.i64 {
     if let .Some(x) = opt {
-        x + 1
+        lang.i64_add(x, 1)
     } else {
         0
     }

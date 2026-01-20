@@ -45,7 +45,7 @@ struct Point {
 
 func main() -> lang.i64 {
     let p = Point(x: 10, y: 20);
-    p.x + p.y
+    lang.i64_add(p.x, p.y)
 }
 "#,
     );
@@ -123,7 +123,7 @@ struct Outer {
 
 func main() -> lang.i64 {
     let o = Outer(inner: Inner(value: 10), extra: 5);
-    o.inner.value + o.extra
+    lang.i64_add(o.inner.value, o.extra)
 }
 "#,
     );
@@ -194,7 +194,7 @@ struct Outer {
 
 func main() -> lang.i64 {
     let o = Outer(first: Inner(value: 1), second: Inner(value: 2));
-    o.first.value + o.second.value
+    lang.i64_add(o.first.value, o.second.value)
 }
 "#,
     );
@@ -240,10 +240,10 @@ struct Resource {
 func main() -> lang.i64 {
     var sum = 0;
     var i = 0;
-    while i < 3 {
-        let r = Resource(value: i * 10);
-        sum = sum + r.value;
-        i = i + 1;
+    while lang.i64_signed_lt(i, 3) {
+        let r = Resource(value: lang.i64_mul(i, 10));
+        sum = lang.i64_add(sum, r.value);
+        i = lang.i64_add(i, 1);
     }
     sum  // 0 + 10 + 20 = 30
 }
@@ -265,8 +265,8 @@ struct Resource {
 
 func test_early_return(x: lang.i64) -> lang.i64 {
     let r = Resource(value: x);
-    if x > 50 {
-        return r.value + 1;
+    if lang.i64_signed_gt(x, 50) {
+        return lang.i64_add(r.value, 1);
     }
     r.value
 }

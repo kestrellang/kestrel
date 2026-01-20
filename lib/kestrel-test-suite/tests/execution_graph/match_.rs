@@ -173,7 +173,7 @@ mod if_let {
 
             func addIfBothSome(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
                 if let .Some(x) = a, let .Some(y) = b {
-                    x + y
+                    lang.i64_add(x, y)
                 } else {
                     0
                 }
@@ -201,9 +201,9 @@ mod if_let {
             }
 
             func maybeDouble(opt: Option[lang.i64]) -> lang.i64 {
-                var result = 0;
+                var result: lang.i64 = 0;
                 if let .Some(v) = opt {
-                    result = v * 2;
+                    result = lang.i64_mul(v, 2);
                 }
                 result
             }
@@ -242,7 +242,7 @@ mod guard_let {
                 guard let .Some(v) = opt else {
                     return 0
                 }
-                v * 2
+                lang.i64_mul(v, 2)
             }
         "#,
         )
@@ -273,7 +273,7 @@ mod guard_let {
                 guard let .Some(y) = b else {
                     return 0
                 }
-                x + y
+                lang.i64_add(x, y)
             }
         "#,
         )
@@ -308,15 +308,15 @@ mod while_let {
 
             struct Counter {
                 var count: lang.i64
-                
+
                 init(start: lang.i64) {
                     self.count = start;
                 }
-                
+
                 mutating func next() -> Option[lang.i64] {
-                    if self.count > 0 {
+                    if lang.i64_signed_gt(self.count, 0) {
                         let v = self.count;
-                        self.count = self.count - 1;
+                        self.count = lang.i64_sub(self.count, 1);
                         Option[lang.i64].Some(value: v)
                     } else {
                         Option[lang.i64].None
@@ -326,9 +326,9 @@ mod while_let {
 
             func sumAll() -> lang.i64 {
                 var counter = Counter(start: 5);
-                var sum = 0;
+                var sum: lang.i64 = 0;
                 while let .Some(v) = counter.next() {
-                    sum = sum + v;
+                    sum = lang.i64_add(sum, v);
                 }
                 sum
             }
@@ -386,7 +386,7 @@ mod tuple_patterns {
 
             func sum(pair: (lang.i64, lang.i64)) -> lang.i64 {
                 let (a, b) = pair;
-                a + b
+                lang.i64_add(a, b)
             }
         "#,
         )
@@ -505,9 +505,9 @@ mod match_with_guards {
 
             func classify(n: lang.i64) -> lang.i64 {
                 match n {
-                    x if x < 0 => 0 - 1,
-                    x if x == 0 => 0,
-                    x if x < 10 => 1,
+                    x if lang.i64_signed_lt(x, 0) => lang.i64_sub(0, 1),
+                    x if lang.i64_eq(x, 0) => 0,
+                    x if lang.i64_signed_lt(x, 10) => 1,
                     _ => 2
                 }
             }

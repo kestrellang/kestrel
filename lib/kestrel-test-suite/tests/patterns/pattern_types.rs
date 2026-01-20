@@ -107,7 +107,7 @@ module Main
 
 func test(x: lang.i64) -> lang.i64 {
     match x {
-        n => n + 1
+        n => lang.i64_add(n, 1)
     }
 }
 "#,
@@ -124,7 +124,7 @@ module Main
 func test(x: lang.i64) -> lang.i64 {
     match x {
         var n => {
-            n = n + 1;
+            n = lang.i64_add(n, 1);
             n
         }
     }
@@ -142,7 +142,7 @@ module Main
 
 func test(x: lang.i64) -> lang.i64 {
     match x {
-        n => n * 2
+        n => lang.i64_mul(n, 2)
     }
 }
 "#,
@@ -284,7 +284,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     match t {
-        (a, b) => a + b
+        (a, b) => lang.i64_add(a, b)
     }
 }
 "#,
@@ -300,7 +300,7 @@ module Main
 
 func test(t: ((lang.i64, lang.i64), lang.i64)) -> lang.i64 {
     match t {
-        ((a, b), c) => a + b + c
+        ((a, b), c) => lang.i64_add(lang.i64_add(a, b), c)
     }
 }
 "#,
@@ -316,7 +316,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64, lang.i64)) -> lang.i64 {
     match t {
-        (first, _, last) => first + last
+        (first, _, last) => lang.i64_add(first, last)
     }
 }
 "#,
@@ -367,7 +367,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64, lang.i64, lang.i64)) -> lang.i64 {
     match t {
-        (first, second, ..) => first + second
+        (first, second, ..) => lang.i64_add(first, second)
     }
 }
 "#,
@@ -399,7 +399,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64, lang.i64, lang.i64)) -> lang.i64 {
     match t {
-        (first, .., last) => first + last
+        (first, .., last) => lang.i64_add(first, last)
     }
 }
 "#,
@@ -565,7 +565,7 @@ struct Point {
 
 func test(p: Point) -> lang.i64 {
     match p {
-        Point { x, y } => x + y
+        Point { x, y } => lang.i64_add(x, y)
     }
 }
 "#,
@@ -586,7 +586,7 @@ struct Point {
 
 func test(p: Point) -> lang.i64 {
     match p {
-        Point { x: a, y: b } => a + b
+        Point { x: a, y: b } => lang.i64_add(a, b)
     }
 }
 "#,
@@ -658,7 +658,7 @@ struct Line {
 
 func test(line: Line) -> lang.i64 {
     match line {
-        Line { start: Point { x: x1, y: y1 }, end: Point { x: x2, y: y2 } } => x1 + y1 + x2 + y2
+        Line { start: Point { x: x1, y: y1 }, end: Point { x: x2, y: y2 } } => lang.i64_add(lang.i64_add(lang.i64_add(x1, y1), x2), y2)
     }
 }
 "#,
@@ -726,7 +726,7 @@ module Main
 
 func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
-        [a, b] => a + b,
+        [a, b] => lang.i64_add(a, b),
         _ => 0
     }
 }
@@ -794,7 +794,7 @@ module Main
 
 func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
-        [first, second, ..] => first + second,
+        [first, second, ..] => lang.i64_add(first, second),
         [only] => only,
         [] => 0
     }
@@ -833,7 +833,7 @@ module Main
 
 func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
-        [first, .., last] => first + last,
+        [first, .., last] => lang.i64_add(first, last),
         [only] => only,
         [] => 0
     }

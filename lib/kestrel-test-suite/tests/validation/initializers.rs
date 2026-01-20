@@ -172,9 +172,9 @@ struct Value {
     var n: lang.i64
 
     init(x: lang.i64) {
-        if x == 1 {
+        if lang.i64_eq(x, 1) {
             self.n = 10;
-        } else if x == 2 {
+        } else if lang.i64_eq(x, 2) {
             self.n = 20;
         } else {
             self.n = 0;
@@ -296,7 +296,7 @@ struct Counter {
     init(cond: lang.i1) {
         self.value = 0;
         while cond {
-            self.value = self.value + 1;
+            self.value = lang.i64_add(self.value, 1);
         }
     }
 }

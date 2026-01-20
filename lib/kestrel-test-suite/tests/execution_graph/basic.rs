@@ -30,7 +30,7 @@ mod basic_functions {
         Test::new(
             r#"
             module Main
-            func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
+            func add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }
         "#,
         )
         .expect(Compiles)
@@ -50,9 +50,9 @@ mod basic_functions {
             r#"
             module Main
             func calculate(x: lang.i64, y: lang.i64) -> lang.i64 {
-                let sum = x + y;
-                let product = x * y;
-                sum + product
+                let sum = lang.i64_add(x, y);
+                let product = lang.i64_mul(x, y);
+                lang.i64_add(sum, product)
             }
         "#,
         )
@@ -95,7 +95,7 @@ mod control_flow {
             r#"
             module Main
             func abs(x: lang.i64) -> lang.i64 {
-                if x < 0 { -x } else { x }
+                if lang.i64_signed_lt(x, 0) { lang.i64_neg(x) } else { x }
             }
         "#,
         )
@@ -115,7 +115,7 @@ mod control_flow {
             r#"
             module Main
             func max(a: lang.i64, b: lang.i64) -> lang.i64 {
-                if a > b { a } else { b }
+                if lang.i64_signed_gt(a, b) { a } else { b }
             }
         "#,
         )
@@ -163,7 +163,7 @@ mod structs {
                 let y: lang.i64
                 
                 func distanceSquared() -> lang.i64 {
-                    self.x * self.x + self.y * self.y
+                    lang.i64_add(lang.i64_mul(self.x, self.x), lang.i64_mul(self.y, self.y))
                 }
             }
         "#,

@@ -97,7 +97,7 @@ mod inference_from_expressions {
 module Main
 
 func test() -> lang.i64 {
-    let x = 1 + 2;
+    let x = lang.i64_add(1, 2);
     x
 }
 "#,
@@ -112,7 +112,7 @@ func test() -> lang.i64 {
 module Main
 
 func test() -> lang.i1 {
-    let x = 1 == 2;
+    let x = lang.i64_eq(1, 2);
     x
 }
 "#,
@@ -267,9 +267,9 @@ module Main
 
 func test() {
     var count = 0;
-    while count < 10 {
-        let doubled = count * 2;
-        count = count + 1;
+    while lang.i64_signed_lt(count, 10) {
+        let doubled = lang.i64_mul(count, 2);
+        count = lang.i64_add(count, 1);
     }
 }
 "#,
@@ -287,12 +287,12 @@ func test() -> lang.i64 {
     var sum = 0;
     var i = 0;
     loop {
-        if i >= 10 {
+        if lang.i64_signed_ge(i, 10) {
             break
         }
-        let x = i * i;
-        sum = sum + x;
-        i = i + 1;
+        let x = lang.i64_mul(i, i);
+        sum = lang.i64_add(sum, x);
+        i = lang.i64_add(i, 1);
     }
     sum
 }
@@ -470,7 +470,7 @@ module Main
 
 func test() {
     let x: lang.i64 = 42;
-    let y = x + 1;
+    let y = lang.i64_add(x, 1);
     let z: lang.i64 = y;
 }
 "#,

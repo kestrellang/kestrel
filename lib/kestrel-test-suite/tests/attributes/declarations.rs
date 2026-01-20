@@ -137,7 +137,7 @@ mod struct_declarations {
                 var y: lang.i64
                 
                 func magnitude() -> lang.i64 {
-                    self.x + self.y
+                    lang.i64_add(self.x, self.y)
                 }
             }
         "#,
@@ -329,7 +329,7 @@ mod function_declarations {
             r#"module Test
             @dummy
             func add(a: lang.i64, b: lang.i64) -> lang.i64 {
-                a + b
+                lang.i64_add(a, b)
             }
         "#,
         )
@@ -412,7 +412,7 @@ mod function_declarations {
                 
                 @dummy
                 mutating func increment() {
-                    self.count = self.count + 1;
+                    self.count = lang.i64_add(self.count, 1);
                 }
             }
         "#,

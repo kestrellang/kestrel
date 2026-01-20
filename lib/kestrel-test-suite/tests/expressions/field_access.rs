@@ -192,7 +192,7 @@ struct Point {
 }
 
 func sum(p: Point) -> lang.i64 {
-    p.x + p.y
+    lang.i64_add(p.x, p.y)
 }
 "#,
         )

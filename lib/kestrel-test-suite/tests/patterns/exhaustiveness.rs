@@ -211,7 +211,7 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
-        .Some(n) if n > 0 => "positive",
+        .Some(n) if lang.i64_signed_gt(n, 0) => "positive",
         .None => "nothing"
     }
 }
@@ -234,7 +234,7 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
-        .Some(n) if n > 0 => "positive",
+        .Some(n) if lang.i64_signed_gt(n, 0) => "positive",
         .Some(_) => "non-positive",
         .None => "nothing"
     }
@@ -252,8 +252,8 @@ module Main
 
 func test(x: lang.i64) -> lang.str {
     match x {
-        n if n > 0 => "positive",
-        n if n < 0 => "negative"
+        n if lang.i64_signed_gt(n, 0) => "positive",
+        n if lang.i64_signed_lt(n, 0) => "negative"
     }
 }
 "#,
@@ -270,8 +270,8 @@ module Main
 
 func test(x: lang.i64) -> lang.str {
     match x {
-        n if n > 0 => "positive",
-        n if n < 0 => "negative",
+        n if lang.i64_signed_gt(n, 0) => "positive",
+        n if lang.i64_signed_lt(n, 0) => "negative",
         _ => "zero"
     }
 }
@@ -648,7 +648,7 @@ func test(arr: [lang.i64]) -> lang.i64 {
     match arr {
         [] => 0,
         [x] => x,
-        [first, ..rest, last] => first + last,
+        [first, ..rest, last] => lang.i64_add(first, last),
         [..] => -1 // UNREACHABLE
     }
 }

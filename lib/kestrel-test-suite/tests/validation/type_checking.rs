@@ -480,7 +480,7 @@ module Main
 
 func test() {
     let x: lang.i64 = 5;
-    if x == 5 {
+    if lang.i64_eq(x, 5) {
         let y: lang.i64 = 1;
     }
 }
@@ -554,9 +554,9 @@ func test(cond: lang.i1) -> lang.i64 {
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    if x == 1 {
+    if lang.i64_eq(x, 1) {
         10
-    } else if x == 2 {
+    } else if lang.i64_eq(x, 2) {
         "twenty"
     } else {
         30
@@ -651,7 +651,7 @@ func test() {
 module Main
 
 func add(a: lang.i64, b: lang.i64) -> lang.i64 {
-    a + b
+    lang.i64_add(a, b)
 }
 
 func test() {
@@ -669,7 +669,7 @@ func test() {
 module Main
 
 func add(a: lang.i64, b: lang.i64) -> lang.i64 {
-    a + b
+    lang.i64_add(a, b)
 }
 
 func test() {
@@ -687,7 +687,7 @@ func test() {
 module Main
 
 func double(x: lang.i64) -> lang.i64 {
-    x + x
+    lang.i64_add(x, x)
 }
 
 func test() {
@@ -705,7 +705,7 @@ func test() {
 module Main
 
 func add(a: lang.i64, b: lang.i64) -> lang.i64 {
-    a + b
+    lang.i64_add(a, b)
 }
 
 func test() -> lang.i64 {
@@ -757,7 +757,7 @@ struct Calculator {
     var value: lang.i64
 
     func add(x: lang.i64) -> lang.i64 {
-        self.value + x
+        lang.i64_add(self.value, x)
     }
 }
 

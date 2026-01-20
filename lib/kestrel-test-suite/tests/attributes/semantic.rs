@@ -440,7 +440,7 @@ mod declaration_combinations {
                 
                 @dummy
                 mutating func increment() {
-                    self.count = self.count + 1;
+                    self.count = lang.i64_add(self.count, 1);
                 }
             }
         "#,

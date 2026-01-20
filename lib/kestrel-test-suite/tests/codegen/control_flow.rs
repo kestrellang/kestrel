@@ -363,7 +363,7 @@ fn test_bool_or_true() {
 module Test
 
 func main() -> lang.i64 {
-    if false or true {
+    if lang.i1_or(false, true) {
         42
     } else {
         0
@@ -385,7 +385,7 @@ fn test_bool_or_false() {
 module Test
 
 func main() -> lang.i64 {
-    if false or false {
+    if lang.i1_or(false, false) {
         0
     } else {
         42
@@ -513,7 +513,7 @@ module Test
 func main() -> lang.i64 {
     let a = 5;
     let b = 10;
-    if a < b and b > 5 {
+    if lang.i1_and(lang.i64_signed_lt(a, b), lang.i64_signed_gt(b, 5)) {
         42
     } else {
         0

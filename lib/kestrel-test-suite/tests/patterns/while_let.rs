@@ -31,7 +31,7 @@ struct Iterator {
 }
 
 func next(iter: Iterator) -> Option[lang.i64] {
-    if iter.current < iter.max {
+    if lang.i64_signed_lt(iter.current, iter.max) {
         Option[lang.i64].Some(value: iter.current)
     } else {
         Option[lang.i64].None
@@ -41,7 +41,7 @@ func next(iter: Iterator) -> Option[lang.i64] {
 func test() {
     var iter = Iterator(current: 0, max: 10);
     while let .Some(item) = next(iter) {
-        iter.current = iter.current + 1;
+        iter.current = lang.i64_add(iter.current, 1);
     }
 }
 "#,
@@ -61,12 +61,12 @@ enum Option[T] {
 }
 
 func test() -> lang.i64 {
-    var sum = 0;
+    var sum: lang.i64 = 0;
     var current: Option[lang.i64] = .Some(value: 5);
     while let .Some(n) = current {
-        sum = sum + n;
-        if n > 0 {
-            current = .Some(value: n - 1);
+        sum = lang.i64_add(sum, n);
+        if lang.i64_signed_gt(n, 0) {
+            current = .Some(value: lang.i64_sub(n, 1));
         } else {
             current = .None;
         }
@@ -147,13 +147,13 @@ enum Option[T] {
 }
 
 func test() -> lang.i64 {
-    var sum = 0;
-    let multiplier = 2;
+    var sum: lang.i64 = 0;
+    let multiplier: lang.i64 = 2;
     var opt: Option[lang.i64] = .Some(value: 5);
     while let .Some(value) = opt {
-        sum = sum + (value * multiplier);
-        if value > 0 {
-            opt = .Some(value: value - 1);
+        sum = lang.i64_add(sum, lang.i64_mul(value, multiplier));
+        if lang.i64_signed_gt(value, 0) {
+            opt = .Some(value: lang.i64_sub(value, 1));
         } else {
             opt = .None;
         }
@@ -185,14 +185,14 @@ enum Option[T] {
 }
 
 func test() -> lang.i64 {
-    var count = 0;
+    var count: lang.i64 = 0;
     var opt: Option[lang.i64] = .Some(value: 100);
     while let .Some(value) = opt {
-        count = count + 1;
-        if count > 5 {
+        count = lang.i64_add(count, 1);
+        if lang.i64_signed_gt(count, 5) {
             break
         }
-        opt = .Some(value: value - 1);
+        opt = .Some(value: lang.i64_sub(value, 1));
     }
     count
 }
@@ -213,7 +213,7 @@ enum Option[T] {
 }
 
 func getOption(n: lang.i64) -> Option[lang.i64] {
-    if n > 0 {
+    if lang.i64_signed_gt(n, 0) {
         Option[lang.i64].Some(value: n)
     } else {
         Option[lang.i64].None
@@ -221,14 +221,14 @@ func getOption(n: lang.i64) -> Option[lang.i64] {
 }
 
 func test() -> lang.i64 {
-    var sum = 0;
-    var n = 10;
+    var sum: lang.i64 = 0;
+    var n: lang.i64 = 10;
     while let .Some(value) = getOption(n) {
-        n = n - 1;
-        if value == 5 {
+        n = lang.i64_sub(n, 1);
+        if lang.i64_eq(value, 5) {
             continue
         }
-        sum = sum + value;
+        sum = lang.i64_add(sum, value);
     }
     sum
 }
@@ -251,10 +251,10 @@ enum Option[T] {
 func test() -> lang.i64 {
     var opt: Option[lang.i64] = .Some(value: 42);
     while let .Some(value) = opt {
-        if value > 40 {
+        if lang.i64_signed_gt(value, 40) {
             return value
         }
-        opt = .Some(value: value - 1);
+        opt = .Some(value: lang.i64_sub(value, 1));
     }
     0
 }
@@ -275,20 +275,20 @@ enum Option[T] {
 }
 
 func test() -> lang.i64 {
-    var sum = 0;
+    var sum: lang.i64 = 0;
     var outer: Option[lang.i64] = .Some(value: 3);
     while let .Some(i) = outer {
         var inner: Option[lang.i64] = .Some(value: i);
         while let .Some(j) = inner {
-            sum = sum + j;
-            if j > 0 {
-                inner = .Some(value: j - 1);
+            sum = lang.i64_add(sum, j);
+            if lang.i64_signed_gt(j, 0) {
+                inner = .Some(value: lang.i64_sub(j, 1));
             } else {
                 inner = .None;
             }
         }
-        if i > 0 {
-            outer = .Some(value: i - 1);
+        if lang.i64_signed_gt(i, 0) {
+            outer = .Some(value: lang.i64_sub(i, 1));
         } else {
             outer = .None;
         }
@@ -323,7 +323,7 @@ func test() {
     var a: Option[lang.i64] = Option.Some(value: 1);
     var b: Option[lang.i64] = Option.Some(value: 2);
     while let .Some(x) = a, let .Some(y) = b {
-        let _ = x + y;
+        let _ = lang.i64_add(x, y);
         a = Option[lang.i64].None;
     }
 }
@@ -345,8 +345,8 @@ enum Option[T] {
 
 func test() {
     var opt: Option[lang.i64] = Option.Some(value: 5);
-    while let .Some(x) = opt, x > 0 {
-        opt = Option.Some(value: x - 1);
+    while let .Some(x) = opt, lang.i64_signed_gt(x, 0) {
+        opt = Option.Some(value: lang.i64_sub(x, 1));
     }
 }
 "#,
@@ -368,9 +368,9 @@ enum Option[T] {
 func test() {
     var a: Option[lang.i64] = Option.Some(value: 10);
     var b: Option[lang.i64] = Option.Some(value: 5);
-    while let .Some(x) = a, let .Some(y) = b, x > y {
-        let _ = x - y;
-        a = Option.Some(value: x - 1);
+    while let .Some(x) = a, let .Some(y) = b, lang.i64_signed_gt(x, y) {
+        let _ = lang.i64_sub(x, y);
+        a = Option.Some(value: lang.i64_sub(x, 1));
     }
 }
 "#,
@@ -398,12 +398,12 @@ enum Option[T] {
 }
 
 func test() -> lang.i64 {
-    var sum = 0;
+    var sum: lang.i64 = 0;
     var opt: Option[lang.i64] = .Some(value: 10);
     while let .Some(n) = opt {
-        sum = sum + n;
-        if n > 0 {
-            opt = .Some(value: n - 1);
+        sum = lang.i64_add(sum, n);
+        if lang.i64_signed_gt(n, 0) {
+            opt = .Some(value: lang.i64_sub(n, 1));
         } else {
             opt = .None;
         }

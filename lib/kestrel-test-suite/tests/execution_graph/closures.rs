@@ -46,7 +46,7 @@ mod non_capturing {
             module Test
 
             func test() -> (lang.i64, lang.i64) -> lang.i64 {
-                { (x, y) in x + y }
+                { (x, y) in lang.i64_add(x, y) }
             }
         "#,
         )
@@ -69,7 +69,7 @@ mod non_capturing {
             module Test
 
             func test() -> (lang.i64) -> lang.i64 {
-                { it * 2 }
+                { lang.i64_mul(it, 2) }
             }
         "#,
         )
@@ -116,7 +116,7 @@ mod capturing {
             module Test
 
             func test(n: lang.i64) -> () -> lang.i64 {
-                { n + 1 }
+                { lang.i64_add(n, 1) }
             }
         "#,
         )
@@ -154,7 +154,7 @@ mod capturing {
                 let a = 1;
                 let b = 2;
                 let c = 3;
-                { a + b + c }
+                { lang.i64_add(lang.i64_add(a, b), c) }
             }
         "#,
         )
@@ -171,7 +171,7 @@ mod capturing {
             module Test
 
             func test(multiplier: lang.i64) -> (lang.i64) -> lang.i64 {
-                { it * multiplier }
+                { lang.i64_mul(it, multiplier) }
             }
         "#,
         )
@@ -200,8 +200,8 @@ mod multi_statement {
 
             func test() -> (lang.i64) -> lang.i64 {
                 { (x) in
-                    let y = x * 2;
-                    y + 1
+                    let y = lang.i64_mul(x, 2);
+                    lang.i64_add(y, 1)
                 }
             }
         "#,
@@ -223,10 +223,10 @@ mod multi_statement {
 
             func test() -> (lang.i64) -> lang.i64 {
                 { (x) in
-                    if x > 0 {
+                    if lang.i64_signed_gt(x, 0) {
                         x
                     } else {
-                        0 - x
+                        lang.i64_sub(0, x)
                     }
                 }
             }
@@ -259,7 +259,7 @@ mod multiple_closures {
             func test() -> lang.i64 {
                 let f: () -> lang.i64 = { 1 };
                 let g: () -> lang.i64 = { 2 };
-                f() + g()
+                lang.i64_add(f(), g())
             }
         "#,
         )
@@ -305,7 +305,7 @@ mod nested {
             module Test
 
             func test() -> (lang.i64) -> (lang.i64) -> lang.i64 {
-                { (x) in { (y) in x + y } }
+                { (x) in { (y) in lang.i64_add(x, y) } }
             }
         "#,
         )
@@ -323,7 +323,7 @@ mod nested {
             module Test
 
             func test() -> lang.i64 {
-                let f: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in { (y) in x + y } };
+                let f: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in { (y) in lang.i64_add(x, y) } };
                 let add10 = f(10);
                 add10(5)
             }
@@ -366,7 +366,7 @@ mod invocation {
             module Test
 
             func test() -> lang.i64 {
-                let f: (lang.i64) -> lang.i64 = { it * 2 };
+                let f: (lang.i64) -> lang.i64 = { lang.i64_mul(it, 2) };
                 f(21)
             }
         "#,
@@ -439,13 +439,13 @@ mod closure_as_parameter {
             }
 
             func main() -> lang.i64 {
-                let double = { (x: lang.i64) in x * 2 };
-                let addOne = { (x: lang.i64) in x + 1 };
-                
+                let double = { (x: lang.i64) in lang.i64_mul(x, 2) };
+                let addOne = { (x: lang.i64) in lang.i64_add(x, 1) };
+
                 let a = apply(double, 5);
                 let b = apply(addOne, 10);
-                
-                a + b
+
+                lang.i64_add(a, b)
             }
         "#,
         )
@@ -479,7 +479,7 @@ mod make_adder {
             module Main
 
             func makeAdder(n: lang.i64) -> (lang.i64) -> lang.i64 {
-                { (x: lang.i64) in x + n }
+                { (x: lang.i64) in lang.i64_add(x, n) }
             }
         "#,
         )
@@ -505,14 +505,14 @@ mod make_adder {
             module Main
 
             func makeAdder(n: lang.i64) -> (lang.i64) -> lang.i64 {
-                { (x: lang.i64) in x + n }
+                { (x: lang.i64) in lang.i64_add(x, n) }
             }
 
             func main() -> lang.i64 {
                 let add5 = makeAdder(5);
                 let add10 = makeAdder(10);
-                
-                add5(3) + add10(3)
+
+                lang.i64_add(add5(3), add10(3))
             }
         "#,
         )

@@ -366,8 +366,8 @@ enum Expr {
 
 func test(e: Expr) -> lang.i64 {
     match e {
-        .Add(left, right) or .Sub(left, right) => left + right,
-        .Mul(left, right) => left * right
+        .Add(left, right) or .Sub(left, right) => lang.i64_add(left, right),
+        .Mul(left, right) => lang.i64_mul(left, right)
     }
 }
 "#,
@@ -442,8 +442,8 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> lang.str {
     match opt {
-        .Some(n) if n > 0 => "positive",
-        .Some(n) if n < 0 => "negative",
+        .Some(n) if lang.i64_signed_gt(n, 0) => "positive",
+        .Some(n) if lang.i64_signed_lt(n, 0) => "negative",
         .Some(_) => "zero",
         .None => "nothing"
     }
@@ -461,8 +461,8 @@ module Main
 
 func test(x: lang.i64) -> lang.str {
     match x {
-        n if n > 100 => "big",
-        n if n > 10 => "medium",
+        n if lang.i64_signed_gt(n, 100) => "big",
+        n if lang.i64_signed_gt(n, 10) => "medium",
         _ => "small"
     }
 }
@@ -473,6 +473,7 @@ func test(x: lang.i64) -> lang.str {
 
     #[test]
     fn guard_must_be_bool() {
+        // The guard condition `n` (a lang.i64) is not a boolean - should fail
         Test::new(
             r#"
 module Main
@@ -502,7 +503,7 @@ enum Value {
 
 func test(v: Value) -> lang.str {
     match v {
-        .A(n) or .B(n) if n > 0 => "positive",
+        .A(n) or .B(n) if lang.i64_signed_gt(n, 0) => "positive",
         _ => "other"
     }
 }
@@ -590,7 +591,7 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
-        .Some(x) => x + 1,
+        .Some(x) => lang.i64_add(x, 1),
         .None => 0
     }
 }
@@ -736,7 +737,7 @@ module Main
 
 func test(t: (lang.i64, lang.i64)) -> lang.i64 {
     match t {
-        (a, b, c) => a + b + c
+        (a, b, c) => lang.i64_add(lang.i64_add(a, b), c)
     }
 }
 "#,
@@ -758,7 +759,7 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> lang.i64 {
     match opt {
-        .Some(a, b) => a + b,
+        .Some(a, b) => lang.i64_add(a, b),
         .None => 0
     }
 }
@@ -825,7 +826,7 @@ module Main
 func test(x: lang.i64) -> lang.i64 {
     let y = 100;
     match x {
-        y => y + 1
+        y => lang.i64_add(y, 1)
     }
 }
 "#,
@@ -840,9 +841,9 @@ func test(x: lang.i64) -> lang.i64 {
 module Main
 
 func test(b: lang.i1) -> lang.i64 {
-    let multiplier = 10;
+    let multiplier: lang.i64 = 10;
     match b {
-        true => multiplier * 2,
+        true => lang.i64_mul(multiplier, 2),
         false => multiplier
     }
 }

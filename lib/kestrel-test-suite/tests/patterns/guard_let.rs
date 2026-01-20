@@ -30,7 +30,7 @@ func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         return 0
     }
-    value * 2
+    lang.i64_mul(value, 2)
 }
 "#,
         )
@@ -55,7 +55,7 @@ func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(y) = b else {
         return 0
     }
-    x + y
+    lang.i64_add(x, y)
 }
 "#,
         )
@@ -77,7 +77,7 @@ func test(opt: Option[(lang.i64, lang.i64)]) -> lang.i64 {
     guard let .Some((a, b)) = opt else {
         return 0
     }
-    a + b
+    lang.i64_add(a, b)
 }
 "#,
         )
@@ -127,14 +127,14 @@ enum Option[T] {
 }
 
 func test(opts: [Option[lang.i64]]) -> lang.i64 {
-    var sum = 0;
-    var i = 0;
-    while i < 10 {
+    var sum: lang.i64 = 0;
+    var i: lang.i64 = 0;
+    while lang.i64_signed_lt(i, 10) {
         guard let .Some(value) = Option.Some(value: i) else {
             break
         }
-        sum = sum + value;
-        i = i + 1;
+        sum = lang.i64_add(sum, value);
+        i = lang.i64_add(i, 1);
     }
     sum
 }
@@ -156,15 +156,15 @@ enum Option[T] {
 }
 
 func test() -> lang.i64 {
-    var sum = 0;
-    var i = 0;
-    while i < 10 {
-        i = i + 1;
+    var sum: lang.i64 = 0;
+    var i: lang.i64 = 0;
+    while lang.i64_signed_lt(i, 10) {
+        i = lang.i64_add(i, 1);
         // Skip odd numbers using guard-let with continue
-        guard let .Some(value) = if i % 2 == 0 { Option[lang.i64].Some(value: i) } else { Option[lang.i64].None } else {
+        guard let .Some(value) = if lang.i64_eq(lang.i64_signed_rem(i, 2), 0) { Option[lang.i64].Some(value: i) } else { Option[lang.i64].None } else {
             continue
         }
-        sum = sum + value;
+        sum = lang.i64_add(sum, value);
     }
     sum
 }
@@ -221,7 +221,7 @@ func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(y) = b else {
         return x
     }
-    x + y
+    lang.i64_add(x, y)
 }
 "#,
         )
@@ -243,7 +243,7 @@ func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(value) = opt else {
         return 0
     }
-    let doubled = value * 2;
+    let doubled = lang.i64_mul(value, 2);
     doubled
 }
 "#,
@@ -297,7 +297,7 @@ func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = a, let .Some(y) = b else {
         return 0
     }
-    x + y
+    lang.i64_add(x, y)
 }
 "#,
         )
@@ -316,10 +316,10 @@ enum Option[T] {
 }
 
 func test(opt: Option[lang.i64]) -> lang.i64 {
-    guard let .Some(x) = opt, x > 0 else {
+    guard let .Some(x) = opt, lang.i64_signed_gt(x, 0) else {
         return 0
     }
-    x * 2
+    lang.i64_mul(x, 2)
 }
 "#,
         )
@@ -338,10 +338,10 @@ enum Option[T] {
 }
 
 func test(a: Option[lang.i64], b: Option[lang.i64]) -> lang.i64 {
-    guard let .Some(x) = a, let .Some(y) = b, x < y else {
+    guard let .Some(x) = a, let .Some(y) = b, lang.i64_signed_lt(x, y) else {
         return 0
     }
-    y - x
+    lang.i64_sub(y, x)
 }
 "#,
         )
@@ -371,7 +371,7 @@ func test(opt: Option[lang.i64]) -> lang.i64 {
     guard let .Some(x) = opt else {
         return 0
     }
-    x + 1
+    lang.i64_add(x, 1)
 }
 "#,
         )

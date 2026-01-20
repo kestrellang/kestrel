@@ -1303,9 +1303,9 @@ mod regression {
                 import Ordering.(Ordering)
 
                 public func compare(a: lang.i64, b: lang.i64) -> Ordering {
-                    if a < b {
+                    if lang.i64_signed_lt(a, b) {
                         Ordering.Less
-                    } else if a > b {
+                    } else if lang.i64_signed_gt(a, b) {
                         Ordering.Greater
                     } else {
                         Ordering.Equal

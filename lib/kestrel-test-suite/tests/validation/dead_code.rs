@@ -34,7 +34,7 @@ func test() -> lang.i64 {
 module Main
 
 func test() -> lang.i64 {
-    return 1 + 2;
+    return lang.i64_add(1, 2);
     return 3;
 }
 "#,
@@ -127,8 +127,8 @@ module Main
 
 func test() {
     var i: lang.i64 = 0;
-    while i < 10 {
-        i = i + 1;
+    while lang.i64_signed_lt(i, 10) {
+        i = lang.i64_add(i, 1);
         continue;
         let x: lang.i64 = 1;
     }
@@ -247,11 +247,11 @@ module Main
 
 func test() -> lang.i64 {
     var i: lang.i64 = 0;
-    while i < 10 {
-        if i == 5 {
+    while lang.i64_signed_lt(i, 10) {
+        if lang.i64_eq(i, 5) {
             return i;
         }
-        i = i + 1;
+        i = lang.i64_add(i, 1);
     }
     0
 }
