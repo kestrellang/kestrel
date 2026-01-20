@@ -17,12 +17,12 @@
 //   let name = try io.prompt(message: "Name: ")
 //   try io.println(s: "Hello, " + name)
 
-module io
+module std.io
 
 // Re-export from submodules
-import io.libc
-import io.error.(Error)
-import io.read.(Read, Empty, Repeat, Cursor, readByte, readAll)
-import io.write.(Write, Sink, Buffer, writeAll, writeByte, writeStr, writeLine)
-import io.file.(Seek, File, readFileString, writeFileString, appendFileString)
-import io.stdio.(Stdin, Stdout, Stderr, stdin, stdout, stderr, print, println, printlnEmpty, eprint, eprintln, readLine, prompt)
+import std.io.libc
+import std.io.error.(Error)
+import std.io.read.(Read, Empty, Repeat, Cursor, readByte, readAll)
+import std.io.write.(Write, Sink, Buffer, writeAll, writeByte, writeStr, writeLine)
+import std.io.file.(Seek, File, readFileString, writeFileString, appendFileString)
+import std.io.stdio.(Stdin, Stdout, Stderr, stdin, stdout, stderr, print, println, printlnEmpty, eprint, eprintln, readLine, prompt)

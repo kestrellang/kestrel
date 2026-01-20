@@ -2,7 +2,7 @@
 //
 // This module provides raw bindings to libc I/O functions via @extern(.C).
 
-module io.libc
+module std.io.libc
 
 import std.num.(Int64, Int32)
 import std.memory.(Pointer)

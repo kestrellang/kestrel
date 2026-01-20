@@ -1,6 +1,6 @@
 // Write trait and utilities
 
-module io.write
+module std.io.write
 
 import std.num.(Int64, UInt8)
 import std.result.(Result)
@@ -8,7 +8,7 @@ import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
-import io.error.(Error, brokenPipe)
+import std.io.error.(Error, brokenPipe)
 
 // Write trait - sink for bytes
 public protocol Write {

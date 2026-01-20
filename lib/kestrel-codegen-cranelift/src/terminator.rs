@@ -220,9 +220,27 @@ fn copy_aggregate_value(
     src_ptr: CraneliftValue,
     builder: &mut FunctionBuilder<'_>,
 ) {
+    // Unit types have zero size - nothing to copy
+    if matches!(ctx.mir.ty(ty), kestrel_execution_graph::MirTy::Unit) {
+        return;
+    }
+
     let layout = ctx.layouts.layout_of(ty);
     if layout.size == 0 {
         return;
+    }
+
+    // Skip copy if src_ptr is a constant 0 (null pointer from Unit value).
+    // This can happen when if-else expressions have aggregate types but
+    // the branch values are from discarded statement results.
+    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr) {
+        if let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
+            builder.func.dfg.insts[inst]
+        {
+            if imm.bits() == 0 {
+                return;
+            }
+        }
     }
 
     for offset in 0..layout.size {

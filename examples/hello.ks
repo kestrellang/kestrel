@@ -2,8 +2,8 @@
 
 module Hello
 
-import io.stdio.(println)
-import io.error.(Error)
+import std.io.stdio.(println)
+import std.io.error.(Error)
 import std.result.(Result)
 
 func main() -> Result[(), Error] {

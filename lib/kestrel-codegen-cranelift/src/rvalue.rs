@@ -91,9 +91,27 @@ fn copy_aggregate_value(
     src_ptr: CraneliftValue,
     builder: &mut FunctionBuilder<'_>,
 ) {
+    // Unit types have zero size - nothing to copy
+    if matches!(ctx.mir.ty(ty), kestrel_execution_graph::MirTy::Unit) {
+        return;
+    }
+
     let layout = ctx.layouts.layout_of(ty);
     if layout.size == 0 {
         return;
+    }
+
+    // Skip copy if src_ptr is a constant 0 (null pointer from Unit value).
+    // This can happen when if-else expressions have aggregate types but
+    // the branch values are from discarded statement results.
+    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr) {
+        if let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
+            builder.func.dfg.insts[inst]
+        {
+            if imm.bits() == 0 {
+                return;
+            }
+        }
     }
 
     for offset in 0..layout.size {
@@ -376,13 +394,24 @@ pub fn compile_rvalue(
                 let concrete_val_ty = subst.apply_ty_readonly(ctx.mir, val_ty).unwrap_or(val_ty);
                 if is_aggregate_value_type(ctx.mir, concrete_val_ty) {
                     copy_aggregate_value(ctx, concrete_val_ty, ptr_val, val, builder);
-                    return Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0));
+                    // Return unit - use pointer type for phi node compatibility
+                    let ptr_type = if ctx.target.is_64bit() {
+                        cranelift_codegen::ir::types::I64
+                    } else {
+                        cranelift_codegen::ir::types::I32
+                    };
+                    return Ok(builder.ins().iconst(ptr_type, 0));
                 }
             }
 
             builder.ins().store(cranelift_codegen::ir::MemFlags::new(), val, ptr_val, 0);
-            // Return unit (represented as 0)
-            Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0))
+            // Return unit - use pointer type for phi node compatibility
+            let ptr_type = if ctx.target.is_64bit() {
+                cranelift_codegen::ir::types::I64
+            } else {
+                cranelift_codegen::ir::types::I32
+            };
+            Ok(builder.ins().iconst(ptr_type, 0))
         }
 
         Rvalue::PtrIsNull { ptr } => {
@@ -1729,8 +1758,14 @@ fn compile_immediate(
         }
 
         ImmediateKind::Unit => {
-            // Unit is zero-sized, return dummy value
-            Ok(builder.ins().iconst(cl_types::I8, 0))
+            // Unit is zero-sized. Use pointer type to avoid type mismatches in phi nodes
+            // when Unit values merge with aggregate pointers in control flow.
+            let ptr_type = if ctx.target.is_64bit() {
+                cl_types::I64
+            } else {
+                cl_types::I32
+            };
+            Ok(builder.ins().iconst(ptr_type, 0))
         }
 
         ImmediateKind::StringLiteral(s) => compile_string_literal(ctx, s, builder),
@@ -2262,8 +2297,13 @@ pub fn compile_call(
 
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
-                // Unit return - return a dummy value
-                Ok(builder.ins().iconst(cl_types::I8, 0))
+                // Unit return - use pointer type to avoid type mismatches in phi nodes
+                let ptr_type = if ctx.target.is_64bit() {
+                    cl_types::I64
+                } else {
+                    cl_types::I32
+                };
+                Ok(builder.ins().iconst(ptr_type, 0))
             } else {
                 let raw_result = results[0];
                 // For extern functions, wrap primitive returns back into wrapper structs
@@ -2441,7 +2481,13 @@ pub fn compile_call(
 
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
-                Ok(builder.ins().iconst(cl_types::I8, 0))
+                // Unit return - use pointer type to avoid type mismatches in phi nodes
+                let ptr_type = if ctx.target.is_64bit() {
+                    cl_types::I64
+                } else {
+                    cl_types::I32
+                };
+                Ok(builder.ins().iconst(ptr_type, 0))
             } else {
                 Ok(results[0])
             }
@@ -3177,8 +3223,13 @@ fn compile_thin_call(
 
     let results = builder.inst_results(call_inst);
     if results.is_empty() {
-        // Unit return - return a dummy value
-        Ok(builder.ins().iconst(cl_types::I8, 0))
+        // Unit return - use pointer type to avoid type mismatches in phi nodes
+        let ptr_type = if ctx.target.is_64bit() {
+            cl_types::I64
+        } else {
+            cl_types::I32
+        };
+        Ok(builder.ins().iconst(ptr_type, 0))
     } else {
         // Check if the return type is a string - if so, copy the fat pointer
         if matches!(ctx.mir.ty(ret_ty), kestrel_execution_graph::MirTy::Str) {
@@ -3296,7 +3347,13 @@ fn compile_thick_call(
             }
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
-                return Ok(builder.ins().iconst(cl_types::I8, 0));
+                // Unit return - use pointer type to avoid type mismatches in phi nodes
+                let ptr_type = if ctx.target.is_64bit() {
+                    cl_types::I64
+                } else {
+                    cl_types::I32
+                };
+                return Ok(builder.ins().iconst(ptr_type, 0));
             } else {
                 // Check if return type is string - if so, copy the fat pointer
                 if matches!(ctx.mir.ty(*ret), MirTy::Str) {
@@ -3399,7 +3456,13 @@ fn compile_thick_call(
 
             let results = builder.inst_results(call_inst);
             if results.is_empty() {
-                return Ok(builder.ins().iconst(cl_types::I8, 0));
+                // Unit return - use pointer type to avoid type mismatches in phi nodes
+                let ptr_type = if ctx.target.is_64bit() {
+                    cl_types::I64
+                } else {
+                    cl_types::I32
+                };
+                return Ok(builder.ins().iconst(ptr_type, 0));
             } else {
                 // Check if return type is string - if so, copy the fat pointer
                 if matches!(ctx.mir.ty(*ret), MirTy::Str) {

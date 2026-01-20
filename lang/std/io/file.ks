@@ -1,6 +1,6 @@
 // File I/O
 
-module io.file
+module std.io.file
 
 import std.num.(Int64, Int32, UInt8)
 import std.result.(Result, Optional)
@@ -8,10 +8,10 @@ import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool, Copyable)
-import io.libc
-import io.error.(Error)
-import io.read.(Read, readAll)
-import io.write.(Write, writeAll, writeStr)
+import std.io.libc
+import std.io.error.(Error)
+import std.io.read.(Read, readAll)
+import std.io.write.(Write, writeAll, writeStr)
 
 // Seek position
 public enum Seek {

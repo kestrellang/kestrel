@@ -1,6 +1,6 @@
 // Standard I/O streams
 
-module io.stdio
+module std.io.stdio
 
 import std.num.(Int64, UInt8)
 import std.result.(Result, Optional)
@@ -8,10 +8,10 @@ import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
-import io.libc
-import io.error.(Error)
-import io.read.(Read)
-import io.write.(Write, writeStr, writeByte, writeLine)
+import std.io.libc
+import std.io.error.(Error)
+import std.io.read.(Read)
+import std.io.write.(Write, writeStr, writeByte, writeLine)
 
 // Stdin - standard input
 public struct Stdin: Read {

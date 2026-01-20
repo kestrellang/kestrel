@@ -1,13 +1,13 @@
 // Read trait and utilities
 
-module io.read
+module std.io.read
 
 import std.num.(Int64, UInt8)
 import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.core.(Bool)
-import io.error.(Error)
+import std.io.error.(Error)
 
 // Read trait - source of bytes
 public protocol Read {

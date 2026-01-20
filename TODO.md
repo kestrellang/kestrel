@@ -1,14 +1,17 @@
 - [x] Build standard library 
 - [x] Build IO
 - [x] Build pong
-- [ ] String escape codes
-- [ ] Cleanup
-- [ ] Move IO into standard library
+- [x] String escape codes
+- [x] Cleanup
+- [x] Remove old STD
+- [x] Move IO into standard library
+- [ ] Build with std by default, add --no-std flag.
+- [ ] Fix dictionary / mutating
+- [ ] Add display protocol
 - [ ] Reference counting
 - [ ] Web server
 - [ ] Add tests
-- [ ] Remove old STD
-- [ ] Build with std by default, add --no-std flag.
+- [ ] Fix test suite
 
 ## Phase 14
 

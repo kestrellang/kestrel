@@ -53,8 +53,9 @@ enum Commands {
     },
     /// Compile and run a program
     Run {
-        /// Source file to run
-        file: String,
+        /// Source files to run
+        #[arg(required = true)]
+        files: Vec<String>,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
         libraries: Vec<String>,
@@ -235,28 +236,42 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
 }
 
 fn run_program(
-    file: &str,
+    files: &[String],
     target: Option<&str>,
     verbose: bool,
     libraries: Vec<String>,
     library_paths: Vec<String>,
     frameworks: Vec<String>,
 ) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("error: no input files");
+        return ExitCode::from(1);
+    }
+
     let target_config = match get_target_config(target) {
         Ok(t) => t,
         Err(code) => return code,
     };
 
-    if verbose {
-        eprintln!("  Reading {}", file);
-    }
-    let Some(content) = read_source(file) else {
-        return ExitCode::from(1);
-    };
+    let mut builder = Compilation::builder();
+    let mut io_ok = true;
 
-    let compilation = Compilation::builder()
-        .add_source(file.to_string(), content)
-        .build();
+    for file in files {
+        if verbose {
+            eprintln!("  Reading {}", file);
+        }
+        let Some(content) = read_source(file) else {
+            io_ok = false;
+            continue;
+        };
+        builder = builder.add_source(file.clone(), content);
+    }
+
+    if !io_ok {
+        return ExitCode::from(1);
+    }
+
+    let compilation = builder.build();
 
     if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
@@ -398,12 +413,12 @@ fn main() -> ExitCode {
         ),
         Some(Commands::Parse { files }) => run_parse(&files, cli.tree.is_some()),
         Some(Commands::Run {
-            file,
+            files,
             libraries,
             library_paths,
             frameworks,
         }) => run_program(
-            &file,
+            &files,
             cli.target.as_deref(),
             cli.verbose,
             libraries,

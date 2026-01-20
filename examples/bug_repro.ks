@@ -3,8 +3,8 @@
 
 module BugRepro
 
-import io.stdio.(print, println)
-import io.error.(Error)
+import std.io.stdio.(print, println)
+import std.io.error.(Error)
 import std.result.(Result)
 import std.num.(Int64)
 import std.core.(Bool)

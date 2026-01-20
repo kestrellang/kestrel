@@ -1,11 +1,11 @@
 // I/O Error types
 
-module io.error
+module std.io.error
 
 import std.num.(Int32, Int64)
 import std.text.(String)
 import std.result.(Result)
-import io.libc
+import std.io.libc
 
 // I/O Error
 public struct Error {
