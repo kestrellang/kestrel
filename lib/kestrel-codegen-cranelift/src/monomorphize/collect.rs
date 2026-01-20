@@ -12,7 +12,7 @@ use super::substitute::{Substitution, build_substitution};
 use super::witness;
 use kestrel_execution_graph::{
     Callee, Function, Id, ImmediateKind, MirContext, MirTy, QualifiedName, Rvalue, StatementKind,
-    Value,
+    Ty, TypeParam, Value,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -601,13 +601,23 @@ impl<'a> CollectionContext<'a> {
         let mir_ty = self.mir.ty(concrete_ty).clone();
         match mir_ty {
             MirTy::Named { name, type_args } => {
-                if !type_args.is_empty() {
+                // Collect struct field info before mutating (to avoid borrow issues)
+                let struct_field_info: Option<(Vec<Id<TypeParam>>, Vec<Id<Ty>>)> = if !type_args.is_empty() {
                     // This is a generic instantiation - determine if it's a struct or enum
                     // Check structs first
+                    let mut field_info = None;
                     for (struct_id, struct_def) in self.mir.structs.iter() {
                         if struct_def.name == name {
                             let inst = StructInstantiation::new(struct_id, type_args.clone());
                             self.result.add_struct(inst);
+                            // Collect field types and type params for later scanning
+                            if !struct_def.type_params.is_empty() {
+                                let type_params = struct_def.type_params.clone();
+                                let field_types: Vec<_> = struct_def.fields.iter()
+                                    .map(|&fid| self.mir.fields[fid].ty)
+                                    .collect();
+                                field_info = Some((type_params, field_types));
+                            }
                             break;
                         }
                     }
@@ -620,6 +630,17 @@ impl<'a> CollectionContext<'a> {
                             break;
                         }
                     }
+                    field_info
+                } else {
+                    None
+                };
+
+                // Scan struct field types with substitution (after loop to avoid borrow issues)
+                if let Some((type_params, field_types)) = struct_field_info {
+                    let field_subst = build_substitution(self.mir, &type_params, &type_args);
+                    for field_ty in field_types {
+                        self.scan_type(field_ty, &field_subst);
+                    }
                 }
 
                 // Recurse into type args
@@ -629,24 +650,25 @@ impl<'a> CollectionContext<'a> {
             }
 
             MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-                self.scan_type(inner, &Substitution::new());
+                // Pass through the substitution so nested types get properly substituted
+                self.scan_type(inner, subst);
             }
 
             MirTy::Tuple(elems) => {
                 for elem in elems {
-                    self.scan_type(elem, &Substitution::new());
+                    self.scan_type(elem, subst);
                 }
             }
 
             MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
                 for param in params {
-                    self.scan_type(param, &Substitution::new());
+                    self.scan_type(param, subst);
                 }
-                self.scan_type(ret, &Substitution::new());
+                self.scan_type(ret, subst);
             }
 
             MirTy::AssociatedTypeProjection { base, .. } => {
-                self.scan_type(base, &Substitution::new());
+                self.scan_type(base, subst);
             }
 
             // Primitives and type params don't contain nested instantiations

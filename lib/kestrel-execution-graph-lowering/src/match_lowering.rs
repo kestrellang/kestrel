@@ -215,8 +215,8 @@ fn emit_success(
         return;
     }
 
-    // Assign result
-    ctx.emit_assign_value(result_place.clone(), body_value);
+    // Assign result - use emit_move_value to mark the temp as moved, preventing double-free
+    ctx.emit_move_value(result_place.clone(), body_value);
 
     // Jump to join block
     ctx.emit_jump(join_block);

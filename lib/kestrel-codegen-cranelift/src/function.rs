@@ -37,13 +37,37 @@ fn collect_address_taken_locals(
                             result.insert(local_id);
                         }
                     }
+                    Rvalue::Call { args, .. } => {
+                        add_call_arg_locals(&mut result, args);
+                    }
                     _ => {}
                 }
+            } else if let StatementKind::Call { args, .. } = &stmt.kind {
+                add_call_arg_locals(&mut result, args);
             }
         }
     }
 
     result
+}
+
+fn add_call_arg_locals(
+    result: &mut HashSet<Id<Local>>,
+    args: &[kestrel_execution_graph::CallArg],
+) {
+    for arg in args {
+        if matches!(
+            arg.mode,
+            kestrel_execution_graph::PassingMode::Ref
+                | kestrel_execution_graph::PassingMode::MutRef
+        ) {
+            if let kestrel_execution_graph::Value::Place(place) = &arg.value {
+                if let Some(local_id) = get_root_local(place) {
+                    result.insert(local_id);
+                }
+            }
+        }
+    }
 }
 
 /// Get the root local of a place expression.
@@ -123,6 +147,18 @@ fn compile_blocks(
     let needs_sret =
         !is_main && !matches!(ret_mir_ty, MirTy::Unit) && is_aggregate_type(ctx, concrete_ret);
 
+    let address_taken_locals = collect_address_taken_locals(ctx, func_def);
+    let mut stack_locals: HashSet<Id<Local>> = HashSet::new();
+    for &local_id in &func_def.locals {
+        let local_def = ctx.mir.local(local_id);
+        let concrete_ty = subst
+            .apply_ty_readonly(ctx.mir, local_def.ty)
+            .unwrap_or(local_def.ty);
+        if address_taken_locals.contains(&local_id) && !is_aggregate_type(ctx, concrete_ty) {
+            stack_locals.insert(local_id);
+        }
+    }
+
     // Create Cranelift blocks for each MIR block
     // The entry block gets special handling - it needs function parameters
     let mut block_map: HashMap<Id<Block>, cranelift_codegen::ir::Block> = HashMap::new();
@@ -138,10 +174,19 @@ fn compile_blocks(
 
     // Map locals to variables
     let mut local_map: HashMap<Id<Local>, Variable> = HashMap::new();
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
     for (i, &local_id) in func_def.locals.iter().enumerate() {
         let var = Variable::from_u32(i as u32);
         let local_def = ctx.mir.local(local_id);
-        let cl_type = translate_type_with_subst(ctx.mir, local_def.ty, ctx.target, subst);
+        let cl_type = if stack_locals.contains(&local_id) {
+            ptr_type
+        } else {
+            translate_type_with_subst(ctx.mir, local_def.ty, ctx.target, subst)
+        };
         builder.declare_var(var, cl_type);
         local_map.insert(local_id, var);
     }
@@ -163,7 +208,26 @@ fn compile_blocks(
         let param = &ctx.mir.params[param_id];
         let local_id = param.local;
         if let Some(&var) = local_map.get(&local_id) {
-            builder.def_var(var, params[i + param_offset]);
+            if stack_locals.contains(&local_id) {
+                let concrete_ty = subst
+                    .apply_ty_readonly(ctx.mir, param.ty)
+                    .unwrap_or(param.ty);
+                let layout = ctx.layouts.layout_of(concrete_ty);
+                let size = if layout.size == 0 { 1 } else { layout.size };
+                let align = if layout.align == 0 { 1 } else { layout.align };
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    size as u32,
+                    align as u8,
+                ));
+                let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), params[i + param_offset], addr, 0);
+                builder.def_var(var, addr);
+            } else {
+                builder.def_var(var, params[i + param_offset]);
+            }
         }
     }
 
@@ -174,14 +238,7 @@ fn compile_blocks(
         .map(|&p| ctx.mir.params[p].local)
         .collect();
 
-    // Allocate stack slots for ALL aggregate-typed non-parameter locals.
-    // This ensures they have valid addresses when Ref/RefMut is taken.
-    let ptr_type = if ctx.target.is_64bit() {
-        cl_types::I64
-    } else {
-        cl_types::I32
-    };
-
+    // Allocate stack slots for memory-backed non-parameter locals.
     for &local_id in &func_def.locals {
         // Skip parameters - they're already initialized from function args
         if param_local_ids.contains(&local_id) {
@@ -192,7 +249,7 @@ fn compile_blocks(
         let concrete_ty = subst
             .apply_ty_readonly(ctx.mir, local_def.ty)
             .unwrap_or(local_def.ty);
-        if is_aggregate_type(ctx, concrete_ty) {
+        if is_aggregate_type(ctx, concrete_ty) || stack_locals.contains(&local_id) {
             // Allocate a stack slot for this local
             let layout = ctx.layouts.layout_of(concrete_ty);
             let size = if layout.size == 0 { 1 } else { layout.size };
@@ -228,6 +285,7 @@ fn compile_blocks(
             builder,
             &block_map,
             &local_map,
+            &stack_locals,
             is_main,
             sret_ptr,
         )?;

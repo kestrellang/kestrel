@@ -388,6 +388,28 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// Emit a move assignment from a value (place or immediate), marking the source as moved.
+    ///
+    /// This should be used when transferring ownership of a non-Copyable value from a
+    /// temporary to another place. The source local (if any) will be marked as moved
+    /// to prevent double-free.
+    pub fn emit_move_value(&mut self, dest: Place, value: Value) {
+        match value {
+            Value::Place(ref p) => {
+                // Emit a Move rvalue instead of Copy
+                self.emit_assign(dest, Rvalue::Move(p.clone()));
+                // Mark the source local as moved
+                if let Some(local) = p.as_local() {
+                    self.mark_moved(local);
+                }
+            }
+            Value::Immediate(i) => self.emit_imm(dest, i),
+            Value::Unreachable => {
+                // Expression diverged, no value to assign.
+            }
+        }
+    }
+
     // === Terminator Emission ===
 
     /// Set the terminator for the current block.

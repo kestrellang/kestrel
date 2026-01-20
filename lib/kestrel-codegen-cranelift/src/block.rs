@@ -24,6 +24,7 @@ pub fn compile_block(
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
     is_main: bool,
     sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
@@ -32,7 +33,15 @@ pub fn compile_block(
     // Compile each statement
     for &stmt_id in &block.statements {
         let stmt = ctx.mir.statement(stmt_id);
-        compile_statement(ctx, func_def, subst, &stmt.kind, builder, local_map)?;
+        compile_statement(
+            ctx,
+            func_def,
+            subst,
+            &stmt.kind,
+            builder,
+            local_map,
+            stack_locals,
+        )?;
     }
 
     // Compile the terminator
@@ -45,6 +54,7 @@ pub fn compile_block(
             builder,
             block_map,
             local_map,
+            stack_locals,
             is_main,
             sret_ptr,
         )?;
@@ -74,16 +84,27 @@ fn compile_statement(
     stmt: &StatementKind,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<(), CodegenError> {
     match stmt {
         StatementKind::Assign { dest, rvalue } => {
-            let value = compile_rvalue(ctx, func_def, subst, rvalue, builder, local_map)?;
-            crate::place::compile_place_write(ctx, dest, value, builder, local_map, subst)?;
+            let value =
+                compile_rvalue(ctx, func_def, subst, rvalue, builder, local_map, stack_locals)?;
+            crate::place::compile_place_write(
+                ctx,
+                dest,
+                value,
+                builder,
+                local_map,
+                subst,
+                stack_locals,
+            )?;
         }
 
         StatementKind::Call { callee, args } => {
             // Call without using the result - we just discard the return value
-            let _ = compile_call(ctx, func_def, subst, callee, args, builder, local_map)?;
+            let _ =
+                compile_call(ctx, func_def, subst, callee, args, builder, local_map, stack_locals)?;
         }
 
         StatementKind::Deinit { place: _ } => {
@@ -114,8 +135,14 @@ fn compile_statement(
             // We still need to "use" the flag to avoid unused variable warnings in the
             // generated code, but since we don't actually emit anything for deinit,
             // we can just read the flag value without acting on it.
-            let _flag_value =
-                compile_place_read(ctx, &Place::local(*flag), builder, local_map, subst)?;
+            let _flag_value = compile_place_read(
+                ctx,
+                &Place::local(*flag),
+                builder,
+                local_map,
+                subst,
+                stack_locals,
+            )?;
         }
 
         StatementKind::SetDeinitFlag { flag, value } => {

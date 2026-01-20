@@ -299,7 +299,7 @@ fn create_ref(ctx: &mut LoweringContext, value: &Value, ty: &Ty, is_mutable: boo
 
 /// Extract the local ID from a Value if it's a simple local reference.
 /// Returns None for complex places (field access, etc.) or immediates.
-fn try_get_local_from_value(value: &Value) -> Option<Id<Local>> {
+pub fn try_get_local_from_value(value: &Value) -> Option<Id<Local>> {
     match value {
         Value::Place(place) => place.as_local(),
         _ => None,
@@ -664,6 +664,11 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
             } else {
                 Value::Immediate(Immediate::unit())
             };
+            // Mark the return value's local as moved so it doesn't get deinited.
+            // The caller takes ownership of the return value.
+            if let Some(local) = try_get_local_from_value(&ret_value) {
+                ctx.mark_moved(local);
+            }
             // Emit deinits for all scopes before returning
             ctx.emit_all_scope_deinits();
             ctx.emit_return(ret_value);
@@ -3688,7 +3693,8 @@ fn lower_if(
             let result = lower_expression(ctx, value_expr);
             if !ctx.is_block_terminated() {
                 if let Some(ref place) = result_place {
-                    ctx.emit_assign_value(place.clone(), result);
+                    // Use emit_move_value to mark the temp as moved, preventing double-free
+                    ctx.emit_move_value(place.clone(), result);
                 }
             }
             true
@@ -3742,7 +3748,8 @@ fn lower_if(
                     let else_result = lower_expression(ctx, value_expr);
                     if !ctx.is_block_terminated() {
                         if let Some(ref place) = result_place {
-                            ctx.emit_assign_value(place.clone(), else_result);
+                            // Use emit_move_value to mark the temp as moved, preventing double-free
+                            ctx.emit_move_value(place.clone(), else_result);
                         }
                     }
                 } else if let Some(ref place) = result_place {
@@ -3762,7 +3769,8 @@ fn lower_if(
 
             if !ctx.is_block_terminated() {
                 if let Some(ref place) = result_place {
-                    ctx.emit_assign_value(place.clone(), else_result);
+                    // Use emit_move_value to mark the temp as moved, preventing double-free
+                    ctx.emit_move_value(place.clone(), else_result);
                 }
             }
 

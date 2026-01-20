@@ -212,6 +212,11 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
         if let Some(yield_expr) = body.yield_expr.as_ref() {
             let value = lower_expression(ctx, yield_expr);
             if !ctx.is_block_terminated() {
+                // Mark the return value's local as moved so it doesn't get deinited.
+                // The caller takes ownership of the return value.
+                if let Some(local) = crate::expr::try_get_local_from_value(&value) {
+                    ctx.mark_moved(local);
+                }
                 // Emit deinits for all scopes before returning
                 ctx.emit_all_scope_deinits();
                 ctx.emit_return(value);
@@ -464,6 +469,11 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
         if let Some(yield_expr) = body.yield_expr.as_ref() {
             let value = lower_expression(ctx, yield_expr);
             if !ctx.is_block_terminated() {
+                // Mark the return value's local as moved so it doesn't get deinited.
+                // The caller takes ownership of the return value.
+                if let Some(local) = crate::expr::try_get_local_from_value(&value) {
+                    ctx.mark_moved(local);
+                }
                 ctx.emit_all_scope_deinits();
                 ctx.emit_return(value);
             }

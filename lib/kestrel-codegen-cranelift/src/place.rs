@@ -13,7 +13,7 @@ use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
 use cranelift_frontend::{FunctionBuilder, Variable};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Read a value from a place.
 pub fn compile_place_read(
@@ -22,18 +22,32 @@ pub fn compile_place_read(
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
     subst: &Substitution,
+    stack_locals: &HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
             let var = local_map
                 .get(local_id)
                 .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
-            Ok(builder.use_var(*var))
+            let local_def = ctx.mir.local(*local_id);
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, local_def.ty)
+                .unwrap_or(local_def.ty);
+            if stack_locals.contains(&local_id) {
+                let addr = builder.use_var(*var);
+                let cl_type = translate_type_with_subst(ctx.mir, local_def.ty, ctx.target, subst);
+                Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
+            } else if is_aggregate_type(ctx, concrete_ty) {
+                Ok(builder.use_var(*var))
+            } else {
+                Ok(builder.use_var(*var))
+            }
         }
 
         PlaceKind::Field { parent, name } => {
             // Get the struct pointer from the parent place
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let struct_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the type of the parent to find field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -81,7 +95,8 @@ pub fn compile_place_read(
             //
             // The parent could be a struct/tuple or a downcast result.
             // We need to get the pointer and add the offset for the indexed field.
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let parent_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the parent type to find the field at this index
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -128,7 +143,8 @@ pub fn compile_place_read(
             // Downcast is used after a switch to access the variant's payload.
             // The enum layout is: [discriminant: i32][padding][payload...]
             // After downcast, we return a pointer to the payload area.
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let enum_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
             let enum_ty = get_place_type(ctx, parent, local_map)?;
             let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)?;
 
@@ -145,7 +161,7 @@ pub fn compile_place_read(
 
         PlaceKind::Deref(inner) => {
             // Get the pointer value from the inner place
-            let ptr = compile_place_read(ctx, inner, builder, local_map, subst)?;
+            let ptr = compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)?;
 
             // Get the type of the inner (which should be a pointer/ref type)
             let inner_ty = get_place_type(ctx, inner, local_map)?;
@@ -182,7 +198,7 @@ fn get_pointee_type(ctx: &CodegenContext<'_>, ptr_ty: Id<Ty>) -> Result<Id<Ty>, 
     }
 }
 
-fn get_enum_payload_offset(
+pub(crate) fn get_enum_payload_offset(
     ctx: &mut CodegenContext<'_>,
     enum_ty: Id<Ty>,
     variant: &str,
@@ -510,6 +526,7 @@ pub fn compile_place_write(
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
     subst: &Substitution,
+    stack_locals: &HashSet<Id<Local>>,
 ) -> Result<(), CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
@@ -521,6 +538,11 @@ pub fn compile_place_write(
             let concrete_ty = subst
                 .apply_ty_readonly(ctx.mir, local_def.ty)
                 .unwrap_or(local_def.ty);
+            if stack_locals.contains(&local_id) {
+                let addr = builder.use_var(*var);
+                builder.ins().store(MemFlags::new(), value, addr, 0);
+                return Ok(());
+            }
             if is_aggregate_type(ctx, concrete_ty) {
                 let dest_ptr = builder.use_var(*var);
                 copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
@@ -533,7 +555,8 @@ pub fn compile_place_write(
 
         PlaceKind::Field { parent, name } => {
             // Get the struct pointer from the parent place
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let struct_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the type of the parent to find field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -563,7 +586,8 @@ pub fn compile_place_write(
             // Index write is used for:
             // 1. Tuple field assignment (tuple.0 = value)
             // 2. Enum payload field assignment after downcast (enum.SomeCase.0 = value)
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let parent_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the parent type to find the field at this index
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -595,7 +619,8 @@ pub fn compile_place_write(
             // Downcast write is used when assigning to an enum variant's payload area.
             // The enum layout is: [discriminant: i32][padding][payload...]
             // We need to get the pointer to the payload area and store there.
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let enum_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
             let enum_ty = get_place_type(ctx, parent, local_map)?;
             let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)? as i32;
 
@@ -608,7 +633,7 @@ pub fn compile_place_write(
 
         PlaceKind::Deref(inner) => {
             // Get the pointer value from the inner place
-            let ptr = compile_place_read(ctx, inner, builder, local_map, subst)?;
+            let ptr = compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)?;
 
             // Store the value at the pointer address
             let dest_ty = get_place_type(ctx, place, local_map)?;
@@ -634,6 +659,7 @@ pub fn compile_place_addr(
     local_map: &HashMap<Id<Local>, Variable>,
     local_slots: &HashMap<Id<Local>, cranelift_codegen::ir::StackSlot>,
     subst: &Substitution,
+    stack_locals: &HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -655,7 +681,8 @@ pub fn compile_place_addr(
         PlaceKind::Field { parent, name } => {
             // Get the parent's address (which is a struct pointer)
             // For a field, the parent is already a pointer to the struct
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let struct_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -671,7 +698,8 @@ pub fn compile_place_addr(
 
         PlaceKind::Index { parent, index } => {
             // Get the parent pointer
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let parent_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the parent type and field info
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -685,16 +713,20 @@ pub fn compile_place_addr(
             }
         }
 
-        PlaceKind::Downcast { parent, variant: _ } => {
-            // Downcast doesn't change the address - it just changes how we interpret it
-            // The payload is at offset 4 (after the discriminant)
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
-            Ok(builder.ins().iadd_imm(enum_ptr, 4))
+        PlaceKind::Downcast { parent, variant } => {
+            // Downcast doesn't change the address - it just changes how we interpret it.
+            let enum_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
+            let enum_ty = get_place_type(ctx, parent, local_map)?;
+            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)?;
+            Ok(builder
+                .ins()
+                .iadd_imm(enum_ptr, payload_offset as i64))
         }
 
         PlaceKind::Deref(inner) => {
             // The address of *ptr is just ptr itself
-            compile_place_read(ctx, inner, builder, local_map, subst)
+            compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)
         }
     }
 }

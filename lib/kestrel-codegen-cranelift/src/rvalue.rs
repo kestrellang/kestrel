@@ -3,7 +3,7 @@
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::monomorphize::{Substitution, build_substitution, resolve_witness};
-use crate::place::compile_place_read;
+use crate::place::{compile_place_read, get_enum_payload_offset};
 use crate::types::{translate_type, translate_type_ext};
 
 use kestrel_codegen::{Layout, mangle_name};
@@ -84,25 +84,6 @@ fn needs_sret_for_type(mir: &MirContext, ty_id: Id<Ty>) -> bool {
     !matches!(mir.ty(ty_id), MirTy::Unit) && is_aggregate_value_type(mir, ty_id)
 }
 
-fn ref_arg_should_pass_direct(
-    ctx: &CodegenContext<'_>,
-    subst: &Substitution,
-    ty_opt: Option<Id<Ty>>,
-) -> bool {
-    // In strict pass-by-ref ABI, almost nothing should be passed direct.
-    // We only pass Ref types themselves direct because they are already pointers.
-    // Everything else (including primitives like i64 and pointers like p[T]) 
-    // must be passed by address if the parameter is a reference.
-    let Some(ty) = ty_opt else {
-        return false;
-    };
-    let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
-    match ctx.mir.ty(concrete_ty) {
-        MirTy::Ref(_) | MirTy::RefMut(_) => true,
-        _ => false,
-    }
-}
-
 fn copy_aggregate_value(
     ctx: &mut CodegenContext<'_>,
     ty: Id<Ty>,
@@ -151,17 +132,20 @@ pub fn compile_rvalue(
     rvalue: &Rvalue,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     match rvalue {
         Rvalue::Use(imm) => compile_immediate(ctx, subst, imm, builder),
 
         Rvalue::Copy(place) | Rvalue::Move(place) => {
-            compile_place_read(ctx, place, builder, local_map, subst)
+            compile_place_read(ctx, place, builder, local_map, subst, stack_locals)
         }
 
         Rvalue::BinaryOp { op, lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            let lhs_val =
+                compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val =
+                compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             let (_, lhs_ty_opt) = get_value_layout(ctx, lhs, local_map)?;
             let (_, rhs_ty_opt) = get_value_layout(ctx, rhs, local_map)?;
 
@@ -172,18 +156,19 @@ pub fn compile_rvalue(
         }
 
         Rvalue::UnaryOp { op, operand } => {
-            let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+            let operand_val =
+                compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
             let (_, ty_opt) = get_value_layout(ctx, operand, local_map)?;
             let operand_val = ensure_primitive_value(ctx, subst, operand_val, ty_opt, builder)?;
             compile_unop(ctx, *op, operand_val, builder)
         }
 
         Rvalue::Call { callee, args } => {
-            compile_call(ctx, func_def, subst, callee, args, builder, local_map)
+            compile_call(ctx, func_def, subst, callee, args, builder, local_map, stack_locals)
         }
 
         Rvalue::Construct { ty, fields } => {
-            compile_construct(ctx, func_def, subst, *ty, fields, builder, local_map)
+            compile_construct(ctx, func_def, subst, *ty, fields, builder, local_map, stack_locals)
         }
 
         Rvalue::EnumVariant {
@@ -191,21 +176,21 @@ pub fn compile_rvalue(
             variant,
             payload,
         } => compile_enum_variant(
-            ctx, func_def, subst, *enum_ty, variant, payload, builder, local_map,
+            ctx, func_def, subst, *enum_ty, variant, payload, builder, local_map, stack_locals,
         ),
 
         Rvalue::Ref(place) | Rvalue::RefMut(place) => {
-            compile_ref(ctx, place, builder, local_map, subst)
+            compile_ref(ctx, place, builder, local_map, subst, stack_locals)
         }
 
         // Pointer/reference conversions - these are no-ops at runtime
         Rvalue::PtrToRef(value) | Rvalue::PtrToRefMut(value) | Rvalue::RefToPtr(value) => {
             // All three are semantically different but have the same runtime representation
-            compile_value(ctx, func_def, subst, value, builder, local_map)
+            compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)
         }
 
         Rvalue::PtrOffset { ptr, offset } => {
-            compile_ptr_offset(ctx, func_def, subst, ptr, offset, builder, local_map)
+            compile_ptr_offset(ctx, func_def, subst, ptr, offset, builder, local_map, stack_locals)
         }
 
         Rvalue::Cast {
@@ -213,24 +198,57 @@ pub fn compile_rvalue(
             operand,
             target,
         } => compile_cast(
-            ctx, func_def, subst, *kind, operand, *target, builder, local_map,
+            ctx, func_def, subst, *kind, operand, *target, builder, local_map, stack_locals,
         ),
 
         // String intrinsics
-        Rvalue::StrPtr(value) => compile_str_ptr(ctx, func_def, subst, value, builder, local_map),
-        Rvalue::StrLen(value) => compile_str_len(ctx, func_def, subst, value, builder, local_map),
+        Rvalue::StrPtr(value) => {
+            compile_str_ptr(ctx, func_def, subst, value, builder, local_map, stack_locals)
+        }
+        Rvalue::StrLen(value) => {
+            compile_str_len(ctx, func_def, subst, value, builder, local_map, stack_locals)
+        }
         Rvalue::StrFromParts { ptr, len } => {
-            compile_str_from_parts(ctx, func_def, subst, ptr, len, builder, local_map)
+            compile_str_from_parts(
+                ctx,
+                func_def,
+                subst,
+                ptr,
+                len,
+                builder,
+                local_map,
+                stack_locals,
+            )
         }
 
-        Rvalue::Tuple(values) => compile_tuple(ctx, func_def, subst, values, builder, local_map),
+        Rvalue::Tuple(values) => {
+            compile_tuple(ctx, func_def, subst, values, builder, local_map, stack_locals)
+        }
 
         Rvalue::StackAlloc { element_ty, count } => {
-            compile_stack_alloc(ctx, func_def, subst, *element_ty, count, builder, local_map)
+            compile_stack_alloc(
+                ctx,
+                func_def,
+                subst,
+                *element_ty,
+                count,
+                builder,
+                local_map,
+                stack_locals,
+            )
         }
 
         Rvalue::ApplyPartial { func, captures } => {
-            compile_apply_partial(ctx, func_def, subst, *func, captures, builder, local_map)
+            compile_apply_partial(
+                ctx,
+                func_def,
+                subst,
+                *func,
+                captures,
+                builder,
+                local_map,
+                stack_locals,
+            )
         }
 
         Rvalue::FuncToEscaping(func) => compile_func_to_escaping(ctx, *func, builder),
@@ -265,7 +283,8 @@ pub fn compile_rvalue(
         Rvalue::FloatPred { bits, pred, operand } => {
             use kestrel_execution_graph::function::{FloatBits, FloatPredicateKind};
 
-            let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+            let operand_val =
+                compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
 
             match (bits, pred) {
                 (FloatBits::F32, FloatPredicateKind::IsNan) => {
@@ -297,7 +316,8 @@ pub fn compile_rvalue(
         Rvalue::FloatMath { bits, op, operand } => {
             use kestrel_execution_graph::function::{FloatBits, FloatMathKind};
 
-            let operand_val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+            let operand_val =
+                compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
 
             match bits {
                 FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
@@ -324,17 +344,17 @@ pub fn compile_rvalue(
 
         Rvalue::PtrFromAddress { address, .. } => {
             // Address is already a pointer at the IR level
-            compile_value(ctx, func_def, subst, address, builder, local_map)
+            compile_value(ctx, func_def, subst, address, builder, local_map, stack_locals)
         }
 
         Rvalue::PtrToAddress { ptr } => {
             // Pointer is already an integer at the IR level
-            compile_value(ctx, func_def, subst, ptr, builder, local_map)
+            compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)
         }
 
         Rvalue::PtrRead { ptr, ty } => {
             // Load value from pointer
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
             let pointee_ty =
                 subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for PtrRead");
             if is_aggregate_value_type(ctx.mir, pointee_ty) {
@@ -346,19 +366,20 @@ pub fn compile_rvalue(
 
         Rvalue::PtrWrite { ptr, value } => {
             // Store value through pointer
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-            let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
-            if let Ok((_, Some(ptr_ty))) = get_value_layout(ctx, ptr, local_map) {
-                let concrete_ptr_ty = subst.apply_ty_readonly(ctx.mir, ptr_ty).unwrap_or(ptr_ty);
-                if let Ok(pointee_ty) = get_pointee_type(ctx, concrete_ptr_ty) {
-                    let concrete_pointee_ty =
-                        subst.apply_ty_readonly(ctx.mir, pointee_ty).unwrap_or(pointee_ty);
-                    if is_aggregate_value_type(ctx.mir, concrete_pointee_ty) {
-                        copy_aggregate_value(ctx, concrete_pointee_ty, ptr_val, val, builder);
-                        return Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0));
-                    }
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let val = compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
+
+            // Check if the value being written is an aggregate type
+            // This is more reliable than checking the pointer's pointee type because
+            // the value type can be directly substituted without needing intermediate types
+            if let Ok((_, Some(val_ty))) = get_value_layout(ctx, value, local_map) {
+                let concrete_val_ty = subst.apply_ty_readonly(ctx.mir, val_ty).unwrap_or(val_ty);
+                if is_aggregate_value_type(ctx.mir, concrete_val_ty) {
+                    copy_aggregate_value(ctx, concrete_val_ty, ptr_val, val, builder);
+                    return Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0));
                 }
             }
+
             builder.ins().store(cranelift_codegen::ir::MemFlags::new(), val, ptr_val, 0);
             // Return unit (represented as 0)
             Ok(builder.ins().iconst(cranelift_codegen::ir::types::I8, 0))
@@ -366,7 +387,7 @@ pub fn compile_rvalue(
 
         Rvalue::PtrIsNull { ptr } => {
             // Compare pointer to null (0)
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
             let ptr_ty = builder.func.dfg.value_type(ptr_val);
             let zero = builder.ins().iconst(ptr_ty, 0);
             Ok(builder.ins().icmp(
@@ -378,7 +399,7 @@ pub fn compile_rvalue(
 
         Rvalue::PtrCast { ptr, .. } => {
             // Pointer cast is a no-op at the IR level (same representation)
-            compile_value(ctx, func_def, subst, ptr, builder, local_map)
+            compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)
         }
 
         Rvalue::SizeOf { ty } => {
@@ -409,25 +430,25 @@ pub fn compile_rvalue(
 
         // Boolean (i1) intrinsics
         Rvalue::I1Eq { lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             // Boolean equality is just integer equality
             Ok(builder.ins().icmp(IntCC::Equal, lhs_val, rhs_val))
         }
         Rvalue::I1And { lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             // Boolean AND is just bitwise AND on i8/i1
             Ok(builder.ins().band(lhs_val, rhs_val))
         }
         Rvalue::I1Or { lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map)?;
+            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             // Boolean OR is just bitwise OR on i8/i1
             Ok(builder.ins().bor(lhs_val, rhs_val))
         }
         Rvalue::I1Not { operand } => {
-            let val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+            let val = compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
             // Boolean NOT: XOR with 1
             let one = builder.ins().iconst(cranelift_codegen::ir::types::I8, 1);
             Ok(builder.ins().bxor(val, one))
@@ -435,8 +456,8 @@ pub fn compile_rvalue(
 
         // Atomic intrinsics
         Rvalue::AtomicAdd { ptr, delta } => {
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map)?;
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map, stack_locals)?;
             let delta_ty = builder.func.dfg.value_type(delta_val);
             // Cranelift atomic_rmw with Add operation
             Ok(builder.ins().atomic_rmw(
@@ -448,8 +469,8 @@ pub fn compile_rvalue(
             ))
         }
         Rvalue::AtomicSub { ptr, delta } => {
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map)?;
+            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map, stack_locals)?;
             let delta_ty = builder.func.dfg.value_type(delta_val);
             // Cranelift atomic_rmw with Sub operation
             Ok(builder.ins().atomic_rmw(
@@ -475,6 +496,7 @@ fn compile_construct(
     fields: &[(String, Value)],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     // Get the struct layout to determine size and field offsets
     let mir_ty = ctx.mir.ty(ty);
@@ -547,7 +569,15 @@ fn compile_construct(
         })?;
 
         // Compile the field value
-        let value = compile_value(ctx, func_def, subst, field_value, builder, local_map)?;
+        let value = compile_value(
+            ctx,
+            func_def,
+            subst,
+            field_value,
+            builder,
+            local_map,
+            stack_locals,
+        )?;
 
         // Apply substitution to get the concrete field type
         // This is important for generic structs where field types might be type parameters
@@ -586,6 +616,7 @@ fn compile_tuple(
     values: &[Value],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     // Calculate tuple layout by laying out elements sequentially
     let mut offsets = Vec::with_capacity(values.len());
@@ -637,7 +668,8 @@ fn compile_tuple(
         let elem_ty = element_types[i];
 
         // Compile the element value
-        let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+        let val =
+            compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
 
         // Check if this is a nested compound type - if so, copy the data
         let compound_ty = if let Some(ty) = elem_ty {
@@ -683,6 +715,7 @@ fn compile_stack_alloc(
     count: &Value,
     builder: &mut FunctionBuilder<'_>,
     _local_map: &HashMap<Id<Local>, Variable>,
+    _stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     // Apply substitution to get concrete element type
     let concrete_element_ty = subst
@@ -789,6 +822,113 @@ fn get_value_layout(
         Value::Unreachable => Err(CodegenError::Unsupported(
             "cannot get layout of unreachable value".into(),
         )),
+    }
+}
+
+fn compile_call_arg(
+    ctx: &mut CodegenContext<'_>,
+    func_def: &FunctionDef,
+    subst: &Substitution,
+    arg: &CallArg,
+    builder: &mut FunctionBuilder<'_>,
+    local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
+    is_extern: bool,
+) -> Result<CraneliftValue, CodegenError> {
+    let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
+    let concrete_ty = ty_opt.map(|ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty));
+    let is_aggregate = concrete_ty
+        .map(|ty| is_aggregate_value_type(ctx.mir, ty))
+        .unwrap_or(false);
+    let is_ref_value = concrete_ty
+        .map(|ty| matches!(ctx.mir.ty(ty), MirTy::Ref(_) | MirTy::RefMut(_)))
+        .unwrap_or(false);
+    let ptr_type = if ctx.target.is_64bit() {
+        cl_types::I64
+    } else {
+        cl_types::I32
+    };
+
+    match arg.mode {
+        PassingMode::Copy => {
+            let mut val =
+                compile_value(ctx, func_def, subst, &arg.value, builder, local_map, stack_locals)?;
+            if is_extern {
+                val = ensure_primitive_value(ctx, subst, val, ty_opt, builder)?;
+                return Ok(val);
+            }
+            if is_aggregate {
+                let ty = concrete_ty.unwrap();
+                let layout = ctx.layouts.layout_of(ty);
+                let size = if layout.size == 0 { 1 } else { layout.size };
+                let align = if layout.align == 0 { 1 } else { layout.align };
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    size as u32,
+                    align as u8,
+                ));
+                let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+                copy_aggregate_value(ctx, ty, addr, val, builder);
+                return Ok(addr);
+            }
+            Ok(val)
+        }
+        PassingMode::Move => {
+            let mut val =
+                compile_value(ctx, func_def, subst, &arg.value, builder, local_map, stack_locals)?;
+            if is_extern {
+                val = ensure_primitive_value(ctx, subst, val, ty_opt, builder)?;
+            }
+            Ok(val)
+        }
+        PassingMode::Ref | PassingMode::MutRef => {
+            if is_ref_value || is_aggregate {
+                return compile_value(
+                    ctx,
+                    func_def,
+                    subst,
+                    &arg.value,
+                    builder,
+                    local_map,
+                    stack_locals,
+                );
+            }
+
+            match &arg.value {
+                Value::Place(place) => compile_ref(
+                    ctx,
+                    place,
+                    builder,
+                    local_map,
+                    subst,
+                    stack_locals,
+                ),
+                Value::Immediate(_) => {
+                    let val = compile_value(
+                        ctx,
+                        func_def,
+                        subst,
+                        &arg.value,
+                        builder,
+                        local_map,
+                        stack_locals,
+                    )?;
+                    let size = if layout.size == 0 { 1 } else { layout.size };
+                    let align = if layout.align == 0 { 1 } else { layout.align };
+                    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        size as u32,
+                        align as u8,
+                    ));
+                    let addr = builder.ins().stack_addr(ptr_type, slot, 0);
+                    builder.ins().store(MemFlags::new(), val, addr, 0);
+                    Ok(addr)
+                }
+                Value::Unreachable => Err(CodegenError::Unsupported(
+                    "cannot take reference to unreachable value".into(),
+                )),
+            }
+        }
     }
 }
 
@@ -908,6 +1048,7 @@ fn compile_enum_variant(
     payload: &[Value],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let mir_ty = ctx.mir.ty(enum_ty);
 
@@ -997,7 +1138,8 @@ fn compile_enum_variant(
             let total_offset = payload_base_offset + field_offset as i32;
 
             // Compile the payload value
-            let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+            let val =
+                compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
 
             // Check if this is a nested struct
             let field_ty = field_def.ty;
@@ -1047,6 +1189,7 @@ fn compile_ref(
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
     subst: &Substitution,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -1056,9 +1199,7 @@ fn compile_ref(
 
     match &place.kind {
         PlaceKind::Local(local_id) => {
-            // For a local variable, we need to get its address.
-            // The local might be stored in a Variable (SSA register).
-            // We need to spill it to a stack slot to get an address.
+            // For a local variable, get its address when it's memory-backed.
             let local_def = ctx.mir.local(*local_id);
             let local_ty = local_def.ty;
 
@@ -1066,35 +1207,23 @@ fn compile_ref(
             let concrete_local_ty = subst
                 .apply_ty_readonly(ctx.mir, local_ty)
                 .unwrap_or(local_ty);
-            if is_aggregate_value_type(ctx.mir, concrete_local_ty) {
-                // Structs are already represented as pointers, just return the value
-                let var = local_map
-                    .get(local_id)
-                    .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
+            let var = local_map
+                .get(local_id)
+                .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
+            if is_aggregate_value_type(ctx.mir, concrete_local_ty)
+                || stack_locals.contains(&local_id)
+            {
                 Ok(builder.use_var(*var))
             } else {
-                // Primitive - need to spill to stack and return the address
-                let var = local_map
-                    .get(local_id)
-                    .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
                 let value = builder.use_var(*var);
-
-                // Get the size of the type
-                let layout = ctx.layouts.layout_of(local_ty);
-
-                // Create a stack slot
+                let layout = ctx.layouts.layout_of(concrete_local_ty);
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     layout.size as u32,
                     layout.align as u8,
                 ));
-
-                // Get address of the slot
                 let addr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-                // Store the value
                 builder.ins().store(MemFlags::new(), value, addr, 0);
-
                 Ok(addr)
             }
         }
@@ -1102,7 +1231,8 @@ fn compile_ref(
         PlaceKind::Field { parent, name } => {
             // Taking a reference to a field means getting the field's address
             // The parent is a struct pointer, so we compute: parent_ptr + field_offset
-            let struct_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let struct_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -1117,7 +1247,8 @@ fn compile_ref(
 
         PlaceKind::Index { parent, index } => {
             // Taking a reference to an indexed element
-            let parent_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
+            let parent_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map)?;
@@ -1130,15 +1261,20 @@ fn compile_ref(
             }
         }
 
-        PlaceKind::Downcast { parent, variant: _ } => {
+        PlaceKind::Downcast { parent, variant } => {
             // Taking a reference to a downcast - return pointer to payload
-            let enum_ptr = compile_place_read(ctx, parent, builder, local_map, subst)?;
-            Ok(builder.ins().iadd_imm(enum_ptr, 4))
+            let enum_ptr =
+                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
+            let enum_ty = get_place_type(ctx, parent, local_map)?;
+            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)?;
+            Ok(builder
+                .ins()
+                .iadd_imm(enum_ptr, payload_offset as i64))
         }
 
         PlaceKind::Deref(inner) => {
             // Taking a reference to a dereference: &*ptr is just ptr
-            compile_place_read(ctx, inner, builder, local_map, subst)
+            compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)
         }
     }
 }
@@ -1193,11 +1329,11 @@ fn get_field_info(
     parent_ty: Id<Ty>,
     field_name: &str,
 ) -> Result<(usize, Id<Ty>), CodegenError> {
-    let mir_ty = ctx.mir.ty(parent_ty);
+    let mir_ty = ctx.mir.ty(parent_ty).clone();
 
-    let struct_id = match mir_ty {
-        MirTy::Named { name, .. } => {
-            let name_data = ctx.mir.name(*name);
+    let (struct_id, type_args) = match mir_ty {
+        MirTy::Named { name, type_args } => {
+            let name_data = ctx.mir.name(name);
             let mut found = None;
             for (id, def) in ctx.mir.structs.iter() {
                 if ctx.mir.name(def.name) == name_data {
@@ -1205,9 +1341,10 @@ fn get_field_info(
                     break;
                 }
             }
-            found.ok_or_else(|| {
+            let struct_id = found.ok_or_else(|| {
                 CodegenError::Unsupported(format!("struct not found: {}", name_data))
-            })?
+            })?;
+            (struct_id, type_args)
         }
         _ => {
             return Err(CodegenError::Unsupported(format!(
@@ -1224,8 +1361,9 @@ fn get_field_info(
         .get(field_name)
         .ok_or_else(|| CodegenError::Unsupported(format!("unknown field: {}", field_name)))?;
 
-    // Get field type
+    // Get field type and apply substitution for generic structs
     let struct_def = ctx.mir.struct_def(struct_id);
+    let type_params = struct_def.type_params.clone();
     let mut field_ty = None;
     for field_id in &struct_def.fields {
         let field_def = &ctx.mir.fields[*field_id];
@@ -1235,9 +1373,20 @@ fn get_field_info(
         }
     }
 
-    let field_ty = field_ty.ok_or_else(|| {
+    let mut field_ty = field_ty.ok_or_else(|| {
         CodegenError::Unsupported(format!("field type not found: {}", field_name))
     })?;
+
+    // Apply substitution from struct's type params to parent's type args
+    if !type_params.is_empty() && !type_args.is_empty() {
+        use crate::monomorphize::build_substitution;
+        let field_subst = build_substitution(ctx.mir, &type_params, &type_args);
+        // Use apply_ty_readonly since we're in codegen (MIR is immutable)
+        // If the type isn't interned, we fall back to the original
+        if let Ok(substituted_ty) = field_subst.apply_ty_readonly(ctx.mir, field_ty) {
+            field_ty = substituted_ty;
+        }
+    }
 
     Ok((offset, field_ty))
 }
@@ -1427,9 +1576,11 @@ fn compile_ptr_offset(
     offset: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-    let offset_val = compile_value(ctx, func_def, subst, offset, builder, local_map)?;
+    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+    let offset_val =
+        compile_value(ctx, func_def, subst, offset, builder, local_map, stack_locals)?;
     let (_, offset_ty_opt) = get_value_layout(ctx, offset, local_map)?;
 
     let mut offset_val = ensure_primitive_value(ctx, subst, offset_val, offset_ty_opt, builder)?;
@@ -1452,9 +1603,12 @@ pub fn compile_value(
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     match value {
-        Value::Place(place) => compile_place_read(ctx, place, builder, local_map, subst),
+        Value::Place(place) => {
+            compile_place_read(ctx, place, builder, local_map, subst, stack_locals)
+        }
         Value::Immediate(imm) => compile_immediate(ctx, subst, imm, builder),
         Value::Unreachable => Err(CodegenError::Unsupported(
             "cannot compile unreachable value - this indicates a MIR lowering bug".into(),
@@ -1910,6 +2064,7 @@ pub fn compile_call(
     args: &[CallArg],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     match callee {
         Callee::Direct { name, type_args } => {
@@ -2005,70 +2160,17 @@ pub fn compile_call(
                 arg_values.push(ptr);
             }
             for arg in args {
-                match arg.mode {
-                    PassingMode::Copy | PassingMode::Move => {
-                        // Pass value directly
-                        let mut val =
-                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-
-                        if is_extern {
-                            let (_, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
-                            val = ensure_primitive_value(ctx, subst, val, ty_opt, builder)?;
-                        }
-
-                        arg_values.push(val);
-                    }
-                    PassingMode::Ref | PassingMode::MutRef => {
-                        let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
-                        let val =
-                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-
-                        // Decide whether to pass the value directly (in register) or by address
-                        let pass_direct = ref_arg_should_pass_direct(ctx, subst, ty_opt);
-
-                        if pass_direct {
-                            arg_values.push(val);
-                            continue;
-                        }
-
-                        let dest_is_aggregate = if let Some(ty) = ty_opt {
-                            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
-                            is_aggregate_value_type(ctx.mir, concrete_ty)
-                        } else {
-                            false
-                        };
-
-                        if dest_is_aggregate {
-                            // Aggregates are already passed by address; preserve reference semantics.
-                            arg_values.push(val);
-                            continue;
-                        }
-
-                        // Pass by reference: spill to stack and pass address
-                        // Create stack slot for the value
-                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            layout.size as u32,
-                            layout.align as u8,
-                        ));
-
-                        // Get pointer type
-                        let ptr_type = if ctx.target.is_64bit() {
-                            cl_types::I64
-                        } else {
-                            cl_types::I32
-                        };
-
-                        // Get address of slot
-                        let addr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-                        // Destination is a primitive, just store the value
-                        builder.ins().store(MemFlags::new(), val, addr, 0);
-
-                        // Pass the address
-                        arg_values.push(addr);
-                    }
-                }
+                let val = compile_call_arg(
+                    ctx,
+                    func_def,
+                    subst,
+                    arg,
+                    builder,
+                    local_map,
+                    stack_locals,
+                    is_extern,
+                )?;
+                arg_values.push(val);
             }
 
             // Emit the call instruction
@@ -2089,11 +2191,29 @@ pub fn compile_call(
         }
 
         Callee::Thin(place) => {
-            compile_thin_call(ctx, func_def, subst, place, args, builder, local_map)
+            compile_thin_call(
+                ctx,
+                func_def,
+                subst,
+                place,
+                args,
+                builder,
+                local_map,
+                stack_locals,
+            )
         }
 
         Callee::Thick(place) => {
-            compile_thick_call(ctx, func_def, subst, place, args, builder, local_map)
+            compile_thick_call(
+                ctx,
+                func_def,
+                subst,
+                place,
+                args,
+                builder,
+                local_map,
+                stack_locals,
+            )
         }
 
         Callee::Witness {
@@ -2204,63 +2324,17 @@ pub fn compile_call(
                 arg_values.push(ptr);
             }
             for arg in args {
-                match arg.mode {
-                    PassingMode::Copy | PassingMode::Move => {
-                        // Pass value directly
-                        let val =
-                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                        arg_values.push(val);
-                    }
-                    PassingMode::Ref | PassingMode::MutRef => {
-                        let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
-                        let val =
-                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-
-                        // Decide whether to pass the value directly (in register) or by address
-                        let pass_direct = ref_arg_should_pass_direct(ctx, subst, ty_opt);
-
-                        if pass_direct {
-                            arg_values.push(val);
-                            continue;
-                        }
-
-                        let dest_is_aggregate = if let Some(ty) = ty_opt {
-                            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
-                            is_aggregate_value_type(ctx.mir, concrete_ty)
-                        } else {
-                            false
-                        };
-
-                        if dest_is_aggregate {
-                            // Aggregates are already passed by address; preserve reference semantics.
-                            arg_values.push(val);
-                            continue;
-                        }
-
-                        // Create stack slot for the value
-                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            layout.size as u32,
-                            layout.align as u8,
-                        ));
-
-                        // Get pointer type
-                        let ptr_type = if ctx.target.is_64bit() {
-                            cl_types::I64
-                        } else {
-                            cl_types::I32
-                        };
-
-                        // Get address of slot
-                        let addr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-                        // Destination is a primitive, just store the value
-                        builder.ins().store(MemFlags::new(), val, addr, 0);
-
-                        // Pass the address
-                        arg_values.push(addr);
-                    }
-                }
+                let val = compile_call_arg(
+                    ctx,
+                    func_def,
+                    subst,
+                    arg,
+                    builder,
+                    local_map,
+                    stack_locals,
+                    is_extern,
+                )?;
+                arg_values.push(val);
             }
 
             // Emit the call instruction
@@ -2291,8 +2365,9 @@ fn compile_cast(
     target: Id<Ty>,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let val = compile_value(ctx, func_def, subst, operand, builder, local_map)?;
+    let val = compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
     let target_ty = translate_type(ctx.mir, target, ctx.target);
 
     match kind {
@@ -2362,8 +2437,9 @@ fn compile_str_ptr(
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2384,8 +2460,9 @@ fn compile_str_len(
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2410,9 +2487,10 @@ fn compile_str_from_parts(
     len: &Value,
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map)?;
-    let len_val = compile_value(ctx, func_def, subst, len, builder, local_map)?;
+    let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+    let len_val = compile_value(ctx, func_def, subst, len, builder, local_map, stack_locals)?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2661,6 +2739,7 @@ fn compile_apply_partial(
     captures: &[Value],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2735,7 +2814,15 @@ fn compile_apply_partial(
             let offset = field_offsets.get(field_name).copied().unwrap_or(0);
 
             // Compile the capture value
-            let val = compile_value(ctx, func_def, subst, capture_value, builder, local_map)?;
+            let val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                capture_value,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
 
             // Check if this is a nested struct that needs copying
             let concrete_field_ty = subst
@@ -2903,21 +2990,6 @@ fn compile_func_to_escaping(
     Ok(thick_ptr)
 }
 
-/// Check if a local is a function parameter (passed by pointer).
-fn is_parameter_local(
-    func_def: &FunctionDef,
-    local_id: Id<Local>,
-    ctx: &CodegenContext<'_>,
-) -> bool {
-    for &param_id in &func_def.params {
-        let param = &ctx.mir.params[param_id];
-        if param.local == local_id {
-            return true;
-        }
-    }
-    false
-}
-
 /// Compile a thin function pointer call.
 ///
 /// A thin function pointer is just an address - we load it and call indirectly.
@@ -2929,6 +3001,7 @@ fn compile_thin_call(
     args: &[CallArg],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2937,18 +3010,14 @@ fn compile_thin_call(
     };
 
     // Get the function pointer value
-    let place_value = compile_place_read(ctx, place, builder, local_map, subst)?;
+    let place_value = compile_place_read(ctx, place, builder, local_map, subst, stack_locals)?;
 
-    // Check if this is a parameter local - if so, we need to dereference
-    // because parameters are passed by pointer.
     let func_ptr = if let PlaceKind::Local(local_id) = place.kind {
-        if is_parameter_local(func_def, local_id, ctx) {
-            // Load the actual function pointer from the parameter pointer
+        if stack_locals.contains(&local_id) {
             builder
                 .ins()
                 .load(ptr_type, MemFlags::new(), place_value, 0)
         } else {
-            // Regular local - value is the function pointer directly
             place_value
         }
     } else {
@@ -2991,57 +3060,17 @@ fn compile_thin_call(
         arg_values.push(ptr);
     }
     for arg in args {
-        match arg.mode {
-            PassingMode::Copy | PassingMode::Move => {
-                // Pass value directly
-                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                arg_values.push(val);
-            }
-            PassingMode::Ref | PassingMode::MutRef => {
-                let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
-                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                if ref_arg_should_pass_direct(ctx, subst, ty_opt) {
-                    arg_values.push(val);
-                    continue;
-                }
-
-                let dest_is_aggregate = if let Some(ty) = ty_opt {
-                    let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
-                    is_aggregate_value_type(ctx.mir, concrete_ty)
-                } else {
-                    false
-                };
-
-                if dest_is_aggregate {
-                    // Aggregates are already passed by address; preserve reference semantics.
-                    arg_values.push(val);
-                    continue;
-                }
-
-                // Create stack slot for the value
-                let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    layout.size as u32,
-                    layout.align as u8,
-                ));
-
-                // Get pointer type
-                let ptr_type = if ctx.target.is_64bit() {
-                    cl_types::I64
-                } else {
-                    cl_types::I32
-                };
-
-                // Get address of slot
-                let addr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-                // Store value in slot
-                builder.ins().store(MemFlags::new(), val, addr, 0);
-
-                // Pass the address
-                arg_values.push(addr);
-            }
-        }
+        let val = compile_call_arg(
+            ctx,
+            func_def,
+            subst,
+            arg,
+            builder,
+            local_map,
+            stack_locals,
+            false,
+        )?;
+        arg_values.push(val);
     }
 
     // Make the indirect call
@@ -3080,6 +3109,7 @@ fn compile_thick_call(
     args: &[CallArg],
     builder: &mut FunctionBuilder<'_>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -3103,18 +3133,15 @@ fn compile_thick_call(
             // Note: If this is a parameter local, the value is a POINTER to the
             // function pointer (because Kestrel passes all parameters by pointer).
             // In that case, we need to load from it.
-            let place_value = compile_place_read(ctx, place, builder, local_map, subst)?;
+            let place_value =
+                compile_place_read(ctx, place, builder, local_map, subst, stack_locals)?;
 
-            // Check if this is a parameter local - if so, we need to dereference
-            // because parameters are passed by pointer.
             let func_ptr = if let PlaceKind::Local(local_id) = place.kind {
-                if is_parameter_local(func_def, local_id, ctx) {
-                    // Load the actual function pointer from the parameter pointer
+                if stack_locals.contains(&local_id) {
                     builder
                         .ins()
                         .load(ptr_type, MemFlags::new(), place_value, 0)
                 } else {
-                    // Regular local - value is the function pointer directly
                     place_value
                 }
             } else {
@@ -3156,7 +3183,16 @@ fn compile_thick_call(
                 arg_values.push(ptr);
             }
             for arg in args {
-                let val = compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
+                let val = compile_call_arg(
+                    ctx,
+                    func_def,
+                    subst,
+                    arg,
+                    builder,
+                    local_map,
+                    stack_locals,
+                    false,
+                )?;
                 arg_values.push(val);
             }
 
@@ -3177,34 +3213,18 @@ fn compile_thick_call(
         }
         MirTy::FuncThick { params, ret } => {
             // For thick function types, the value is a struct with func_ptr and env_ptr
-            let place_value = compile_place_read(ctx, place, builder, local_map, subst)?;
+            let place_value =
+                compile_place_read(ctx, place, builder, local_map, subst, stack_locals)?;
 
             // Determine the actual thick_ptr based on the place and type
             // If this is a parameter local with a reference type to a thick function,
             // we need to dereference appropriately.
             let thick_ptr = if let PlaceKind::Local(local_id) = place.kind {
-                if is_parameter_local(func_def, local_id, ctx) {
-                    // Parameter locals contain a pointer to the actual value.
-                    // If the local's type is a reference to a thick function,
-                    // we need to load from the parameter pointer to get the reference,
-                    // which is itself the pointer to the thick struct.
-                    let local_ty = ctx.mir.local(local_id).ty;
-                    match ctx.mir.ty(local_ty) {
-                        MirTy::Ref(_) | MirTy::RefMut(_) => {
-                            // Local is &func or &mut func - load from param ptr to get the reference
-                            builder
-                                .ins()
-                                .load(ptr_type, MemFlags::new(), place_value, 0)
-                        }
-                        MirTy::FuncThick { .. } => {
-                            // Local is directly a thick function (not a reference)
-                            // The param pointer points to the thick struct
-                            place_value
-                        }
-                        _ => place_value,
-                    }
+                if stack_locals.contains(&local_id) {
+                    builder
+                        .ins()
+                        .load(ptr_type, MemFlags::new(), place_value, 0)
                 } else {
-                    // Regular local - use the value directly (it's a pointer to the thick struct)
                     place_value
                 }
             } else {
@@ -3263,59 +3283,17 @@ fn compile_thick_call(
             }
             arg_values.push(env_ptr);
             for arg in args {
-                match arg.mode {
-                    PassingMode::Copy | PassingMode::Move => {
-                        // Pass value directly
-                        let val =
-                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                        arg_values.push(val);
-                    }
-                    PassingMode::Ref | PassingMode::MutRef => {
-                        let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
-                        let val =
-                            compile_value(ctx, func_def, subst, &arg.value, builder, local_map)?;
-                        if ref_arg_should_pass_direct(ctx, subst, ty_opt) {
-                            arg_values.push(val);
-                            continue;
-                        }
-
-                        let dest_is_aggregate = if let Some(ty) = ty_opt {
-                            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
-                            is_aggregate_value_type(ctx.mir, concrete_ty)
-                        } else {
-                            false
-                        };
-
-                        if dest_is_aggregate {
-                            // Aggregates are already passed by address; preserve reference semantics.
-                            arg_values.push(val);
-                            continue;
-                        }
-
-                        // Create stack slot for the value
-                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            layout.size as u32,
-                            layout.align as u8,
-                        ));
-
-                        // Get pointer type
-                        let ptr_type = if ctx.target.is_64bit() {
-                            cl_types::I64
-                        } else {
-                            cl_types::I32
-                        };
-
-                        // Get address of slot
-                        let addr = builder.ins().stack_addr(ptr_type, slot, 0);
-
-                        // Destination is a primitive, just store the value
-                        builder.ins().store(MemFlags::new(), val, addr, 0);
-
-                        // Pass the address
-                        arg_values.push(addr);
-                    }
-                }
+                let val = compile_call_arg(
+                    ctx,
+                    func_def,
+                    subst,
+                    arg,
+                    builder,
+                    local_map,
+                    stack_locals,
+                    false,
+                )?;
+                arg_values.push(val);
             }
 
             // Make the indirect call

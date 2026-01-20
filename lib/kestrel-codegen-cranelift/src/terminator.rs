@@ -26,6 +26,7 @@ pub fn compile_terminator(
     builder: &mut FunctionBuilder<'_>,
     block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
     local_map: &HashMap<Id<Local>, Variable>,
+    stack_locals: &std::collections::HashSet<Id<Local>>,
     is_main: bool,
     sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
@@ -57,7 +58,8 @@ pub fn compile_terminator(
                         .ins()
                         .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
                 } else {
-                    let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+                    let val =
+                        compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
                     copy_aggregate_value(ctx, concrete_ret, dest_ptr, val, builder);
                     builder.ins().return_(&[]);
                 }
@@ -77,7 +79,8 @@ pub fn compile_terminator(
                         .ins()
                         .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
                 } else {
-                    let val = compile_value(ctx, func_def, subst, value, builder, local_map)?;
+                    let val =
+                        compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
                     builder.ins().return_(&[val]);
                 }
             }
@@ -95,7 +98,8 @@ pub fn compile_terminator(
             then_block,
             else_block,
         } => {
-            let cond = compile_value(ctx, func_def, subst, condition, builder, local_map)?;
+            let cond =
+                compile_value(ctx, func_def, subst, condition, builder, local_map, stack_locals)?;
             let ptr_type = if ctx.target.is_64bit() {
                 cl_types::I64
             } else {
@@ -125,7 +129,8 @@ pub fn compile_terminator(
         } => {
             // Load the discriminant value from the enum
             // The discriminant is stored at offset 0 as an i32
-            let enum_ptr = compile_place_read(ctx, discriminant, builder, local_map, subst)?;
+            let enum_ptr =
+                compile_place_read(ctx, discriminant, builder, local_map, subst, stack_locals)?;
             let discr_val = builder
                 .ins()
                 .load(cl_types::I32, MemFlags::new(), enum_ptr, 0);

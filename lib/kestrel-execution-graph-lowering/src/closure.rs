@@ -423,6 +423,11 @@ fn create_closure_function(
         if let Some(expr) = tail_expr {
             let value = lower_expression(ctx, expr);
             if !ctx.is_block_terminated() {
+                // Mark the return value's local as moved so it doesn't get deinited.
+                // The caller takes ownership of the return value.
+                if let Some(local) = crate::expr::try_get_local_from_value(&value) {
+                    ctx.mark_moved(local);
+                }
                 ctx.emit_return(value);
             }
         } else {
