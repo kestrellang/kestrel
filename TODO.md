@@ -7,6 +7,8 @@
 - [ ] Reference counting
 - [ ] Web server
 - [ ] Add tests
+- [ ] Remove old STD
+- [ ] Build with std by default, add --no-std flag.
 
 ## Phase 14
 
