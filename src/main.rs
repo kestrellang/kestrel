@@ -64,6 +64,9 @@ enum Commands {
         /// Source files to run
         #[arg(required = true)]
         files: Vec<String>,
+        /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
+        #[arg(short = 'O', long = "opt-level", value_name = "LEVEL", default_value = "0")]
+        opt_level: u8,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
         libraries: Vec<String>,
@@ -84,6 +87,9 @@ enum Commands {
         /// Output file path (defaults to input filename without extension)
         #[arg(short, long)]
         output: Option<String>,
+        /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
+        #[arg(short = 'O', long = "opt-level", value_name = "LEVEL", default_value = "0")]
+        opt_level: u8,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
         libraries: Vec<String>,
@@ -263,6 +269,7 @@ fn run_program(
     files: &[String],
     target: Option<&str>,
     verbose: bool,
+    opt_level: u8,
     libraries: Vec<String>,
     library_paths: Vec<String>,
     frameworks: Vec<String>,
@@ -323,6 +330,7 @@ fn run_program(
     }
 
     let options = kestrel_compiler::CodegenOptions {
+        opt_level,
         libraries,
         library_paths,
         frameworks,
@@ -357,6 +365,7 @@ fn run_build(
     output: Option<&str>,
     target: Option<&str>,
     verbose: bool,
+    opt_level: u8,
     libraries: Vec<String>,
     library_paths: Vec<String>,
     frameworks: Vec<String>,
@@ -432,6 +441,7 @@ fn run_build(
     }
 
     let options = kestrel_compiler::CodegenOptions {
+        opt_level,
         libraries,
         library_paths,
         frameworks,
@@ -472,6 +482,7 @@ fn main() -> ExitCode {
         Some(Commands::Parse { files }) => run_parse(&files, cli.tree.is_some()),
         Some(Commands::Run {
             files,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
@@ -479,6 +490,7 @@ fn main() -> ExitCode {
             &files,
             cli.target.as_deref(),
             cli.verbose,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
@@ -489,6 +501,7 @@ fn main() -> ExitCode {
             file,
             files,
             output,
+            opt_level,
             libraries,
             library_paths,
             frameworks,
@@ -501,6 +514,7 @@ fn main() -> ExitCode {
                 output.as_deref(),
                 cli.target.as_deref(),
                 cli.verbose,
+                opt_level,
                 libraries,
                 library_paths,
                 frameworks,
