@@ -541,12 +541,12 @@ mod edge_cases {
         Test::new(
             r#"module Test
             protocol Printer {
-                func print(value: lang.i64)
-                func print(text: lang.str)
+                func print(value value: lang.i64)
+                func print(text text: lang.str)
             }
             struct Console: Printer {
-                func print(value: lang.i64) { }
-                func print(text: lang.str) { }
+                func print(value value: lang.i64) { }
+                func print(text text: lang.str) { }
             }
         "#,
         )

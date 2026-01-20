@@ -233,7 +233,7 @@ struct Box[T] {
 
 func test() -> lang.i64 {
     let b = Box(value: 42);
-    b.get()
+    b.read()
 }
 "#,
         )

@@ -133,7 +133,7 @@ mod generic_structs {
                 .has_field("value", MirTy::type_param("T")),
         )
         .expect(
-            Mir::mir_function("Main.Box.get")
+            Mir::mir_function("Main.Box.read")
                 .has_type_params(1)
                 .returns(MirTy::type_param("T")),
         );
@@ -249,13 +249,13 @@ mod generic_methods {
 
             func main() -> lang.i64 {
                 let b = Box[lang.i64](value: 42);
-                b.get()
+                b.read()
             }
         "#,
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_function("Main.main").calls("Main.Box.get"));
+        .expect(Mir::mir_function("Main.main").calls("Main.Box.read"));
     }
 }
 

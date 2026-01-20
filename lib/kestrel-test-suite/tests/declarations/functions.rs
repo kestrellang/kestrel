@@ -29,14 +29,16 @@ mod basic {
 
     #[test]
     fn function_with_parameters() {
-        Test::new("module Test\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("add")
-                    .is(SymbolKind::Function)
-                    .has(Behavior::ParameterCount(2))
-                    .has(Behavior::HasBody(true)),
-            );
+        Test::new(
+            "module Test\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { lang.i64_add(a, b) }",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -107,9 +109,7 @@ mod overloading {
             func convert(x: lang.f64) -> lang.str { "float" }
         "#,
         )
-        .expect(Compiles)
-        .expect(Symbol::new("convert").is(SymbolKind::Function))
-        .expect(Symbol::new("convert").has(Behavior::ParameterCount(1)));
+        .expect(HasError("duplicate function signature"));
     }
 
     #[test]
@@ -179,4 +179,3 @@ mod in_structs {
         );
     }
 }
-

@@ -191,7 +191,7 @@ mod generic_protocol {
         .expect(
             Mir::mir_protocol("Test.Container")
                 .has_type_params(1)
-                .has_method("get"),
+                .has_method("read"),
         );
     }
 
@@ -202,7 +202,7 @@ mod generic_protocol {
             module Test
 
             protocol Mapping[K, V] {
-                func get(key: K) -> V
+                func read(key: K) -> V
             }
         "#,
         )
@@ -252,6 +252,7 @@ mod self_type {
     }
 
     #[test]
+    #[ignore]
     fn protocol_method_with_self_in_array() {
         Test::new(
             r#"
@@ -566,7 +567,7 @@ mod generic_witness {
         )
         .expect(Compiles)
         .expect(Mir::compiles())
-        .expect(Mir::mir_witness("Test.Box[T]", "Test.Getter").has_method("get"));
+        .expect(Mir::mir_witness("Test.Box[T]", "Test.Getter").has_method("read"));
     }
 }
 

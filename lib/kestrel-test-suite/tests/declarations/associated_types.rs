@@ -218,12 +218,12 @@ mod struct_binding {
             protocol Dictionary {
                 type Key;
                 type Value;
-                func get(key: Key) -> Value
+                func read(key: Key) -> Value
             }
             struct StringIntMap: Dictionary {
                 type Key = lang.str;
                 type Value = lang.i64;
-                func get(key: lang.str) -> lang.i64 { 0 }
+                func read(key: lang.str) -> lang.i64 { 0 }
             }
         "#,
         )

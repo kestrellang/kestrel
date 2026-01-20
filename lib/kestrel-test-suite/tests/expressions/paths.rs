@@ -293,15 +293,24 @@ mod edge_cases {
 
     compiles_fn!(
         parameter_with_same_name_as_type,
-        "(lang.i64: lang.i64) -> lang.i64",
-        "lang.i64"
+        "(Int: lang.i64) -> lang.i64",
+        "Int"
     );
 
     #[test]
     fn null_literals() {
-        Test::new("module Test\nfunc test() {\nnull;\n[null, null, null];\n(null, 42, null);\n[null, -1, null, -2, null, -3];\n}")
-            .expect(Compiles)
-            .expect(Symbol::new("Test.test").is(SymbolKind::Function));
+        Test::new(
+            r#"
+        module Test
+        func test() {
+        null;
+        [null, null, null];
+        (null, 42, null);
+        [null, 1, null, 2, null, 3];
+        }"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Test.test").is(SymbolKind::Function));
     }
 
     #[test]

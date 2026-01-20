@@ -486,7 +486,7 @@ mod mutating_methods {
                 var c = Counter(count: 0);
                 c.increment();
                 c.increment();
-                c.get()
+                c.read()
             }
         "#,
         )
@@ -495,7 +495,7 @@ mod mutating_methods {
         .expect(
             Mir::mir_function("Main.main")
                 .calls("Main.Counter.increment")
-                .calls("Main.Counter.get"),
+                .calls("Main.Counter.read"),
         );
     }
 }
@@ -581,7 +581,7 @@ mod initializers {
 
             func main() -> lang.i64 {
                 let c = Counter(start: 42);
-                c.get()
+                c.read()
             }
         "#,
         )
@@ -590,7 +590,7 @@ mod initializers {
         .expect(
             Mir::mir_function("Main.main")
                 .calls("Main.Counter.init")
-                .calls("Main.Counter.get"),
+                .calls("Main.Counter.read"),
         );
     }
 }

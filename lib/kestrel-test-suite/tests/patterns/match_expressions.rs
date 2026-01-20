@@ -487,7 +487,7 @@ func test(x: lang.i64) -> lang.i64 {
 "#,
         )
         .expect(Fails)
-        .expect(HasError("lang.i1"));
+        .expect(HasError("Bool"));
     }
 
     #[test]

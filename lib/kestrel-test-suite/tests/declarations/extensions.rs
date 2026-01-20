@@ -261,7 +261,7 @@ mod generics {
             }
             func test() -> lang.i64 {
                 let b = Box[lang.i64](value: 42);
-                return b.get();
+                return b.read();
             }
         "#,
         )

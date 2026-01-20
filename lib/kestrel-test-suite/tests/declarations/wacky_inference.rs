@@ -68,14 +68,13 @@ fn nested_associated_type_projections() {
 #[test]
 fn intentional_inference_failure_cases() {
     // Case 1: Wrong return type in extension method with constraint
-    // CURRENT BUG: This succeeds when it should fail
     Test::new(
         r#"module Test
         protocol P { type A; func read() -> A }
         struct S[T] { var val: T }
         extend S[T] where T: P, T.A = lang.i64 {
             func fail_it() -> lang.str {
-                return self.val.get(); 
+                return self.val.read(); 
             }
         }
     "#,
