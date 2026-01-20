@@ -4,7 +4,6 @@
 //! - Deinit parsing and semantic binding
 //! - DeinitBehavior attachment to parent structs
 //! - Duplicate deinit error detection
-//! - Copyable + deinit warning
 //! - Automatic deinit insertion at scope exit
 //!
 //! NOTE: Currently, deinit bodies with statements (e.g., `deinit { let x = 1 }`)
@@ -157,26 +156,26 @@ mod duplicate_deinit {
 }
 
 // =============================================================================
-// COPYABLE + DEINIT WARNING
+// COPYABLE + DEINIT
 // =============================================================================
 
 mod copyable_with_deinit {
     use super::*;
 
     #[test]
-    fn copyable_struct_with_deinit_warning() {
-        // A Copyable struct with deinit should emit a warning
+    fn copyable_struct_with_deinit_compiles() {
+        // A Copyable struct with deinit should compile without warning
         Test::new(
             r#"module Test
             struct Counter {
                 var count: lang.i64
-                
+
                 deinit {}
             }
         "#,
         )
-        .expect(Compiles) // Should compile (warning, not error)
-        .expect(HasWarning("is Copyable but has deinit"))
+        .expect(Compiles)
+        .expect(NoWarnings)
         .expect(
             Symbol::new("Counter")
                 .is(SymbolKind::Struct)
@@ -191,10 +190,10 @@ mod copyable_with_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
-                
+
                 deinit {}
             }
         "#,
@@ -215,14 +214,14 @@ mod copyable_with_deinit {
         Test::new(
             r#"module Test
             import Prelude
-            
+
             struct Handle: not Copyable {
                 var fd: lang.i64
             }
-            
+
             struct Wrapper {
                 var handle: Handle
-                
+
                 deinit {}
             }
         "#,

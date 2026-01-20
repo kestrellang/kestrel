@@ -513,3 +513,26 @@ public func test_panic_in_then(condition: lang.i1) -> lang.i64 {
         .expect(Symbol::new("test_panic_in_then").is(SymbolKind::Function));
     }
 }
+
+mod try_expressions {
+    use super::*;
+
+    #[test]
+    fn try_expression_not_supported() {
+        Test::new(
+            r#"
+module Main
+
+func getValue() -> lang.i64 {
+    42
+}
+
+func test() {
+    let x = try getValue();
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("not yet supported"));
+    }
+}

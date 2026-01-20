@@ -14,8 +14,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::diagnostics::{
     AsciiEscapeOutOfRangeError, BreakOutsideLoopError, ContinueOutsideLoopError,
     IncompleteEscapeSequenceError, InvalidEscapeSequenceError, InvalidUnicodeEscapeError,
-    TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError, UndeclaredLabelError,
-    UnicodeEscapeErrorReason,
+    TryExpressionNotSupportedError, TupleIndexOnNonTupleError, TupleIndexOutOfBoundsError,
+    UndeclaredLabelError, UnicodeEscapeErrorReason,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -1212,13 +1212,26 @@ fn resolve_return_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext)
 /// Resolve a try expression: try expr
 ///
 /// Desugars to:
-/// ```
+/// ```text
 /// match expr.tryExtract() {
 ///     .Continue(value) => value,
 ///     .Break(early) => return R.fromResidual(early)
 /// }
 /// ```
+// TODO: Remove the TryExpressionNotSupportedError and restore full implementation
+// when try expressions are fully supported
 fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
+    let span = get_node_span(node, ctx.file_id);
+
+    // Emit error: try expressions are not yet supported
+    ctx.diagnostics
+        .throw(TryExpressionNotSupportedError { span: span.clone() });
+
+    Expression::error(span)
+}
+
+#[allow(dead_code)]
+fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     use kestrel_semantic_tree::expr::MatchArm;
     use kestrel_semantic_tree::pattern::{EnumPatternBinding, Mutability, Pattern};
 

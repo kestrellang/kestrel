@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::attributes::AttributesBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-use kestrel_semantic_tree::behavior::copy_semantics::{CopySemantics, CopySemanticsBehavior};
-use kestrel_semantic_tree::behavior::deinit::DeinitBehavior;
+use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::builtins::BuiltinKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -17,9 +16,8 @@ use semantic_tree::symbol::Symbol;
 use crate::binders::utils::attributes::{BuiltinParseResult, parse_builtin_attribute};
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::{
-    BuiltinWrongKindError, CloneableFieldRequiresCloneableConformance, CopyableWithDeinitWarning,
-    DuplicateBuiltinError, FieldsNotConformingToProtocolError, NonConformingField,
-    NotAProtocolContext,
+    BuiltinWrongKindError, CloneableFieldRequiresCloneableConformance, DuplicateBuiltinError,
+    FieldsNotConformingToProtocolError, NonConformingField, NotAProtocolContext,
 };
 use crate::syntax::helpers::resolve_conformance_list;
 
@@ -93,9 +91,6 @@ impl DeclarationBinder for StructBinder {
         // Compute and attach CopySemanticsBehavior based on conformances and field types
         // This is done in bind_body because fields are bound after the struct's signature
         Self::compute_copy_semantics(symbol, context);
-
-        // Check for Copyable + deinit combination and emit warning
-        Self::check_copyable_with_deinit(symbol, context);
 
         // Validate that protocols with requires_fields_conform have all fields conforming
         Self::validate_protocol_field_conformances(symbol, context);
@@ -308,47 +303,6 @@ impl StructBinder {
                 feature_name: feature.name().to_string(),
             });
         }
-    }
-
-    /// Check for Copyable type with deinit and emit a warning.
-    ///
-    /// This is allowed but potentially confusing - the deinit will run for each copy
-    /// of the value, which may not be the intended behavior.
-    fn check_copyable_with_deinit(
-        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        context: &mut BindingContext,
-    ) {
-        // Check if struct has a deinit
-        let Some(deinit_behavior) = symbol.metadata().get_behavior::<DeinitBehavior>() else {
-            return;
-        };
-
-        // Check if struct is Copyable
-        let is_copyable = symbol
-            .metadata()
-            .get_behavior::<CopySemanticsBehavior>()
-            .map(|b| b.semantics() == CopySemantics::Copyable)
-            .unwrap_or(true); // Default to copyable if no behavior
-
-        if !is_copyable {
-            // Not copyable, no warning needed
-            return;
-        }
-
-        // Get the deinit span for the warning
-        let deinit_span = context
-            .model
-            .registry()
-            .get(deinit_behavior.deinit_symbol())
-            .map(|s| s.metadata().span().clone())
-            .unwrap_or_else(|| symbol.metadata().span().clone());
-
-        let struct_name = symbol.metadata().name().value.clone();
-
-        context.diagnostics.throw(CopyableWithDeinitWarning {
-            deinit_span,
-            struct_name,
-        });
     }
 
     /// Validate that protocols with requires_fields_conform have all fields conforming.

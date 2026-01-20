@@ -7,11 +7,13 @@
 - [x] Move IO into standard library
 - [x] Build with std by default, add --no-std flag.
 - [x] Fix matches on non-primitive types 
-- [ ] Add Formattable protocol
+- [x] Add Formattable protocol
+- [x] Remove deinit + copyable warning
+- [x] Error for try
+- [ ] Fix test suite
 - [ ] Reference counting
 - [ ] Web server
 - [ ] Add tests
-- [ ] Fix test suite
 
 ## Phase 14
 
