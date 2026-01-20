@@ -25,6 +25,7 @@ pub struct SemanticModelBuilder {
     root: Arc<dyn Symbol<KestrelLanguage>>,
     syntax_map: HashMap<SymbolId, SyntaxNode>,
     sources: HashMap<String, String>,
+    std_auto_import: bool,
 }
 
 impl SemanticModelBuilder {
@@ -33,7 +34,16 @@ impl SemanticModelBuilder {
             root: Arc::new(RootSymbol::new()),
             syntax_map: HashMap::new(),
             sources: HashMap::new(),
+            std_auto_import: false,
         }
+    }
+
+    /// Enable auto-import of standard library modules.
+    ///
+    /// When enabled, all symbols from std.* modules will be automatically
+    /// imported into user source files (non-std modules).
+    pub fn enable_std_auto_import(&mut self) {
+        self.std_auto_import = true;
     }
 
     pub fn add_file(
@@ -76,8 +86,117 @@ impl SemanticModelBuilder {
             .insert(file_name.to_string(), source.to_string());
     }
 
-    pub fn build(self) -> SemanticModel {
+    pub fn build(mut self) -> SemanticModel {
+        // If auto-import is enabled, inject synthetic imports into user source files
+        if self.std_auto_import {
+            self.inject_std_imports();
+        }
+
         SemanticModel::new(self.root, self.syntax_map, self.sources)
+    }
+
+    /// Inject synthetic wildcard imports for all std.* modules into user source files.
+    fn inject_std_imports(&mut self) {
+        use kestrel_semantic_tree::symbol::import::{ImportDataBehavior, ImportSymbol};
+
+        // Collect all std.* module paths (including submodules)
+        let std_modules = self.collect_std_module_paths(&self.root.clone(), vec![]);
+
+        // Collect all user source files (non-std modules)
+        let user_source_files = self.collect_user_source_files(&self.root.clone());
+
+        // For each user source file, inject synthetic imports for all std modules
+        for source_file in user_source_files {
+            // Get the file_id from the source file's span
+            let file_id = source_file.metadata().span().file_id;
+
+            for module_path in &std_modules {
+                // Create synthetic import with correct file_id
+                let import_name = module_path.join(".");
+                let span = Span::synthetic(file_id);
+                let name = Spanned::new(import_name.clone(), span.clone());
+
+                let import_symbol = ImportSymbol::new(name, source_file.clone(), span.clone());
+                let import_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(import_symbol);
+
+                // Create import data with no items (wildcard import) and no alias
+                let module_path_with_spans: Vec<(String, Span)> = module_path
+                    .iter()
+                    .map(|s| (s.clone(), Span::synthetic(file_id)))
+                    .collect();
+
+                let import_data = ImportDataBehavior::new(
+                    module_path_with_spans,
+                    span,
+                    None,  // no alias
+                    vec![], // no items = wildcard
+                );
+                import_arc.metadata().add_behavior(import_data);
+
+                source_file.metadata().add_child(&import_arc);
+            }
+        }
+    }
+
+    /// Recursively collect all module paths that start with "std".
+    fn collect_std_module_paths(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        current_path: Vec<String>,
+    ) -> Vec<Vec<String>> {
+        let mut result = Vec::new();
+
+        for child in symbol.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Module {
+                let name = child.metadata().name().value.clone();
+                let mut new_path = current_path.clone();
+                new_path.push(name.clone());
+
+                // If this is a std module (path starts with "std"), add it
+                if new_path.first().map(|s| s.as_str()) == Some("std") {
+                    result.push(new_path.clone());
+                }
+
+                // Recursively collect submodules
+                let submodule_paths = self.collect_std_module_paths(&child, new_path);
+                result.extend(submodule_paths);
+            }
+        }
+
+        result
+    }
+
+    /// Collect all source files that are NOT in std.* modules.
+    fn collect_user_source_files(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+        let mut result = Vec::new();
+        self.collect_user_source_files_recursive(symbol, &mut result, false);
+        result
+    }
+
+    fn collect_user_source_files_recursive(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        result: &mut Vec<Arc<dyn Symbol<KestrelLanguage>>>,
+        in_std: bool,
+    ) {
+        for child in symbol.metadata().children() {
+            match child.metadata().kind() {
+                KestrelSymbolKind::Module => {
+                    let name = child.metadata().name().value.clone();
+                    let is_std = name == "std" || in_std;
+                    self.collect_user_source_files_recursive(&child, result, is_std);
+                }
+                KestrelSymbolKind::SourceFile => {
+                    if !in_std {
+                        result.push(child.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Walk syntax tree and build symbols (iterative to avoid stack overflow on deep trees)

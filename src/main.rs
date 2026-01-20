@@ -37,6 +37,14 @@ struct Cli {
     /// Verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
+
+    /// Path to standard library (overrides default lang/std/)
+    #[arg(long = "std", global = true, value_name = "PATH")]
+    std_path: Option<String>,
+
+    /// Disable the standard library
+    #[arg(long = "no-std", global = true)]
+    no_std: bool,
 }
 
 #[derive(Subcommand)]
@@ -114,6 +122,8 @@ fn run_check(
     show_symbols: bool,
     show_execution_graph: bool,
     verbose: bool,
+    std_path: Option<&str>,
+    no_std: bool,
 ) -> ExitCode {
     if files.is_empty() {
         eprintln!("error: no input files");
@@ -121,6 +131,14 @@ fn run_check(
     }
 
     let mut builder = Compilation::builder();
+
+    // Configure stdlib
+    if no_std {
+        builder = builder.without_std();
+    } else if let Some(path) = std_path {
+        builder = builder.with_std_path(path);
+    }
+
     let mut io_ok = true;
 
     for file in files {
@@ -137,7 +155,13 @@ fn run_check(
     if verbose {
         eprintln!("  Compiling...");
     }
-    let compilation = builder.build();
+    let compilation = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
 
     // Show results
     if let Some(mode) = show_tree {
@@ -242,6 +266,8 @@ fn run_program(
     libraries: Vec<String>,
     library_paths: Vec<String>,
     frameworks: Vec<String>,
+    std_path: Option<&str>,
+    no_std: bool,
 ) -> ExitCode {
     if files.is_empty() {
         eprintln!("error: no input files");
@@ -254,6 +280,14 @@ fn run_program(
     };
 
     let mut builder = Compilation::builder();
+
+    // Configure stdlib
+    if no_std {
+        builder = builder.without_std();
+    } else if let Some(path) = std_path {
+        builder = builder.with_std_path(path);
+    }
+
     let mut io_ok = true;
 
     for file in files {
@@ -271,7 +305,13 @@ fn run_program(
         return ExitCode::from(1);
     }
 
-    let compilation = builder.build();
+    let compilation = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
 
     if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
@@ -320,6 +360,8 @@ fn run_build(
     libraries: Vec<String>,
     library_paths: Vec<String>,
     frameworks: Vec<String>,
+    std_path: Option<&str>,
+    no_std: bool,
 ) -> ExitCode {
     if files.is_empty() {
         eprintln!("error: no input files");
@@ -332,6 +374,14 @@ fn run_build(
     };
 
     let mut builder = Compilation::builder();
+
+    // Configure stdlib
+    if no_std {
+        builder = builder.without_std();
+    } else if let Some(path) = std_path {
+        builder = builder.with_std_path(path);
+    }
+
     let mut io_ok = true;
 
     for file in files {
@@ -364,7 +414,13 @@ fn run_build(
         }
     };
 
-    let compilation = builder.build();
+    let compilation = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
 
     if compilation.has_errors() {
         compilation.diagnostics().emit().ok();
@@ -410,6 +466,8 @@ fn main() -> ExitCode {
             cli.symbols,
             cli.execution_graph,
             cli.verbose,
+            cli.std_path.as_deref(),
+            cli.no_std,
         ),
         Some(Commands::Parse { files }) => run_parse(&files, cli.tree.is_some()),
         Some(Commands::Run {
@@ -424,6 +482,8 @@ fn main() -> ExitCode {
             libraries,
             library_paths,
             frameworks,
+            cli.std_path.as_deref(),
+            cli.no_std,
         ),
         Some(Commands::Build {
             file,
@@ -444,6 +504,8 @@ fn main() -> ExitCode {
                 libraries,
                 library_paths,
                 frameworks,
+                cli.std_path.as_deref(),
+                cli.no_std,
             )
         }
         None => {
@@ -459,6 +521,8 @@ fn main() -> ExitCode {
                     cli.symbols,
                     cli.execution_graph,
                     cli.verbose,
+                    cli.std_path.as_deref(),
+                    cli.no_std,
                 )
             }
         }

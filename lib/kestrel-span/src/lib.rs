@@ -20,6 +20,23 @@ impl Span {
         }
     }
 
+    /// Create a synthetic span for compiler-generated constructs.
+    ///
+    /// Synthetic spans have a zero-length range and are used for
+    /// auto-generated code like implicit imports.
+    pub fn synthetic(file_id: usize) -> Self {
+        Self {
+            file_id,
+            start: 0,
+            end: 0,
+        }
+    }
+
+    /// Returns true if this span is synthetic (compiler-generated).
+    pub fn is_synthetic(&self) -> bool {
+        self.start == 0 && self.end == 0
+    }
+
     /// Get the byte range of this span.
     pub fn range(&self) -> std::ops::Range<usize> {
         self.start..self.end

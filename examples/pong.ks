@@ -3,13 +3,6 @@
 
 module Pong
 
-import std.io.stdio.(println, print)
-import std.io.error.(Error)
-import std.num.(Int64, Int32, UInt32)
-import std.result.(Result)
-import std.text.(String)
-import std.core.(Bool)
-
 struct Pong {
     var ballX: Int64
     var ballY: Int64
@@ -73,9 +66,9 @@ struct Pong {
         // Frame counter
         self.frameCount = 0;
 
-        // Scores
-        self.score1 = 0;
-        self.score2 = 0;
+        // Scores (testing with non-zero values)
+        self.score1 = 42;
+        self.score2 = 7;
     }
 
     // Convenience init with defaults

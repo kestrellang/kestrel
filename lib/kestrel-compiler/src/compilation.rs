@@ -41,12 +41,15 @@ impl Compilation {
     }
 
     /// Internal method to create a compilation from source files.
-    pub(crate) fn from_sources(sources: Vec<(String, String)>) -> Self {
+    pub(crate) fn from_sources(sources: Vec<(String, String)>, stdlib_enabled: bool) -> Self {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
         // Create the semantic model builder (build/lowering phase)
         let mut builder = SemanticModelBuilder::new();
+        if stdlib_enabled {
+            builder.enable_std_auto_import();
+        }
 
         // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
         for (name, source) in sources {
