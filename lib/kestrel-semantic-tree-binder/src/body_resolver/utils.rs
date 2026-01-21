@@ -27,9 +27,7 @@ use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use super::context::BodyResolutionContext;
-use crate::diagnostics::{
-    TypeParameterCannotBeUsedAsValueError, UnsupportedGenericProtocolBoundError,
-};
+use crate::diagnostics::TypeParameterCannotBeUsedAsValueError;
 
 /// Check if a syntax kind is an expression kind
 pub fn is_expression_kind(kind: SyntaxKind) -> bool {
@@ -493,31 +491,6 @@ pub fn get_type_parameter_bounds_by_id(
             }
         }
     }
-
-    // Validate that no bounds use generic protocols (with type arguments)
-    // Filter them out and emit errors
-    bounds = bounds
-        .into_iter()
-        .filter(|bound| {
-            if let TyKind::Protocol {
-                symbol,
-                substitutions,
-            } = bound.kind()
-            {
-                if !substitutions.is_empty() {
-                    // This is a generic protocol bound like Container[E]
-                    let protocol_name = symbol.metadata().name().value.clone();
-                    let error = UnsupportedGenericProtocolBoundError {
-                        span: bound.span().clone(),
-                        protocol_name,
-                    };
-                    ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                    return false; // Filter out this bound
-                }
-            }
-            true
-        })
-        .collect();
 
     bounds
 }

@@ -26,5 +26,6 @@ mod instantiation;
 mod memory_model;
 mod patterns;
 mod statements;
+mod stdlib;
 mod types;
 mod validation;

@@ -344,6 +344,38 @@ mod associated_types {
                 .has(Behavior::ImplementsProtocol("Collection", "getAll")),
         );
     }
+
+    #[test]
+    fn generic_struct_with_generic_associated_type() {
+        // This mirrors the Range[T]: Iterable pattern where:
+        // - The struct is generic (Range[T])
+        // - The associated type binding references the struct's type param (type Iter = RangeIterator[T])
+        // - The method returns the associated type (func iter() -> Iter)
+        Test::new(
+            r#"module Test
+            struct Wrapper[T] {
+                var value: T
+                init(v: T) { self.value = v }
+            }
+            protocol Iterable {
+                type Iter
+                func iter() -> Iter
+            }
+            struct Container[T]: Iterable {
+                type Iter = Wrapper[T]
+                var data: T
+                init(d: T) { self.data = d }
+                func iter() -> Wrapper[T] { Wrapper(self.data) }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Container.iter")
+                .is(SymbolKind::Function)
+                .has(Behavior::ImplementsProtocol("Iterable", "iter")),
+        );
+    }
 }
 
 mod multiple_conformances {

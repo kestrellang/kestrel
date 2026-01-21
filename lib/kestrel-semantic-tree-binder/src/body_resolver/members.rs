@@ -34,8 +34,7 @@ use crate::diagnostics::{
     AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError,
     DelegatingInitOutsideInitializerError, MemberNotAccessibleError, MemberNotVisibleError,
     MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError,
-    PrimitiveMethodNotCallableError, UnconstrainedTypeParameterMemberError,
-    UnsupportedGenericProtocolBoundError,
+    UnconstrainedTypeParameterMemberError,
 };
 
 use super::calls::{collect_overload_descriptions, try_resolve_subscript_call, validate_argument_access_modes};
@@ -474,16 +473,6 @@ fn resolve_constrained_member_access(
         if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
             let proto_name = proto.metadata().name().value.clone();
             bound_names.push(proto_name.clone());
-
-            // Check for generic protocol (not yet supported)
-            if !proto.type_parameters().is_empty() {
-                let error = UnsupportedGenericProtocolBoundError {
-                    span: bound.span().clone(),
-                    protocol_name: proto_name,
-                };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                return Expression::error(full_span);
-            }
 
             // Collect method IDs from this protocol (including inherited)
             collect_protocol_method_candidates(proto, member_name, &mut candidates, ctx);
@@ -971,22 +960,23 @@ fn resolve_constrained_member_call(
     let mut bound_names: Vec<String> = Vec::new();
 
     for bound in &bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+        if let TyKind::Protocol {
+            symbol: proto,
+            substitutions,
+        } = bound.kind()
+        {
             let proto_name = proto.metadata().name().value.clone();
             bound_names.push(proto_name.clone());
 
-            // Check for generic protocol (not yet supported)
-            if !proto.type_parameters().is_empty() {
-                let error = UnsupportedGenericProtocolBoundError {
-                    span: bound.span().clone(),
-                    protocol_name: proto_name,
-                };
-                ctx.diagnostics.add_diagnostic(error.into_diagnostic());
-                return Expression::error(span);
-            }
-
             // Collect methods from this protocol (including inherited)
-            collect_protocol_methods(proto, member_name, receiver_ty, &mut candidates, ctx);
+            collect_protocol_methods(
+                proto,
+                member_name,
+                receiver_ty,
+                substitutions,
+                &mut candidates,
+                ctx,
+            );
         }
     }
 
@@ -1096,10 +1086,15 @@ fn resolve_constrained_member_call(
 }
 
 /// Collect methods from a protocol, including inherited protocols.
+///
+/// The `protocol_substitutions` parameter contains the type arguments for the protocol
+/// bound, e.g., for `T: Converter[lang.i64]`, it maps the Converter's type parameter
+/// to `lang.i64`. These substitutions are applied to method signatures.
 fn collect_protocol_methods(
     protocol: &Arc<ProtocolSymbol>,
     method_name: &str,
     receiver_ty: &Ty,
+    protocol_substitutions: &Substitutions,
     candidates: &mut Vec<ConstrainedMethodCandidate>,
     ctx: &BodyResolutionContext,
 ) {
@@ -1113,6 +1108,9 @@ fn collect_protocol_methods(
                 if let Some(callable) = get_callable_behavior(&method.symbol) {
                     // Substitute Self with the receiver type
                     let substituted_callable = substitute_callable_self(&callable, receiver_ty);
+                    // Apply protocol type parameter substitutions
+                    let substituted_callable =
+                        substitute_callable(&substituted_callable, protocol_substitutions);
 
                     candidates.push(ConstrainedMethodCandidate {
                         method: method.symbol.clone(),
@@ -1137,6 +1135,9 @@ fn collect_protocol_methods(
             if let Some(callable) = get_callable_behavior(&child) {
                 // Substitute Self with the receiver type
                 let substituted_callable = substitute_callable_self(&callable, receiver_ty);
+                // Apply protocol type parameter substitutions
+                let substituted_callable =
+                    substitute_callable(&substituted_callable, protocol_substitutions);
 
                 candidates.push(ConstrainedMethodCandidate {
                     method: child.clone(),
@@ -1151,8 +1152,21 @@ fn collect_protocol_methods(
     // Search inherited protocols
     if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
         for parent_proto_ty in conformances.conformances() {
-            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
-                collect_protocol_methods(parent, method_name, receiver_ty, candidates, ctx);
+            if let TyKind::Protocol {
+                symbol: parent,
+                substitutions: parent_subs,
+            } = parent_proto_ty.kind()
+            {
+                // Compose substitutions: apply our substitutions to the parent's type arguments
+                let composed_subs = compose_substitutions(protocol_substitutions, parent_subs);
+                collect_protocol_methods(
+                    parent,
+                    method_name,
+                    receiver_ty,
+                    &composed_subs,
+                    candidates,
+                    ctx,
+                );
             }
         }
     }
@@ -1188,6 +1202,57 @@ pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -
         ),
         None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
     }
+}
+
+/// Substitute type parameters in a CallableBehavior using protocol substitutions.
+///
+/// This is used when a protocol bound has type arguments, e.g., `T: Converter[lang.i64]`.
+/// The protocol's type parameters need to be substituted with the concrete types.
+fn substitute_callable(callable: &CallableBehavior, substitutions: &Substitutions) -> CallableBehavior {
+    use kestrel_semantic_tree::behavior::callable::CallableParameter;
+
+    // Skip if no substitutions to apply
+    if substitutions.is_empty() {
+        return callable.clone();
+    }
+
+    let new_params: Vec<CallableParameter> = callable
+        .parameters()
+        .iter()
+        .map(|p| CallableParameter {
+            access_mode: p.access_mode,
+            ty: substitute_type(&p.ty, substitutions),
+            label: p.label.clone(),
+            bind_name: p.bind_name.clone(),
+        })
+        .collect();
+
+    let new_return = substitute_type(callable.return_type(), substitutions);
+
+    // Preserve receiver kind if present
+    match callable.receiver() {
+        Some(receiver_kind) => CallableBehavior::with_receiver(
+            new_params,
+            new_return,
+            receiver_kind,
+            callable.span().clone(),
+        ),
+        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
+    }
+}
+
+/// Compose substitutions: apply outer substitutions to inner substitution values.
+///
+/// When a generic protocol inherits from another generic protocol, we need to
+/// compose the substitutions. For example, if `SpecialConverter[T]: Converter[T]`
+/// and we have a bound `X: SpecialConverter[lang.i64]`, then when looking at
+/// Converter's methods, T should be substituted with lang.i64.
+fn compose_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substitutions {
+    let mut result = Substitutions::new();
+    for (id, ty) in inner.iter() {
+        result.insert(*id, substitute_type(ty, outer));
+    }
+    result
 }
 
 /// Resolve static member access on a type parameter: `T.staticMethod`.

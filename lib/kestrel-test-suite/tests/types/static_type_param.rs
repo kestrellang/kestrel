@@ -545,7 +545,7 @@ mod edge_cases {
 
     #[test]
     fn generic_protocol_bound() {
-        // T: Container[E] with generic protocol
+        // T: Container[E] with generic protocol - NOW SUPPORTED
         Test::new(
             r#"module Test
             protocol Container[E] {
@@ -556,7 +556,7 @@ mod edge_cases {
             }
         "#,
         )
-        .expect(HasError("generic protocol bounds"));
+        .expect(Compiles);
     }
 
     #[test]
@@ -621,6 +621,158 @@ mod edge_cases {
             }
             func makeBothWays[T]() -> (T, T) where T: Factory {
                 return (T(), T.create())
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod generic_protocol_bounds {
+    use super::*;
+
+    #[test]
+    fn basic_generic_protocol_bound_instance_method() {
+        // where T: Converter[lang.i64] - instance method with return type substitution
+        Test::new(
+            r#"module Test
+            protocol Converter[Target] {
+                func convert() -> Target
+            }
+            func useConverter[T](val: T) -> lang.i64 where T: Converter[lang.i64] {
+                val.convert()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_with_type_parameter() {
+        // where T: Container[E] - protocol arg is another type param
+        Test::new(
+            r#"module Test
+            protocol Container[E] {
+                func first() -> E
+            }
+            func getFirst[T, E](c: T) -> E where T: Container[E] {
+                c.first()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_static_method() {
+        // Static method on generic protocol bound
+        Test::new(
+            r#"module Test
+            protocol Factory[T] {
+                static func create() -> T
+            }
+            func makeWidget[F]() -> lang.i64 where F: Factory[lang.i64] {
+                F.create()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_init() {
+        // Init on generic protocol bound
+        Test::new(
+            r#"module Test
+            protocol Buildable[T] {
+                init(value: T)
+            }
+            func build[B](v: lang.i64) -> B where B: Buildable[lang.i64] {
+                B(v)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_self_and_type_param() {
+        // Method uses both Self and protocol type param
+        Test::new(
+            r#"module Test
+            protocol Transformer[Output] {
+                func transform() -> Output
+                func chain(other: Self) -> Output
+            }
+            func apply[T](a: T, b: T) -> lang.i64 where T: Transformer[lang.i64] {
+                a.chain(b)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_inheritance() {
+        // Child protocol inherits from generic parent
+        Test::new(
+            r#"module Test
+            protocol Converter[T] {
+                func convert() -> T
+            }
+            protocol IntConverter: Converter[lang.i64] {
+                func convertTwice() -> lang.i64
+            }
+            func useIntConverter[T](val: T) -> lang.i64 where T: IntConverter {
+                val.convert()
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_bound_multiple_type_params() {
+        // Protocol with multiple type parameters
+        Test::new(
+            r#"module Test
+            protocol BiConverter[From, To] {
+                func convert(input: From) -> To
+            }
+            func transform[T](c: T, input: lang.str) -> lang.i64 where T: BiConverter[lang.str, lang.i64] {
+                c.convert(input)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn recursive_type_param_in_bound() {
+        // where T: Comparable[T] - common pattern
+        Test::new(
+            r#"module Test
+            protocol Comparable[Other] {
+                func compare(other: Other) -> lang.i64
+            }
+            func compareToSelf[T](a: T, b: T) -> lang.i64 where T: Comparable[T] {
+                a.compare(b)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_protocol_with_parameter_types() {
+        // Protocol type param used in method parameter types
+        Test::new(
+            r#"module Test
+            protocol Processor[Input] {
+                func process(input: Input) -> lang.i64
+            }
+            func runProcessor[P](p: P, input: lang.str) -> lang.i64 where P: Processor[lang.str] {
+                p.process(input)
             }
         "#,
         )

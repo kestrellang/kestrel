@@ -51,6 +51,15 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
     }) || type_uses_self(mir, func_def.ret)
 }
 
+/// Check if a function has a self receiver (first parameter named "self").
+/// This is used to determine if a witness call needs a self_type for mangling.
+fn has_self_receiver(mir: &MirContext, func_def: &FunctionDef) -> bool {
+    func_def.params.first().map_or(false, |&param_id| {
+        let param = &mir.params[param_id];
+        param.name == "self"
+    })
+}
+
 fn is_main_function(ctx: &CodegenContext<'_>, func_def: &FunctionDef) -> bool {
     let name = ctx.mir.name(func_def.name);
     name.segments.last().map(|s| s.as_str()) == Some("main")
@@ -1882,8 +1891,11 @@ fn compile_immediate(
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
 
+            // For witness methods, check if the function has a self receiver to determine
+            // if we need to include self_type in the mangled name. This matches what the
+            // monomorphization collection phase does when creating FunctionInstantiation.
             let self_type = match func_lookup {
-                Some((_, def)) if func_uses_self(ctx.mir, def) => Some(concrete_for_type),
+                Some((_, def)) if has_self_receiver(ctx.mir, def) => Some(concrete_for_type),
                 _ => None,
             };
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);
@@ -2404,8 +2416,11 @@ pub fn compile_call(
                 .iter()
                 .find(|(_, def)| def.name == impl_name);
             let callee_def = func_lookup.map(|(_, def)| def);
+            // For witness calls, always use concrete_for_type as self_type if the function
+            // has a self receiver (first param named "self"). This matches what the
+            // monomorphization collection phase does when creating FunctionInstantiation.
             let self_type = match callee_def {
-                Some(def) if func_uses_self(ctx.mir, def) => Some(concrete_for_type),
+                Some(def) if has_self_receiver(ctx.mir, def) => Some(concrete_for_type),
                 _ => None,
             };
             let mangled_name = ctx.resolve_symbol_name(impl_name, &impl_type_args, self_type);

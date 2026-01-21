@@ -1320,8 +1320,8 @@ mod constraint_enforcement {
     }
 
     #[test]
-    fn generic_protocol_bound_not_supported() {
-        // Generic protocol bounds require associated types (not yet implemented)
+    fn generic_protocol_bound_now_supported() {
+        // Generic protocol bounds are now supported
         Test::new(
             r#"module Test
             protocol Container[T] {
@@ -1333,7 +1333,7 @@ mod constraint_enforcement {
             func main() {}
         "#,
         )
-        .expect(HasError("generic protocol bounds are not yet supported"));
+        .expect(Compiles);
     }
 
     #[test]

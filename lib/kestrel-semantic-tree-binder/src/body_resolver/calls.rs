@@ -38,8 +38,8 @@ use crate::diagnostics::{
     MemberNotVisibleError, NoInitInTypeParameterBoundsError, NoMatchingInitializerError,
     NoMatchingMethodError, NoMatchingOverloadError, NoMatchingTypeParameterInitError,
     NonCallableError, NotGenericError, OverloadDescription, PrimitiveMethodArityError,
-    PrimitiveMethodNotCallableError, TooFewTypeArgumentsError, TooManyTypeArgumentsError,
-    TypeArgsOnNonGenericError, UnconstrainedTypeParameterMemberError,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
+    UnconstrainedTypeParameterMemberError,
 };
 use kestrel_syntax_tree::utils::get_node_span;
 
@@ -53,7 +53,7 @@ use super::utils::{
     create_generic_struct_type, create_struct_type, create_struct_type_with_type_args,
     find_type_directed_match, get_callable_behavior, get_type_container,
     get_type_parameter_bounds_by_id, infer_type_arguments, is_expression_kind, matches_signature,
-    replace_type_params_except, replace_unsubstituted_type_params, substitute_self, substitute_type,
+    replace_type_params_except, substitute_self, substitute_type,
     validate_not_standalone_type_param, verify_type_argument_constraints,
 };
 
@@ -1636,6 +1636,66 @@ pub fn resolve_method_call(
                     // Check if this is a static method call (TypeRef receiver)
                     let is_static_method = matches!(&receiver.kind, ExprKind::TypeRef(_));
 
+                    // Handle TypeParameterRef receiver (static method on type parameter)
+                    // e.g., T.create() where T: Factory[lang.i64]
+                    // We need to find the protocol bound that contains this method and apply its substitutions
+                    if let ExprKind::TypeParameterRef(type_param_id) = &receiver.kind {
+                        // Look up protocol bounds for this type parameter
+                        let bounds = get_type_parameter_bounds_by_id(*type_param_id, ctx);
+
+                        // Find the protocol that contains this method and get composed substitutions
+                        for bound in &bounds {
+                            if let TyKind::Protocol {
+                                symbol: proto,
+                                substitutions: proto_subs,
+                            } = bound.kind()
+                            {
+                                // Get composed substitutions tracing through inheritance
+                                if let Some(composed_subs) =
+                                    get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                {
+                                    // Apply composed substitutions to return type and callable
+                                    if !composed_subs.is_empty() {
+                                        return_ty = substitute_type(&return_ty, &composed_subs);
+                                        for (param_id, ty) in composed_subs.iter() {
+                                            call_substitutions.insert(*param_id, ty.clone());
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // Also handle instance method calls where receiver's TYPE is a TypeParameter
+                    // e.g., val.convert() where val: T and T: Converter[lang.i64]
+                    else if let TyKind::TypeParameter(type_param) = receiver.ty.kind() {
+                        // Look up protocol bounds for this type parameter
+                        let bounds = get_type_parameter_bounds_by_id(type_param.metadata().id(), ctx);
+
+                        // Find the protocol that contains this method and get composed substitutions
+                        for bound in &bounds {
+                            if let TyKind::Protocol {
+                                symbol: proto,
+                                substitutions: proto_subs,
+                            } = bound.kind()
+                            {
+                                // Get composed substitutions tracing through inheritance
+                                if let Some(composed_subs) =
+                                    get_method_protocol_substitutions(&symbol, proto, proto_subs)
+                                {
+                                    // Apply composed substitutions to return type and callable
+                                    if !composed_subs.is_empty() {
+                                        return_ty = substitute_type(&return_ty, &composed_subs);
+                                        for (param_id, ty) in composed_subs.iter() {
+                                            call_substitutions.insert(*param_id, ty.clone());
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     // Handle struct receiver types (e.g., Box[Int])
                     if let Some((struct_sym, substitutions)) = resolved_receiver_ty.as_struct_with_subs() {
                         // Check if we need type inference (only for static methods):
@@ -1946,12 +2006,16 @@ fn resolve_type_parameter_init_call(
     let mut bound_names: Vec<String> = Vec::new();
 
     for bound in &bounds {
-        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+        if let TyKind::Protocol {
+            symbol: proto,
+            substitutions,
+        } = bound.kind()
+        {
             let proto_name = proto.metadata().name().value.clone();
             bound_names.push(proto_name.clone());
 
             // Collect initializers from this protocol
-            collect_protocol_initializers(proto, &type_param_ty, &mut candidates);
+            collect_protocol_initializers(proto, &type_param_ty, substitutions, &mut candidates);
         }
     }
 
@@ -2056,7 +2120,72 @@ fn resolve_type_parameter_init_call(
 
     let init_ref = Expression::symbol_ref(init_id, init_fn_ty, false, span.clone());
 
-    Expression::call(init_ref, arguments, return_ty, span)
+    // Use generic_call with protocol substitutions so type inference can apply them
+    Expression::generic_call(
+        init_ref,
+        arguments,
+        winner.protocol_substitutions.clone(),
+        return_ty,
+        span,
+    )
+}
+
+/// Find the substitutions needed to use a method from a protocol, tracing through inheritance.
+///
+/// Returns Some(substitutions) if the method is from the protocol or its ancestors,
+/// None if the method is not found in this protocol's hierarchy.
+fn get_method_protocol_substitutions(
+    method: &Arc<dyn Symbol<KestrelLanguage>>,
+    protocol: &Arc<ProtocolSymbol>,
+    base_substitutions: &Substitutions,
+) -> Option<Substitutions> {
+    // Get the method's parent protocol
+    let method_parent = method.metadata().parent()?;
+    if method_parent.metadata().kind() != KestrelSymbolKind::Protocol {
+        return None;
+    }
+    let method_parent_id = method_parent.metadata().id();
+    let protocol_id = protocol.metadata().id();
+
+    // Direct parent check - method is directly from this protocol
+    if method_parent_id == protocol_id {
+        return Some(base_substitutions.clone());
+    }
+
+    // Check if method comes from an inherited protocol
+    // Trace through the inheritance to find the path and compose substitutions
+    if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
+        for parent_ty in conformances.conformances() {
+            if let TyKind::Protocol {
+                symbol: parent,
+                substitutions: parent_subs,
+            } = parent_ty.kind()
+            {
+                // Compose substitutions: apply our base_substitutions to the parent's type args
+                let composed = compose_substitutions(base_substitutions, parent_subs);
+
+                if parent.metadata().id() == method_parent_id {
+                    // Found the method's protocol directly
+                    return Some(composed);
+                }
+
+                // Recursively check
+                if let Some(result) = get_method_protocol_substitutions(method, parent, &composed) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if a method symbol belongs to a protocol (directly or through inheritance).
+fn method_is_from_protocol(
+    method: &Arc<dyn Symbol<KestrelLanguage>>,
+    protocol: &Arc<ProtocolSymbol>,
+) -> bool {
+    get_method_protocol_substitutions(method, protocol, &Substitutions::new()).is_some()
 }
 
 /// Candidate for init resolution on type parameter
@@ -2067,12 +2196,18 @@ struct InitCandidate {
     callable: kestrel_semantic_tree::behavior::callable::CallableBehavior,
     /// Protocol name (for ambiguity detection)
     protocol_name: String,
+    /// Protocol substitutions to apply (for generic protocol bounds)
+    protocol_substitutions: Substitutions,
 }
 
 /// Collect initializer methods from a protocol, including inherited protocols.
+///
+/// The `protocol_substitutions` parameter contains the type arguments for the protocol
+/// bound, e.g., for `T: Buildable[lang.i64]`, it maps Buildable's type parameter to `lang.i64`.
 fn collect_protocol_initializers(
     protocol: &Arc<ProtocolSymbol>,
     self_replacement: &Ty,
+    protocol_substitutions: &Substitutions,
     candidates: &mut Vec<InitCandidate>,
 ) {
     let protocol_name = protocol.metadata().name().value.clone();
@@ -2083,11 +2218,14 @@ fn collect_protocol_initializers(
             if let Some(callable) = get_callable_behavior(&child) {
                 // Substitute Self with the type parameter in the callable
                 let substituted = substitute_callable_self(&callable, self_replacement);
+                // Apply protocol type parameter substitutions
+                let substituted = substitute_callable_with_substitutions(&substituted, protocol_substitutions);
 
                 candidates.push(InitCandidate {
                     init: child.clone(),
                     callable: substituted,
                     protocol_name: protocol_name.clone(),
+                    protocol_substitutions: protocol_substitutions.clone(),
                 });
             }
         }
@@ -2096,11 +2234,63 @@ fn collect_protocol_initializers(
     // Search inherited protocols
     if let Some(conformances) = protocol.metadata().get_behavior::<ConformancesBehavior>() {
         for parent_proto_ty in conformances.conformances() {
-            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
-                collect_protocol_initializers(parent, self_replacement, candidates);
+            if let TyKind::Protocol {
+                symbol: parent,
+                substitutions: parent_subs,
+            } = parent_proto_ty.kind()
+            {
+                // Compose substitutions: apply our substitutions to the parent's type arguments
+                let composed_subs = compose_substitutions(protocol_substitutions, parent_subs);
+                collect_protocol_initializers(parent, self_replacement, &composed_subs, candidates);
             }
         }
     }
+}
+
+/// Substitute type parameters in a CallableBehavior using protocol substitutions.
+fn substitute_callable_with_substitutions(
+    callable: &CallableBehavior,
+    substitutions: &Substitutions,
+) -> CallableBehavior {
+    use kestrel_semantic_tree::behavior::callable::CallableParameter;
+
+    // Skip if no substitutions to apply
+    if substitutions.is_empty() {
+        return callable.clone();
+    }
+
+    let new_params: Vec<CallableParameter> = callable
+        .parameters()
+        .iter()
+        .map(|p| CallableParameter {
+            access_mode: p.access_mode,
+            ty: substitute_type(&p.ty, substitutions),
+            label: p.label.clone(),
+            bind_name: p.bind_name.clone(),
+        })
+        .collect();
+
+    let new_return = substitute_type(callable.return_type(), substitutions);
+
+    // Preserve receiver kind if present
+    match callable.receiver() {
+        Some(receiver_kind) => CallableBehavior::with_receiver(
+            new_params,
+            new_return,
+            receiver_kind,
+            callable.span().clone(),
+        ),
+        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
+    }
+}
+
+/// Compose substitutions: apply outer substitutions to inner substitution values.
+fn compose_substitutions(outer: &Substitutions, inner: &Substitutions) -> Substitutions {
+    let mut result = Substitutions::new();
+    for (id, ty) in inner.iter() {
+        result.insert(*id, substitute_type(ty, outer));
+    }
+    result
 }
 
 // =============================================================================
