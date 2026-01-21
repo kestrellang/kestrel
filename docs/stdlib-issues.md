@@ -278,7 +278,7 @@ public init(arrayLiteral elements: [T]) {
 
 // Workaround: duplicate initialization logic (not ideal)
 public init(arrayLiteral elements: [T]) {
-    self.storage = ArcBox(value: ArrayStorage(
+    self.storage = RcBox(value: ArrayStorage(
         buffer: Buffer(capacity: elements.count),
         count: 0
     ))

@@ -35,21 +35,22 @@
 - [x] Remove deinit + copyable warning
 - [x] Error for try
 - [x] Fix test suite
-- [ ] Reference counting
+- [x] Reference counting
 - [x] Add tests for features
 - [x] Add tests for STD
 
 ## Phase 14
 
 - [ ] For loops
-- [ ] Compound assignment operators
-- [ ] try expressions
+- [ ] Character Literals
+- [ ] Compound Assignment Operators
+- [ ] Try Expressions
 - [ ] Array type syntax [Item]
 - [ ] Dictionary type syntax [Key: Value]
 - [ ] Optional type syntax Type?
 - [ ] Result type syntax Type throws Error
 - [ ] Optional Chaining
 - [ ] Null Coalescing
-- [ ] and && or cut off
+- [ ] and / or short-circuit
 - [ ] String interpolation
 - [ ] Web server

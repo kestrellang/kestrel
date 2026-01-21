@@ -12,19 +12,17 @@
 //! the stack, and modifications through the reference aren't reflected in
 //! the original variable.
 
-use super::compile_and_run;
+use kestrel_test_suite::*;
 
 #[test]
-#[ignore]
 fn test_mutating_parameter_struct() {
     // This works because structs are already stack-allocated pointers
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
 struct Point {
-    var x: lang.i64
-    var y: lang.i64
+    var x: std.num.Int64
+    var y: std.num.Int64
 }
 
 func reset(mutating p: Point) {
@@ -35,89 +33,83 @@ func reset(mutating p: Point) {
 func main() -> lang.i64 {
     var pt = Point(x: 0, y: 0);
     reset(pt);
-    pt.x
+    if pt.x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_borrow_parameter_struct() {
     // Default parameter mode is borrow (read-only reference)
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
 struct Point {
-    let x: lang.i64
-    let y: lang.i64
+    let x: std.num.Int64
+    let y: std.num.Int64
 }
 
-func sum(p: Point) -> lang.i64 {
+func sum(p: Point) -> std.num.Int64 {
     p.x + p.y
 }
 
 func main() -> lang.i64 {
     let pt = Point(x: 20, y: 22);
-    sum(pt)
+    if sum(pt) != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_method_borrow_self() {
     // Methods take self by borrow by default
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
 struct Point {
-    let x: lang.i64
-    let y: lang.i64
-    
-    func sum() -> lang.i64 {
+    let x: std.num.Int64
+    let y: std.num.Int64
+
+    func sum() -> std.num.Int64 {
         self.x + self.y
     }
 }
 
 func main() -> lang.i64 {
     let pt = Point(x: 20, y: 22);
-    pt.sum()
+    if pt.sum() != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_mutating_method() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
 struct Counter {
-    var count: lang.i64
-    
+    var count: std.num.Int64
+
     mutating func increment() {
         self.count = self.count + 1;
     }
-    
-    func read() -> lang.i64 {
+
+    func read() -> std.num.Int64 {
         self.count
     }
 }
@@ -126,46 +118,44 @@ func main() -> lang.i64 {
     var c = Counter(count: 40);
     c.increment();
     c.increment();
-    c.get()
+    if c.read() != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_mutating_through_nested_field() {
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
 struct Inner {
-    var value: lang.i64
+    var value: std.num.Int64
 }
 
 struct Outer {
     var inner: Inner
 }
 
-func setValue(mutating i: Inner, n: lang.i64) {
+func setValue(mutating i: Inner, n: std.num.Int64) {
     i.value = n;
 }
 
 func main() -> lang.i64 {
     var o = Outer(inner: Inner(value: 0));
     setValue(o.inner, 42);
-    o.inner.value
+    if o.inner.value != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 // The following tests involve primitives passed by mutable reference.
@@ -182,79 +172,76 @@ func main() -> lang.i64 {
 // stack-allocated) but not for primitives (lang.i64, lang.i1, lang.f64, etc.).
 
 #[test]
-#[ignore = "Requires stack allocation for address-taken locals"]
+
 fn test_mutating_parameter_int() {
     // This test fails because `x` is in a register, not on the stack.
     // When increment takes `mutating n`, it gets a reference to a COPY of x.
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func increment(mutating n: lang.i64) {
+func increment(mutating n: std.num.Int64) {
     n = n + 1;
 }
 
 func main() -> lang.i64 {
-    var x = 41;
+    var x: std.num.Int64 = 41;
     increment(x);
-    x
+    if x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore = "Requires stack allocation for address-taken locals"]
+
 fn test_multiple_mutating_calls() {
     // This test fails because `x` is in a register, not on the stack.
-    let result = compile_and_run(
-        r#"
-module Test
+    Test::new(
+        r#"module Test
 
-func add(mutating n: lang.i64, amount: lang.i64) {
+func add(mutating n: std.num.Int64, amount: std.num.Int64) {
     n = n + amount;
 }
 
 func main() -> lang.i64 {
-    var x = 0;
+    var x: std.num.Int64 = 0;
     add(x, 10);
     add(x, 20);
     add(x, 12);
-    x
+    if x != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }
 
 #[test]
-#[ignore]
 fn test_mutating_and_return() {
-    // NOTE: This test may fail because primitive locals are register-allocated
-    let result = compile_and_run(
-        r#"
-module Test
+    // This test works because it returns the value, not the mutated variable
+    Test::new(
+        r#"module Test
 
-func incrementAndGet(mutating n: lang.i64) -> lang.i64 {
+func incrementAndGet(mutating n: std.num.Int64) -> std.num.Int64 {
     n = n + 1;
     n
 }
 
 func main() -> lang.i64 {
-    var x = 41;
-    incrementAndGet(x)
+    var x: std.num.Int64 = 41;
+    let result = incrementAndGet(x);
+    if result != 42 { return 1 }
+    0
 }
 "#,
-    );
-    if result.exit_code != 42 {
-        eprintln!("stderr: {}", result.stderr);
-    }
-    assert_eq!(result.exit_code, 42);
+    )
+    .with_stdlib()
+    .expect(Compiles)
+    .expect(Runs);
 }

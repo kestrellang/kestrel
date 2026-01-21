@@ -160,4 +160,14 @@ pub trait TypeOracle {
         // Implementations with access to stdlib can override to return the String struct.
         Ty::string(span)
     }
+
+    /// Get the default type for boolean literals when type is ambiguous.
+    ///
+    /// Returns the `Bool` struct type if available in the stdlib,
+    /// otherwise falls back to the primitive bool type.
+    fn default_boolean_type(&self, span: Span) -> Ty {
+        // Default implementation uses primitive bool type.
+        // Implementations with access to stdlib can override to return the Bool struct.
+        Ty::bool(span)
+    }
 }

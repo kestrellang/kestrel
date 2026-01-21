@@ -5,7 +5,7 @@ module std.collections
 import std.core.(Bool, Equatable, Comparable, Cloneable)
 import std.num.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, ArcBox)
+import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, RcBox)
 import std.iter.(Iterator, Iterable)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 
@@ -80,13 +80,13 @@ struct ArrayStorage[T]: Cloneable {
     }
 }
 
-// Array[T] - dynamic array with COW semantics using ArcBox
+// Array[T] - dynamic array with COW semantics using RcBox
 public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
     type Item = T
     type Iter = ArrayIterator[T]
     type Element = T
 
-    private var storage: ArcBox[ArrayStorage[T]]
+    private var storage: RcBox[ArrayStorage[T]]
 
     // Helper accessors for storage fields
     private func ptr() -> Pointer[T] { self.storage.getValue().ptr }
@@ -101,13 +101,13 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     // Private init for internal use (from storage)
-    private init(storage storage: ArcBox[ArrayStorage[T]]) {
+    private init(storage storage: RcBox[ArrayStorage[T]]) {
         self.storage = storage;
     }
 
     // Create empty array
     public init() {
-        self.storage = ArcBox(ArrayStorage(
+        self.storage = RcBox(ArrayStorage(
             ptr: Pointer(raw: lang.ptr_null[T]()),
             len: Int64(intLiteral: 0),
             cap: Int64(intLiteral: 0)
@@ -121,7 +121,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if result.isSome() {
-                self.storage = ArcBox(ArrayStorage(
+                self.storage = RcBox(ArrayStorage(
                     ptr: result.unwrap().cast[T](),
                     len: Int64(intLiteral: 0),
                     cap: capacity
@@ -130,7 +130,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 lang.panic("Array allocation failed")
             }
         } else {
-            self.storage = ArcBox(ArrayStorage(
+            self.storage = RcBox(ArrayStorage(
                 ptr: Pointer(raw: lang.ptr_null[T]()),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
@@ -165,7 +165,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                         done = true
                     }
                 }
-                self.storage = ArcBox(ArrayStorage(
+                self.storage = RcBox(ArrayStorage(
                     ptr: newPtr,
                     len: currentLen,
                     cap: elementCount
@@ -174,7 +174,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 lang.panic("Array allocation failed")
             }
         } else {
-            self.storage = ArcBox(ArrayStorage(
+            self.storage = RcBox(ArrayStorage(
                 ptr: Pointer(raw: lang.ptr_null[T]()),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)

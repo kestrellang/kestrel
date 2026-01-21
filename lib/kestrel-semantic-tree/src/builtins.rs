@@ -41,6 +41,7 @@ pub enum LanguageFeature {
     DefaultIntegerLiteralType,
     DefaultFloatLiteralType,
     DefaultStringLiteralType,
+    DefaultBooleanLiteralType,
 
     // Operator protocols - arithmetic
     AddOperatorProtocol,
@@ -129,6 +130,7 @@ impl LanguageFeature {
             "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
             "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
             "DefaultStringLiteralType" => Some(Self::DefaultStringLiteralType),
+            "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
             // Operator protocols - arithmetic
             "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
             "AddOperatorMethod" => Some(Self::AddOperatorMethod),
@@ -211,6 +213,7 @@ impl LanguageFeature {
             Self::DefaultIntegerLiteralType => "DefaultIntegerLiteralType",
             Self::DefaultFloatLiteralType => "DefaultFloatLiteralType",
             Self::DefaultStringLiteralType => "DefaultStringLiteralType",
+            Self::DefaultBooleanLiteralType => "DefaultBooleanLiteralType",
             // Operator protocols - arithmetic
             Self::AddOperatorProtocol => "AddOperatorProtocol",
             Self::AddOperatorMethod => "AddOperatorMethod",
@@ -411,6 +414,10 @@ impl LanguageFeature {
                 kind: BuiltinKind::TypeAlias,
             },
             Self::DefaultStringLiteralType => BuiltinDefinition {
+                feature: *self,
+                kind: BuiltinKind::TypeAlias,
+            },
+            Self::DefaultBooleanLiteralType => BuiltinDefinition {
                 feature: *self,
                 kind: BuiltinKind::TypeAlias,
             },

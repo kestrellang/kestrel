@@ -270,7 +270,7 @@ mod dictionary {
     }
 }
 
-mod arcbox {
+mod rcbox {
     use super::*;
 
     #[test]
@@ -279,8 +279,8 @@ mod arcbox {
             r#"module Test
 
             func main() -> lang.i64 {
-                // Create ArcBox
-                let box1 = std.memory.ArcBox[std.num.Int64](42);
+                // Create RcBox
+                let box1 = std.memory.RcBox[std.num.Int64](42);
 
                 // Test getValue
                 if box1.getValue() != 42 { return 1 }

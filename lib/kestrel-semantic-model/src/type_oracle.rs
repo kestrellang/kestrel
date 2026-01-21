@@ -701,6 +701,23 @@ impl TypeOracle for SemanticModel {
         // Fall back to primitive string type
         Ty::string(span)
     }
+
+    fn default_boolean_type(&self, span: kestrel_span::Span) -> Ty {
+        use kestrel_semantic_tree::builtins::LanguageFeature;
+
+        // Try to look up the DefaultBooleanLiteralType type alias
+        if let Some(type_alias_id) = self
+            .builtin_registry()
+            .type_alias(LanguageFeature::DefaultBooleanLiteralType)
+        {
+            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
+                return resolved;
+            }
+        }
+
+        // Fall back to primitive bool type
+        Ty::bool(span)
+    }
 }
 
 // ============================================================================
@@ -780,6 +797,10 @@ impl TypeOracle for ContextualOracle<'_> {
 
     fn default_string_type(&self, span: kestrel_span::Span) -> Ty {
         self.model.default_string_type(span)
+    }
+
+    fn default_boolean_type(&self, span: kestrel_span::Span) -> Ty {
+        self.model.default_boolean_type(span)
     }
 }
 

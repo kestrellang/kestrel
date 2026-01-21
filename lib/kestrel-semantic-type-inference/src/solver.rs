@@ -99,7 +99,7 @@ fn apply_default_literal_types(ctx: &mut InferenceContext<'_>) {
             LanguageFeature::ExpressibleByIntLiteral => ctx.oracle().default_integer_type(span),
             LanguageFeature::ExpressibleByFloatLiteral => ctx.oracle().default_float_type(span),
             LanguageFeature::ExpressibleByStringLiteral => ctx.oracle().default_string_type(span),
-            LanguageFeature::ExpressibleByBoolLiteral => Ty::bool(span),
+            LanguageFeature::ExpressibleByBoolLiteral => ctx.oracle().default_boolean_type(span),
             _ => continue,
         };
 

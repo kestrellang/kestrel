@@ -5,7 +5,7 @@ module std.collections
 import std.core.(Bool, Equatable, Cloneable)
 import std.num.(Int64, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, ArcBox)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.iter.(Iterator, Iterable)
 
 // Compute next power of two, minimum 8
@@ -132,12 +132,12 @@ struct DictionaryStorage[K, V]: Cloneable where K: Equatable {
     }
 }
 
-// Dictionary[K, V] - hash map with COW semantics using ArcBox
+// Dictionary[K, V] - hash map with COW semantics using RcBox
 public struct Dictionary[K, V]: Iterable where K: Equatable {
     type Item = DictionaryEntry[K, V]
     type Iter = DictionaryIterator[K, V]
 
-    private var storage: ArcBox[DictionaryStorage[K, V]]
+    private var storage: RcBox[DictionaryStorage[K, V]]
 
     // Helper accessors for storage fields
     private func entries() -> Pointer[DictionaryEntry[K, V]] { self.storage.getValue().entries }
@@ -154,13 +154,13 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     }
 
     // Private init for internal use (from storage)
-    private init(storage storage: ArcBox[DictionaryStorage[K, V]]) {
+    private init(storage storage: RcBox[DictionaryStorage[K, V]]) {
         self.storage = storage;
     }
 
     // Create empty dictionary - requires placeholder key/value for future resizing
     public init(placeholderKey: K, placeholderValue: V) {
-        self.storage = ArcBox(DictionaryStorage(
+        self.storage = RcBox(DictionaryStorage(
             entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
             len: Int64(intLiteral: 0),
             cap: Int64(intLiteral: 0),
@@ -187,7 +187,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
                     ));
                     i = i + Int64(intLiteral: 1)
                 }
-                self.storage = ArcBox(DictionaryStorage(
+                self.storage = RcBox(DictionaryStorage(
                     entries: newEntries,
                     len: Int64(intLiteral: 0),
                     cap: actualCap,
@@ -198,7 +198,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
                 lang.panic("Dictionary allocation failed")
             }
         } else {
-            self.storage = ArcBox(DictionaryStorage(
+            self.storage = RcBox(DictionaryStorage(
                 entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0),

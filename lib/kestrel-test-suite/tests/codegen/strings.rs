@@ -3,7 +3,7 @@
 use super::compile_and_run;
 
 #[test]
-#[ignore]
+
 fn test_string_literal() {
     // Test that string literals compile
     let result = compile_and_run(
@@ -23,7 +23,7 @@ func main() -> lang.i64 {
 }
 
 #[test]
-#[ignore]
+
 fn test_empty_string() {
     let result = compile_and_run(
         r#"
@@ -42,7 +42,7 @@ func main() -> lang.i64 {
 }
 
 #[test]
-#[ignore]
+
 fn test_multiple_strings() {
     let result = compile_and_run(
         r#"
@@ -62,7 +62,7 @@ func main() -> lang.i64 {
 }
 
 #[test]
-#[ignore]
+
 fn test_duplicate_strings() {
     // Test that duplicate strings are deduplicated
     let result = compile_and_run(

@@ -5,7 +5,7 @@ module std.text
 import std.core.(Bool, Equatable, Comparable, Cloneable, Formattable, Ordering, Addable, ExpressibleByStringLiteral)
 import std.num.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, ArcBox)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.iter.(Iterator, Iterable)
 import std.text.(CodePoint, decodeUtf8, encodeUtf8)
 import std.ffi.(memcpy)
@@ -179,7 +179,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     type Iter = StringIterator
     type Output = String
 
-    private var storage: ArcBox[StringStorage]
+    private var storage: RcBox[StringStorage]
 
     // Helper accessors for storage fields
     private func ptr() -> Pointer[UInt8] { self.storage.getValue().ptr }
@@ -195,7 +195,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Create empty string
     public init() {
-        self.storage = ArcBox(StringStorage(
+        self.storage = RcBox(StringStorage(
             ptr: Pointer(raw: lang.ptr_null[UInt8]()),
             len: Int64(intLiteral: 0),
             cap: Int64(intLiteral: 0)
@@ -209,7 +209,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if result.isSome() {
-                self.storage = ArcBox(StringStorage(
+                self.storage = RcBox(StringStorage(
                     ptr: result.unwrap().cast[UInt8](),
                     len: Int64(intLiteral: 0),
                     cap: capacity
@@ -218,7 +218,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 lang.panic("String allocation failed")
             }
         } else {
-            self.storage = ArcBox(StringStorage(
+            self.storage = RcBox(StringStorage(
                 ptr: Pointer(raw: lang.ptr_null[UInt8]()),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
@@ -239,7 +239,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 let srcPtr: lang.ptr[lang.i8] = ptr;
                 let dstPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](newPtr.asRaw().raw);
                 let _ = memcpy(dstPtr, srcPtr, length);
-                self.storage = ArcBox(StringStorage(
+                self.storage = RcBox(StringStorage(
                     ptr: newPtr,
                     len: byteCount,
                     cap: byteCount
@@ -248,7 +248,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 lang.panic("String allocation failed")
             }
         } else {
-            self.storage = ArcBox(StringStorage(
+            self.storage = RcBox(StringStorage(
                 ptr: Pointer(raw: lang.ptr_null[UInt8]()),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
@@ -257,7 +257,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     // Private: create from storage (for COW clone)
-    private init(storage storage: ArcBox[StringStorage]) {
+    private init(storage storage: RcBox[StringStorage]) {
         self.storage = storage;
     }
 
@@ -277,7 +277,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 newPtr.offset(by: i).write(ptr.offset(by: i).read());
                 i = i + Int64(intLiteral: 1)
             }
-            String(storage: ArcBox(StringStorage(ptr: newPtr, len: count, cap: count)))
+            String(storage: RcBox(StringStorage(ptr: newPtr, len: count, cap: count)))
         } else {
             lang.panic("String allocation failed")
         }
