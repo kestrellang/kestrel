@@ -420,19 +420,9 @@
   - [x] FunctionPass trait for per-function passes
   - [x] PassManager with sequential execution
   - [x] Fixed-point iteration support
-- [ ] Analysis Infrastructure
-  - [ ] CFG traversal utilities (dominator computation, post-order traversal)
-  - [ ] Dataflow analysis framework (reaching definitions, liveness)
-  - [ ] Loop detection utilities
-- [ ] Optimization Passes
-  - [ ] Dead code elimination
-  - [ ] Constant folding/propagation
-  - [ ] Copy propagation
-  - [ ] Inlining
-- [x] Remaining Features
+- [x] Additional Features
   - [x] Method references as values (bound methods)
   - [x] Int.toString() (IntToString MIR operation)
-  - [ ] Thin closure optimization (when no captures)
 
 ## Phase 11: Memory Model ✅ COMPLETE
 
