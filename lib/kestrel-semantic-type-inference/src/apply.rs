@@ -661,14 +661,12 @@ fn apply_to_pattern(pattern: &Pattern, solution: &Solution) -> Pattern {
 }
 
 /// Resolve a type using the solution.
-/// If the type is an inference placeholder, look it up in the solution.
+/// If the type is an inference placeholder or unresolved function, look it up in the solution.
 /// Recursively resolves nested types.
 fn resolve_type(ty: &Ty, solution: &Solution) -> Ty {
-    // If this type is an inference placeholder, look it up
-    if matches!(ty.kind(), TyKind::Infer) {
-        if let Some(resolved) = solution.get_type(ty.id()) {
-            return resolve_type(resolved, solution);
-        }
+    // Check if this type has a substitution (for Infer and UnresolvedFunction types)
+    if let Some(resolved) = solution.get_type(ty.id()) {
+        return resolve_type(resolved, solution);
     }
 
     // For compound types, recursively resolve components

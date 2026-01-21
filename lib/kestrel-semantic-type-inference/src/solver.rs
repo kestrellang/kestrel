@@ -309,6 +309,8 @@ fn unify(
             }
             // Unify return types
             ctx.equate(ret_unresolved.id(), expected_return.id(), span.clone());
+            // Store substitution: UnresolvedFunction -> Function
+            ctx.substitutions_mut().insert(ty_a.id(), ty_b.clone());
             Ok(SolveResult::Solved)
         }
 
@@ -350,6 +352,8 @@ fn unify(
                 }
             }
             ctx.equate(ret_unresolved.id(), expected_return.id(), span.clone());
+            // Store substitution: UnresolvedFunction -> Function
+            ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
             Ok(SolveResult::Solved)
         }
 

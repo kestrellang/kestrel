@@ -448,8 +448,19 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     }
                 }
                 TyKind::UnresolvedFunction { .. } => {
-                    // Unresolved function - can't generate param constraints yet
-                    // The closure will be resolved through other constraints
+                    // For unresolved functions, create a concrete function type from
+                    // the call site and equate it with the callee's type. This allows
+                    // the solver to unify the UnresolvedFunction with the expected
+                    // function signature based on how it's being called.
+                    let arg_types: Vec<Ty> = arguments
+                        .iter()
+                        .map(|arg| arg.value.ty.clone())
+                        .collect();
+                    let expected_fn_ty =
+                        Ty::function(arg_types, expr.ty.clone(), expr.span.clone());
+                    ctx.register_type(&expected_fn_ty);
+                    ctx.register_type(&callee.ty);
+                    ctx.equate(callee.ty.id(), expected_fn_ty.id(), expr.span.clone());
                 }
                 _ => {
                     // Callee type is not a function - might be an error or inference needed
