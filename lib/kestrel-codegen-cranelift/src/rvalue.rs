@@ -3126,15 +3126,20 @@ fn compile_apply_partial(
                 stack_locals,
             )?;
 
-            // Check if this is a nested struct that needs copying
+            // Check if this is an aggregate type that needs copying (structs, thick callables, etc.)
             let concrete_field_ty = subst
                 .apply_ty_readonly(ctx.mir, field_ty)
                 .unwrap_or(field_ty);
             let field_mir_ty = ctx.mir.ty(concrete_field_ty);
-            let is_nested_struct = matches!(field_mir_ty, MirTy::Named { .. })
-                && is_struct_type(ctx, concrete_field_ty);
+            let is_aggregate = match field_mir_ty {
+                MirTy::Named { .. } => is_struct_type(ctx, concrete_field_ty),
+                MirTy::FuncThick { .. } => true, // Thick callables are 16-byte structs
+                MirTy::Tuple(_) => true,
+                MirTy::Str => true,
+                _ => false,
+            };
 
-            if is_nested_struct {
+            if is_aggregate {
                 // Copy nested struct data
                 let nested_layout = ctx.layouts.layout_of(concrete_field_ty);
                 let dest_ptr = if offset == 0 {
