@@ -4,7 +4,6 @@
 //! of semantic analysis, resolving all references and establishing relationships.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
@@ -125,19 +124,18 @@ impl SemanticBinder {
         // Map symbol kind to syntax kind for resolver lookup
         let syntax_kind = Self::symbol_kind_to_syntax_kind(kind);
 
-        if let Some(sk) = syntax_kind {
-            if let Some(resolver) = self.binder_registry.get(sk) {
-                if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
-                    let mut ctx = BindingContext {
-                        model: &self.model,
-                        diagnostics,
-                        type_alias_cycle_detector: &self.cycle_detector,
-                        copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
-                        sources: &self.sources,
-                    };
-                    resolver.bind_signature(symbol, syntax_node, &mut ctx);
-                }
-            }
+        if let Some(sk) = syntax_kind
+            && let Some(resolver) = self.binder_registry.get(sk)
+            && let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id())
+        {
+            let mut ctx = BindingContext {
+                model: &self.model,
+                diagnostics,
+                type_alias_cycle_detector: &self.cycle_detector,
+                copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
+                sources: &self.sources,
+            };
+            resolver.bind_signature(symbol, syntax_node, &mut ctx);
         }
 
         // Recursively bind children's signatures
@@ -160,19 +158,18 @@ impl SemanticBinder {
         // Map symbol kind to syntax kind for resolver lookup
         let syntax_kind = Self::symbol_kind_to_syntax_kind(kind);
 
-        if let Some(sk) = syntax_kind {
-            if let Some(resolver) = self.binder_registry.get(sk) {
-                if let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id()) {
-                    let mut ctx = BindingContext {
-                        model: &self.model,
-                        diagnostics,
-                        type_alias_cycle_detector: &self.cycle_detector,
-                        copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
-                        sources: &self.sources,
-                    };
-                    resolver.bind_body(symbol, syntax_node, &mut ctx);
-                }
-            }
+        if let Some(sk) = syntax_kind
+            && let Some(resolver) = self.binder_registry.get(sk)
+            && let Some(syntax_node) = self.syntax_map.get(&symbol.metadata().id())
+        {
+            let mut ctx = BindingContext {
+                model: &self.model,
+                diagnostics,
+                type_alias_cycle_detector: &self.cycle_detector,
+                copy_semantics_cycle_detector: &self.copy_semantics_cycle_detector,
+                sources: &self.sources,
+            };
+            resolver.bind_body(symbol, syntax_node, &mut ctx);
         }
 
         // Recursively resolve children's bodies
@@ -204,5 +201,4 @@ impl SemanticBinder {
             KestrelSymbolKind::SourceFile => None,
         }
     }
-
 }

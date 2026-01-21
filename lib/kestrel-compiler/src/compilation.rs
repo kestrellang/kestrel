@@ -171,7 +171,7 @@ impl Compilation {
             .ok_or(CompileError::NoSemanticModel)?;
 
         let root = model.root();
-        let result = kestrel_execution_graph_lowering::lower_module(model, &root);
+        let result = kestrel_execution_graph_lowering::lower_module(model, root);
 
         if result.has_errors() {
             return Err(CompileError::LoweringFailed(result.diagnostics));

@@ -68,7 +68,7 @@ impl DeclarationBinder for GetterBinder {
         let callable = match receiver_kind {
             Some(kind) => {
                 CallableBehavior::with_receiver(vec![], field_type.clone(), kind, span.clone())
-            }
+            },
             None => CallableBehavior::new(vec![], field_type.clone(), span.clone()),
         };
 
@@ -125,9 +125,7 @@ fn resolve_getter_body(
     file_id: usize,
 ) {
     use crate::body_resolver::BodyResolutionContext;
-    use crate::body_resolver::context::{
-        create_local_scope_for_body, resolve_code_block,
-    };
+    use crate::body_resolver::context::{create_local_scope_for_body, resolve_code_block};
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
 
     // Downcast to GetterSymbol
@@ -147,9 +145,7 @@ fn resolve_getter_body(
         .unwrap_or(false);
 
     // If this is an instance getter, inject `self` as the first local (immutable)
-    if has_receiver
-        && let Some(self_type) = get_self_type(symbol)
-    {
+    if has_receiver && let Some(self_type) = get_self_type(symbol) {
         let decl_span = symbol.metadata().span().clone();
         let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
@@ -198,7 +194,9 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
     match type_parent.metadata().kind() {
         KestrelSymbolKind::Struct => {
             // Create concrete struct type with type parameters mapping to themselves
-            let struct_arc = Arc::clone(&type_parent).downcast_arc::<StructSymbol>().ok()?;
+            let struct_arc = Arc::clone(&type_parent)
+                .downcast_arc::<StructSymbol>()
+                .ok()?;
             let mut substitutions = Substitutions::new();
             if let Some(generics) = type_parent.metadata().get_behavior::<GenericsBehavior>() {
                 for param in generics.type_parameters() {
@@ -208,7 +206,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_struct(struct_arc, substitutions, type_span))
-        }
+        },
         KestrelSymbolKind::Enum => {
             // Create concrete enum type with type parameters mapping to themselves
             let enum_arc = Arc::clone(&type_parent).downcast_arc::<EnumSymbol>().ok()?;
@@ -221,14 +219,14 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_enum(enum_arc, substitutions, type_span))
-        }
+        },
         KestrelSymbolKind::Extension => {
             // For extension properties, use the target type
             type_parent
                 .metadata()
                 .get_behavior::<ExtensionTargetBehavior>()
                 .map(|b| b.target_type().clone())
-        }
+        },
         _ => None,
     }
 }

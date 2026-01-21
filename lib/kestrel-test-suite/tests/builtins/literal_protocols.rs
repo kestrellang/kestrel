@@ -456,8 +456,10 @@ mod builtin_annotations {
         )
         .without_prelude()
         .expect(Compiles)
-        .expect(Symbol::new("ExpressibleByIntegerLiteral")
-            .is(SymbolKind::Protocol)
-            .has(Behavior::HasAttribute("builtin")));
+        .expect(
+            Symbol::new("ExpressibleByIntegerLiteral")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::HasAttribute("builtin")),
+        );
     }
 }

@@ -35,6 +35,7 @@ use kestrel_syntax_tree::utils::{extract_path_segments, get_node_span};
 pub struct TypeResolver<'a> {
     model: &'a SemanticModel,
     diagnostics: &'a mut DiagnosticContext,
+    #[allow(dead_code)]
     source: &'a str,
     file_id: usize,
     context_id: SymbolId,
@@ -172,7 +173,7 @@ impl<'a> TypeResolver<'a> {
                     span.clone(),
                     |subs| Ty::generic_struct(symbol.clone(), subs, span),
                 )
-            }
+            },
 
             TyKind::Protocol { symbol, .. } => {
                 let type_params = symbol.type_parameters();
@@ -184,7 +185,7 @@ impl<'a> TypeResolver<'a> {
                     span.clone(),
                     |subs| Ty::generic_protocol(symbol.clone(), subs, span),
                 )
-            }
+            },
 
             TyKind::TypeAlias { symbol, .. } => {
                 let type_params = symbol.type_parameters();
@@ -196,7 +197,7 @@ impl<'a> TypeResolver<'a> {
                     span.clone(),
                     |subs| Ty::generic_type_alias(symbol.clone(), subs, span),
                 )
-            }
+            },
 
             TyKind::Enum { symbol, .. } => {
                 let type_params = symbol.type_parameters();
@@ -208,7 +209,7 @@ impl<'a> TypeResolver<'a> {
                     span.clone(),
                     |subs| Ty::generic_enum(symbol.clone(), subs, span),
                 )
-            }
+            },
 
             // Non-generic types with type arguments is an error
             _ => {
@@ -236,7 +237,7 @@ impl<'a> TypeResolver<'a> {
                     type_name,
                 });
                 Ty::error(span)
-            }
+            },
         }
     }
 
@@ -292,7 +293,7 @@ impl<'a> TypeResolver<'a> {
                             // Brackets present with exactly 1 type argument - valid
                             Some(type_args) if type_args.len() == 1 => {
                                 return Ty::pointer(type_args.into_iter().next().unwrap(), ty_span);
-                            }
+                            },
                             // Brackets present with wrong arity (including empty) - error
                             Some(type_args) => {
                                 self.diagnostics.throw(LangPtrArityError {
@@ -300,7 +301,7 @@ impl<'a> TypeResolver<'a> {
                                     got: type_args.len(),
                                 });
                                 return Ty::error(ty_span);
-                            }
+                            },
                             // No brackets - lang.ptr requires explicit type argument
                             None => {
                                 self.diagnostics.throw(LangPtrArityError {
@@ -308,20 +309,20 @@ impl<'a> TypeResolver<'a> {
                                     got: 0,
                                 });
                                 return Ty::error(ty_span);
-                            }
+                            },
                         }
                     }
 
                     // Helper to check if type args were provided for a non-generic primitive
                     let reject_type_args = |resolver: &mut Self, type_name: &str| -> Option<Ty> {
-                        if let Some(type_args) = resolver.extract_type_arguments(ty_path_node) {
-                            if !type_args.is_empty() {
-                                resolver.diagnostics.throw(NotGenericError {
-                                    span: ty_span.clone(),
-                                    type_name: type_name.to_string(),
-                                });
-                                return Some(Ty::error(ty_span.clone()));
-                            }
+                        if let Some(type_args) = resolver.extract_type_arguments(ty_path_node)
+                            && !type_args.is_empty()
+                        {
+                            resolver.diagnostics.throw(NotGenericError {
+                                span: ty_span.clone(),
+                                type_name: type_name.to_string(),
+                            });
+                            return Some(Ty::error(ty_span.clone()));
                         }
                         None
                     };
@@ -407,7 +408,7 @@ impl<'a> TypeResolver<'a> {
                         // Always call apply_type_arguments to validate arity and apply defaults
                         Some(type_args) if is_potentially_generic => {
                             return self.apply_type_arguments(&resolved, type_args, ty_span);
-                        }
+                        },
                         // Type arguments on a non-generic type is an error
                         Some(type_args) if !type_args.is_empty() => {
                             let type_name = format!("{:?}", resolved.kind());
@@ -416,15 +417,16 @@ impl<'a> TypeResolver<'a> {
                                 type_name,
                             });
                             return Ty::error(ty_span);
-                        }
+                        },
                         // No brackets (raw type reference) - for types where all params have defaults,
                         // treat it as an instantiation with inferred placeholders for all params:
                         // `Optional` => `Optional[_]`, `Map` => `Map[_, _]`, etc.
                         None if is_potentially_generic => {
-                            return self
-                                .apply_inferred_type_arguments_for_raw_reference(&resolved, ty_span);
-                        }
-                        _ => {}
+                            return self.apply_inferred_type_arguments_for_raw_reference(
+                                &resolved, ty_span,
+                            );
+                        },
+                        _ => {},
                     }
                 }
 
@@ -448,7 +450,7 @@ impl<'a> TypeResolver<'a> {
                     type_name: segment,
                 });
                 Ty::error(ty_span)
-            }
+            },
             TypePathResolution::Ambiguous {
                 segment,
                 candidates,
@@ -460,14 +462,14 @@ impl<'a> TypeResolver<'a> {
                     candidate_count: candidates.len(),
                 });
                 Ty::error(ty_span)
-            }
+            },
             TypePathResolution::NotAType { .. } => {
                 self.diagnostics.throw(NotATypeError {
                     span: ty_span.clone(),
                     name: segments.join("."),
                 });
                 Ty::error(ty_span)
-            }
+            },
         }
     }
 
@@ -477,20 +479,16 @@ impl<'a> TypeResolver<'a> {
     /// - `None` if there are no type argument brackets (raw type reference like `Box`)
     /// - `Some(vec)` if there are brackets, with the type arguments (may be empty for `Box[]`)
     fn extract_type_arguments(&mut self, ty_path_node: &SyntaxNode) -> Option<Vec<Ty>> {
-        if let Some(arg_list) = ty_path_node
+        ty_path_node
             .children()
             .find(|c| c.kind() == SyntaxKind::TypeArgumentList)
-        {
-            Some(
+            .map(|arg_list| {
                 arg_list
                     .children()
                     .filter(|c| c.kind() == SyntaxKind::Ty)
                     .map(|ty| self.resolve(&ty))
-                    .collect(),
-            )
-        } else {
-            None
-        }
+                    .collect()
+            })
     }
 
     /// Apply type arguments to a generic type (helper)
@@ -567,15 +565,13 @@ pub fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
     if let Some(ty_path_node) = ty_node
         .children()
         .find(|child| child.kind() == SyntaxKind::TyPath)
-    {
-        if let Some(path_node) = ty_path_node
+        && let Some(path_node) = ty_path_node
             .children()
             .find(|child| child.kind() == SyntaxKind::Path)
-        {
-            let segments: Vec<String> = extract_path_segments(&path_node);
-            if !segments.is_empty() {
-                return Ty::error(ty_span);
-            }
+    {
+        let segments: Vec<String> = extract_path_segments(&path_node);
+        if !segments.is_empty() {
+            return Ty::error(ty_span);
         }
     }
 

@@ -13,9 +13,9 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::SymbolFor;
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Information about a protocol property requirement.
 #[derive(Debug, Clone)]

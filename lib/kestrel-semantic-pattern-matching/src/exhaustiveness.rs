@@ -232,11 +232,11 @@ impl<'a> ExhaustivenessChecker<'a> {
                         .map(|c| self.constructor_to_witness(c))
                         .collect()
                 }
-            }
+            },
             None => {
                 // Infinite constructor type - need a wildcard
                 vec![Witness::any()]
-            }
+            },
         }
     }
 
@@ -252,17 +252,17 @@ impl<'a> ExhaustivenessChecker<'a> {
                 } else {
                     Witness::enum_case_with_args(name, vec![Witness::any(); *arity])
                 }
-            }
+            },
             Constructor::Tuple { arity } => Witness::tuple(vec![Witness::any(); *arity]),
             Constructor::Struct { name, .. } => Witness::struct_witness(name, vec![]),
             Constructor::IntLiteral(n) => Witness::integer(*n),
             Constructor::IntRange { start, end } => {
                 Witness::range(start.to_string(), end.to_string(), true)
-            }
+            },
             Constructor::CharLiteral(c) => Witness::Literal(format!("'{}'", c)),
             Constructor::CharRange { start, end } => {
                 Witness::range(format!("'{}'", start), format!("'{}'", end), true)
-            }
+            },
             Constructor::StringLiteral(s) => Witness::string(s),
             Constructor::Array {
                 prefix_len,
@@ -271,7 +271,7 @@ impl<'a> ExhaustivenessChecker<'a> {
             } => Witness::array(vec![Witness::any(); prefix_len + suffix_len]),
             Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => {
                 Witness::any()
-            }
+            },
         }
     }
 }
@@ -289,7 +289,7 @@ fn extract_int_range(pattern: &Pattern) -> Option<(i64, i64)> {
             (RangeBound::Integer(s), RangeBound::Integer(e)) => {
                 let end_val = if *inclusive { *e } else { e - 1 };
                 Some((*s, end_val))
-            }
+            },
             _ => None,
         },
         _ => None,
@@ -314,7 +314,7 @@ fn expand_or_patterns(pattern: &Pattern) -> Vec<Pattern> {
         PatternKind::Or { alternatives } => {
             // Recursively expand nested or-patterns
             alternatives.iter().flat_map(expand_or_patterns).collect()
-        }
+        },
         PatternKind::At {
             name,
             local_id,
@@ -336,7 +336,7 @@ fn expand_or_patterns(pattern: &Pattern) -> Vec<Pattern> {
                     )
                 })
                 .collect()
-        }
+        },
         _ => vec![pattern.clone()],
     }
 }

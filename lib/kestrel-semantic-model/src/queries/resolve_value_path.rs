@@ -10,7 +10,10 @@ use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::SemanticModel;
-use crate::queries::{ExtensionsFor, IsVisibleFrom, ResolveName, ResolvedAliasedType, SymbolFor, VisibleChildrenByName};
+use crate::queries::{
+    ExtensionsFor, IsVisibleFrom, ResolveName, ResolvedAliasedType, SymbolFor,
+    VisibleChildrenByName,
+};
 use crate::query::Query;
 use crate::resolution::{SymbolResolution, ValuePathResolution};
 
@@ -67,13 +70,13 @@ impl Query for ResolveValuePath {
                     };
                 }
                 symbols
-            }
+            },
             SymbolResolution::NotFound => {
                 return ValuePathResolution::NotFound {
                     segment: first.clone(),
                     index: 0,
                 };
-            }
+            },
         };
 
         if first_symbols.is_empty() {
@@ -149,10 +152,9 @@ impl Query for ResolveValuePath {
                             // Check if it's a static method (no receiver)
                             if let Some(callable) =
                                 child.metadata().get_behavior::<CallableBehavior>()
+                                && callable.is_static()
                             {
-                                if callable.is_static() {
-                                    matches.push(child);
-                                }
+                                matches.push(child);
                             }
                         }
                     }
@@ -163,8 +165,7 @@ impl Query for ResolveValuePath {
             // Enum cases are values, not namespaces - remaining segments should be member accesses.
             // This handles cases like `Player.player1.description()` where `player1` is an enum case
             // and `description()` is a method call on that value.
-            if matches.is_empty()
-                && current_symbol.metadata().kind() == KestrelSymbolKind::EnumCase
+            if matches.is_empty() && current_symbol.metadata().kind() == KestrelSymbolKind::EnumCase
             {
                 // Get the type of the enum case (which is the parent enum type)
                 if let Some(value_beh) = current_symbol.metadata().get_behavior::<ValueBehavior>() {
@@ -190,17 +191,17 @@ impl Query for ResolveValuePath {
                         segment: segment.clone(),
                         index,
                     };
-                }
+                },
                 1 => {
                     current_symbol = matches.into_iter().next().unwrap();
-                }
+                },
                 _ => {
                     return ValuePathResolution::Ambiguous {
                         segment: segment.clone(),
                         index,
                         candidates: matches.iter().map(|s| s.metadata().id()).collect(),
                     };
-                }
+                },
             }
         }
 

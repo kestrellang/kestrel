@@ -2,21 +2,17 @@
 
 use crate::CodegenOptions;
 use crate::error::CodegenError;
-use crate::monomorphize::{
-    FunctionInstantiation, MonomorphizationSet, Substitution, build_substitution,
-};
-use crate::types::{translate_type, translate_type_ext};
-use kestrel_codegen::{Layout, LayoutCache, TargetConfig, mangle_function_with_self, mangle_name};
-use kestrel_execution_graph::{
-    Function, FunctionDef, Id, MirContext, QualifiedName, QualifiedNameData, Ty,
-};
+use crate::monomorphize::{FunctionInstantiation, MonomorphizationSet, build_substitution};
+use crate::types::translate_type_ext;
+use kestrel_codegen::{LayoutCache, TargetConfig, mangle_function_with_self, mangle_name};
+use kestrel_execution_graph::{Function, FunctionDef, Id, MirContext, QualifiedName, Ty};
 
 use cranelift_codegen::Context as CraneliftContext;
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{AbiParam, Function as CraneliftFunction, Signature, UserFuncName};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
@@ -356,7 +352,8 @@ impl<'a> CodegenContext<'a> {
             let concrete_ty = subst
                 .apply_ty_readonly(self.mir, param.ty)
                 .expect("type substitution failed for param type");
-            let cl_type = translate_type_ext(self.mir, concrete_ty, self.target, func_def.is_extern());
+            let cl_type =
+                translate_type_ext(self.mir, concrete_ty, self.target, func_def.is_extern());
             sig.params.push(AbiParam::new(cl_type));
         }
 
@@ -366,7 +363,8 @@ impl<'a> CodegenContext<'a> {
             // C runtime expects int main() - always return i64
             sig.returns.push(AbiParam::new(cl_types::I64));
         } else if !matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) && !needs_sret {
-            let cl_type = translate_type_ext(self.mir, concrete_ret, self.target, func_def.is_extern());
+            let cl_type =
+                translate_type_ext(self.mir, concrete_ret, self.target, func_def.is_extern());
             sig.returns.push(AbiParam::new(cl_type));
         }
 
@@ -434,7 +432,7 @@ impl<'a> CodegenContext<'a> {
 
 /// Create a Cranelift target ISA from the target config.
 fn create_isa(
-    target: &TargetConfig,
+    _target: &TargetConfig,
     options: &CodegenOptions,
 ) -> Result<Arc<dyn TargetIsa>, CodegenError> {
     let mut flags_builder = settings::builder();
@@ -443,13 +441,13 @@ fn create_isa(
     match options.opt_level {
         0 => {
             flags_builder.set("opt_level", "none").unwrap();
-        }
+        },
         1 => {
             flags_builder.set("opt_level", "speed").unwrap();
-        }
+        },
         _ => {
             flags_builder.set("opt_level", "speed_and_size").unwrap();
-        }
+        },
     }
 
     // Enable position-independent code for shared libraries

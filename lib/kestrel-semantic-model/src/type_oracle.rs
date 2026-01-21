@@ -77,10 +77,10 @@ impl TypeOracle for SemanticModel {
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     // Substitute type parameters and Self (Self = the type parameter)
-                                    let raw_return_ty = callable
-                                        .return_type()
-                                        .apply_substitutions(current_subs);
-                                    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                    let raw_return_ty =
+                                        callable.return_type().apply_substitutions(current_subs);
+                                    let returns_self =
+                                        matches!(raw_return_ty.kind(), TyKind::SelfType);
                                     let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                     let parameters: Vec<Ty> = callable
                                         .parameters()
@@ -118,7 +118,8 @@ impl TypeOracle for SemanticModel {
                                         let raw_return_ty = callable
                                             .return_type()
                                             .apply_substitutions(current_subs);
-                                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                        let returns_self =
+                                            matches!(raw_return_ty.kind(), TyKind::SelfType);
                                         let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                         let parameters: Vec<Ty> = callable
                                             .parameters()
@@ -164,7 +165,7 @@ impl TypeOracle for SemanticModel {
                     receiver_ty: receiver_ty.clone(),
                     member: member.to_string(),
                 });
-            }
+            },
         };
 
         // Look for the member in direct children
@@ -232,11 +233,11 @@ impl TypeOracle for SemanticModel {
                                     receiver_ty: receiver_ty.clone(),
                                     member: member.to_string(),
                                 });
-                            }
+                            },
                         }
-                    }
+                    },
                 }
-            }
+            },
         };
 
         let member_id = member_symbol.metadata().id();
@@ -245,33 +246,29 @@ impl TypeOracle for SemanticModel {
         // Handle static vs instance access
         if is_static {
             // Static access - should be a function with no receiver
-            if member_kind == KestrelSymbolKind::Function {
-                if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
-                {
-                    if callable.is_static() {
-                        // Substitute both type parameters and Self with the receiver type
-                        let raw_return_ty = callable
-                            .return_type()
-                            .apply_substitutions(&substitutions);
-                        let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                        let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                        let parameters: Vec<Ty> = callable
-                            .parameters()
-                            .iter()
-                            .map(|p| {
-                                p.ty.apply_substitutions(&substitutions)
-                                    .substitute_self(receiver_ty)
-                            })
-                            .collect();
-                        return Ok(MemberResolution {
-                            ty: return_ty,
-                            symbol_id: member_id,
-                            substitutions,
-                            parameters,
-                            returns_self,
-                        });
-                    }
-                }
+            if member_kind == KestrelSymbolKind::Function
+                && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
+                && callable.is_static()
+            {
+                // Substitute both type parameters and Self with the receiver type
+                let raw_return_ty = callable.return_type().apply_substitutions(&substitutions);
+                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                let return_ty = raw_return_ty.substitute_self(receiver_ty);
+                let parameters: Vec<Ty> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| {
+                        p.ty.apply_substitutions(&substitutions)
+                            .substitute_self(receiver_ty)
+                    })
+                    .collect();
+                return Ok(MemberResolution {
+                    ty: return_ty,
+                    symbol_id: member_id,
+                    substitutions,
+                    parameters,
+                    returns_self,
+                });
             }
             // Static access on non-static member
             return Err(MemberError::NotFound {
@@ -284,55 +281,54 @@ impl TypeOracle for SemanticModel {
 
         // Check for field access via MemberAccessBehavior
         for behavior in member_symbol.metadata().behaviors() {
-            if behavior.kind() == KestrelBehaviorKind::MemberAccess {
-                if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
-                    // Substitute type parameters and Self with the receiver type
-                    let member_ty = access
-                        .member_type()
-                        .apply_substitutions(&substitutions)
-                        .substitute_self(receiver_ty);
-                    // Resolve any qualified associated types (e.g., String.Output → String)
-                    let member_ty = resolve_all_associated_types(self, &member_ty);
-                    return Ok(MemberResolution {
-                        ty: member_ty,
-                        symbol_id: member_id,
-                        substitutions,
-                        parameters: vec![], // field access has no parameters
-                        returns_self: false, // field access, not a method call
-                    });
-                }
+            if behavior.kind() == KestrelBehaviorKind::MemberAccess
+                && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+            {
+                // Substitute type parameters and Self with the receiver type
+                let member_ty = access
+                    .member_type()
+                    .apply_substitutions(&substitutions)
+                    .substitute_self(receiver_ty);
+                // Resolve any qualified associated types (e.g., String.Output → String)
+                let member_ty = resolve_all_associated_types(self, &member_ty);
+                return Ok(MemberResolution {
+                    ty: member_ty,
+                    symbol_id: member_id,
+                    substitutions,
+                    parameters: vec![],  // field access has no parameters
+                    returns_self: false, // field access, not a method call
+                });
             }
         }
 
         // Check for method access
-        if member_kind == KestrelSymbolKind::Function {
-            if let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>() {
-                // For methods, return the return type and parameter types
-                // Substitute both type parameters and Self with the receiver type
-                let raw_return_ty = callable
-                    .return_type()
-                    .apply_substitutions(&substitutions);
-                let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
-                let return_ty = raw_return_ty.substitute_self(receiver_ty);
-                // Resolve any qualified associated types (e.g., String.Output → String)
-                let return_ty = resolve_all_associated_types(self, &return_ty);
-                let parameters: Vec<Ty> = callable
-                    .parameters()
-                    .iter()
-                    .map(|p| {
-                        let param_ty = p.ty.apply_substitutions(&substitutions)
+        if member_kind == KestrelSymbolKind::Function
+            && let Some(callable) = member_symbol.metadata().get_behavior::<CallableBehavior>()
+        {
+            // For methods, return the return type and parameter types
+            // Substitute both type parameters and Self with the receiver type
+            let raw_return_ty = callable.return_type().apply_substitutions(&substitutions);
+            let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+            let return_ty = raw_return_ty.substitute_self(receiver_ty);
+            // Resolve any qualified associated types (e.g., String.Output → String)
+            let return_ty = resolve_all_associated_types(self, &return_ty);
+            let parameters: Vec<Ty> = callable
+                .parameters()
+                .iter()
+                .map(|p| {
+                    let param_ty =
+                        p.ty.apply_substitutions(&substitutions)
                             .substitute_self(receiver_ty);
-                        resolve_all_associated_types(self, &param_ty)
-                    })
-                    .collect();
-                return Ok(MemberResolution {
-                    ty: return_ty,
-                    symbol_id: member_id,
-                    substitutions,
-                    parameters,
-                    returns_self,
-                });
-            }
+                    resolve_all_associated_types(self, &param_ty)
+                })
+                .collect();
+            return Ok(MemberResolution {
+                ty: return_ty,
+                symbol_id: member_id,
+                substitutions,
+                parameters,
+                returns_self,
+            });
         }
 
         // Member exists but is not accessible (e.g., type alias, nested type)
@@ -389,20 +385,20 @@ impl TypeOracle for SemanticModel {
         //
         // Note: `Pointer` here refers to the primitive `lang.ptr[T]` type, not the
         // stdlib `std.memory.Pointer[T]` struct (which conforms via an extension).
-        if let Some(ffi_safe_id) = self.builtin_protocol(LanguageFeature::FFISafe) {
-            if protocol_id == ffi_safe_id {
-                match ty.kind() {
-                    TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
-                        return true;
-                    }
-                    TyKind::Pointer(pointee) => {
-                        // A pointer is FFI-safe if the pointee type is FFI-safe.
-                        // (If the pointee is an error type, we treat it as conforming
-                        // to suppress cascading diagnostics.)
-                        return self.conforms_to(pointee, protocol_id);
-                    }
-                    _ => {}
-                }
+        if let Some(ffi_safe_id) = self.builtin_protocol(LanguageFeature::FFISafe)
+            && protocol_id == ffi_safe_id
+        {
+            match ty.kind() {
+                TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::String => {
+                    return true;
+                },
+                TyKind::Pointer(pointee) => {
+                    // A pointer is FFI-safe if the pointee type is FFI-safe.
+                    // (If the pointee is an error type, we treat it as conforming
+                    // to suppress cascading diagnostics.)
+                    return self.conforms_to(pointee, protocol_id);
+                },
+                _ => {},
             }
         }
 
@@ -412,57 +408,52 @@ impl TypeOracle for SemanticModel {
                 // Primitive ints implicitly conform to ExpressibleByIntLiteral
                 if let Some(lit_protocol_id) =
                     self.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
+                    && protocol_id == lit_protocol_id
                 {
-                    if protocol_id == lit_protocol_id {
-                        return true;
-                    }
+                    return true;
                 }
                 // Primitives don't conform to any other protocols
                 return false;
-            }
+            },
             TyKind::Float(_) => {
                 // Primitive floats implicitly conform to ExpressibleByFloatLiteral
                 if let Some(lit_protocol_id) =
                     self.builtin_protocol(LanguageFeature::ExpressibleByFloatLiteral)
+                    && protocol_id == lit_protocol_id
                 {
-                    if protocol_id == lit_protocol_id {
-                        return true;
-                    }
+                    return true;
                 }
                 // Also ExpressibleByIntLiteral since floats can be created from int literals
                 if let Some(lit_protocol_id) =
                     self.builtin_protocol(LanguageFeature::ExpressibleByIntLiteral)
+                    && protocol_id == lit_protocol_id
                 {
-                    if protocol_id == lit_protocol_id {
-                        return true;
-                    }
+                    return true;
                 }
                 // Primitives don't conform to any other protocols
                 return false;
-            }
+            },
             TyKind::Bool => {
                 // Primitive bool implicitly conforms to ExpressibleByBoolLiteral
                 if let Some(lit_protocol_id) =
                     self.builtin_protocol(LanguageFeature::ExpressibleByBoolLiteral)
+                    && protocol_id == lit_protocol_id
                 {
-                    if protocol_id == lit_protocol_id {
-                        return true;
-                    }
+                    return true;
                 }
                 return false;
-            }
+            },
             TyKind::String => {
                 // Primitive string implicitly conforms to ExpressibleByStringLiteral
                 if let Some(lit_protocol_id) =
                     self.builtin_protocol(LanguageFeature::ExpressibleByStringLiteral)
+                    && protocol_id == lit_protocol_id
                 {
-                    if protocol_id == lit_protocol_id {
-                        return true;
-                    }
+                    return true;
                 }
                 return false;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Get the type's symbol ID to check conformances
@@ -478,10 +469,10 @@ impl TypeOracle for SemanticModel {
 
         // Check if any conformance matches the protocol
         for conformance in conformances {
-            if let TyKind::Protocol { symbol, .. } = conformance.kind() {
-                if symbol.metadata().id() == protocol_id {
-                    return true;
-                }
+            if let TyKind::Protocol { symbol, .. } = conformance.kind()
+                && symbol.metadata().id() == protocol_id
+            {
+                return true;
             }
         }
 
@@ -503,10 +494,10 @@ impl TypeOracle for SemanticModel {
             });
 
             for conformance in ext_conformances {
-                if let TyKind::Protocol { symbol, .. } = conformance.kind() {
-                    if symbol.metadata().id() == protocol_id {
-                        return true;
-                    }
+                if let TyKind::Protocol { symbol, .. } = conformance.kind()
+                    && symbol.metadata().id() == protocol_id
+                {
+                    return true;
                 }
             }
         }
@@ -530,14 +521,12 @@ impl TypeOracle for SemanticModel {
                 for child in symbol.metadata().children() {
                     if child.metadata().kind() == KestrelSymbolKind::TypeAlias
                         && child.metadata().name().value == assoc_name
+                        && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
+                        && let Some(resolved) = self.query(ResolvedAliasedType {
+                            type_alias_id: type_alias.metadata().id(),
+                        })
                     {
-                        if let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>() {
-                            if let Some(resolved) = self.query(ResolvedAliasedType {
-                                type_alias_id: type_alias.metadata().id(),
-                            }) {
-                                return Some(resolved.apply_substitutions(substitutions));
-                            }
-                        }
+                        return Some(resolved.apply_substitutions(substitutions));
                     }
                 }
 
@@ -551,12 +540,10 @@ impl TypeOracle for SemanticModel {
                         symbol: proto,
                         substitutions: proto_subs,
                     } = conformance.kind()
-                    {
-                        if let Some(ty) =
+                        && let Some(ty) =
                             resolve_associated_type_from_protocol(proto, assoc_name, proto_subs)
-                        {
-                            return Some(ty.apply_substitutions(substitutions));
-                        }
+                    {
+                        return Some(ty.apply_substitutions(substitutions));
                     }
                 }
 
@@ -566,28 +553,28 @@ impl TypeOracle for SemanticModel {
                     target_id: symbol.metadata().id(),
                 });
 
-                let applicable_extensions =
-                    filter_applicable_extensions_for_conformance(&extensions, &Some(substitutions.clone()));
+                let applicable_extensions = filter_applicable_extensions_for_conformance(
+                    &extensions,
+                    &Some(substitutions.clone()),
+                );
 
                 for extension in applicable_extensions {
                     // Look for a type alias in the extension
                     for child in extension.metadata().children() {
                         if child.metadata().kind() == KestrelSymbolKind::TypeAlias
                             && child.metadata().name().value == assoc_name
+                            && let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>()
+                            && let Some(resolved) = self.query(ResolvedAliasedType {
+                                type_alias_id: type_alias.metadata().id(),
+                            })
                         {
-                            if let Ok(type_alias) = child.downcast_arc::<TypeAliasSymbol>() {
-                                if let Some(resolved) = self.query(ResolvedAliasedType {
-                                    type_alias_id: type_alias.metadata().id(),
-                                }) {
-                                    return Some(resolved.apply_substitutions(substitutions));
-                                }
-                            }
+                            return Some(resolved.apply_substitutions(substitutions));
                         }
                     }
                 }
 
                 None
-            }
+            },
 
             // For protocol types, look for associated type declaration
             TyKind::Protocol {
@@ -605,18 +592,14 @@ impl TypeOracle for SemanticModel {
                         symbol,
                         substitutions,
                     } = bound.kind()
+                        && let Some(ty) =
+                            resolve_associated_type_from_protocol(symbol, assoc_name, substitutions)
                     {
-                        if let Some(ty) = resolve_associated_type_from_protocol(
-                            symbol,
-                            assoc_name,
-                            substitutions,
-                        ) {
-                            return Some(ty);
-                        }
+                        return Some(ty);
                     }
                 }
                 None
-            }
+            },
 
             // For associated types themselves, we might need to resolve nested projections
             TyKind::AssociatedType { container, .. } => {
@@ -626,7 +609,7 @@ impl TypeOracle for SemanticModel {
                 } else {
                     None
                 }
-            }
+            },
 
             _ => None,
         }
@@ -657,10 +640,9 @@ impl TypeOracle for SemanticModel {
         if let Some(type_alias_id) = self
             .builtin_registry()
             .type_alias(LanguageFeature::DefaultIntegerLiteralType)
+            && let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id })
         {
-            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
-                return resolved;
-            }
+            return resolved;
         }
 
         // Fall back to default Int64
@@ -675,10 +657,9 @@ impl TypeOracle for SemanticModel {
         if let Some(type_alias_id) = self
             .builtin_registry()
             .type_alias(LanguageFeature::DefaultFloatLiteralType)
+            && let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id })
         {
-            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
-                return resolved;
-            }
+            return resolved;
         }
 
         // Fall back to default Float64
@@ -692,10 +673,9 @@ impl TypeOracle for SemanticModel {
         if let Some(type_alias_id) = self
             .builtin_registry()
             .type_alias(LanguageFeature::DefaultStringLiteralType)
+            && let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id })
         {
-            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
-                return resolved;
-            }
+            return resolved;
         }
 
         // Fall back to primitive string type
@@ -709,10 +689,9 @@ impl TypeOracle for SemanticModel {
         if let Some(type_alias_id) = self
             .builtin_registry()
             .type_alias(LanguageFeature::DefaultBooleanLiteralType)
+            && let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id })
         {
-            if let Some(resolved) = self.query(ResolvedAliasedType { type_alias_id }) {
-                return resolved;
-            }
+            return resolved;
         }
 
         // Fall back to primitive bool type
@@ -834,12 +813,11 @@ fn resolve_member_with_context(
         let mut bounds = get_type_parameter_bounds(type_param);
 
         // If we have context, also check for extension bounds
-        if let Some(ctx_id) = context {
-            if let Some(ext_bounds) =
+        if let Some(ctx_id) = context
+            && let Some(ext_bounds) =
                 get_extension_bounds_for_param(model, ctx_id, type_param.metadata().id())
-            {
-                bounds.extend(ext_bounds);
-            }
+        {
+            bounds.extend(ext_bounds);
         }
 
         // If any bound is an error type, the type parameter's constraints couldn't be resolved.
@@ -867,9 +845,8 @@ fn resolve_member_with_context(
                                 child.metadata().get_behavior::<CallableBehavior>()
                             {
                                 // Substitute type parameters and Self (Self = the type parameter)
-                                let raw_return_ty = callable
-                                    .return_type()
-                                    .apply_substitutions(current_subs);
+                                let raw_return_ty =
+                                    callable.return_type().apply_substitutions(current_subs);
                                 let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
                                 let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                 let parameters: Vec<Ty> = callable
@@ -905,10 +882,10 @@ fn resolve_member_with_context(
                                     child.metadata().get_behavior::<CallableBehavior>()
                                 {
                                     // Substitute type parameters and Self (Self = the type parameter)
-                                    let raw_return_ty = callable
-                                        .return_type()
-                                        .apply_substitutions(current_subs);
-                                    let returns_self = matches!(raw_return_ty.kind(), TyKind::SelfType);
+                                    let raw_return_ty =
+                                        callable.return_type().apply_substitutions(current_subs);
+                                    let returns_self =
+                                        matches!(raw_return_ty.kind(), TyKind::SelfType);
                                     let return_ty = raw_return_ty.substitute_self(receiver_ty);
                                     let parameters: Vec<Ty> = callable
                                         .parameters()
@@ -986,26 +963,26 @@ fn get_type_container_with_subs(
         } => {
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
             Some((dyn_symbol, substitutions.clone()))
-        }
+        },
         TyKind::Enum {
             symbol,
             substitutions,
         } => {
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
             Some((dyn_symbol, substitutions.clone()))
-        }
+        },
         TyKind::Protocol {
             symbol,
             substitutions,
         } => {
             let dyn_symbol: Arc<dyn Symbol<KestrelLanguage>> = symbol.clone();
             Some((dyn_symbol, substitutions.clone()))
-        }
+        },
         TyKind::SelfType => {
             // SelfType is handled in resolve_member() before this function is called.
             // If we reach here, it means SelfType wasn't resolved and we can't proceed.
             None
-        }
+        },
         _ => None,
     }
 }
@@ -1035,11 +1012,9 @@ fn resolve_associated_type_from_protocol(
             // Found the associated type - check for default
             if let Ok(assoc) =
                 child.downcast_arc::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>()
-            {
-                if let Some(default_ty) = assoc.default_type() {
+                && let Some(default_ty) = assoc.default_type() {
                     return Some(default_ty.apply_substitutions(substitutions));
                 }
-            }
             // No default - return the associated type itself
             // (caller should handle this based on context)
             return None;
@@ -1223,7 +1198,7 @@ fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
                 }
             }
             true
-        }
+        },
 
         // Enums - compare by symbol ID and recursively check substitutions
         (
@@ -1249,12 +1224,12 @@ fn types_match_for_conformance(a: &Ty, b: &Ty) -> bool {
                 }
             }
             true
-        }
+        },
 
         // Type parameters - compare by symbol ID
         (TyKind::TypeParameter(a_param), TyKind::TypeParameter(b_param)) => {
             a_param.metadata().id() == b_param.metadata().id()
-        }
+        },
 
         // Error types match anything
         (TyKind::Error, _) | (_, TyKind::Error) => true,
@@ -1350,8 +1325,8 @@ fn get_type_parameter_bounds(type_param: &Arc<TypeParameterSymbol>) -> Vec<Ty> {
                 match bound.kind() {
                     TyKind::Protocol { .. } | TyKind::Error => {
                         bounds.push(bound.clone());
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -1388,7 +1363,10 @@ fn resolve_all_associated_types_impl(
 
     let result = match ty.kind() {
         // The key case: qualified associated type (e.g., String.Output)
-        TyKind::AssociatedType { symbol, container: Some(container) } => {
+        TyKind::AssociatedType {
+            symbol,
+            container: Some(container),
+        } => {
             // First resolve any associated types in the container itself
             let resolved_container = resolve_all_associated_types_impl(oracle, container, visited);
             let name = symbol.metadata().name().value.clone();
@@ -1401,7 +1379,7 @@ fn resolve_all_associated_types_impl(
                 // Can't resolve - return the type with the resolved container
                 Ty::qualified_associated_type(symbol.clone(), resolved_container, ty.span().clone())
             }
-        }
+        },
 
         // Unqualified associated type (container: None) - leave as-is
         // This shouldn't appear after substitute_self, but handle it gracefully
@@ -1414,56 +1392,80 @@ fn resolve_all_associated_types_impl(
                 .map(|e| resolve_all_associated_types_impl(oracle, e, visited))
                 .collect();
             Ty::tuple(new_elements, ty.span().clone())
-        }
+        },
 
         TyKind::Array(element) => {
             let new_element = resolve_all_associated_types_impl(oracle, element, visited);
             Ty::array(new_element, ty.span().clone())
-        }
+        },
 
         TyKind::Pointer(element) => {
             let new_element = resolve_all_associated_types_impl(oracle, element, visited);
             Ty::pointer(new_element, ty.span().clone())
-        }
+        },
 
-        TyKind::Function { params, return_type } => {
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
             let new_params: Vec<Ty> = params
                 .iter()
                 .map(|p| resolve_all_associated_types_impl(oracle, p, visited))
                 .collect();
             let new_return = resolve_all_associated_types_impl(oracle, return_type, visited);
             Ty::function(new_params, new_return, ty.span().clone())
-        }
+        },
 
-        TyKind::Struct { symbol, substitutions } => {
+        TyKind::Struct {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             for (id, sub_ty) in substitutions.iter() {
-                new_subs.insert(*id, resolve_all_associated_types_impl(oracle, sub_ty, visited));
+                new_subs.insert(
+                    *id,
+                    resolve_all_associated_types_impl(oracle, sub_ty, visited),
+                );
             }
             Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
-        }
+        },
 
-        TyKind::Enum { symbol, substitutions } => {
+        TyKind::Enum {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             for (id, sub_ty) in substitutions.iter() {
-                new_subs.insert(*id, resolve_all_associated_types_impl(oracle, sub_ty, visited));
+                new_subs.insert(
+                    *id,
+                    resolve_all_associated_types_impl(oracle, sub_ty, visited),
+                );
             }
             Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
-        }
+        },
 
         // Don't recurse into protocol substitutions - protocols may have cyclic inheritance
         // and their substitutions shouldn't contain associated types that need resolution
         TyKind::Protocol { .. } => ty.clone(),
 
-        TyKind::TypeAlias { symbol, substitutions } => {
+        TyKind::TypeAlias {
+            symbol,
+            substitutions,
+        } => {
             let mut new_subs = Substitutions::new();
             for (id, sub_ty) in substitutions.iter() {
-                new_subs.insert(*id, resolve_all_associated_types_impl(oracle, sub_ty, visited));
+                new_subs.insert(
+                    *id,
+                    resolve_all_associated_types_impl(oracle, sub_ty, visited),
+                );
             }
             Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
-        }
+        },
 
-        TyKind::UnresolvedFunction { param_info, return_type } => {
+        TyKind::UnresolvedFunction {
+            param_info,
+            return_type,
+        } => {
             let new_return = resolve_all_associated_types_impl(oracle, return_type, visited);
             let new_param_info = match param_info {
                 ParamInfo::Unconstrained => ParamInfo::Unconstrained,
@@ -1478,7 +1480,7 @@ fn resolve_all_associated_types_impl(
                 },
             };
             Ty::unresolved_function(new_param_info, new_return, ty.span().clone())
-        }
+        },
 
         // Primitive types and special types - no nested types to resolve
         TyKind::Unit

@@ -19,7 +19,7 @@ pub struct FieldSymbol {
 
 impl Symbol<KestrelLanguage> for FieldSymbol {
     fn metadata(&self) -> &SymbolMetadata<KestrelLanguage> {
-        return &self.metadata;
+        &self.metadata
     }
 }
 

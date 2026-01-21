@@ -107,14 +107,14 @@ fn analyze_block(statements: &[Statement], yield_expr: Option<&Expression>) -> R
         }
         state = analyze_statement(stmt);
     }
-    if !state.definitely_returns() {
-        if let Some(expr) = yield_expr {
-            let expr_state = analyze_expression(expr);
-            if expr_state.definitely_returns() {
-                return expr_state;
-            }
-            return ReturnState::Returns;
+    if !state.definitely_returns()
+        && let Some(expr) = yield_expr
+    {
+        let expr_state = analyze_expression(expr);
+        if expr_state.definitely_returns() {
+            return expr_state;
         }
+        return ReturnState::Returns;
     }
     state
 }
@@ -138,13 +138,13 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
                         if state.definitely_returns() {
                             return state;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         let state = analyze_expression(value);
                         if state.definitely_returns() {
                             return state;
                         }
-                    }
+                    },
                 }
             }
             // The else block must diverge - if it does, control continues after guard-let
@@ -158,11 +158,11 @@ fn analyze_statement(stmt: &Statement) -> ReturnState {
                 // but for return analysis, we still may fall through
                 ReturnState::MayFallThrough
             }
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit is a simple statement that doesn't return or diverge
             ReturnState::MayFallThrough
-        }
+        },
     }
 }
 
@@ -190,14 +190,14 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 match else_b {
                     ElseBranch::Block { statements, value } => {
                         analyze_block(statements, value.as_deref())
-                    }
+                    },
                     ElseBranch::ElseIf(if_expr) => analyze_expression(if_expr),
                 }
             } else {
                 ReturnState::MayFallThrough
             };
             then_state.merge(else_state)
-        }
+        },
         ExprKind::While {
             condition, body, ..
         } => {
@@ -207,7 +207,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             }
             let _ = analyze_block(body, None);
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::WhileLet {
             conditions, body, ..
         } => {
@@ -218,18 +218,18 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                         if state.definitely_returns() {
                             return state;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         let state = analyze_expression(value);
                         if state.definitely_returns() {
                             return state;
                         }
-                    }
+                    },
                 }
             }
             let _ = analyze_block(body, None);
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::Loop { body, .. } => {
             let mut body_state = ReturnState::MayFallThrough;
             let mut has_break = false;
@@ -249,7 +249,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 return ReturnState::Diverges;
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::Call {
             callee, arguments, ..
         } => {
@@ -264,14 +264,14 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::Assignment { target, value } => {
             let state = analyze_expression(value);
             if state.definitely_returns() {
                 return state;
             }
             analyze_expression(target)
-        }
+        },
         ExprKind::Grouping(inner) => analyze_expression(inner),
         ExprKind::Array(elements) => {
             for e in elements {
@@ -281,7 +281,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::Tuple(elements) => {
             for e in elements {
                 let s = analyze_expression(e);
@@ -290,7 +290,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::FieldAccess { object, .. } => analyze_expression(object),
         ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple),
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver),
@@ -311,7 +311,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::DeferredMethodCall {
             receiver,
             arguments,
@@ -328,7 +328,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 let s = analyze_expression(&arg.value);
@@ -337,7 +337,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 let s = analyze_expression(&arg.value);
@@ -346,7 +346,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {
@@ -357,7 +357,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 }
             }
             ReturnState::MayFallThrough
-        }
+        },
         // Lang intrinsic - check which intrinsic
         ExprKind::LangIntrinsic { intrinsic, .. } => {
             use kestrel_semantic_tree::expr::LangIntrinsic;
@@ -367,7 +367,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
                 // All other intrinsics return a value normally
                 _ => ReturnState::MayFallThrough,
             }
-        }
+        },
 
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
@@ -394,7 +394,7 @@ fn analyze_expression(expr: &Expression) -> ReturnState {
             } else {
                 ReturnState::MayFallThrough
             }
-        }
+        },
 
         // Block expression - analyze statements and value
         ExprKind::Block { statements, value } => analyze_block(statements, value.as_deref()),
@@ -418,12 +418,12 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
                         if expr_contains_break(&expr.kind) {
                             return true;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         if expr_contains_break(&value.kind) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             for stmt in &else_block.statements {
@@ -431,17 +431,17 @@ fn statement_contains_break(kind: &StatementKind) -> bool {
                     return true;
                 }
             }
-            if let Some(yield_expr) = &else_block.yield_expr {
-                if expr_contains_break(&yield_expr.kind) {
-                    return true;
-                }
+            if let Some(yield_expr) = &else_block.yield_expr
+                && expr_contains_break(&yield_expr.kind)
+            {
+                return true;
             }
             false
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit doesn't contain break
             false
-        }
+        },
     }
 }
 
@@ -459,10 +459,10 @@ fn expr_contains_break(kind: &ExprKind) -> bool {
                     return true;
                 }
             }
-            if let Some(val) = then_value {
-                if expr_contains_break(&val.kind) {
-                    return true;
-                }
+            if let Some(val) = then_value
+                && expr_contains_break(&val.kind)
+            {
+                return true;
             }
             if let Some(else_b) = else_branch {
                 match else_b {
@@ -472,21 +472,21 @@ fn expr_contains_break(kind: &ExprKind) -> bool {
                                 return true;
                             }
                         }
-                        if let Some(val) = value {
-                            if expr_contains_break(&val.kind) {
-                                return true;
-                            }
+                        if let Some(val) = value
+                            && expr_contains_break(&val.kind)
+                        {
+                            return true;
                         }
-                    }
+                    },
                     ElseBranch::ElseIf(if_expr) => {
                         if expr_contains_break(&if_expr.kind) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             false
-        }
+        },
         // Don't recurse into nested loops
         ExprKind::While { .. } | ExprKind::WhileLet { .. } | ExprKind::Loop { .. } => false,
         _ => false,

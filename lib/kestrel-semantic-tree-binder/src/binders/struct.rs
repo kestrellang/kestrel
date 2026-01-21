@@ -134,7 +134,7 @@ impl StructBinder {
                     .add_behavior(CopySemanticsBehavior::copyable());
                 CycleDetector::exit_ref(context.copy_semantics_cycle_detector);
                 return;
-            }
+            },
         };
 
         // Get the conformances behavior for checking protocol conformances

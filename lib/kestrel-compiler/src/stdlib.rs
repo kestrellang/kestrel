@@ -85,12 +85,12 @@ impl StdLib {
         }
 
         // 4. Relative to executable
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                let installed_path = exe_dir.join("lib/std");
-                if installed_path.exists() {
-                    return Ok(installed_path);
-                }
+        if let Ok(exe_path) = std::env::current_exe()
+            && let Some(exe_dir) = exe_path.parent()
+        {
+            let installed_path = exe_dir.join("lib/std");
+            if installed_path.exists() {
+                return Ok(installed_path);
             }
         }
 
@@ -117,7 +117,7 @@ impl StdLib {
 
             if path.is_dir() {
                 Self::collect_sources(root, &path, sources)?;
-            } else if path.extension().map_or(false, |e| e == "ks") {
+            } else if path.extension().is_some_and(|e| e == "ks") {
                 let content = fs::read_to_string(&path)?;
                 // Use relative path from stdlib root with std/ prefix
                 let rel_path = path

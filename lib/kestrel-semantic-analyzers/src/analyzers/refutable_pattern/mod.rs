@@ -49,13 +49,13 @@ impl Analyzer for RefutablePatternAnalyzer {
     }
 
     fn visit_statement(&mut self, stmt: &Statement, ctx: &mut AnalysisContext) {
-        if let StatementKind::Binding { pattern, .. } = &stmt.kind {
-            if !is_pattern_irrefutable(pattern) {
-                ctx.report(RefutablePatternError {
-                    pattern_span: pattern.span.clone(),
-                    pattern_description: describe_pattern(pattern),
-                });
-            }
+        if let StatementKind::Binding { pattern, .. } = &stmt.kind
+            && !is_pattern_irrefutable(pattern)
+        {
+            ctx.report(RefutablePatternError {
+                pattern_span: pattern.span.clone(),
+                pattern_description: describe_pattern(pattern),
+            });
         }
     }
 }
@@ -93,7 +93,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
             }
             // Multi-case enum or unresolved type - refutable
             false
-        }
+        },
 
         // Range patterns are REFUTABLE - they don't cover all values
         PatternKind::Range { .. } => false,
@@ -101,7 +101,7 @@ fn is_pattern_irrefutable(pattern: &Pattern) -> bool {
         // Struct patterns are irrefutable if all field patterns are irrefutable
         PatternKind::Struct { fields, .. } => {
             fields.iter().all(|f| is_pattern_irrefutable(&f.pattern))
-        }
+        },
 
         // Array patterns are REFUTABLE - they check array length
         PatternKind::Array { .. } => false,
@@ -147,7 +147,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
             }
             parts.extend(suffix.iter().map(describe_pattern));
             format!("({})", parts.join(", "))
-        }
+        },
         PatternKind::Literal { value } => format_literal_value(value),
         PatternKind::EnumVariant {
             case_name,
@@ -169,7 +169,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                     .collect();
                 format!(".{}({})", case_name, inner.join(", "))
             }
-        }
+        },
         PatternKind::Range {
             start,
             end,
@@ -186,7 +186,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
             };
             let op = if *inclusive { "..=" } else { "..<" };
             format!("{}{}{}", start_str, op, end_str)
-        }
+        },
         PatternKind::Struct {
             struct_name,
             fields,
@@ -197,7 +197,7 @@ fn describe_pattern(pattern: &Pattern) -> String {
                 .map(|f| format!("{}: {}", f.field_name, describe_pattern(&f.pattern)))
                 .collect();
             format!("{} {{ {} }}", struct_name, inner.join(", "))
-        }
+        },
         PatternKind::Array {
             prefix,
             rest,
@@ -209,16 +209,16 @@ fn describe_pattern(pattern: &Pattern) -> String {
             }
             parts.extend(suffix.iter().map(describe_pattern));
             format!("[{}]", parts.join(", "))
-        }
+        },
         PatternKind::Or { alternatives } => {
             let parts: Vec<String> = alternatives.iter().map(describe_pattern).collect();
             parts.join(" | ")
-        }
+        },
         PatternKind::At {
             name, subpattern, ..
         } => {
             format!("{} @ {}", name, describe_pattern(subpattern))
-        }
+        },
         PatternKind::Rest => "..".to_string(),
         PatternKind::Error => "<error>".to_string(),
     }

@@ -91,7 +91,8 @@ impl CompilationBuilder {
     /// # use kestrel_compiler::CompilationBuilder;
     /// let compilation = CompilationBuilder::new()
     ///     .add_source("main.ks", "module Main\nclass Foo {}")
-    ///     .build();
+    ///     .build()
+    ///     .expect("failed to build compilation");
     ///
     /// if compilation.has_errors() {
     ///     compilation.diagnostics().emit().unwrap();
@@ -106,6 +107,9 @@ impl CompilationBuilder {
         // Combine: stdlib first, then user sources
         let all_sources: Vec<_> = stdlib_sources.into_iter().chain(self.sources).collect();
 
-        Ok(Compilation::from_sources(all_sources, self.stdlib_config.enabled))
+        Ok(Compilation::from_sources(
+            all_sources,
+            self.stdlib_config.enabled,
+        ))
     }
 }

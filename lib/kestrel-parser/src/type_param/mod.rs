@@ -94,15 +94,16 @@ pub struct WhereClauseData {
 /// Parser for a path (used in type positions): Ident or Ident.Ident.Ident
 fn path_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
-    skip_trivia().ignore_then(
-        select! {
-            Token::Identifier = e => to_kestrel_span(e.span()),
-        }
-        .separated_by(just(Token::Dot))
-        .at_least(1)
-        .collect(),
-    )
-    .boxed()
+    skip_trivia()
+        .ignore_then(
+            select! {
+                Token::Identifier = e => to_kestrel_span(e.span()),
+            }
+            .separated_by(just(Token::Dot))
+            .at_least(1)
+            .collect(),
+        )
+        .boxed()
 }
 
 /// Parser for a single type argument (recursive to handle nested generics)
@@ -394,7 +395,7 @@ pub fn emit_where_clause(sink: &mut EventSink, data: WhereClauseData) {
             WhereConstraintData::Bound(bound) => emit_type_bound(sink, bound),
             WhereConstraintData::NegativeBound(neg_bound) => {
                 emit_negative_type_bound(sink, neg_bound)
-            }
+            },
             WhereConstraintData::Equality(equality) => emit_type_equality(sink, equality),
         }
     }
@@ -549,10 +550,7 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
             // The dot should be a single character somewhere in this gap
             let dot_start = end;
             let dot_end = (end + 1).min(span.start);
-            sink.add_token(
-                SyntaxKind::Dot,
-                Span::new(span.file_id, dot_start..dot_end),
-            );
+            sink.add_token(SyntaxKind::Dot, Span::new(span.file_id, dot_start..dot_end));
         }
         sink.start_node(SyntaxKind::PathElement);
         sink.add_token(SyntaxKind::Identifier, span.clone());
@@ -676,7 +674,7 @@ mod tests {
         match &data.constraints[0] {
             WhereConstraintData::NegativeBound(neg_bound) => {
                 assert_eq!(neg_bound.path.len(), 1); // T
-            }
+            },
             _ => panic!("Expected NegativeBound constraint"),
         }
     }
@@ -688,11 +686,11 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.constraints.len(), 2);
         match &data.constraints[0] {
-            WhereConstraintData::Bound(_) => {}
+            WhereConstraintData::Bound(_) => {},
             _ => panic!("Expected Bound for first constraint"),
         }
         match &data.constraints[1] {
-            WhereConstraintData::NegativeBound(_) => {}
+            WhereConstraintData::NegativeBound(_) => {},
             _ => panic!("Expected NegativeBound for second constraint"),
         }
     }

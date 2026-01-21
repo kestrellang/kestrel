@@ -37,7 +37,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                     ty.span().clone(),
                 ));
                 ctx.mir.ty_error()
-            }
+            },
             SemanticFloatBits::F32 => ctx.mir.ty_f32(),
             SemanticFloatBits::F64 => ctx.mir.ty_f64(),
         },
@@ -46,7 +46,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
         TyKind::Tuple(elements) => {
             let mir_elements: Vec<_> = elements.iter().map(|e| lower_type(ctx, e)).collect();
             ctx.mir.ty_tuple(mir_elements)
-        }
+        },
 
         TyKind::Array(_element_ty) => {
             // Array literal types [T] should be resolved to concrete types
@@ -57,12 +57,12 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 ty.span().clone(),
             ));
             ctx.mir.ty_error()
-        }
+        },
 
         TyKind::Pointer(element_ty) => {
             let element = lower_type(ctx, element_ty);
             ctx.mir.ty_ptr(element)
-        }
+        },
 
         // === Named Types ===
         TyKind::Struct {
@@ -84,7 +84,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 .collect();
 
             ctx.mir.ty_named(name, type_args)
-        }
+        },
 
         TyKind::Enum {
             symbol,
@@ -105,7 +105,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 .collect();
 
             ctx.mir.ty_named(name, type_args)
-        }
+        },
 
         TyKind::Protocol { symbol, .. } => {
             // TODO: Protocol types need witness-based handling
@@ -114,7 +114,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 ty.span().clone(),
             ));
             ctx.mir.ty_error()
-        }
+        },
 
         TyKind::TypeAlias {
             symbol,
@@ -132,7 +132,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
             } else {
                 lower_type(ctx, &expanded)
             }
-        }
+        },
 
         // === Function Types ===
         TyKind::Function {
@@ -149,7 +149,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 params: mir_params,
                 ret: mir_ret,
             })
-        }
+        },
 
         TyKind::UnresolvedFunction { return_type, .. } => {
             // This shouldn't appear after type inference, but handle gracefully
@@ -162,7 +162,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 params: vec![],
                 ret: mir_ret,
             })
-        }
+        },
 
         // === Type Parameters ===
         TyKind::TypeParameter(param_symbol) => {
@@ -182,7 +182,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                 ));
                 ctx.mir.ty_error()
             }
-        }
+        },
 
         // === Associated Types ===
         TyKind::AssociatedType { symbol, container } => {
@@ -207,7 +207,7 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                     // Lower the base type and create a projection
                     let base = lower_type(ctx, container_ty);
                     ctx.mir.ty_assoc_projection(base, protocol_name, assoc_name)
-                }
+                },
                 None => {
                     // No container - bare associated type in protocol context
                     // This means we're in a protocol method signature like:
@@ -216,33 +216,37 @@ pub fn lower_type(ctx: &mut LoweringContext, ty: &Ty) -> Id<MirTyMarker> {
                     let self_ty = ctx.mir.ty_self();
                     ctx.mir
                         .ty_assoc_projection(self_ty, protocol_name, assoc_name)
-                }
+                },
             }
-        }
+        },
 
         // === Self Type ===
         TyKind::SelfType => {
             // In protocol method signatures, Self is preserved as MirTy::SelfType.
             // During witness lookup, this gets substituted with the concrete implementing type.
             ctx.mir.ty_self()
-        }
+        },
 
         // === Inference Placeholder ===
         TyKind::Infer => {
             // This shouldn't appear after type inference
-            eprintln!("[DEBUG] Lowering TyKind::Infer - ty.id={:?} span={:?}", ty.id(), ty.span());
+            eprintln!(
+                "[DEBUG] Lowering TyKind::Infer - ty.id={:?} span={:?}",
+                ty.id(),
+                ty.span()
+            );
             ctx.emit_error(LoweringError::unsupported_type(
                 "unresolved inference type",
                 ty.span().clone(),
             ));
             ctx.mir.ty_error()
-        }
+        },
 
         // === Error Type ===
         TyKind::Error => {
             // Error types are poison values
             ctx.mir.ty_error()
-        }
+        },
     }
 }
 
@@ -271,13 +275,19 @@ pub fn make_int_immediate(bits: SemanticIntBits, value: i64) -> kestrel_executio
 }
 
 /// Create a float immediate with the correct bit width from a semantic type.
-pub fn make_float_immediate(bits: SemanticFloatBits, value: f64) -> kestrel_execution_graph::Immediate {
+pub fn make_float_immediate(
+    bits: SemanticFloatBits,
+    value: f64,
+) -> kestrel_execution_graph::Immediate {
     kestrel_execution_graph::Immediate::float(convert_float_bits(bits), value)
 }
 
 /// Create a zero integer immediate matching the given MIR integer type.
 /// Returns None if the type is not an integer type.
-pub fn make_int_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<MirTyMarker>) -> Option<kestrel_execution_graph::Immediate> {
+pub fn make_int_zero_for_mir_ty(
+    ctx: &crate::context::LoweringContext,
+    ty: Id<MirTyMarker>,
+) -> Option<kestrel_execution_graph::Immediate> {
     use kestrel_execution_graph::IntBits;
     let mir_ty = ctx.mir.ty(ty);
     let bits = match mir_ty {
@@ -293,8 +303,12 @@ pub fn make_int_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<Mi
 /// Create a zero/default immediate for any MIR type.
 /// This is used to initialize variables before control flow to ensure
 /// Cranelift's SSA builder always has a definition.
-pub fn make_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<MirTyMarker>) -> kestrel_execution_graph::Immediate {
-    use kestrel_execution_graph::{IntBits, FloatBits};
+#[allow(dead_code)]
+pub fn make_zero_for_mir_ty(
+    ctx: &crate::context::LoweringContext,
+    ty: Id<MirTyMarker>,
+) -> kestrel_execution_graph::Immediate {
+    use kestrel_execution_graph::{FloatBits, IntBits};
     let mir_ty = ctx.mir.ty(ty);
     match mir_ty {
         MirTy::I8 => kestrel_execution_graph::Immediate::int(IntBits::I8, 0),
@@ -315,6 +329,7 @@ pub fn make_zero_for_mir_ty(ctx: &crate::context::LoweringContext, ty: Id<MirTyM
 
 /// Create an integer immediate with the correct bit width from a semantic type.
 /// Extracts integer bits from the type if it's an Int type, otherwise defaults to i64.
+#[allow(dead_code)]
 pub fn make_int_immediate_for_ty(ty: &Ty, value: i64) -> kestrel_execution_graph::Immediate {
     match ty.kind() {
         TyKind::Int(bits) => make_int_immediate(*bits, value),

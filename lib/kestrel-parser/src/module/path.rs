@@ -88,7 +88,7 @@ where
     match module_path_parser_internal().parse(input).into_result() {
         Ok(segments) => {
             crate::common::emit_module_path(sink, &segments);
-        }
+        },
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
@@ -96,6 +96,6 @@ where
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }

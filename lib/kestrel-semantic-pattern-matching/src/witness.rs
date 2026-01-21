@@ -155,12 +155,12 @@ impl Witness {
                     let args_str: Vec<String> = args.iter().map(|a| a.display()).collect();
                     format!(".{}({})", name, args_str.join(", "))
                 }
-            }
+            },
 
             Witness::Tuple(elements) => {
                 let elems_str: Vec<String> = elements.iter().map(|e| e.display()).collect();
                 format!("({})", elems_str.join(", "))
-            }
+            },
 
             Witness::Literal(s) => s.clone(),
 
@@ -169,7 +169,7 @@ impl Witness {
             Witness::Array(elements) => {
                 let elems_str: Vec<String> = elements.iter().map(|e| e.display()).collect();
                 format!("[{}]", elems_str.join(", "))
-            }
+            },
 
             Witness::Struct { name, fields } => {
                 if fields.is_empty() {
@@ -181,7 +181,7 @@ impl Witness {
                         .collect();
                     format!("{} {{ {} }}", name, fields_str.join(", "))
                 }
-            }
+            },
 
             Witness::Range {
                 start,
@@ -193,7 +193,7 @@ impl Witness {
                 } else {
                     format!("{}..{}", start, end)
                 }
-            }
+            },
         }
     }
 }

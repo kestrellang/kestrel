@@ -21,7 +21,8 @@ public class Vector3D {
 
     let compilation = Compilation::builder()
         .add_source("vector.ks", source)
-        .build();
+        .build()
+        .expect("failed to build compilation");
 
     if compilation.has_errors() {
         println!("Compilation failed!");
@@ -71,7 +72,8 @@ public class Helper {
     let compilation = Compilation::builder()
         .add_source("main.ks", main_source)
         .add_source("utils.ks", utils_source)
-        .build();
+        .build()
+        .expect("failed to build compilation");
 
     if compilation.has_errors() {
         println!("Compilation failed!");
@@ -101,7 +103,8 @@ public class Bad {
 
     let compilation = Compilation::builder()
         .add_source("bad.ks", invalid_source)
-        .build();
+        .build()
+        .expect("failed to build compilation");
 
     if compilation.has_errors() {
         println!("Compilation failed as expected!");

@@ -10,7 +10,6 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::resolution::LocalScope;
 use kestrel_syntax_tree::utils::find_child;
@@ -221,12 +220,14 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        }
+        },
         KestrelSymbolKind::Extension => {
             // For extension initializers, get the target struct type from ExtensionTargetBehavior
-            let target_behavior = parent.metadata().get_behavior::<ExtensionTargetBehavior>()?;
+            let target_behavior = parent
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()?;
             Some(target_behavior.target_type().clone())
-        }
+        },
         _ => None,
     }
 }

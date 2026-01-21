@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::ExecutableBodyFor;
 use kestrel_semantic_tree::expr::{ElseBranch, ExprKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -89,19 +88,19 @@ fn check_statement(stmt: &Statement, ctx: &mut AnalysisContext) {
             if let Some(yield_expr) = &else_block.yield_expr {
                 check_expression(yield_expr, ctx);
             }
-        }
+        },
         StatementKind::Binding {
             value: Some(expr), ..
         } => {
             check_expression(expr, ctx);
-        }
-        StatementKind::Binding { value: None, .. } => {}
+        },
+        StatementKind::Binding { value: None, .. } => {},
         StatementKind::Expr(expr) => {
             check_expression(expr, ctx);
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit statements don't contain nested expressions to check
-        }
+        },
     }
 }
 
@@ -124,19 +123,19 @@ fn check_expression(expr: &kestrel_semantic_tree::expr::Expression, ctx: &mut An
                         if let Some(v) = value {
                             check_expression(v, ctx);
                         }
-                    }
+                    },
                     ElseBranch::ElseIf(if_expr) => {
                         check_expression(if_expr, ctx);
-                    }
+                    },
                 }
             }
-        }
+        },
         ExprKind::While { body, .. } | ExprKind::WhileLet { body, .. } => {
             check_statements(body, ctx);
-        }
+        },
         ExprKind::Loop { body, .. } => {
             check_statements(body, ctx);
-        }
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {
@@ -144,13 +143,13 @@ fn check_expression(expr: &kestrel_semantic_tree::expr::Expression, ctx: &mut An
             if let Some(tail) = tail_expr {
                 check_expression(tail, ctx);
             }
-        }
+        },
         ExprKind::Match { arms, .. } => {
             for arm in arms {
                 check_expression(&arm.body, ctx);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -172,10 +171,10 @@ fn block_diverges(
     }
 
     // Check if last statement is an expression statement that diverges
-    if let Some(last) = statements.last() {
-        if let StatementKind::Expr(expr) = &last.kind {
-            return expression_diverges(expr);
-        }
+    if let Some(last) = statements.last()
+        && let StatementKind::Expr(expr) = &last.kind
+    {
+        return expression_diverges(expr);
     }
 
     false
@@ -196,22 +195,22 @@ fn statement_diverges(stmt: &Statement) -> bool {
                         if expression_diverges(expr) {
                             return true;
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { value, .. } => {
                         if expression_diverges(value) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             // The else block must diverge (but the guard-let as a whole doesn't diverge
             // because control continues after it if the pattern matches)
             false
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit doesn't diverge
             false
-        }
+        },
     }
 }
 
@@ -231,22 +230,22 @@ fn expression_diverges(expr: &kestrel_semantic_tree::expr::Expression) -> bool {
             let else_diverges = match else_branch {
                 Some(ElseBranch::Block { statements, value }) => {
                     block_diverges(statements, value.as_deref())
-                }
+                },
                 Some(ElseBranch::ElseIf(if_expr)) => expression_diverges(if_expr),
                 None => false,
             };
             then_diverges && else_diverges
-        }
+        },
         ExprKind::Match { arms, .. } => {
             // Match diverges if all arms diverge
             !arms.is_empty() && arms.iter().all(|arm| expression_diverges(&arm.body))
-        }
-        ExprKind::Loop { body, .. } => {
+        },
+        ExprKind::Loop { body: _, .. } => {
             // Infinite loop without break diverges
             // But for simplicity, assume it might break
             // TODO: properly analyze break statements
             false
-        }
+        },
         _ => false,
     }
 }

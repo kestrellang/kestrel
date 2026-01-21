@@ -96,10 +96,7 @@ struct CallableInfo {
 }
 
 /// Check for duplicate callable signatures within a scope.
-fn check_duplicate_callables(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    ctx: &mut AnalysisContext,
-) {
+fn check_duplicate_callables(symbol: &Arc<dyn Symbol<KestrelLanguage>>, ctx: &mut AnalysisContext) {
     // Map from (name, labels) -> list of callables with that key
     let mut seen: HashMap<DuplicateKey, Vec<CallableInfo>> = HashMap::new();
 
@@ -114,21 +111,21 @@ fn check_duplicate_callables(
                     .get_behavior::<CallableBehavior>()
                     .map(|b| b.duplicate_key(&name));
                 (key, "function")
-            }
+            },
             KestrelSymbolKind::Initializer => {
                 let key = child
                     .metadata()
                     .get_behavior::<CallableBehavior>()
                     .map(|b| b.duplicate_key("init"));
                 (key, "initializer")
-            }
+            },
             KestrelSymbolKind::Subscript => {
                 let key = child
                     .metadata()
                     .get_behavior::<SubscriptBehavior>()
                     .map(|b| b.duplicate_key());
                 (key, "subscript")
-            }
+            },
             _ => continue,
         };
 

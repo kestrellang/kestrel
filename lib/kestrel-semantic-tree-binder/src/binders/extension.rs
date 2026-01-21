@@ -129,6 +129,7 @@ impl ExtendableSymbol {
         }
     }
 
+    #[allow(dead_code)]
     fn is_protocol(&self) -> bool {
         matches!(self, ExtendableSymbol::Protocol(_))
     }
@@ -182,7 +183,7 @@ fn resolve_extension_target(
                     type_name: format_type_kind(ty.kind()),
                 });
                 return None;
-            }
+            },
         },
         TypePathResolution::NotFound { segment, .. } => {
             ctx.diagnostics.throw(UnresolvedTypeError {
@@ -190,7 +191,7 @@ fn resolve_extension_target(
                 type_name: segment,
             });
             return None;
-        }
+        },
         _ => return None,
     };
 
@@ -259,14 +260,14 @@ fn resolve_extension_target(
     let resolved_ty = match &target_symbol {
         ExtendableSymbol::Struct(struct_sym) => {
             Ty::generic_struct(struct_sym.clone(), substitutions, ty_span)
-        }
+        },
         ExtendableSymbol::Enum(enum_sym) => {
             Ty::generic_enum(enum_sym.clone(), substitutions, ty_span)
-        }
+        },
         ExtendableSymbol::Protocol(protocol_sym) => {
             // Protocol extensions don't use substitutions - they apply to all conforming types
             Ty::protocol(protocol_sym.clone(), ty_span)
-        }
+        },
     };
 
     Some((resolved_ty, target_symbol, type_args, referenced_params))

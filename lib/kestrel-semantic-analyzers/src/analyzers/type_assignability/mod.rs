@@ -136,7 +136,7 @@ fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
                         changed = true;
                     }
                 }
-            }
+            },
             TyKind::Array(element) => {
                 let normalized = normalize_type(&element, equalities);
                 if normalized.to_string() != element.to_string() {
@@ -147,7 +147,7 @@ fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
                         changed = true;
                     }
                 }
-            }
+            },
             TyKind::Function {
                 params,
                 return_type,
@@ -173,25 +173,24 @@ fn normalize_type(ty: &Ty, equalities: &[(&Ty, &Ty)]) -> Ty {
                         changed = true;
                     }
                 }
-            }
-            TyKind::AssociatedType { symbol, container } => {
-                if let Some(cont) = container {
-                    let normalized_container = normalize_type(&cont, equalities);
-                    if normalized_container.to_string() != cont.to_string() {
-                        current = Ty::qualified_associated_type(
-                            symbol.clone(),
-                            normalized_container,
-                            current.span().clone(),
-                        );
-                        let current_str = current.to_string();
-                        if !seen.contains(&current_str) {
-                            seen.insert(current_str);
-                            changed = true;
-                        }
+            },
+            TyKind::AssociatedType { symbol, container } if container.is_some() => {
+                let cont = container.as_ref().unwrap();
+                let normalized_container = normalize_type(cont, equalities);
+                if normalized_container.to_string() != cont.to_string() {
+                    current = Ty::qualified_associated_type(
+                        symbol.clone(),
+                        normalized_container,
+                        current.span().clone(),
+                    );
+                    let current_str = current.to_string();
+                    if !seen.contains(&current_str) {
+                        seen.insert(current_str);
+                        changed = true;
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -226,7 +225,7 @@ fn types_match(a: &Ty, b: &Ty) -> bool {
     match (a.kind(), b.kind()) {
         (TyKind::TypeParameter(a_param), TyKind::TypeParameter(b_param)) => {
             a_param.metadata().id() == b_param.metadata().id()
-        }
+        },
         (
             TyKind::AssociatedType {
                 symbol: a_sym,
@@ -245,7 +244,7 @@ fn types_match(a: &Ty, b: &Ty) -> bool {
                 (None, None) => true,
                 _ => false,
             }
-        }
+        },
         // If one is a type param/associated type and other isn't, they don't match
         (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => false,
         (TyKind::AssociatedType { .. }, _) | (_, TyKind::AssociatedType { .. }) => false,

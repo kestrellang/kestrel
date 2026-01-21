@@ -81,7 +81,7 @@ impl Analyzer for ExtensionConflictAnalyzer {
     fn visit_symbol(
         &mut self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        ctx: &mut AnalysisContext,
+        _ctx: &mut AnalysisContext,
     ) {
         if symbol.metadata().kind() != KestrelSymbolKind::Extension {
             return;
@@ -107,17 +107,14 @@ impl Analyzer for ExtensionConflictAnalyzer {
 
         let extension_id = extension.metadata().id();
         // Collect methods with DuplicateKey directly from the extension symbol
-        let methods = collect_methods_with_keys(&(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        let methods =
+            collect_methods_with_keys(&(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>));
 
         {
             let mut struct_methods = self.struct_methods.lock().unwrap();
-            if !struct_methods.contains_key(&target_id) {
-                // Collect methods with DuplicateKey directly from the struct symbol
-                struct_methods.insert(
-                    target_id,
-                    collect_methods_with_keys(&(target_symbol as Arc<dyn Symbol<KestrelLanguage>>)),
-                );
-            }
+            struct_methods.entry(target_id).or_insert_with(|| {
+                collect_methods_with_keys(&(target_symbol as Arc<dyn Symbol<KestrelLanguage>>))
+            });
         }
 
         let collected = CollectedExtension {

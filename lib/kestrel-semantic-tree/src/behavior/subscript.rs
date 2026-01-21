@@ -5,8 +5,8 @@
 
 use semantic_tree::behavior::Behavior;
 
-use crate::behavior::callable::{CallableParameter, DuplicateKey, ReceiverKind};
 use crate::behavior::KestrelBehaviorKind;
+use crate::behavior::callable::{CallableParameter, DuplicateKey, ReceiverKind};
 use crate::language::KestrelLanguage;
 use crate::ty::Ty;
 
@@ -174,8 +174,7 @@ mod tests {
             Ty::int(IntBits::I64, Span::new(0, 0..3)),
         )];
         let return_ty = Ty::int(IntBits::I64, Span::new(0, 10..13));
-        let behavior =
-            SubscriptBehavior::with_receiver(params, return_ty, ReceiverKind::Borrowing);
+        let behavior = SubscriptBehavior::with_receiver(params, return_ty, ReceiverKind::Borrowing);
 
         assert!(!behavior.is_static());
         assert!(behavior.is_instance());

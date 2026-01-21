@@ -5,8 +5,8 @@
 //! - Extension conformances: `extend Int: Hashable { ... }`
 
 use kestrel_execution_graph::{Id, TypeParam};
-use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_model::SymbolFor;
+use kestrel_semantic_model::queries::ExtensionsFor;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::conforms_to::ConformsToBehavior;
 use kestrel_semantic_tree::behavior::implements::ImplementsBehavior;
@@ -267,7 +267,7 @@ fn register_extension_type_params(
 
                 return mir_type_params;
             }
-        }
+        },
         TyKind::Enum { symbol, .. } => {
             let name = qualified_name_for_symbol(ctx, &(symbol.clone() as _));
             // Find enum and clone type params to avoid borrow issues
@@ -288,8 +288,8 @@ fn register_extension_type_params(
 
                 return mir_type_params;
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     // Fallback: Create new type params for the witness
@@ -300,7 +300,7 @@ fn register_extension_type_params(
         // Use a special witness-owned type param (or function-owned as placeholder)
         let tp_def = kestrel_execution_graph::TypeParamDef::new(
             tp_name,
-            TypeParamOwner::Function(Id::from_raw(0u32.into())), // placeholder
+            TypeParamOwner::Function(Id::from_raw(0u32)), // placeholder
         );
         let tp_id = ctx.mir.type_params.alloc(tp_def);
         ctx.map_type_param(tp.metadata().id(), tp_id);
@@ -497,7 +497,8 @@ pub fn generate_derived_witnesses_for_protocol_extensions(
 
     for extension in &extensions {
         // Get conformances added by this extension (e.g., Less[Self], Greater[Self])
-        let Some(extension_conformances) = extension.metadata().get_behavior::<ConformancesBehavior>()
+        let Some(extension_conformances) =
+            extension.metadata().get_behavior::<ConformancesBehavior>()
         else {
             continue;
         };
@@ -557,15 +558,13 @@ fn bind_associated_types_from_extension(
             }
 
             // Get the aliased type
-            if let Ok(alias_symbol) = child.clone().downcast_arc::<TypeAliasSymbol>() {
-                if let Some(typed_behavior) = alias_symbol
+            if let Ok(alias_symbol) = child.clone().downcast_arc::<TypeAliasSymbol>()
+                && let Some(typed_behavior) = alias_symbol
                     .metadata()
                     .get_behavior::<TypeAliasTypedBehavior>()
-                {
-                    let mir_ty = lower_type(ctx, typed_behavior.resolved_ty());
-                    ctx.mir.witnesses[witness_id]
-                        .bind_type(conforms_to.associated_type_name(), mir_ty);
-                }
+            {
+                let mir_ty = lower_type(ctx, typed_behavior.resolved_ty());
+                ctx.mir.witnesses[witness_id].bind_type(conforms_to.associated_type_name(), mir_ty);
             }
         }
     }
@@ -583,7 +582,7 @@ fn bind_methods_from_extension(
     witness_id: Id<kestrel_execution_graph::Witness>,
     extension: &Arc<ExtensionSymbol>,
     added_protocol_symbol: &Arc<kestrel_semantic_tree::symbol::protocol::ProtocolSymbol>,
-    implementing_type: Id<kestrel_execution_graph::Ty>,
+    _implementing_type: Id<kestrel_execution_graph::Ty>,
 ) {
     // Get the required methods from the protocol
     let protocol_methods: Vec<_> = added_protocol_symbol

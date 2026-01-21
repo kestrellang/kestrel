@@ -51,7 +51,6 @@ impl<'a> CollectionContext<'a> {
             functions_by_name.insert(func_def.name, func_id);
         }
 
-
         Self {
             mir,
             functions_by_name,
@@ -113,7 +112,7 @@ impl<'a> CollectionContext<'a> {
     fn process_function_instantiation(&mut self, inst: &FunctionInstantiation) {
         // Get function definition (need to clone type_params to avoid borrow conflict)
         let func_def = &self.mir.functions[inst.func_id];
-        let func_name = self.mir.name(func_def.name).to_string();
+        let _func_name = self.mir.name(func_def.name).to_string();
         let type_params = func_def.type_params.clone();
         let blocks = func_def.blocks.clone();
         let params = func_def.params.clone();
@@ -185,7 +184,7 @@ impl<'a> CollectionContext<'a> {
         match stmt {
             StatementKind::Assign { dest: _, rvalue } => {
                 self.scan_rvalue(rvalue, subst);
-            }
+            },
             StatementKind::Call { callee, args } => {
                 // For protocol extension method calls, we need to track Self type.
                 // Check if this is a direct call to a function with Self-typed parameters.
@@ -198,48 +197,48 @@ impl<'a> CollectionContext<'a> {
                 for arg in args {
                     self.scan_value(&arg.value, subst);
                 }
-            }
-            StatementKind::Deinit { place: _ } => {}
-            StatementKind::DeinitIf { place: _, flag: _ } => {}
-            StatementKind::SetDeinitFlag { flag: _, value: _ } => {}
+            },
+            StatementKind::Deinit { place: _ } => {},
+            StatementKind::DeinitIf { place: _, flag: _ } => {},
+            StatementKind::SetDeinitFlag { flag: _, value: _ } => {},
         }
     }
 
     /// Scan an rvalue for instantiations.
     fn scan_rvalue(&mut self, rvalue: &Rvalue, subst: &Substitution) {
         match rvalue {
-            Rvalue::Move(_) | Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) => {}
+            Rvalue::Move(_) | Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) => {},
 
             Rvalue::Use(imm) => {
                 self.scan_immediate(&imm.kind, subst);
-            }
+            },
 
             Rvalue::BinaryOp { lhs, rhs, .. } => {
                 self.scan_value(lhs, subst);
                 self.scan_value(rhs, subst);
-            }
+            },
 
             Rvalue::UnaryOp { operand, .. } => {
                 self.scan_value(operand, subst);
-            }
+            },
 
             Rvalue::Construct { ty, fields } => {
                 self.scan_type(*ty, subst);
                 for (_, value) in fields {
                     self.scan_value(value, subst);
                 }
-            }
+            },
 
             Rvalue::Tuple(elements) => {
                 for elem in elements {
                     self.scan_value(elem, subst);
                 }
-            }
+            },
 
             Rvalue::StackAlloc { element_ty, count } => {
                 self.scan_type(*element_ty, subst);
                 self.scan_value(count, subst);
-            }
+            },
 
             Rvalue::EnumVariant {
                 enum_ty, payload, ..
@@ -248,7 +247,7 @@ impl<'a> CollectionContext<'a> {
                 for val in payload {
                     self.scan_value(val, subst);
                 }
-            }
+            },
 
             Rvalue::Call { callee, args } => {
                 // For protocol extension method calls, we need to track Self type.
@@ -262,14 +261,14 @@ impl<'a> CollectionContext<'a> {
                 for arg in args {
                     self.scan_value(&arg.value, subst);
                 }
-            }
+            },
 
             Rvalue::Cast {
                 operand, target, ..
             } => {
                 self.scan_value(operand, subst);
                 self.scan_type(*target, subst);
-            }
+            },
 
             Rvalue::StrPtr(v)
             | Rvalue::StrLen(v)
@@ -278,27 +277,28 @@ impl<'a> CollectionContext<'a> {
             | Rvalue::PtrToRefMut(v)
             | Rvalue::RefToPtr(v) => {
                 self.scan_value(v, subst);
-            }
+            },
 
             Rvalue::StrFromParts { ptr, len } => {
                 self.scan_value(ptr, subst);
                 self.scan_value(len, subst);
-            }
+            },
 
             Rvalue::PtrOffset { ptr, offset } => {
                 self.scan_value(ptr, subst);
                 self.scan_value(offset, subst);
-            }
+            },
 
             Rvalue::FuncToEscaping(name) => {
                 // Non-generic function reference
                 if let Some(&func_id) = self.functions_by_name.get(name) {
                     let func_def = &self.mir.functions[func_id];
                     if !func_def.type_params.is_empty() {
-                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
-                            name: *name,
-                            reason: "generic function requires type arguments".to_string(),
-                        });
+                        self.errors
+                            .push(MonomorphizeError::UnsupportedFunctionReference {
+                                name: *name,
+                                reason: "generic function requires type arguments".to_string(),
+                            });
                         return;
                     }
                     let needs_self = func_def.params.iter().any(|&param_id| {
@@ -306,10 +306,11 @@ impl<'a> CollectionContext<'a> {
                         self.type_needs_self(self.mir.ty(param.ty))
                     }) || self.type_needs_self(self.mir.ty(func_def.ret));
                     if needs_self {
-                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
-                            name: *name,
-                            reason: "function reference requires Self type".to_string(),
-                        });
+                        self.errors
+                            .push(MonomorphizeError::UnsupportedFunctionReference {
+                                name: *name,
+                                reason: "function reference requires Self type".to_string(),
+                            });
                         return;
                     }
                     let inst = FunctionInstantiation::non_generic(func_id);
@@ -317,17 +318,18 @@ impl<'a> CollectionContext<'a> {
                         self.pending.push_back(inst);
                     }
                 }
-            }
+            },
 
             Rvalue::ApplyPartial { func, captures } => {
                 // Non-generic function reference
                 if let Some(&func_id) = self.functions_by_name.get(func) {
                     let func_def = &self.mir.functions[func_id];
                     if !func_def.type_params.is_empty() {
-                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
-                            name: *func,
-                            reason: "generic function requires type arguments".to_string(),
-                        });
+                        self.errors
+                            .push(MonomorphizeError::UnsupportedFunctionReference {
+                                name: *func,
+                                reason: "generic function requires type arguments".to_string(),
+                            });
                         return;
                     }
                     let needs_self = func_def.params.iter().any(|&param_id| {
@@ -335,10 +337,11 @@ impl<'a> CollectionContext<'a> {
                         self.type_needs_self(self.mir.ty(param.ty))
                     }) || self.type_needs_self(self.mir.ty(func_def.ret));
                     if needs_self {
-                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
-                            name: *func,
-                            reason: "function reference requires Self type".to_string(),
-                        });
+                        self.errors
+                            .push(MonomorphizeError::UnsupportedFunctionReference {
+                                name: *func,
+                                reason: "function reference requires Self type".to_string(),
+                            });
                         return;
                     }
                     let inst = FunctionInstantiation::non_generic(func_id);
@@ -349,58 +352,57 @@ impl<'a> CollectionContext<'a> {
                 for cap in captures {
                     self.scan_value(cap, subst);
                 }
-            }
+            },
 
             // Float intrinsics
-            Rvalue::FloatConst { .. } => {}
+            Rvalue::FloatConst { .. } => {},
 
             Rvalue::FloatPred { operand, .. } => {
                 self.scan_value(operand, subst);
-            }
+            },
 
             Rvalue::FloatMath { operand, .. } => {
                 self.scan_value(operand, subst);
-            }
+            },
 
             // Pointer intrinsics
             Rvalue::PtrNull { ty } | Rvalue::SizeOf { ty } | Rvalue::AlignOf { ty } => {
                 self.scan_type(*ty, subst);
-            }
+            },
             Rvalue::PtrFromAddress { ty, address } => {
                 self.scan_type(*ty, subst);
                 self.scan_value(address, subst);
-            }
-            Rvalue::PtrToAddress { ptr }
-            | Rvalue::PtrIsNull { ptr } => {
+            },
+            Rvalue::PtrToAddress { ptr } | Rvalue::PtrIsNull { ptr } => {
                 self.scan_value(ptr, subst);
-            }
+            },
             Rvalue::PtrRead { ptr, ty } => {
                 self.scan_value(ptr, subst);
                 self.scan_type(*ty, subst);
-            }
+            },
             Rvalue::PtrWrite { ptr, value } => {
                 self.scan_value(ptr, subst);
                 self.scan_value(value, subst);
-            }
+            },
             Rvalue::PtrCast { ptr, target_ty } => {
                 self.scan_value(ptr, subst);
                 self.scan_type(*target_ty, subst);
-            }
+            },
 
             // Boolean (i1) intrinsics
             Rvalue::I1Eq { lhs, rhs } | Rvalue::I1And { lhs, rhs } | Rvalue::I1Or { lhs, rhs } => {
                 self.scan_value(lhs, subst);
                 self.scan_value(rhs, subst);
-            }
+            },
             Rvalue::I1Not { operand } => {
                 self.scan_value(operand, subst);
-            }
+            },
 
             // Atomic intrinsics
             Rvalue::AtomicAdd { ptr, delta } | Rvalue::AtomicSub { ptr, delta } => {
                 self.scan_value(ptr, subst);
                 self.scan_value(delta, subst);
-            }
+            },
         }
     }
 
@@ -441,11 +443,11 @@ impl<'a> CollectionContext<'a> {
                     self.errors
                         .push(MonomorphizeError::FunctionNotFound { name: *name });
                 }
-            }
+            },
 
             Callee::Thin(_) | Callee::Thick(_) => {
                 // Function pointer calls - we can't statically know what's being called
-            }
+            },
 
             Callee::Witness {
                 protocol,
@@ -471,16 +473,16 @@ impl<'a> CollectionContext<'a> {
                                 self.pending.push_back(inst);
                             }
                         } else {
-                            let name_str = self.mir.name(impl_name);
+                            let _name_str = self.mir.name(impl_name);
                             self.errors
                                 .push(MonomorphizeError::FunctionNotFound { name: impl_name });
                         }
-                    }
+                    },
                     Err(e) => {
                         self.errors.push(e);
-                    }
+                    },
                 }
-            }
+            },
         }
     }
 
@@ -500,10 +502,11 @@ impl<'a> CollectionContext<'a> {
                     if !func_def.type_params.is_empty()
                         && func_def.type_params.len() != concrete_args.len()
                     {
-                        self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
-                            name: *name,
-                            reason: "missing or mismatched type arguments".to_string(),
-                        });
+                        self.errors
+                            .push(MonomorphizeError::UnsupportedFunctionReference {
+                                name: *name,
+                                reason: "missing or mismatched type arguments".to_string(),
+                            });
                         return;
                     }
 
@@ -516,10 +519,11 @@ impl<'a> CollectionContext<'a> {
                         if let Some(st) = subst.get_self_type() {
                             FunctionInstantiation::with_self_type(func_id, concrete_args, st)
                         } else {
-                            self.errors.push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *name,
-                                reason: "missing Self type for function reference".to_string(),
-                            });
+                            self.errors
+                                .push(MonomorphizeError::UnsupportedFunctionReference {
+                                    name: *name,
+                                    reason: "missing Self type for function reference".to_string(),
+                                });
                             return;
                         }
                     } else {
@@ -532,7 +536,7 @@ impl<'a> CollectionContext<'a> {
                     self.errors
                         .push(MonomorphizeError::FunctionNotFound { name: *name });
                 }
-            }
+            },
 
             ImmediateKind::WitnessMethod {
                 protocol,
@@ -556,20 +560,20 @@ impl<'a> CollectionContext<'a> {
                                 self.pending.push_back(inst);
                             }
                         } else {
-                            let name_str = self.mir.name(impl_name);
+                            let _name_str = self.mir.name(impl_name);
                             self.errors
                                 .push(MonomorphizeError::FunctionNotFound { name: impl_name });
                         }
-                    }
+                    },
                     Err(e) => {
                         self.errors.push(e);
-                    }
+                    },
                 }
-            }
+            },
 
             ImmediateKind::NullPtr(ty) => {
                 self.scan_type(*ty, subst);
-            }
+            },
 
             // Literals don't contain instantiations
             ImmediateKind::IntLiteral { .. }
@@ -578,18 +582,18 @@ impl<'a> CollectionContext<'a> {
             | ImmediateKind::StringLiteral(_)
             | ImmediateKind::StringPointer(_)
             | ImmediateKind::Unit
-            | ImmediateKind::Error => {}
+            | ImmediateKind::Error => {},
         }
     }
 
     /// Scan a value for instantiations.
     fn scan_value(&mut self, value: &Value, subst: &Substitution) {
         match value {
-            Value::Place(_) => {}
+            Value::Place(_) => {},
             Value::Immediate(imm) => {
                 self.scan_immediate(&imm.kind, subst);
-            }
-            Value::Unreachable => {}
+            },
+            Value::Unreachable => {},
         }
     }
 
@@ -603,38 +607,41 @@ impl<'a> CollectionContext<'a> {
         match mir_ty {
             MirTy::Named { name, type_args } => {
                 // Collect struct field info before mutating (to avoid borrow issues)
-                let struct_field_info: Option<(Vec<Id<TypeParam>>, Vec<Id<Ty>>)> = if !type_args.is_empty() {
-                    // This is a generic instantiation - determine if it's a struct or enum
-                    // Check structs first
-                    let mut field_info = None;
-                    for (struct_id, struct_def) in self.mir.structs.iter() {
-                        if struct_def.name == name {
-                            let inst = StructInstantiation::new(struct_id, type_args.clone());
-                            self.result.add_struct(inst);
-                            // Collect field types and type params for later scanning
-                            if !struct_def.type_params.is_empty() {
-                                let type_params = struct_def.type_params.clone();
-                                let field_types: Vec<_> = struct_def.fields.iter()
-                                    .map(|&fid| self.mir.fields[fid].ty)
-                                    .collect();
-                                field_info = Some((type_params, field_types));
+                let struct_field_info: Option<(Vec<Id<TypeParam>>, Vec<Id<Ty>>)> =
+                    if !type_args.is_empty() {
+                        // This is a generic instantiation - determine if it's a struct or enum
+                        // Check structs first
+                        let mut field_info = None;
+                        for (struct_id, struct_def) in self.mir.structs.iter() {
+                            if struct_def.name == name {
+                                let inst = StructInstantiation::new(struct_id, type_args.clone());
+                                self.result.add_struct(inst);
+                                // Collect field types and type params for later scanning
+                                if !struct_def.type_params.is_empty() {
+                                    let type_params = struct_def.type_params.clone();
+                                    let field_types: Vec<_> = struct_def
+                                        .fields
+                                        .iter()
+                                        .map(|&fid| self.mir.fields[fid].ty)
+                                        .collect();
+                                    field_info = Some((type_params, field_types));
+                                }
+                                break;
                             }
-                            break;
                         }
-                    }
 
-                    // Check enums
-                    for (enum_id, enum_def) in self.mir.enums.iter() {
-                        if enum_def.name == name {
-                            let inst = EnumInstantiation::new(enum_id, type_args.clone());
-                            self.result.add_enum(inst);
-                            break;
+                        // Check enums
+                        for (enum_id, enum_def) in self.mir.enums.iter() {
+                            if enum_def.name == name {
+                                let inst = EnumInstantiation::new(enum_id, type_args.clone());
+                                self.result.add_enum(inst);
+                                break;
+                            }
                         }
-                    }
-                    field_info
-                } else {
-                    None
-                };
+                        field_info
+                    } else {
+                        None
+                    };
 
                 // Scan struct field types with substitution (after loop to avoid borrow issues)
                 if let Some((type_params, field_types)) = struct_field_info {
@@ -648,29 +655,29 @@ impl<'a> CollectionContext<'a> {
                 for arg in &type_args {
                     self.scan_type(*arg, &Substitution::new());
                 }
-            }
+            },
 
             MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
                 // Pass through the substitution so nested types get properly substituted
                 self.scan_type(inner, subst);
-            }
+            },
 
             MirTy::Tuple(elems) => {
                 for elem in elems {
                     self.scan_type(elem, subst);
                 }
-            }
+            },
 
             MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
                 for param in params {
                     self.scan_type(param, subst);
                 }
                 self.scan_type(ret, subst);
-            }
+            },
 
             MirTy::AssociatedTypeProjection { base, .. } => {
                 self.scan_type(base, subst);
-            }
+            },
 
             // Primitives and type params don't contain nested instantiations
             MirTy::I8
@@ -686,7 +693,7 @@ impl<'a> CollectionContext<'a> {
             | MirTy::Str
             | MirTy::TypeParam(_)
             | MirTy::SelfType
-            | MirTy::Error => {}
+            | MirTy::Error => {},
         }
     }
 
@@ -701,14 +708,14 @@ impl<'a> CollectionContext<'a> {
         match &term.kind {
             TerminatorKind::Return(value) => {
                 self.scan_value(value, subst);
-            }
-            TerminatorKind::Jump(_) => {}
+            },
+            TerminatorKind::Jump(_) => {},
             TerminatorKind::Branch { condition, .. } => {
                 self.scan_value(condition, subst);
-            }
-            TerminatorKind::Switch { .. } => {}
-            TerminatorKind::Panic(_) => {}
-            TerminatorKind::Unreachable => {}
+            },
+            TerminatorKind::Switch { .. } => {},
+            TerminatorKind::Panic(_) => {},
+            TerminatorKind::Unreachable => {},
         }
     }
 
@@ -726,8 +733,13 @@ impl<'a> CollectionContext<'a> {
             Callee::Direct { name, .. } => {
                 let func_id = self.functions_by_name.get(name).copied()?;
                 self.infer_self_type_from_direct_call(func_id, args, subst)
-            }
-            Callee::Witness { for_type, protocol, method, .. } => {
+            },
+            Callee::Witness {
+                for_type,
+                protocol: _,
+                method: _,
+                ..
+            } => {
                 // For witness calls where for_type is SelfType, prefer existing self_type from subst
                 let ty = self.mir.ty(*for_type);
                 if matches!(ty, MirTy::SelfType) {
@@ -749,7 +761,7 @@ impl<'a> CollectionContext<'a> {
                     }
                 }
                 None
-            }
+            },
             _ => None,
         }
     }
@@ -801,10 +813,10 @@ impl<'a> CollectionContext<'a> {
                 // For now, return true for Named types to be conservative
                 // TODO: Add proper protocol detection
                 true
-            }
+            },
             MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
                 self.type_contains_self(self.mir.ty(*inner))
-            }
+            },
             _ => false,
         }
     }
@@ -816,15 +828,15 @@ impl<'a> CollectionContext<'a> {
             MirTy::SelfType => true,
             MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
                 self.type_needs_self(self.mir.ty(*inner))
-            }
+            },
             MirTy::Tuple(elems) => elems.iter().any(|e| self.type_needs_self(self.mir.ty(*e))),
-            MirTy::Named { type_args, .. } => {
-                type_args.iter().any(|a| self.type_needs_self(self.mir.ty(*a)))
-            }
+            MirTy::Named { type_args, .. } => type_args
+                .iter()
+                .any(|a| self.type_needs_self(self.mir.ty(*a))),
             MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
                 params.iter().any(|p| self.type_needs_self(self.mir.ty(*p)))
                     || self.type_needs_self(self.mir.ty(*ret))
-            }
+            },
             _ => false,
         }
     }
@@ -835,8 +847,6 @@ impl<'a> CollectionContext<'a> {
         value: &Value,
         subst: &Substitution,
     ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        use kestrel_execution_graph::PlaceKind;
-
         match value {
             Value::Place(place) => self.get_place_type(place, subst),
             Value::Immediate(_) => None,
@@ -845,6 +855,7 @@ impl<'a> CollectionContext<'a> {
     }
 
     /// Get the type of a place
+    #[allow(clippy::only_used_in_recursion)]
     fn get_place_type(
         &self,
         place: &kestrel_execution_graph::Place,
@@ -856,7 +867,7 @@ impl<'a> CollectionContext<'a> {
             PlaceKind::Local(local_id) => {
                 let local = self.mir.local(*local_id);
                 Some(local.ty)
-            }
+            },
             PlaceKind::Deref(inner) => {
                 // For deref, get the inner place's type and unwrap the pointer/ref
                 let inner_ty_id = self.get_place_type(inner, subst)?;
@@ -864,23 +875,23 @@ impl<'a> CollectionContext<'a> {
                 match inner_ty {
                     MirTy::Ref(pointee) | MirTy::RefMut(pointee) | MirTy::Pointer(pointee) => {
                         Some(*pointee)
-                    }
+                    },
                     _ => Some(inner_ty_id), // Unexpected, return as-is
                 }
-            }
-            PlaceKind::Field { parent, .. } => {
+            },
+            PlaceKind::Field { parent: _, .. } => {
                 // For field access, we'd need to look up the struct definition
                 // For now, return None as this is complex
                 None
-            }
-            PlaceKind::Index { parent, .. } => {
+            },
+            PlaceKind::Index { parent: _, .. } => {
                 // For index access, we'd need to look up element type
                 None
-            }
+            },
             PlaceKind::Downcast { parent, .. } => {
                 // For enum downcast, return parent type (the enum)
                 self.get_place_type(parent, subst)
-            }
+            },
         }
     }
 
@@ -894,11 +905,11 @@ impl<'a> CollectionContext<'a> {
             MirTy::Ref(inner) | MirTy::RefMut(inner) => {
                 // Recursively unwrap
                 self.extract_concrete_type_from_arg(*inner)
-            }
+            },
             MirTy::SelfType | MirTy::TypeParam(_) => {
                 // Can't extract concrete type from abstract type
                 None
-            }
+            },
             _ => Some(ty),
         }
     }

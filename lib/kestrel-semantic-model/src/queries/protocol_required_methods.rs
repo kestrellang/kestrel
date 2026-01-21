@@ -57,6 +57,7 @@ impl Query for ProtocolRequiredMethods {
     }
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn collect_protocol_methods_recursive(
     protocol: &Arc<ProtocolSymbol>,
     model: &SemanticModel,

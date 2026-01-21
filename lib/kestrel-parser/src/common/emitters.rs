@@ -12,10 +12,10 @@ use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,
     AttributeArgsData, AttributeData, ComputedBodyData, DeinitDeclarationData,
     EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
-    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData,
-    ParameterAccessMode, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
-    ReceiverModifier, StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData,
-    TypeAliasDeclarationData, TypeDeclarationBodyItem,
+    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode,
+    ParameterData, ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier,
+    StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData, TypeAliasDeclarationData,
+    TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -142,23 +142,23 @@ fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
     match value {
         AttributeArgValue::String(span) => {
             sink.add_token(SyntaxKind::String, span.clone());
-        }
+        },
         AttributeArgValue::Integer(span) => {
             sink.add_token(SyntaxKind::Integer, span.clone());
-        }
+        },
         AttributeArgValue::Float(span) => {
             sink.add_token(SyntaxKind::Float, span.clone());
-        }
+        },
         AttributeArgValue::Bool(span) => {
             sink.add_token(SyntaxKind::Boolean, span.clone());
-        }
+        },
         AttributeArgValue::ImplicitMember {
             dot_span,
             name_span,
         } => {
             sink.add_token(SyntaxKind::Dot, dot_span.clone());
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
-        }
+        },
         AttributeArgValue::Path(segments) => {
             for (i, span) in segments.iter().enumerate() {
                 if i > 0 {
@@ -171,7 +171,7 @@ fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
                 }
                 sink.add_token(SyntaxKind::Identifier, span.clone());
             }
-        }
+        },
     }
 }
 
@@ -420,7 +420,7 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
         ComputedBodyData::Shorthand(body) => {
             // Shorthand: just emit the code block directly
             emit_code_block(sink, body);
-        }
+        },
         ComputedBodyData::Accessors { getter, setter } => {
             // Emit getter
             if let Some(getter_body) = getter {
@@ -457,7 +457,7 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
                     sink.finish_node();
                 }
             }
-        }
+        },
     }
 
     sink.finish_node();
@@ -550,10 +550,10 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
         TypeDeclarationBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
         TypeDeclarationBodyItem::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
-        }
+        },
         TypeDeclarationBodyItem::Import(import_span, path_segments, alias, items) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        }
+        },
     }
 }
 
@@ -588,13 +588,13 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
             ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
             ProtocolBodyItem::Subscript(subscript_data) => {
                 emit_subscript_declaration(sink, subscript_data)
-            }
+            },
             ProtocolBodyItem::AssociatedType(type_data) => {
                 emit_type_alias_declaration(sink, type_data)
-            }
+            },
             ProtocolBodyItem::Initializer(init_data) => {
                 emit_initializer_declaration(sink, init_data)
-            }
+            },
             ProtocolBodyItem::Field(field_data) => emit_field_declaration(sink, field_data),
         }
     }
@@ -612,7 +612,7 @@ fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTarg
     match target {
         AssociatedTypeTargetData::Simple(name_span) => {
             emit_name(sink, name_span.clone());
-        }
+        },
         AssociatedTypeTargetData::Qualified {
             protocol_path,
             dot_span,
@@ -623,7 +623,7 @@ fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTarg
             sink.add_token(SyntaxKind::Dot, dot_span.clone());
             emit_name(sink, name_span.clone());
             sink.finish_node();
-        }
+        },
     }
 }
 
@@ -848,7 +848,7 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
         SubscriptBodyData::Shorthand(code_block) => {
             // Shorthand: just emit the code block directly
             emit_code_block(sink, code_block);
-        }
+        },
         SubscriptBodyData::Accessors { getter, setter } => {
             // Wrap accessors in PropertyAccessors node
             sink.start_node(SyntaxKind::PropertyAccessors);
@@ -858,11 +858,10 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
                 // Full getter with body: emit GetterClause containing Get token and code block
                 sink.start_node(SyntaxKind::GetterClause);
                 // Emit Get token - use the start of the code block as approximate span
-                let get_span =
-                    Span::new(
-                        getter_body.lbrace.file_id,
-                        getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start,
-                    );
+                let get_span = Span::new(
+                    getter_body.lbrace.file_id,
+                    getter_body.lbrace.start.saturating_sub(4)..getter_body.lbrace.start,
+                );
                 sink.add_token(SyntaxKind::Get, get_span);
                 emit_code_block(sink, getter_body);
                 sink.finish_node();
@@ -891,7 +890,7 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
             }
 
             sink.finish_node(); // PropertyAccessors
-        }
+        },
     }
 
     sink.finish_node(); // SubscriptBody

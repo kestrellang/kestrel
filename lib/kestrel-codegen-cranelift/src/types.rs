@@ -12,7 +12,12 @@ use cranelift_codegen::ir::types as cl_types;
 /// If the type is an `AssociatedTypeProjection`, resolve it via witness lookup.
 /// Otherwise, return the type unchanged.
 fn resolve_projection(ctx: &MirContext, ty: Id<Ty>) -> Result<Id<Ty>, String> {
-    if let MirTy::AssociatedTypeProjection { base, protocol, associated } = ctx.ty(ty) {
+    if let MirTy::AssociatedTypeProjection {
+        base,
+        protocol,
+        associated,
+    } = ctx.ty(ty)
+    {
         resolve_associated_type(ctx, *base, *protocol, associated)
             .map_err(|e| format!("failed to resolve associated type projection: {:?}", e))
     } else {
@@ -27,11 +32,7 @@ fn resolve_projection(ctx: &MirContext, ty: Id<Ty>) -> Result<Id<Ty>, String> {
 ///
 /// IMPORTANT: If you call this with a type that might be an `AssociatedTypeProjection`,
 /// you should call `resolve_projection` first, or use `translate_type_with_subst` instead.
-pub fn translate_type(
-    ctx: &MirContext,
-    ty: Id<Ty>,
-    target: &TargetConfig,
-) -> CraneliftType {
+pub fn translate_type(ctx: &MirContext, ty: Id<Ty>, target: &TargetConfig) -> CraneliftType {
     translate_type_ext(ctx, ty, target, false)
 }
 
@@ -50,10 +51,8 @@ pub fn translate_type_ext(
     // Try to resolve any associated type projections before translation
     let ty = resolve_projection(ctx, ty).expect("failed to resolve projection in translate_type");
 
-    if is_extern {
-        if let Some(inner) = get_wrapper_primitive(ctx, ty) {
-            return translate_type_ext(ctx, inner, target, is_extern);
-        }
+    if is_extern && let Some(inner) = get_wrapper_primitive(ctx, ty) {
+        return translate_type_ext(ctx, inner, target, is_extern);
     }
 
     match ctx.ty(ty) {
@@ -91,7 +90,7 @@ pub fn translate_type_ext(
         MirTy::AssociatedTypeProjection { .. } => {
             // Should have been resolved above
             panic!("AssociatedTypeProjection should have been resolved")
-        }
+        },
 
         // Error - use pointer as fallback
         MirTy::Error => ptr_type,
@@ -99,18 +98,18 @@ pub fn translate_type_ext(
 }
 
 /// Check if a type should be passed by value (fits in a register).
+#[allow(dead_code)]
 pub fn is_pass_by_value(ctx: &MirContext, ty: Id<Ty>) -> bool {
     is_pass_by_value_ext(ctx, ty, false)
 }
 
+#[allow(dead_code)]
 pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bool {
     // Resolve any associated type projections first
     let ty = resolve_projection(ctx, ty).expect("failed to resolve projection in is_pass_by_value");
 
-    if is_extern {
-        if let Some(inner) = get_wrapper_primitive(ctx, ty) {
-            return is_pass_by_value_ext(ctx, inner, is_extern);
-        }
+    if is_extern && let Some(inner) = get_wrapper_primitive(ctx, ty) {
+        return is_pass_by_value_ext(ctx, inner, is_extern);
     }
 
     matches!(
@@ -132,25 +131,24 @@ pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bo
 }
 
 pub fn get_wrapper_primitive(ctx: &MirContext, ty: Id<Ty>) -> Option<Id<Ty>> {
-    if let MirTy::Named { name, type_args } = ctx.ty(ty) {
-        if let Some((_, struct_def)) = ctx.structs.iter().find(|(_, s)| s.name == *name) {
-            if struct_def.fields.len() == 1 {
-                let field_id = struct_def.fields[0];
-                let field_def = &ctx.fields[field_id];
-                let mut field_ty = field_def.ty;
+    if let MirTy::Named { name, type_args } = ctx.ty(ty)
+        && let Some((_, struct_def)) = ctx.structs.iter().find(|(_, s)| s.name == *name)
+        && struct_def.fields.len() == 1
+    {
+        let field_id = struct_def.fields[0];
+        let field_def = &ctx.fields[field_id];
+        let mut field_ty = field_def.ty;
 
-                // Apply substitution from struct's type params to concrete type args
-                let type_params = &struct_def.type_params;
-                if !type_params.is_empty() && type_params.len() == type_args.len() {
-                    let subst = build_substitution(ctx, type_params, type_args);
-                    if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx, field_ty) {
-                        field_ty = substituted_ty;
-                    }
-                }
-
-                return Some(field_ty);
+        // Apply substitution from struct's type params to concrete type args
+        let type_params = &struct_def.type_params;
+        if !type_params.is_empty() && type_params.len() == type_args.len() {
+            let subst = build_substitution(ctx, type_params, type_args);
+            if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx, field_ty) {
+                field_ty = substituted_ty;
             }
         }
+
+        return Some(field_ty);
     }
     None
 }
@@ -163,15 +161,20 @@ pub fn translate_type_with_subst(
     subst: &Substitution,
 ) -> CraneliftType {
     // Apply substitution first
-    let concrete_ty = subst.apply_ty_readonly(ctx, ty).expect("type substitution failed for translate_type");
+    let concrete_ty = subst
+        .apply_ty_readonly(ctx, ty)
+        .expect("type substitution failed for translate_type");
 
     // translate_type will handle any remaining projection resolution
     translate_type(ctx, concrete_ty, target)
 }
 
 /// Check if a type should be passed by value, applying substitution first.
+#[allow(dead_code)]
 pub fn is_pass_by_value_with_subst(ctx: &MirContext, ty: Id<Ty>, subst: &Substitution) -> bool {
-    let concrete_ty = subst.apply_ty_readonly(ctx, ty).expect("type substitution failed for is_pass_by_value");
+    let concrete_ty = subst
+        .apply_ty_readonly(ctx, ty)
+        .expect("type substitution failed for is_pass_by_value");
 
     // is_pass_by_value will handle any remaining projection resolution
     is_pass_by_value(ctx, concrete_ty)

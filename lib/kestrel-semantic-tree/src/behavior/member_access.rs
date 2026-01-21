@@ -97,7 +97,7 @@ mod tests {
         match &result.kind {
             crate::expr::ExprKind::FieldAccess { field, .. } => {
                 assert_eq!(field, "x");
-            }
+            },
             _ => panic!("Expected FieldAccess"),
         }
     }

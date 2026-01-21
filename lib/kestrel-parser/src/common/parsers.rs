@@ -341,13 +341,14 @@ pub(crate) fn parameter_parser<'tokens>()
 /// Parser for parameter list (zero or more parameters separated by commas)
 pub(crate) fn parameter_list_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ParameterData>, ParserExtra<'tokens>> + Clone {
-    skip_trivia().ignore_then(
-        parameter_parser()
-            .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
-            .allow_trailing()
-            .collect(),
-    )
-    .boxed()
+    skip_trivia()
+        .ignore_then(
+            parameter_parser()
+                .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
+                .allow_trailing()
+                .collect(),
+        )
+        .boxed()
 }
 
 /// Parser for optional return type: `-> Type`
@@ -482,19 +483,17 @@ fn computed_body_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBrace))
-        .map(|has_setter| {
-            ComputedBodyData::Accessors {
-                getter: None,
-                setter: if has_setter {
-                    Some(CodeBlockData {
-                        lbrace: Span::new(0, 0..0),
-                        items: vec![],
-                        rbrace: Span::new(0, 0..0),
-                    })
-                } else {
-                    None
-                },
-            }
+        .map(|has_setter| ComputedBodyData::Accessors {
+            getter: None,
+            setter: if has_setter {
+                Some(CodeBlockData {
+                    lbrace: Span::new(0, 0..0),
+                    items: vec![],
+                    rbrace: Span::new(0, 0..0),
+                })
+            } else {
+                None
+            },
         });
 
     // Explicit accessors: { get { body } set { body }? }
@@ -512,11 +511,9 @@ fn computed_body_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBrace))
-        .map(|(getter_body, setter_body)| {
-            ComputedBodyData::Accessors {
-                getter: Some(getter_body),
-                setter: setter_body,
-            }
+        .map(|(getter_body, setter_body)| ComputedBodyData::Accessors {
+            getter: Some(getter_body),
+            setter: setter_body,
         });
 
     // Shorthand: { expr } - parsed as a code block
@@ -575,7 +572,10 @@ pub fn field_declaration_parser_internal<'tokens>()
                         (
                             (
                                 (
-                                    (((attributes, visibility), is_static), (mutability_span, is_mutable)),
+                                    (
+                                        ((attributes, visibility), is_static),
+                                        (mutability_span, is_mutable),
+                                    ),
                                     name_span,
                                 ),
                                 colon_span,
@@ -625,7 +625,19 @@ pub fn initializer_declaration_parser_internal<'tokens>()
         .then(where_clause_parser().or_not())
         .then(function_body_parser())
         .map(
-            |((((((((attributes, visibility), init_span), type_params), lparen), parameters), rparen), where_clause), body)| {
+            |(
+                (
+                    (
+                        (
+                            ((((attributes, visibility), init_span), type_params), lparen),
+                            parameters,
+                        ),
+                        rparen,
+                    ),
+                    where_clause,
+                ),
+                body,
+            )| {
                 InitializerDeclarationData {
                     attributes,
                     visibility,
@@ -683,19 +695,17 @@ fn subscript_body_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBrace))
-        .map(|has_setter| {
-            SubscriptBodyData::Accessors {
-                getter: None,
-                setter: if has_setter {
-                    Some(CodeBlockData {
-                        lbrace: Span::new(0, 0..0),
-                        items: vec![],
-                        rbrace: Span::new(0, 0..0),
-                    })
-                } else {
-                    None
-                },
-            }
+        .map(|has_setter| SubscriptBodyData::Accessors {
+            getter: None,
+            setter: if has_setter {
+                Some(CodeBlockData {
+                    lbrace: Span::new(0, 0..0),
+                    items: vec![],
+                    rbrace: Span::new(0, 0..0),
+                })
+            } else {
+                None
+            },
         });
 
     // Explicit accessors: { get { body } set { body }? }
@@ -713,11 +723,9 @@ fn subscript_body_parser<'tokens>()
         )
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::RBrace))
-        .map(|(getter_body, setter_body)| {
-            SubscriptBodyData::Accessors {
-                getter: Some(getter_body),
-                setter: setter_body,
-            }
+        .map(|(getter_body, setter_body)| SubscriptBodyData::Accessors {
+            getter: Some(getter_body),
+            setter: setter_body,
         });
 
     // Shorthand: { expr } - parsed as a code block
@@ -765,7 +773,28 @@ pub fn subscript_declaration_parser_internal<'tokens>()
         .then(where_clause_parser().or_not())
         .then(subscript_body_parser())
         .map(
-            |((((((((((attributes, visibility), is_static), subscript_span), type_params), lparen), parameters), rparen), return_type), where_clause), body)| {
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (
+                                        (((attributes, visibility), is_static), subscript_span),
+                                        type_params,
+                                    ),
+                                    lparen,
+                                ),
+                                parameters,
+                            ),
+                            rparen,
+                        ),
+                        return_type,
+                    ),
+                    where_clause,
+                ),
+                body,
+            )| {
                 SubscriptDeclarationData {
                     attributes,
                     visibility,

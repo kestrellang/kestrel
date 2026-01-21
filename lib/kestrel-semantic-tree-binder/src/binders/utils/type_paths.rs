@@ -7,7 +7,11 @@ use crate::declaration_binder::BindingContext;
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 
 fn apply_default_protocol_type_arguments_for_bound(ty: Ty) -> Ty {
-    let TyKind::Protocol { symbol, substitutions } = ty.kind() else {
+    let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = ty.kind()
+    else {
         return ty;
     };
 
@@ -61,7 +65,7 @@ pub(crate) fn resolve_protocol_bound_path(
                     context: NotAProtocolContext::Bound,
                 });
                 Ty::error(span)
-            }
+            },
             TyKind::TypeAlias { symbol, .. } => {
                 ctx.diagnostics.throw(NotAProtocolError {
                     span: span.clone(),
@@ -69,7 +73,7 @@ pub(crate) fn resolve_protocol_bound_path(
                     context: NotAProtocolContext::Bound,
                 });
                 Ty::error(span)
-            }
+            },
             _ => {
                 ctx.diagnostics.throw(NotAProtocolError {
                     span: span.clone(),
@@ -77,7 +81,7 @@ pub(crate) fn resolve_protocol_bound_path(
                     context: NotAProtocolContext::Bound,
                 });
                 Ty::error(span)
-            }
+            },
         },
         TypePathResolution::NotFound { .. } => {
             ctx.diagnostics.throw(UnresolvedTypeError {
@@ -85,7 +89,7 @@ pub(crate) fn resolve_protocol_bound_path(
                 type_name: bound_name,
             });
             Ty::error(span)
-        }
+        },
         TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
             ctx.diagnostics.throw(NotAProtocolError {
                 span: span.clone(),
@@ -93,6 +97,6 @@ pub(crate) fn resolve_protocol_bound_path(
                 context: NotAProtocolContext::Bound,
             });
             Ty::error(span)
-        }
+        },
     }
 }

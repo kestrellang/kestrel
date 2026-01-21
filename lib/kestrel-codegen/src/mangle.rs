@@ -61,11 +61,7 @@ pub fn mangle_function_with_self(
     self_type: Option<Id<Ty>>,
 ) -> String {
     let func_def = &ctx.functions[func_id];
-    let param_types: Vec<Id<Ty>> = func_def
-        .params
-        .iter()
-        .map(|p| ctx.params[*p].ty)
-        .collect();
+    let param_types: Vec<Id<Ty>> = func_def.params.iter().map(|p| ctx.params[*p].ty).collect();
 
     let mut mangler = Mangler::new(ctx);
     mangler.mangle_function_sig_with_self(func_def.name, &param_types, type_args, self_type)
@@ -201,15 +197,15 @@ impl<'a> Mangler<'a> {
             MirTy::Pointer(inner) => {
                 self.output.push('P');
                 self.mangle_type(*inner);
-            }
+            },
             MirTy::Ref(inner) => {
                 self.output.push('R');
                 self.mangle_type(*inner);
-            }
+            },
             MirTy::RefMut(inner) => {
                 self.output.push('M');
                 self.mangle_type(*inner);
-            }
+            },
 
             MirTy::Tuple(elems) => {
                 self.output.push('T');
@@ -217,7 +213,7 @@ impl<'a> Mangler<'a> {
                 for &elem in elems {
                     self.mangle_type(elem);
                 }
-            }
+            },
 
             MirTy::Named { name, type_args } => {
                 let name_data = self.ctx.name(*name);
@@ -231,13 +227,13 @@ impl<'a> Mangler<'a> {
                     }
                     self.output.push('E');
                 }
-            }
+            },
 
             MirTy::TypeParam(id) => {
                 // Use type param name
                 let param = self.ctx.type_param(*id);
                 self.mangle_segment(&param.name);
-            }
+            },
 
             MirTy::FuncThin { params, ret } => {
                 self.output.push('F');
@@ -246,7 +242,7 @@ impl<'a> Mangler<'a> {
                     self.mangle_type(p);
                 }
                 self.mangle_type(*ret);
-            }
+            },
 
             MirTy::FuncThick { params, ret } => {
                 self.output.push('C'); // Closure/thick
@@ -255,11 +251,11 @@ impl<'a> Mangler<'a> {
                     self.mangle_type(p);
                 }
                 self.mangle_type(*ret);
-            }
+            },
 
             MirTy::SelfType => {
                 self.output.push('S');
-            }
+            },
 
             MirTy::AssociatedTypeProjection {
                 base,
@@ -273,11 +269,11 @@ impl<'a> Mangler<'a> {
                     self.mangle_segment(segment);
                 }
                 self.mangle_segment(associated);
-            }
+            },
 
             MirTy::Error => {
                 self.output.push('X'); // Error type
-            }
+            },
         }
     }
 }

@@ -446,7 +446,7 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
         match item {
             BlockItem::Statement(stmt) => {
                 emit_stmt_variant(sink, stmt);
-            }
+            },
             BlockItem::StatementExpr(expr) => {
                 // Statement-like expressions are wrapped in Statement node
                 // but don't have a semicolon
@@ -455,13 +455,13 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
                 emit_expr_variant(sink, expr);
                 sink.finish_node(); // ExpressionStatement
                 sink.finish_node(); // Statement
-            }
+            },
             BlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);
-            }
+            },
             BlockItem::GuardLet(guard_data) => {
                 emit_guard_let(sink, guard_data);
-            }
+            },
         }
     }
 
@@ -489,17 +489,17 @@ fn emit_guard_let(sink: &mut EventSink, data: &GuardLetData) {
         match item {
             ElseBlockItem::Statement(stmt) => {
                 emit_stmt_variant(sink, stmt);
-            }
+            },
             ElseBlockItem::StatementExpr(expr) => {
                 sink.start_node(SyntaxKind::Statement);
                 sink.start_node(SyntaxKind::ExpressionStatement);
                 emit_expr_variant(sink, expr);
                 sink.finish_node();
                 sink.finish_node();
-            }
+            },
             ElseBlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);
-            }
+            },
         }
     }
     sink.add_token(SyntaxKind::RBrace, data.else_rbrace.clone());
@@ -520,13 +520,13 @@ where
     match code_block_parser().parse(input).into_result() {
         Ok(data) => {
             emit_code_block(sink, &data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

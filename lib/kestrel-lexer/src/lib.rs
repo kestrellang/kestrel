@@ -56,7 +56,7 @@ fn parse_raw_string(lex: &mut logos::Lexer<Token>) -> bool {
 
         // Actually, let's use a different approach: peek ahead to see if stopping now
         // would result in a valid closing sequence immediately.
-        let mut peek_chars = remainder[additional_quotes..].chars();
+        let peek_chars = remainder[additional_quotes..].chars();
         let mut consecutive = 0;
         for c in peek_chars.clone() {
             if c == '"' {
@@ -85,7 +85,7 @@ fn parse_raw_string(lex: &mut logos::Lexer<Token>) -> bool {
     // Now scan for the closing sequence of `quote_count` quotes
     let mut consecutive_quotes = 0;
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         offset += c.len_utf8();
 
         if c == '"' {

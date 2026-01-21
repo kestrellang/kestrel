@@ -1,0 +1,12 @@
+# Clippy configuration for the Kestrel compiler project
+# See: https://doc.rust-lang.org/clippy/lint_configuration.html
+
+# Allow more arguments for functions - compiler code often needs many parameters
+too-many-arguments-threshold = 10
+
+# Allow longer type complexity - parser combinators naturally have complex types
+type-complexity-threshold = 500
+
+# Threshold for triggering the large_enum_variant lint (in bytes)
+# AST/IR nodes are naturally large, so we set this high
+enum-variant-size-threshold = 400

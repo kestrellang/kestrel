@@ -142,10 +142,7 @@ impl DeclarationBinderRegistry {
         binders.insert(SyntaxKind::DeinitDeclaration, Box::new(DeinitBinder));
         binders.insert(SyntaxKind::GetterClause, Box::new(GetterBinder));
         binders.insert(SyntaxKind::SetterClause, Box::new(SetterBinder));
-        binders.insert(
-            SyntaxKind::SubscriptDeclaration,
-            Box::new(SubscriptBinder),
-        );
+        binders.insert(SyntaxKind::SubscriptDeclaration, Box::new(SubscriptBinder));
 
         // Register terminal resolvers
         binders.insert(SyntaxKind::Visibility, Box::new(TerminalBinder));

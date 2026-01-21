@@ -99,7 +99,7 @@ impl Substitutions {
                     // No substitution found, return as-is
                     ty.clone()
                 }
-            }
+            },
 
             // Composite types - recursively apply to components
             TyKind::Tuple(elements) => {
@@ -108,17 +108,17 @@ impl Substitutions {
                     .map(|e| self.apply_with_visited(e, visited))
                     .collect();
                 Ty::tuple(new_elements, ty.span().clone())
-            }
+            },
 
             TyKind::Array(element_type) => {
                 let new_element = self.apply_with_visited(element_type, visited);
                 Ty::array(new_element, ty.span().clone())
-            }
+            },
 
             TyKind::Pointer(element_type) => {
                 let new_element = self.apply_with_visited(element_type, visited);
                 Ty::pointer(new_element, ty.span().clone())
-            }
+            },
 
             TyKind::Function {
                 params,
@@ -130,7 +130,7 @@ impl Substitutions {
                     .collect();
                 let new_return = self.apply_with_visited(return_type, visited);
                 Ty::function(new_params, new_return, ty.span().clone())
-            }
+            },
 
             // Instantiated types - recursively apply to their substitutions
             TyKind::Struct {
@@ -139,7 +139,7 @@ impl Substitutions {
             } => {
                 let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
                 Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
-            }
+            },
 
             TyKind::Enum {
                 symbol,
@@ -147,7 +147,7 @@ impl Substitutions {
             } => {
                 let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
                 Ty::generic_enum(symbol.clone(), new_subs, ty.span().clone())
-            }
+            },
 
             TyKind::Protocol {
                 symbol,
@@ -155,7 +155,7 @@ impl Substitutions {
             } => {
                 let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
                 Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
-            }
+            },
 
             TyKind::TypeAlias {
                 symbol,
@@ -163,14 +163,14 @@ impl Substitutions {
             } => {
                 let new_subs = self.apply_to_substitutions_with_visited(substitutions, visited);
                 Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
-            }
+            },
 
             // Associated type - apply substitutions to container if present
             TyKind::AssociatedType { symbol, container } => match container {
                 Some(container_ty) => {
                     let new_container = self.apply_with_visited(container_ty, visited);
                     Ty::qualified_associated_type(symbol.clone(), new_container, ty.span().clone())
-                }
+                },
                 None => ty.clone(),
             },
 
@@ -195,7 +195,7 @@ impl Substitutions {
                     },
                 };
                 Ty::unresolved_function(new_param_info, new_return, ty.span().clone())
-            }
+            },
 
             // Base types and special types - return as-is
             TyKind::Unit

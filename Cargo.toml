@@ -50,6 +50,29 @@ members = [
     "lib/kestrel-test-suite"
 ]
 
+# Workspace-wide lint configuration
+# Individual crates inherit these with [lints] workspace = true
+[workspace.lints.rust]
+unused_imports = "warn"
+dead_code = "warn"
+unused_variables = "warn"
+unused_mut = "warn"
+
+[workspace.lints.clippy]
+# Deny categories that indicate bugs
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+# Warn on style and performance issues
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+
+# Specific lint overrides (allow some noisy lints)
+too_many_arguments = "allow"  # Common in compiler code
+large_enum_variant = "allow"  # AST nodes are naturally large
+type_complexity = "allow"     # Parser combinators have complex types
+
 # Reduce stack frame size in debug builds for recursive parsers
 [profile.dev]
 opt-level = 1

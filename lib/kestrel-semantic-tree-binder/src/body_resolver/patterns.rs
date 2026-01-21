@@ -103,7 +103,7 @@ fn resolve_pattern_inner(
         SyntaxKind::WildcardPattern => resolve_wildcard_pattern(node, ctx, expected_ty),
         SyntaxKind::BindingPattern => {
             resolve_binding_pattern(node, ctx, expected_ty, force_mutable)
-        }
+        },
         SyntaxKind::TuplePattern => resolve_tuple_pattern(node, ctx, expected_ty, force_mutable),
         SyntaxKind::LiteralPattern => resolve_literal_pattern(node, ctx, expected_ty),
         SyntaxKind::EnumPattern => resolve_enum_pattern(node, ctx, expected_ty, force_mutable),
@@ -117,7 +117,7 @@ fn resolve_pattern_inner(
         _ => {
             // Unknown pattern kind - treat as error
             Pattern::error(span)
-        }
+        },
     }
 }
 
@@ -244,10 +244,10 @@ fn resolve_tuple_pattern(
     // Find rest pattern indices
     let mut rest_indices: Vec<usize> = Vec::new();
     for (i, elem_node) in element_nodes.iter().enumerate() {
-        if let Some(inner) = elem_node.children().next() {
-            if inner.kind() == SyntaxKind::RestPattern {
-                rest_indices.push(i);
-            }
+        if let Some(inner) = elem_node.children().next()
+            && inner.kind() == SyntaxKind::RestPattern
+        {
+            rest_indices.push(i);
         }
     }
 
@@ -263,7 +263,7 @@ fn resolve_tuple_pattern(
     let rest_index = rest_indices.first().copied();
 
     // Calculate expected types for prefix and suffix
-    let expected_tuple_len = expected_element_types.as_ref().map(|t| t.len());
+    let _expected_tuple_len = expected_element_types.as_ref().map(|t| t.len());
 
     // Split elements into prefix and suffix based on rest pattern position
     let (prefix_nodes, suffix_nodes): (Vec<_>, Vec<_>) = if let Some(rest_idx) = rest_index {
@@ -349,7 +349,7 @@ fn resolve_tuple_pattern(
 fn resolve_literal_pattern(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
-    expected_ty: Option<&Ty>,
+    _expected_ty: Option<&Ty>,
 ) -> Pattern {
     let span = get_node_span(node, ctx.file_id);
 
@@ -364,14 +364,14 @@ fn resolve_literal_pattern(
                     // based on the scrutinee type and ExpressibleByIntLiteral conformance
                     let ty = Ty::infer(span.clone());
                     return Pattern::literal(LiteralValue::Integer(value), ty, span);
-                }
+                },
                 SyntaxKind::Float => {
                     // Float literals are not allowed in patterns
                     use crate::diagnostics::FloatLiteralInPatternError;
                     let error = FloatLiteralInPatternError { span: span.clone() };
                     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                     return Pattern::error(span);
-                }
+                },
                 SyntaxKind::String => {
                     // Remove quotes and process escape sequences
                     let text_range = token.text_range();
@@ -381,11 +381,15 @@ fn resolve_literal_pattern(
                     } else {
                         text
                     };
-                    let value =
-                        super::expressions::unescape_string(inner, ctx.file_id, token_start + 1, ctx);
+                    let value = super::expressions::unescape_string(
+                        inner,
+                        ctx.file_id,
+                        token_start + 1,
+                        ctx,
+                    );
                     let ty = Ty::string(span.clone());
                     return Pattern::literal(LiteralValue::String(value), ty, span);
-                }
+                },
                 SyntaxKind::RawString => {
                     // Raw strings: strip quotes, no escape processing
                     let quote_count = text.chars().take_while(|&c| c == '"').count();
@@ -396,15 +400,15 @@ fn resolve_literal_pattern(
                     };
                     let ty = Ty::string(span.clone());
                     return Pattern::literal(LiteralValue::String(value), ty, span);
-                }
+                },
                 SyntaxKind::Boolean => {
                     let value = text == "true";
                     // Use infer type so type inference can unify with scrutinee type
                     // based on the scrutinee type and ExpressibleByBoolLiteral conformance
                     let ty = Ty::infer(span.clone());
                     return Pattern::literal(LiteralValue::Bool(value), ty, span);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
@@ -722,7 +726,7 @@ fn resolve_range_pattern(
                 } else {
                     end_bound = Some(bound);
                 }
-            }
+            },
             SyntaxKind::String => {
                 // Handle char literals (single-char strings like 'a')
                 let text = token.text();
@@ -736,16 +740,16 @@ fn resolve_range_pattern(
                         end_bound = Some(bound);
                     }
                 }
-            }
+            },
             SyntaxKind::DotDotEquals => {
                 found_operator = true;
                 inclusive = true;
-            }
+            },
             SyntaxKind::DotDotLess => {
                 found_operator = true;
                 inclusive = false;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -763,14 +767,14 @@ fn resolve_range_pattern(
             } else {
                 *s < *e
             }
-        }
+        },
         (RangeBound::Char(s), RangeBound::Char(e)) => {
             if inclusive {
                 *s <= *e
             } else {
                 *s < *e
             }
-        }
+        },
         _ => false, // Mismatched types are invalid
     };
 
@@ -794,7 +798,7 @@ fn resolve_range_pattern(
             expected_ty
                 .cloned()
                 .unwrap_or_else(|| Ty::infer(span.clone()))
-        }
+        },
         // Mismatched bounds (e.g., int..=char) - error
         _ => return Pattern::error(span),
     };
@@ -871,12 +875,12 @@ fn resolve_or_pattern(
         match &pattern.kind {
             PatternKind::Local { name, .. } => {
                 bindings.insert(name.clone(), pattern.ty.clone());
-            }
+            },
             PatternKind::Tuple { prefix, suffix, .. } => {
                 for elem in prefix.iter().chain(suffix.iter()) {
                     collect_bindings_inner(elem, bindings);
                 }
-            }
+            },
             PatternKind::EnumVariant {
                 bindings: enum_bindings,
                 ..
@@ -884,14 +888,14 @@ fn resolve_or_pattern(
                 for binding in enum_bindings {
                     collect_bindings_inner(&binding.pattern, bindings);
                 }
-            }
+            },
             PatternKind::Or { alternatives } => {
                 // For nested or-patterns, use the first alternative's bindings
                 if let Some(first) = alternatives.first() {
                     collect_bindings_inner(first, bindings);
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -968,7 +972,7 @@ fn resolve_array_pattern(
                 } else {
                     prefix.push(pattern);
                 }
-            }
+            },
             SyntaxKind::ArrayPatternRest => {
                 // We're now in the suffix
                 in_suffix = true;
@@ -1004,8 +1008,8 @@ fn resolve_array_pattern(
                     // Anonymous rest: `..` - just ignore remaining elements
                     rest = Some((None, None));
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -1164,12 +1168,12 @@ fn collect_bindings_for_duplicate_check(
             } else {
                 bindings.insert(name.clone(), pattern.span.clone());
             }
-        }
+        },
         PatternKind::Tuple { prefix, suffix, .. } => {
             for elem in prefix.iter().chain(suffix.iter()) {
                 collect_bindings_for_duplicate_check(elem, bindings, ctx);
             }
-        }
+        },
         PatternKind::EnumVariant {
             bindings: enum_bindings,
             ..
@@ -1177,12 +1181,12 @@ fn collect_bindings_for_duplicate_check(
             for binding in enum_bindings {
                 collect_bindings_for_duplicate_check(&binding.pattern, bindings, ctx);
             }
-        }
+        },
         PatternKind::Struct { fields, .. } => {
             for field in fields {
                 collect_bindings_for_duplicate_check(&field.pattern, bindings, ctx);
             }
-        }
+        },
         PatternKind::Array { prefix, suffix, .. } => {
             for elem in prefix {
                 collect_bindings_for_duplicate_check(elem, bindings, ctx);
@@ -1190,11 +1194,11 @@ fn collect_bindings_for_duplicate_check(
             for elem in suffix {
                 collect_bindings_for_duplicate_check(elem, bindings, ctx);
             }
-        }
+        },
         PatternKind::Or { .. } => {
             // For or-patterns, each alternative can have the same bindings
             // (they should have the same set of names). Don't check across alternatives.
-        }
+        },
         PatternKind::At {
             name, subpattern, ..
         } => {
@@ -1210,11 +1214,11 @@ fn collect_bindings_for_duplicate_check(
                 bindings.insert(name.clone(), pattern.span.clone());
             }
             collect_bindings_for_duplicate_check(subpattern, bindings, ctx);
-        }
+        },
         PatternKind::Wildcard
         | PatternKind::Literal { .. }
         | PatternKind::Range { .. }
         | PatternKind::Rest
-        | PatternKind::Error => {}
+        | PatternKind::Error => {},
     }
 }

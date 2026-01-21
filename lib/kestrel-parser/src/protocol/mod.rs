@@ -196,13 +196,13 @@ where
     {
         Ok(data) => {
             emit_protocol_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

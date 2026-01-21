@@ -154,7 +154,7 @@ impl StatementPattern {
             StatementKind::DeinitIf { place, flag } => self.matches_deinit_if(place, flag, ctx),
             StatementKind::SetDeinitFlag { flag, value } => {
                 self.matches_set_deinit_flag(flag, *value, ctx)
-            }
+            },
         }
     }
 
@@ -175,7 +175,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::Copy => matches!(rvalue, Rvalue::Copy(_)),
             StatementPattern::Move => matches!(rvalue, Rvalue::Move(_)),
@@ -189,7 +189,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::EnumVariant { enum_ty, variant } => {
                 if let Rvalue::EnumVariant {
@@ -203,7 +203,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::Tuple { arity } => {
                 if let Rvalue::Tuple(elements) = rvalue {
@@ -211,7 +211,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::StackAlloc => matches!(rvalue, Rvalue::StackAlloc { .. }),
 
@@ -221,7 +221,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::AnyBinOp => matches!(rvalue, Rvalue::BinaryOp { .. }),
 
@@ -231,7 +231,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::AnyUnOp => matches!(rvalue, Rvalue::UnaryOp { .. }),
 
@@ -245,49 +245,41 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::CallGeneric {
                 callee,
                 type_arg_count,
             } => {
                 if let Rvalue::Call {
-                    callee: actual_callee,
+                    callee: Callee::Direct { name, type_args },
                     ..
                 } = rvalue
                 {
-                    if let Callee::Direct { name, type_args } = actual_callee {
-                        let actual_name = ctx.name(*name).to_string();
-                        actual_name == *callee && type_args.len() == *type_arg_count
-                    } else {
-                        false
-                    }
+                    let actual_name = ctx.name(*name).to_string();
+                    actual_name == *callee && type_args.len() == *type_arg_count
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::CallWitness { protocol, method } => {
                 if let Rvalue::Call {
-                    callee: actual_callee,
+                    callee:
+                        Callee::Witness {
+                            protocol: actual_protocol,
+                            method: actual_method,
+                            ..
+                        },
                     ..
                 } = rvalue
                 {
-                    if let Callee::Witness {
-                        protocol: actual_protocol,
-                        method: actual_method,
-                        ..
-                    } = actual_callee
-                    {
-                        let actual_protocol_name = ctx.name(*actual_protocol).to_string();
-                        actual_protocol_name == *protocol && actual_method == method
-                    } else {
-                        false
-                    }
+                    let actual_protocol_name = ctx.name(*actual_protocol).to_string();
+                    actual_protocol_name == *protocol && actual_method == method
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::CallEscaping => {
                 if let Rvalue::Call {
@@ -299,7 +291,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::AnyCall => matches!(rvalue, Rvalue::Call { .. }),
 
@@ -309,7 +301,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::ApplyPartial {
                 func,
@@ -324,7 +316,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::Cast { kind } => {
                 if let Rvalue::Cast {
@@ -335,7 +327,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::CallWithModes { callee, arg_modes } => {
                 if let Rvalue::Call {
@@ -361,7 +353,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::StrPtr => matches!(rvalue, Rvalue::StrPtr(_)),
             StatementPattern::StrLen => matches!(rvalue, Rvalue::StrLen(_)),
@@ -389,7 +381,7 @@ impl StatementPattern {
 
             StatementPattern::Call { callee: expected } => {
                 self.callee_matches_name(callee, expected, ctx)
-            }
+            },
 
             StatementPattern::CallGeneric {
                 callee: expected,
@@ -401,7 +393,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::CallWitness { protocol, method } => {
                 if let Callee::Witness {
@@ -415,7 +407,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::CallEscaping => matches!(callee, Callee::Thick(_)),
 
@@ -426,7 +418,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             StatementPattern::DeinitCall { ty } => {
                 if let Callee::Direct { name, .. } = callee {
@@ -436,7 +428,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
 
             _ => false,
         }
@@ -459,7 +451,7 @@ impl StatementPattern {
                 } else {
                     false
                 }
-            }
+            },
             _ => false,
         }
     }
@@ -488,7 +480,7 @@ impl StatementPattern {
                     actual_flag.name == *expected_flag
                 };
                 local_matches && flag_matches
-            }
+            },
             _ => false,
         }
     }
@@ -510,7 +502,7 @@ impl StatementPattern {
                     actual_flag.name == *expected_flag
                 };
                 flag_matches && value == *expected_value
-            }
+            },
             _ => false,
         }
     }
@@ -527,7 +519,7 @@ impl StatementPattern {
             StatementPattern::Construct { ty } => format!("construct {}", ty),
             StatementPattern::EnumVariant { enum_ty, variant } => {
                 format!("enum {}.{}", enum_ty, variant)
-            }
+            },
             StatementPattern::Tuple { arity } => format!("tuple of arity {}", arity),
             StatementPattern::StackAlloc => "stack_alloc".to_string(),
             StatementPattern::BinOp(op) => format!("binop {:?}", op),
@@ -541,7 +533,7 @@ impl StatementPattern {
             } => format!("call {}[{} type args]", callee, type_arg_count),
             StatementPattern::CallWitness { protocol, method } => {
                 format!("witness call {}.{}", protocol, method)
-            }
+            },
             StatementPattern::CallEscaping => "escaping call".to_string(),
             StatementPattern::AnyCall => "any call".to_string(),
             StatementPattern::FuncToEscaping { func } => format!("func.to.escaping {}", func),
@@ -550,12 +542,12 @@ impl StatementPattern {
                 capture_count,
             } => {
                 format!("apply partial {}({} captures)", func, capture_count)
-            }
+            },
             StatementPattern::Cast { kind } => format!("cast {:?}", kind),
             StatementPattern::CallWithModes { callee, arg_modes } => {
                 let modes_str: Vec<_> = arg_modes.iter().map(|m| m.as_str()).collect();
                 format!("call {}({})", callee, modes_str.join(", "))
-            }
+            },
             StatementPattern::StrPtr => "str.ptr".to_string(),
             StatementPattern::StrLen => "str.len".to_string(),
             StatementPattern::StrFromParts => "str.from_parts".to_string(),
@@ -567,11 +559,11 @@ impl StatementPattern {
             StatementPattern::AnyDeinit => "any deinit".to_string(),
             StatementPattern::DeinitIf { local, flag } => {
                 format!("deinit %{} if %{}", local, flag)
-            }
+            },
             StatementPattern::AnyDeinitIf => "any conditional deinit".to_string(),
             StatementPattern::SetDeinitFlag { flag, value } => {
                 format!("%{} = {}", flag, value)
-            }
+            },
             StatementPattern::AnySetDeinitFlag => "any set deinit flag".to_string(),
             StatementPattern::DeinitCall { ty } => format!("call {}.deinit", ty),
             StatementPattern::AnyDeinitCall => "any deinit call".to_string(),

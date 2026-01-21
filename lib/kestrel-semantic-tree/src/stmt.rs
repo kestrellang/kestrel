@@ -156,14 +156,14 @@ impl Statement {
                         } else {
                             "let"
                         }
-                    }
+                    },
                     PatternKind::At { mutability, .. } => {
                         if *mutability == Mutability::Mutable {
                             "var"
                         } else {
                             "let"
                         }
-                    }
+                    },
                     PatternKind::Wildcard
                     | PatternKind::Tuple { .. }
                     | PatternKind::Literal { .. }
@@ -181,7 +181,7 @@ impl Statement {
                     .map(|v| format!(" = {}", v.debug_compact()))
                     .unwrap_or_default();
                 format!("{} {}{};", keyword, name, value_str)
-            }
+            },
             StatementKind::Expr(expr) => format!("{};", expr.debug_compact()),
             StatementKind::GuardLet { conditions, .. } => {
                 let conds: Vec<_> = conditions
@@ -190,15 +190,15 @@ impl Statement {
                         IfCondition::Let { pattern, value, .. } => {
                             let name = pattern.name().unwrap_or("<pattern>");
                             format!("let {} = {}", name, value.debug_compact())
-                        }
+                        },
                         IfCondition::Expr(e) => e.debug_compact(),
                     })
                     .collect();
                 format!("guard {} else {{ ... }}", conds.join(", "))
-            }
+            },
             StatementKind::Deinit { name, .. } => {
                 format!("deinit {};", name)
-            }
+            },
         }
     }
 }

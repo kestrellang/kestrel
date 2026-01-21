@@ -198,7 +198,7 @@ impl InitializerSymbol {
         self.metadata
             .get_behavior::<GenericsBehavior>()
             .map(|g| g.where_clause().clone())
-            .unwrap_or_else(WhereClause::new)
+            .unwrap_or_default()
     }
 
     /// Get the type parameters for this initializer.

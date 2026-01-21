@@ -86,7 +86,7 @@ impl MirStruct {
                 }
 
                 Ok(())
-            }
+            },
 
             StructExpectation::FieldCount(expected) => {
                 let actual = def.fields.len();
@@ -97,7 +97,7 @@ impl MirStruct {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             StructExpectation::TypeParamCount(expected) => {
                 let actual = def.type_params.len();
@@ -108,7 +108,7 @@ impl MirStruct {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             StructExpectation::NoField(name) => {
                 if def.field_by_name(name).is_some() {
@@ -118,7 +118,7 @@ impl MirStruct {
                     ));
                 }
                 Ok(())
-            }
+            },
         }
     }
 }

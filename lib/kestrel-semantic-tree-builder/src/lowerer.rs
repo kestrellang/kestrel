@@ -59,7 +59,7 @@ impl SemanticModelBuilder {
         let parent_module = match extract_module_path(syntax) {
             Some(path_segments) if !path_segments.is_empty() => {
                 build_module_hierarchy(&root, &path_segments, file_id)
-            }
+            },
             _ => root.clone(),
         };
 
@@ -128,7 +128,7 @@ impl SemanticModelBuilder {
                 let import_data = ImportDataBehavior::new(
                     module_path_with_spans,
                     span,
-                    None,  // no alias
+                    None,   // no alias
                     vec![], // no items = wildcard
                 );
                 import_arc.metadata().add_behavior(import_data);
@@ -188,13 +188,13 @@ impl SemanticModelBuilder {
                     let name = child.metadata().name().value.clone();
                     let is_std = name == "std" || in_std;
                     self.collect_user_source_files_recursive(&child, result, is_std);
-                }
+                },
                 KestrelSymbolKind::SourceFile => {
                     if !in_std {
                         result.push(child.clone());
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
@@ -230,12 +230,18 @@ impl SemanticModelBuilder {
                     // For field declarations with computed properties, add getter/setter
                     // syntax mappings for the child symbols created by the field builder
                     if current_syntax.kind() == kestrel_syntax_tree::SyntaxKind::FieldDeclaration {
-                        self.add_computed_property_syntax_mappings(&symbol, &current_syntax, file_id);
+                        self.add_computed_property_syntax_mappings(
+                            &symbol,
+                            &current_syntax,
+                            file_id,
+                        );
                     }
 
                     // For subscript declarations, add getter/setter syntax mappings
                     // for the child symbols created by the subscript builder
-                    if current_syntax.kind() == kestrel_syntax_tree::SyntaxKind::SubscriptDeclaration {
+                    if current_syntax.kind()
+                        == kestrel_syntax_tree::SyntaxKind::SubscriptDeclaration
+                    {
                         self.add_subscript_syntax_mappings(&symbol, &current_syntax, file_id);
                     }
 
@@ -322,14 +328,14 @@ impl SemanticModelBuilder {
                         self.syntax_map
                             .insert(child.metadata().id(), body_syntax.clone());
                     }
-                }
+                },
                 KestrelSymbolKind::Setter => {
                     if let Some(ref setter_syntax) = setter_clause {
                         self.syntax_map
                             .insert(child.metadata().id(), setter_syntax.clone());
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
@@ -392,14 +398,14 @@ impl SemanticModelBuilder {
                         self.syntax_map
                             .insert(child.metadata().id(), body_syntax.clone());
                     }
-                }
+                },
                 KestrelSymbolKind::Setter => {
                     if let Some(ref setter_syntax) = setter_clause {
                         self.syntax_map
                             .insert(child.metadata().id(), setter_syntax.clone());
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }

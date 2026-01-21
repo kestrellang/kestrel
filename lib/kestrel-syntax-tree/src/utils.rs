@@ -95,12 +95,12 @@ fn find_first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
                 if !is_trivia(t.kind()) {
                     return Some(t.text_range().start().into());
                 }
-            }
+            },
             SyntaxElement::Node(n) => {
                 if let Some(start) = find_first_non_trivia_start(&n) {
                     return Some(start);
                 }
-            }
+            },
         }
     }
     None

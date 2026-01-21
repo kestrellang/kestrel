@@ -33,7 +33,7 @@ pub use context::CodegenContext;
 pub use error::CodegenError;
 pub use link::link_executable;
 
-use kestrel_codegen::{LayoutCache, TargetConfig};
+use kestrel_codegen::TargetConfig;
 use kestrel_execution_graph::MirContext;
 use std::path::Path;
 

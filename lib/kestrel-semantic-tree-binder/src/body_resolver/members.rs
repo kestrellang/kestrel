@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_model::{ExtensionsFor, IsVisibleFrom, SymbolFor};
+use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
-use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
-use kestrel_semantic_tree::behavior::ComputedMemberAccessBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
+use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::expr::{CallArgument, ExprKind, Expression, PrimitiveMethod};
@@ -22,10 +22,10 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
-use kestrel_semantic_tree::ty::Substitutions;
 use kestrel_semantic_tree::symbol::protocol::FlattenedProtocolBehavior;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
+use kestrel_semantic_tree::ty::Substitutions;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -37,7 +37,9 @@ use crate::diagnostics::{
     UnconstrainedTypeParameterMemberError,
 };
 
-use super::calls::{collect_overload_descriptions, try_resolve_subscript_call, validate_argument_access_modes};
+use super::calls::{
+    collect_overload_descriptions, try_resolve_subscript_call, validate_argument_access_modes,
+};
 use super::context::BodyResolutionContext;
 use super::utils::{
     find_type_directed_match, format_symbol_kind, get_callable_behavior, get_type_container,
@@ -156,7 +158,7 @@ pub fn resolve_member_access(
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(full_span.clone());
-        }
+        },
     };
 
     // 2. Find child with that name - first in direct children, then in extensions
@@ -230,9 +232,9 @@ pub fn resolve_member_access(
                     };
                     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                     return Expression::error(full_span.clone());
-                }
+                },
             }
-        }
+        },
     };
 
     // 3. Check visibility
@@ -262,33 +264,35 @@ pub fn resolve_member_access(
 
     // 4. Get MemberAccessBehavior or ComputedMemberAccessBehavior and produce expression
     for behavior in member.metadata().behaviors() {
-        if behavior.kind() == KestrelBehaviorKind::MemberAccess {
-            if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
-                let mut result = access.access(base.clone(), full_span.clone());
-                // Apply substitutions from the parent's type to the member type
-                // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess
+            && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+        {
+            let mut result = access.access(base.clone(), full_span.clone());
+            // Apply substitutions from the parent's type to the member type
+            // e.g., for Box[T].value, substitute Box's T with the instantiated type arg
 
-                // First, resolve SelfType to the actual type if needed
-                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+            // First, resolve SelfType to the actual type if needed
+            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
 
-                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                    result.ty = result.ty.apply_substitutions(substitutions);
-                }
-                return result;
+            if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                result.ty = result.ty.apply_substitutions(substitutions);
             }
+            return result;
         }
         // Handle computed properties (getter-only access for now)
-        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess {
-            if let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>() {
-                let mut result = access.access(base.clone(), full_span.clone());
-                // Apply substitutions from the parent's type to the member type
-                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
+            && let Some(access) = behavior
+                .as_ref()
+                .downcast_ref::<ComputedMemberAccessBehavior>()
+        {
+            let mut result = access.access(base.clone(), full_span.clone());
+            // Apply substitutions from the parent's type to the member type
+            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
 
-                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                    result.ty = result.ty.apply_substitutions(substitutions);
-                }
-                return result;
+            if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                result.ty = result.ty.apply_substitutions(substitutions);
             }
+            return result;
         }
     }
 
@@ -387,7 +391,7 @@ fn try_resolve_field_access(
                 .iter()
                 .flat_map(|ext| ext.metadata().children())
                 .find(|child| child.metadata().name().value == field_name)?
-        }
+        },
     };
 
     // Check visibility (silently fail if not visible)
@@ -401,28 +405,29 @@ fn try_resolve_field_access(
 
     // Check for MemberAccessBehavior (field) or ComputedMemberAccessBehavior (computed property)
     for behavior in member.metadata().behaviors() {
-        if behavior.kind() == KestrelBehaviorKind::MemberAccess {
-            if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
-                let mut result = access.access(base.clone(), span.clone());
-                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess
+            && let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>()
+        {
+            let mut result = access.access(base.clone(), span.clone());
+            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
 
-                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                    result.ty = result.ty.apply_substitutions(substitutions);
-                }
-                return Some(result);
+            if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                result.ty = result.ty.apply_substitutions(substitutions);
             }
+            return Some(result);
         }
-        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess {
-            if let Some(access) = behavior.as_ref().downcast_ref::<ComputedMemberAccessBehavior>()
-            {
-                let mut result = access.access(base.clone(), span.clone());
-                let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
+        if behavior.kind() == KestrelBehaviorKind::ComputedMemberAccess
+            && let Some(access) = behavior
+                .as_ref()
+                .downcast_ref::<ComputedMemberAccessBehavior>()
+        {
+            let mut result = access.access(base.clone(), span.clone());
+            let resolved_base_ty = resolve_self_type_to_concrete(base_ty, ctx);
 
-                if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
-                    result.ty = result.ty.apply_substitutions(substitutions);
-                }
-                return Some(result);
+            if let Some((_, substitutions)) = resolved_base_ty.as_struct_with_subs() {
+                result.ty = result.ty.apply_substitutions(substitutions);
             }
+            return Some(result);
         }
     }
 
@@ -588,27 +593,24 @@ pub fn resolve_member_call(
     let base_ty = &object.ty;
 
     // Check for delegating initializer: self.init(...)
-    if member_name == "init" {
-        if let ExprKind::LocalRef(local_id) = &object.kind {
-            // Check if this is the "self" local (local ID 0 in initializers)
-            if *local_id == LocalId(0) {
-                // Check if we're inside an initializer
-                if let Some(symbol) = ctx.model.query(SymbolFor {
-                    id: ctx.function_id,
-                }) {
-                    if symbol.metadata().kind() == KestrelSymbolKind::Initializer {
-                        return resolve_delegating_init(
-                            &symbol, arguments, arg_labels, span, ctx,
-                        );
-                    }
-                }
-
-                // Not in an initializer - error
-                ctx.diagnostics.add_diagnostic(
-                    DelegatingInitOutsideInitializerError { span: span.clone() }.into_diagnostic(),
-                );
-                return Expression::error(span);
+    if member_name == "init"
+        && let ExprKind::LocalRef(local_id) = &object.kind
+    {
+        // Check if this is the "self" local (local ID 0 in initializers)
+        if *local_id == LocalId(0) {
+            // Check if we're inside an initializer
+            if let Some(symbol) = ctx.model.query(SymbolFor {
+                id: ctx.function_id,
+            }) && symbol.metadata().kind() == KestrelSymbolKind::Initializer
+            {
+                return resolve_delegating_init(&symbol, arguments, arg_labels, span, ctx);
             }
+
+            // Not in an initializer - error
+            ctx.diagnostics.add_diagnostic(
+                DelegatingInitOutsideInitializerError { span: span.clone() }.into_diagnostic(),
+            );
+            return Expression::error(span);
         }
     }
 
@@ -664,7 +666,7 @@ pub fn resolve_member_call(
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             return Expression::error(span);
-        }
+        },
     };
 
     // Find method(s) with this name - first in direct children
@@ -738,11 +740,11 @@ pub fn resolve_member_call(
                         return Expression::error(span);
                     }
                     return Expression::call(field_expr, arguments, (**return_type).clone(), span);
-                }
+                },
                 TyKind::UnresolvedFunction { return_type, .. } => {
                     return Expression::call(field_expr, arguments, (**return_type).clone(), span);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -762,19 +764,19 @@ pub fn resolve_member_call(
         Vec::new();
 
     for (idx, method) in methods.iter().enumerate() {
-        if let Some(callable) = get_callable_behavior(method) {
-            if matches_signature(&callable, arguments.len(), arg_labels) {
-                // Check visibility
-                let method_id = method.metadata().id();
-                if !ctx.model.query(IsVisibleFrom {
-                    target: method_id,
-                    context: ctx.function_id,
-                }) {
-                    invisible_matches.push(method.clone());
-                    continue;
-                }
-                candidates.push((idx, method, callable));
+        if let Some(callable) = get_callable_behavior(method)
+            && matches_signature(&callable, arguments.len(), arg_labels)
+        {
+            // Check visibility
+            let method_id = method.metadata().id();
+            if !ctx.model.query(IsVisibleFrom {
+                target: method_id,
+                context: ctx.function_id,
+            }) {
+                invisible_matches.push(method.clone());
+                continue;
             }
+            candidates.push((idx, method, callable));
         }
     }
 
@@ -813,8 +815,7 @@ pub fn resolve_member_call(
                 // e.g., Option.Some(value: 42) should infer T = Int from the argument
                 let type_params = enum_sym.type_parameters();
                 if !type_params.is_empty() {
-                    let arg_types: Vec<Ty> =
-                        arguments.iter().map(|a| a.value.ty.clone()).collect();
+                    let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
                     let inferred_subs = infer_type_arguments(&type_params, callable, &arg_types);
                     return_ty = substitute_type(&return_ty, &inferred_subs);
                 }
@@ -1064,7 +1065,8 @@ fn resolve_constrained_member_call(
         let method_type_params = generics.type_parameters();
         if !method_type_params.is_empty() {
             let arg_types: Vec<Ty> = arguments.iter().map(|a| a.value.ty.clone()).collect();
-            let method_subs = infer_type_arguments(method_type_params, &winner.callable, &arg_types);
+            let method_subs =
+                infer_type_arguments(method_type_params, &winner.callable, &arg_types);
             for (key, ty) in method_subs.iter() {
                 call_subs.insert(*key, ty.clone());
             }
@@ -1090,6 +1092,7 @@ fn resolve_constrained_member_call(
 /// The `protocol_substitutions` parameter contains the type arguments for the protocol
 /// bound, e.g., for `T: Converter[lang.i64]`, it maps the Converter's type parameter
 /// to `lang.i64`. These substitutions are applied to method signatures.
+#[allow(clippy::only_used_in_recursion)]
 fn collect_protocol_methods(
     protocol: &Arc<ProtocolSymbol>,
     method_name: &str,
@@ -1131,21 +1134,20 @@ fn collect_protocol_methods(
     for child in protocol.metadata().children() {
         if child.metadata().kind() == KestrelSymbolKind::Function
             && child.metadata().name().value == method_name
+            && let Some(callable) = get_callable_behavior(&child)
         {
-            if let Some(callable) = get_callable_behavior(&child) {
-                // Substitute Self with the receiver type
-                let substituted_callable = substitute_callable_self(&callable, receiver_ty);
-                // Apply protocol type parameter substitutions
-                let substituted_callable =
-                    substitute_callable(&substituted_callable, protocol_substitutions);
+            // Substitute Self with the receiver type
+            let substituted_callable = substitute_callable_self(&callable, receiver_ty);
+            // Apply protocol type parameter substitutions
+            let substituted_callable =
+                substitute_callable(&substituted_callable, protocol_substitutions);
 
-                candidates.push(ConstrainedMethodCandidate {
-                    method: child.clone(),
-                    callable: substituted_callable,
-                    protocol_name: proto_name.clone(),
-                    definition_span: child.metadata().name().span.clone(),
-                });
-            }
+            candidates.push(ConstrainedMethodCandidate {
+                method: child.clone(),
+                callable: substituted_callable,
+                protocol_name: proto_name.clone(),
+                definition_span: child.metadata().name().span.clone(),
+            });
         }
     }
 
@@ -1208,7 +1210,10 @@ pub fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -
 ///
 /// This is used when a protocol bound has type arguments, e.g., `T: Converter[lang.i64]`.
 /// The protocol's type parameters need to be substituted with the concrete types.
-fn substitute_callable(callable: &CallableBehavior, substitutions: &Substitutions) -> CallableBehavior {
+fn substitute_callable(
+    callable: &CallableBehavior,
+    substitutions: &Substitutions,
+) -> CallableBehavior {
     use kestrel_semantic_tree::behavior::callable::CallableParameter;
 
     // Skip if no substitutions to apply
@@ -1399,17 +1404,15 @@ fn find_associated_type_in_bounds(
                     // Found an associated type - create a qualified associated type
                     if let Some(symbol) = ctx.model.query(SymbolFor {
                         id: child.metadata().id(),
-                    }) {
-                        if let Ok(assoc_type_arc) =
-                            symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
-                        {
-                            let qualified_ty = Ty::qualified_associated_type(
-                                assoc_type_arc,
-                                container_ty.clone(),
-                                span.clone(),
-                            );
-                            return Some(Expression::associated_type_ref(qualified_ty, span));
-                        }
+                    }) && let Ok(assoc_type_arc) =
+                        symbol.into_any_arc().downcast::<AssociatedTypeSymbol>()
+                    {
+                        let qualified_ty = Ty::qualified_associated_type(
+                            assoc_type_arc,
+                            container_ty.clone(),
+                            span.clone(),
+                        );
+                        return Some(Expression::associated_type_ref(qualified_ty, span));
                     }
                 }
             }
@@ -1418,15 +1421,14 @@ fn find_associated_type_in_bounds(
             if let Some(flattened) = protocol
                 .metadata()
                 .get_behavior::<FlattenedProtocolBehavior>()
+                && let Some(flattened_assoc) = flattened.associated_types().get(member_name)
             {
-                if let Some(flattened_assoc) = flattened.associated_types().get(member_name) {
-                    let qualified_ty = Ty::qualified_associated_type(
-                        flattened_assoc.symbol.clone(),
-                        container_ty.clone(),
-                        span.clone(),
-                    );
-                    return Some(Expression::associated_type_ref(qualified_ty, span));
-                }
+                let qualified_ty = Ty::qualified_associated_type(
+                    flattened_assoc.symbol.clone(),
+                    container_ty.clone(),
+                    span.clone(),
+                );
+                return Some(Expression::associated_type_ref(qualified_ty, span));
             }
         }
     }
@@ -1483,7 +1485,7 @@ fn resolve_associated_type_member_access(
     let container_ty = match container {
         Some(c) => {
             Ty::qualified_associated_type(assoc_type.clone(), (**c).clone(), full_span.clone())
-        }
+        },
         None => base.ty.clone(),
     };
 
@@ -1598,16 +1600,15 @@ fn collect_protocol_static_methods(
     for child in protocol.metadata().children() {
         if child.metadata().kind() == KestrelSymbolKind::Function
             && child.metadata().name().value == method_name
+            && let Some(callable) = get_callable_behavior(&child)
         {
-            if let Some(callable) = get_callable_behavior(&child) {
-                // Check if it's a static method (no receiver)
-                if callable.is_static() {
-                    candidates.push(StaticMethodCandidate {
-                        method_id: child.metadata().id(),
-                        protocol_name: protocol_name.clone(),
-                        definition_span: child.metadata().span().clone(),
-                    });
-                }
+            // Check if it's a static method (no receiver)
+            if callable.is_static() {
+                candidates.push(StaticMethodCandidate {
+                    method_id: child.metadata().id(),
+                    protocol_name: protocol_name.clone(),
+                    definition_span: child.metadata().span().clone(),
+                });
             }
         }
     }
@@ -1813,12 +1814,12 @@ fn types_match_simple(a: &Ty, b: &Ty) -> bool {
         // The caller must check substitutions separately to avoid infinite recursion
         (TyKind::Struct { symbol: a_sym, .. }, TyKind::Struct { symbol: b_sym, .. }) => {
             a_sym.metadata().id() == b_sym.metadata().id()
-        }
+        },
 
         // Type parameters - compare by symbol ID
         (TyKind::TypeParameter(a_param), TyKind::TypeParameter(b_param)) => {
             a_param.metadata().id() == b_param.metadata().id()
-        }
+        },
 
         // Error types match anything (to suppress cascading errors)
         (TyKind::Error, _) | (_, TyKind::Error) => true,
@@ -1838,46 +1839,45 @@ pub fn resolve_self_type_to_concrete(ty: &Ty, ctx: &BodyResolutionContext) -> Ty
             // Get the function symbol, then its parent (struct/protocol/extension)
             if let Some(function) = ctx.model.query(SymbolFor {
                 id: ctx.function_id,
-            }) {
-                if let Some(parent) = function.metadata().parent() {
-                    match parent.metadata().kind() {
-                        KestrelSymbolKind::Extension => {
-                            // For extension methods, get the target type from ExtensionTargetBehavior
-                            // This gives us the type with substitutions (e.g., Box[Int] not Box[T])
-                            if let Some(target_beh) =
-                                parent.metadata().get_behavior::<ExtensionTargetBehavior>()
-                            {
-                                // For protocol extensions, keep SelfType abstract so constraint
-                                // methods can be resolved (e.g., `extend Proto where Self: Other`)
-                                if target_beh.is_protocol_extension() {
-                                    return ty.clone();
-                                }
-                                let target_ty = target_beh.target_type();
-                                // Make sure target type isn't also SelfType (should never happen, but prevent infinite recursion)
-                                if !matches!(target_ty.kind(), TyKind::SelfType) {
-                                    return target_ty.clone();
-                                }
+            }) && let Some(parent) = function.metadata().parent()
+            {
+                match parent.metadata().kind() {
+                    KestrelSymbolKind::Extension => {
+                        // For extension methods, get the target type from ExtensionTargetBehavior
+                        // This gives us the type with substitutions (e.g., Box[Int] not Box[T])
+                        if let Some(target_beh) =
+                            parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+                        {
+                            // For protocol extensions, keep SelfType abstract so constraint
+                            // methods can be resolved (e.g., `extend Proto where Self: Other`)
+                            if target_beh.is_protocol_extension() {
+                                return ty.clone();
+                            }
+                            let target_ty = target_beh.target_type();
+                            // Make sure target type isn't also SelfType (should never happen, but prevent infinite recursion)
+                            if !matches!(target_ty.kind(), TyKind::SelfType) {
+                                return target_ty.clone();
                             }
                         }
-                        KestrelSymbolKind::Struct => {
-                            // For struct methods, resolve Self to the concrete struct type
-                            if let Some(typed) = parent.metadata().get_behavior::<TypedBehavior>() {
-                                let struct_ty = typed.ty();
-                                if !matches!(struct_ty.kind(), TyKind::SelfType) {
-                                    return struct_ty.clone();
-                                }
+                    },
+                    KestrelSymbolKind::Struct => {
+                        // For struct methods, resolve Self to the concrete struct type
+                        if let Some(typed) = parent.metadata().get_behavior::<TypedBehavior>() {
+                            let struct_ty = typed.ty();
+                            if !matches!(struct_ty.kind(), TyKind::SelfType) {
+                                return struct_ty.clone();
                             }
                         }
-                        KestrelSymbolKind::Protocol => {
-                            // For protocol methods, Self remains abstract
-                            // (needed for future default impl support)
-                        }
-                        _ => {}
-                    }
+                    },
+                    KestrelSymbolKind::Protocol => {
+                        // For protocol methods, Self remains abstract
+                        // (needed for future default impl support)
+                    },
+                    _ => {},
                 }
             }
             ty.clone()
-        }
+        },
         _ => ty.clone(),
     }
 }
@@ -1918,34 +1918,34 @@ pub fn resolve_delegating_init(
             continue;
         }
 
-        if let Some(callable) = get_callable_behavior(init_sym) {
-            if matches_signature(&callable, arguments.len(), arg_labels) {
-                // Found matching initializer
-                let init_id = init_sym.metadata().id();
+        if let Some(callable) = get_callable_behavior(init_sym)
+            && matches_signature(&callable, arguments.len(), arg_labels)
+        {
+            // Found matching initializer
+            let init_id = init_sym.metadata().id();
 
-                // Validate access modes for arguments
-                validate_argument_access_modes(&callable, &arguments, &span, ctx);
+            // Validate access modes for arguments
+            validate_argument_access_modes(&callable, &arguments, &span, ctx);
 
-                // Build substitutions from the self type
-                // For generic structs like Array[T], self has type Array[T] with substitutions {T -> TypeParameter(T)}
-                // We need to pass these substitutions to the delegated initializer
-                let substitutions = if let Some(self_local_id) = ctx.local_scope.lookup("self") {
-                    if let Some(self_local) = ctx.local_scope.get_local(self_local_id) {
-                        let self_ty = self_local.ty();
-                        if let Some((_, subs)) = self_ty.as_struct_with_subs() {
-                            subs.clone()
-                        } else {
-                            Substitutions::new()
-                        }
+            // Build substitutions from the self type
+            // For generic structs like Array[T], self has type Array[T] with substitutions {T -> TypeParameter(T)}
+            // We need to pass these substitutions to the delegated initializer
+            let substitutions = if let Some(self_local_id) = ctx.local_scope.lookup("self") {
+                if let Some(self_local) = ctx.local_scope.get_local(self_local_id) {
+                    let self_ty = self_local.ty();
+                    if let Some((_, subs)) = self_ty.as_struct_with_subs() {
+                        subs.clone()
                     } else {
                         Substitutions::new()
                     }
                 } else {
                     Substitutions::new()
-                };
+                }
+            } else {
+                Substitutions::new()
+            };
 
-                return Expression::delegating_init(init_id, arguments, substitutions, span);
-            }
+            return Expression::delegating_init(init_id, arguments, substitutions, span);
         }
     }
 
@@ -1965,10 +1965,7 @@ pub fn resolve_delegating_init(
 /// Get all protocols that a concrete type conforms to (including through extensions).
 ///
 /// Returns a list of (protocol_symbol, protocol_type) pairs.
-fn get_type_conformances(
-    ty: &Ty,
-    ctx: &BodyResolutionContext,
-) -> Vec<(Arc<ProtocolSymbol>, Ty)> {
+fn get_type_conformances(ty: &Ty, ctx: &BodyResolutionContext) -> Vec<(Arc<ProtocolSymbol>, Ty)> {
     let mut conformances = Vec::new();
 
     match ty.kind() {
@@ -1989,10 +1986,12 @@ fn get_type_conformances(
             });
             for extension in extensions {
                 // Skip protocol extensions when collecting type conformances
-                if let Some(target) = extension.metadata().get_behavior::<ExtensionTargetBehavior>() {
-                    if target.is_protocol_extension() {
-                        continue;
-                    }
+                if let Some(target) = extension
+                    .metadata()
+                    .get_behavior::<ExtensionTargetBehavior>()
+                    && target.is_protocol_extension()
+                {
+                    continue;
                 }
                 if let Some(conf_behavior) =
                     extension.metadata().get_behavior::<ConformancesBehavior>()
@@ -2004,7 +2003,7 @@ fn get_type_conformances(
                     }
                 }
             }
-        }
+        },
         TyKind::Enum { symbol, .. } => {
             // Direct conformances on the enum
             if let Some(conf_behavior) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
@@ -2019,10 +2018,12 @@ fn get_type_conformances(
             let enum_id = symbol.metadata().id();
             let extensions = ctx.model.query(ExtensionsFor { target_id: enum_id });
             for extension in extensions {
-                if let Some(target) = extension.metadata().get_behavior::<ExtensionTargetBehavior>() {
-                    if target.is_protocol_extension() {
-                        continue;
-                    }
+                if let Some(target) = extension
+                    .metadata()
+                    .get_behavior::<ExtensionTargetBehavior>()
+                    && target.is_protocol_extension()
+                {
+                    continue;
                 }
                 if let Some(conf_behavior) =
                     extension.metadata().get_behavior::<ConformancesBehavior>()
@@ -2034,8 +2035,8 @@ fn get_type_conformances(
                     }
                 }
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     conformances
@@ -2049,7 +2050,10 @@ fn get_type_conformances(
 fn get_applicable_protocol_extensions(
     concrete_ty: &Ty,
     ctx: &BodyResolutionContext,
-) -> Vec<(Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>, usize)> {
+) -> Vec<(
+    Arc<kestrel_semantic_tree::symbol::extension::ExtensionSymbol>,
+    usize,
+)> {
     let conformances = get_type_conformances(concrete_ty, ctx);
     let mut applicable = Vec::new();
 
@@ -2062,7 +2066,9 @@ fn get_applicable_protocol_extensions(
 
         for extension in extensions {
             // Check if this is actually a protocol extension
-            let target_behavior = match extension.metadata().get_behavior::<ExtensionTargetBehavior>()
+            let target_behavior = match extension
+                .metadata()
+                .get_behavior::<ExtensionTargetBehavior>()
             {
                 Some(b) => b,
                 None => continue,
@@ -2096,7 +2102,10 @@ fn is_protocol_extension_applicable(
 ) -> bool {
     use kestrel_semantic_tree::ty::Constraint;
 
-    let target_behavior = match extension.metadata().get_behavior::<ExtensionTargetBehavior>() {
+    let target_behavior = match extension
+        .metadata()
+        .get_behavior::<ExtensionTargetBehavior>()
+    {
         Some(b) => b,
         None => return false,
     };
@@ -2104,29 +2113,25 @@ fn is_protocol_extension_applicable(
     let where_clause = target_behavior.where_clause();
 
     for constraint in where_clause.constraints() {
-        match constraint {
-            Constraint::SelfBound {
-                associated_type_path,
-                bounds,
-                ..
-            } => {
-                if associated_type_path.is_empty() {
-                    // Self: Protocol - check if concrete type conforms to all bounds
-                    for bound in bounds {
-                        if !type_satisfies_bound(concrete_ty, bound, ctx.model) {
-                            return false;
-                        }
-                    }
-                } else {
-                    // Self.Item: Protocol - resolve associated type and check bounds
-                    // For now, we don't fully support this - requires associated type resolution
-                    // TODO: Implement Self.AssociatedType constraint checking
-                    // For now, skip these constraints (they'll be checked at call site)
+        if let Constraint::SelfBound {
+            associated_type_path,
+            bounds,
+            ..
+        } = constraint
+            && associated_type_path.is_empty()
+        {
+            // Self: Protocol - check if concrete type conforms to all bounds
+            for bound in bounds {
+                if !type_satisfies_bound(concrete_ty, bound, ctx.model) {
+                    return false;
                 }
             }
-            // Other constraint types shouldn't appear in protocol extensions
-            _ => {}
         }
+        // Self.Item: Protocol - resolve associated type and check bounds
+        // For now, we don't fully support this - requires associated type resolution
+        // TODO: Implement Self.AssociatedType constraint checking
+        // For now, skip these constraints (they'll be checked at call site)
+        // Other constraint types shouldn't appear in protocol extensions
     }
 
     true

@@ -104,10 +104,10 @@ fn analyze_block(body: &CodeBlock, ctx: &mut VerificationContext) -> State {
         state = analyze_statement(stmt, state, ctx);
     }
 
-    if !state.diverged {
-        if let Some(yield_expr) = body.yield_expr() {
-            state = analyze_expression(yield_expr, state, false, ctx);
-        }
+    if !state.diverged
+        && let Some(yield_expr) = body.yield_expr()
+    {
+        state = analyze_expression(yield_expr, state, false, ctx);
     }
 
     state
@@ -121,10 +121,10 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
                 // Mark variables in pattern as initialized
                 mark_pattern_locals_assigned(pattern, &mut state);
             }
-        }
+        },
         StatementKind::Expr(expr) => {
             state = analyze_expression(expr, state, false, ctx);
-        }
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -134,12 +134,12 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                         state = analyze_expression(expr, state, false, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
                         state = analyze_expression(value, state, false, ctx);
                         // Pattern bindings become assigned for subsequent conditions
                         mark_pattern_locals_assigned(pattern, &mut state);
-                    }
+                    },
                 }
             }
 
@@ -155,11 +155,11 @@ fn analyze_statement(stmt: &Statement, mut state: State, ctx: &mut VerificationC
             // Collect any errors from the else block
             ctx.errors.extend(else_ctx.errors);
             // Else block diverges, we don't merge its state
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit doesn't introduce new bindings or read variables in a way
             // that needs definite assignment checking (the variable is already in scope)
-        }
+        },
     }
     state
 }
@@ -186,7 +186,7 @@ fn analyze_expression(
                     variable_name: name,
                 });
             }
-        }
+        },
         ExprKind::Assignment { target, value } => {
             state = analyze_expression(value, state, false, ctx);
             // If target is a LocalRef, mark it as assigned
@@ -194,7 +194,7 @@ fn analyze_expression(
                 state.assigned.insert(*local_id);
             }
             state = analyze_expression(target, state, true, ctx);
-        }
+        },
         ExprKind::If {
             conditions,
             then_branch,
@@ -206,12 +206,12 @@ fn analyze_expression(
                 match condition {
                     IfCondition::Expr(expr) => {
                         state = analyze_expression(expr, state, false, ctx);
-                    }
+                    },
                     IfCondition::Let { value, pattern, .. } => {
                         state = analyze_expression(value, state, false, ctx);
                         // Mark pattern bindings as assigned for subsequent conditions
                         mark_pattern_locals_assigned(pattern, &mut state);
-                    }
+                    },
                 }
             }
             let pre_if_assigned = state.assigned.clone();
@@ -227,10 +227,10 @@ fn analyze_expression(
                 }
                 then_state = analyze_statement(stmt, then_state, ctx);
             }
-            if !then_state.diverged {
-                if let Some(v) = then_value {
-                    then_state = analyze_expression(v, then_state, false, ctx);
-                }
+            if !then_state.diverged
+                && let Some(v) = then_value
+            {
+                then_state = analyze_expression(v, then_state, false, ctx);
             }
 
             // Analyze else branch
@@ -247,15 +247,15 @@ fn analyze_expression(
                             }
                             es = analyze_statement(stmt, es, ctx);
                         }
-                        if !es.diverged {
-                            if let Some(v) = value {
-                                es = analyze_expression(v, es, false, ctx);
-                            }
+                        if !es.diverged
+                            && let Some(v) = value
+                        {
+                            es = analyze_expression(v, es, false, ctx);
                         }
-                    }
+                    },
                     ElseBranch::ElseIf(if_expr) => {
                         es = analyze_expression(if_expr, es, false, ctx);
-                    }
+                    },
                 }
                 es
             } else {
@@ -284,7 +284,7 @@ fn analyze_expression(
                     .cloned()
                     .collect();
             }
-        }
+        },
         ExprKind::While {
             condition, body, ..
         } => {
@@ -299,7 +299,7 @@ fn analyze_expression(
                 }
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
-        }
+        },
         ExprKind::WhileLet {
             conditions, body, ..
         } => {
@@ -312,12 +312,12 @@ fn analyze_expression(
                 match condition {
                     kestrel_semantic_tree::expr::IfCondition::Expr(expr) => {
                         body_state = analyze_expression(expr, body_state, false, ctx);
-                    }
+                    },
                     kestrel_semantic_tree::expr::IfCondition::Let { pattern, value, .. } => {
                         body_state = analyze_expression(value, body_state, false, ctx);
                         // Mark pattern bindings as assigned for subsequent conditions and body
                         mark_pattern_locals_assigned(pattern, &mut body_state);
-                    }
+                    },
                 }
             }
             for stmt in body {
@@ -327,7 +327,7 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // Pattern bindings don't persist after the loop
-        }
+        },
         ExprKind::Loop { body, .. } => {
             let mut body_state = State {
                 assigned: state.assigned.clone(),
@@ -340,16 +340,16 @@ fn analyze_expression(
                 body_state = analyze_statement(stmt, body_state, ctx);
             }
             // For simplicity, we don't assume anything about loop exit state yet
-        }
+        },
         ExprKind::Return { value } => {
             if let Some(v) = value {
                 state = analyze_expression(v, state, false, ctx);
             }
             state.diverged = true;
-        }
+        },
         ExprKind::Break { .. } | ExprKind::Continue { .. } => {
             state.diverged = true;
-        }
+        },
         ExprKind::LangIntrinsic {
             arguments,
             intrinsic,
@@ -359,11 +359,10 @@ fn analyze_expression(
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
             // Check if this intrinsic diverges
-            match intrinsic {
-                LangIntrinsic::PanicUnwind => state.diverged = true,
-                _ => {} // All other intrinsics return normally
+            if matches!(intrinsic, LangIntrinsic::PanicUnwind) {
+                state.diverged = true;
             }
-        }
+        },
         ExprKind::Literal(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::TypeRef(_)
@@ -373,34 +372,34 @@ fn analyze_expression(
         | ExprKind::LangIntrinsicRef(_)
         | ExprKind::Error
         | ExprKind::OverloadedRef(_)
-        | ExprKind::Closure { .. } => {}
+        | ExprKind::Closure { .. } => {},
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {
                     state = analyze_expression(&arg.value, state, false, ctx);
                 }
             }
-        }
+        },
         ExprKind::Array(exprs) | ExprKind::Tuple(exprs) => {
             for e in exprs {
                 state = analyze_expression(e, state, false, ctx);
             }
-        }
+        },
         ExprKind::Grouping(inner) => {
             state = analyze_expression(inner, state, false, ctx);
-        }
+        },
         ExprKind::FieldAccess { object, .. } => {
             state = analyze_expression(object, state, false, ctx);
-        }
+        },
         ExprKind::TupleIndex { tuple, .. } => {
             state = analyze_expression(tuple, state, false, ctx);
-        }
+        },
         ExprKind::MethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
-        }
+        },
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             state = analyze_expression(receiver, state, false, ctx);
-        }
+        },
         ExprKind::Call {
             callee, arguments, ..
         } => {
@@ -408,7 +407,7 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
@@ -418,7 +417,7 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::DeferredMethodCall {
             receiver,
             arguments,
@@ -428,17 +427,17 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
         ExprKind::Match { scrutinee, arms } => {
             // Analyze scrutinee
             state = analyze_expression(scrutinee, state, false, ctx);
@@ -454,7 +453,7 @@ fn analyze_expression(
                 arm_state = analyze_expression(&arm.body, arm_state, false, ctx);
                 // Note: proper handling would merge states from all arms
             }
-        }
+        },
         ExprKind::Block { statements, value } => {
             for stmt in statements {
                 if state.diverged {
@@ -462,12 +461,12 @@ fn analyze_expression(
                 }
                 state = analyze_statement(stmt, state, ctx);
             }
-            if !state.diverged {
-                if let Some(val) = value {
-                    state = analyze_expression(val, state, false, ctx);
-                }
+            if !state.diverged
+                && let Some(val) = value
+            {
+                state = analyze_expression(val, state, false, ctx);
             }
-        }
+        },
         ExprKind::SubscriptCall {
             receiver,
             arguments,
@@ -477,7 +476,7 @@ fn analyze_expression(
             for arg in arguments {
                 state = analyze_expression(&arg.value, state, false, ctx);
             }
-        }
+        },
     }
     state
 }
@@ -493,31 +492,31 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
     match &pattern.kind {
         PatternKind::Local { local_id, .. } => {
             state.assigned.insert(*local_id);
-        }
+        },
         PatternKind::Wildcard => {
             // Wildcards don't bind anything
-        }
+        },
         PatternKind::Tuple { prefix, suffix, .. } => {
             for elem in prefix.iter().chain(suffix.iter()) {
                 mark_pattern_locals_assigned(elem, state);
             }
-        }
+        },
         PatternKind::Literal { .. } => {
             // Literals don't bind anything
-        }
+        },
         PatternKind::EnumVariant { bindings, .. } => {
             for binding in bindings {
                 mark_pattern_locals_assigned(&binding.pattern, state);
             }
-        }
+        },
         PatternKind::Range { .. } => {
             // Range patterns don't bind anything
-        }
+        },
         PatternKind::Struct { fields, .. } => {
             for field in fields {
                 mark_pattern_locals_assigned(&field.pattern, state);
             }
-        }
+        },
         PatternKind::Array {
             prefix,
             suffix,
@@ -533,14 +532,14 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
             if let Some((Some(_name), Some(local_id))) = rest {
                 state.assigned.insert(*local_id);
             }
-        }
+        },
         PatternKind::Or { alternatives } => {
             // For or-patterns, all alternatives must bind the same names
             // We can mark from the first alternative since they're all the same
             if let Some(first) = alternatives.first() {
                 mark_pattern_locals_assigned(first, state);
             }
-        }
+        },
         PatternKind::At {
             local_id,
             subpattern,
@@ -550,13 +549,13 @@ fn mark_pattern_locals_assigned(pattern: &Pattern, state: &mut State) {
             state.assigned.insert(*local_id);
             // Also mark any bindings from the subpattern
             mark_pattern_locals_assigned(subpattern, state);
-        }
+        },
         PatternKind::Rest => {
             // Rest patterns don't bind anything (the named variant is tracked elsewhere)
-        }
+        },
         PatternKind::Error => {
             // Error patterns don't bind anything
-        }
+        },
     }
 }
 

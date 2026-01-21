@@ -204,7 +204,8 @@ fn declaration_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(DeclarationItemData::Function);
 
-    let subscript_parser = subscript_declaration_parser_internal().map(DeclarationItemData::Subscript);
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(DeclarationItemData::Subscript);
 
     let field_parser = field_declaration_parser_internal().map(DeclarationItemData::Field);
 
@@ -243,34 +244,34 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
     match data {
         DeclarationItemData::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
-        }
+        },
         DeclarationItemData::Import(import_span, path_segments, alias, items) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        }
+        },
         DeclarationItemData::Protocol(data) => {
             emit_protocol_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Struct(data) => {
             emit_struct_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Enum(data) => {
             emit_enum_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Extension(data) => {
             emit_extension_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Function(data) => {
             emit_function_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Subscript(data) => {
             emit_subscript_declaration(sink, data);
-        }
+        },
         DeclarationItemData::Field(data) => {
             emit_field_declaration(sink, data);
-        }
+        },
         DeclarationItemData::TypeAlias(data) => {
             emit_type_alias_declaration(sink, data);
-        }
+        },
     }
 }
 
@@ -338,13 +339,13 @@ where
             for item_data in items {
                 emit_declaration_item(sink, item_data);
             }
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 
     sink.finish_node();

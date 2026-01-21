@@ -200,7 +200,7 @@ impl IntoDiagnostic for LoweringError {
                 } else {
                     diag
                 }
-            }
+            },
         }
     }
 }

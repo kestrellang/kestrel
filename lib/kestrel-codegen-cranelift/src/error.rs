@@ -37,44 +37,44 @@ impl fmt::Display for CodegenError {
         match self {
             CodegenError::ModuleCreation(e) => {
                 write!(f, "failed to create module: {}", e)
-            }
+            },
             CodegenError::FunctionCompilation { name, error } => {
                 write!(f, "failed to compile function '{}': {}", name, error)
-            }
+            },
             CodegenError::FunctionDefinition { name, error } => {
                 write!(f, "failed to define function '{}': {}", name, error)
-            }
+            },
             CodegenError::ModuleFinish(e) => {
                 write!(f, "failed to finish module: {}", e)
-            }
+            },
             CodegenError::NoEntryPoint => {
                 write!(f, "no entry point 'main' found")
-            }
+            },
             CodegenError::InvalidEntryPoint(msg) => {
                 write!(f, "invalid entry point: {}", msg)
-            }
+            },
             CodegenError::LinkerError(e) => {
                 write!(f, "linker error: {}", e)
-            }
+            },
             CodegenError::IoError(e) => {
                 write!(f, "I/O error: {}", e)
-            }
+            },
             CodegenError::Unsupported(msg) => {
                 write!(f, "unsupported: {}", msg)
-            }
+            },
             CodegenError::DataSection(msg) => {
                 write!(f, "data section error: {}", msg)
-            }
+            },
             CodegenError::Monomorphization(e) => {
                 write!(f, "monomorphization error: {}", e)
-            }
+            },
             CodegenError::MonomorphizationErrors(errors) => {
                 writeln!(f, "monomorphization errors:")?;
                 for e in errors {
                     writeln!(f, "  - {}", e)?;
                 }
                 Ok(())
-            }
+            },
         }
     }
 }

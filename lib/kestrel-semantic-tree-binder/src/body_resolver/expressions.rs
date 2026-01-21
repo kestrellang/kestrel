@@ -41,7 +41,7 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 }
             }
             Expression::error(span)
-        }
+        },
 
         SyntaxKind::ExprUnit => Expression::unit(span),
 
@@ -49,31 +49,31 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
             let value = extract_integer_value(expr_node);
             // Use inference type so literal protocols can be applied
             Expression::integer_infer(value, span)
-        }
+        },
 
         SyntaxKind::ExprFloat => {
             let value = extract_float_value(expr_node);
             // Use inference type so literal protocols can be applied
             Expression::float_infer(value, span)
-        }
+        },
 
         SyntaxKind::ExprString => {
             let value = extract_string_value(expr_node, ctx);
             // Use inference type so literal protocols can be applied
             Expression::string_infer(value, span)
-        }
+        },
 
         SyntaxKind::ExprRawString => {
             let value = extract_raw_string_value(expr_node);
             // Use inference type so literal protocols can be applied
             Expression::string_infer(value, span)
-        }
+        },
 
         SyntaxKind::ExprBool => {
             let value = extract_bool_value(expr_node);
             // Use inference type so literal protocols can be applied
             Expression::bool_infer(value, span)
-        }
+        },
 
         SyntaxKind::ExprArray => resolve_array_expression(expr_node, ctx),
 
@@ -92,7 +92,7 @@ pub fn resolve_expression(expr_node: &SyntaxNode, ctx: &mut BodyResolutionContex
         SyntaxKind::ExprNull => {
             // TODO: Handle null properly with optional types
             Expression::error(span)
-        }
+        },
 
         SyntaxKind::ExprCall => resolve_call_expression(expr_node, ctx),
 
@@ -228,7 +228,7 @@ pub(crate) fn unescape_string(
                 };
                 ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                 result.push('\\');
-            }
+            },
             Some((j, next_char)) => {
                 match next_char {
                     'n' => result.push('\n'),
@@ -249,7 +249,7 @@ pub(crate) fn unescape_string(
                                 break;
                             }
                         }
-                    }
+                    },
                     '\r' => {
                         // Handle \r\n as line continuation
                         if let Some(&(_, '\n')) = chars.peek() {
@@ -263,7 +263,7 @@ pub(crate) fn unescape_string(
                                 break;
                             }
                         }
-                    }
+                    },
                     // Hex escape: \xNN
                     'x' => {
                         let hex_start = base_offset + j + 1;
@@ -298,7 +298,7 @@ pub(crate) fn unescape_string(
                                 result.push(value as char);
                             }
                         }
-                    }
+                    },
                     // Unicode escape: \u{NNNN}
                     'u' => {
                         let u_pos = base_offset + j;
@@ -334,7 +334,8 @@ pub(crate) fn unescape_string(
                             }
                         }
 
-                        let escape_end = base_offset + j + 2 + hex_str.len() + if found_close { 1 } else { 0 };
+                        let escape_end =
+                            base_offset + j + 2 + hex_str.len() + if found_close { 1 } else { 0 };
                         let escape_seq = format!("\\u{{{}}}", hex_str);
 
                         if !found_close {
@@ -376,7 +377,7 @@ pub(crate) fn unescape_string(
                                         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                                         result.push_str(&escape_seq);
                                     }
-                                }
+                                },
                                 _ => {
                                     let error = InvalidUnicodeEscapeError {
                                         span: Span::new(file_id, escape_start..escape_end),
@@ -385,22 +386,25 @@ pub(crate) fn unescape_string(
                                     };
                                     ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                                     result.push_str(&escape_seq);
-                                }
+                                },
                             }
                         }
-                    }
+                    },
                     // Unknown escape sequence
                     other => {
                         let error = InvalidEscapeSequenceError {
-                            span: Span::new(file_id, escape_start..base_offset + j + other.len_utf8()),
+                            span: Span::new(
+                                file_id,
+                                escape_start..base_offset + j + other.len_utf8(),
+                            ),
                             sequence: format!("\\{}", other),
                         };
                         ctx.diagnostics.add_diagnostic(error.into_diagnostic());
                         result.push('\\');
                         result.push(other);
-                    }
+                    },
                 }
-            }
+            },
         }
     }
 
@@ -637,21 +641,19 @@ fn resolve_if_then_block(
         match child.kind() {
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
                 // Check if this is a trailing expression wrapped in a statement
-                if is_last {
-                    if let Some(expr) = try_extract_trailing_expression(child, ctx) {
-                        trailing_expr = Some(expr);
-                        continue;
-                    }
+                if is_last && let Some(expr) = try_extract_trailing_expression(child, ctx) {
+                    trailing_expr = Some(expr);
+                    continue;
                 }
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 if let Some(stmt) = super::statements::resolve_variable_declaration(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::Expression => {
                 // If last child and no semicolon, it's the trailing expression
                 if is_last && !has_trailing_semicolon(child) {
@@ -661,7 +663,7 @@ fn resolve_if_then_block(
                     let stmt_span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, stmt_span));
                 }
-            }
+            },
             _ if is_expression_kind(child.kind()) => {
                 // Handle bare expression kinds (not wrapped in Expression)
                 if is_last {
@@ -671,9 +673,9 @@ fn resolve_if_then_block(
                     let stmt_span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, stmt_span));
                 }
-            }
+            },
             // Skip tokens like braces
-            _ => {}
+            _ => {},
         }
     }
 
@@ -702,21 +704,19 @@ fn resolve_if_block(
         match child.kind() {
             SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
                 // Check if this is a trailing expression wrapped in a statement
-                if is_last {
-                    if let Some(expr) = try_extract_trailing_expression(child, ctx) {
-                        trailing_expr = Some(expr);
-                        continue;
-                    }
+                if is_last && let Some(expr) = try_extract_trailing_expression(child, ctx) {
+                    trailing_expr = Some(expr);
+                    continue;
                 }
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 if let Some(stmt) = super::statements::resolve_variable_declaration(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::Expression => {
                 // If last child and no semicolon, it's the trailing expression
                 if is_last && !has_trailing_semicolon(child) {
@@ -726,7 +726,7 @@ fn resolve_if_block(
                     let stmt_span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, stmt_span));
                 }
-            }
+            },
             _ if is_expression_kind(child.kind()) => {
                 // Handle bare expression kinds (not wrapped in Expression)
                 if is_last {
@@ -736,9 +736,9 @@ fn resolve_if_block(
                     let stmt_span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, stmt_span));
                 }
-            }
+            },
             // Skip tokens like braces
-            _ => {}
+            _ => {},
         }
     }
 
@@ -772,7 +772,7 @@ fn try_extract_trailing_expression(
             SyntaxKind::ExpressionStatement => {
                 // Recurse into ExpressionStatement
                 return try_extract_trailing_expression(&child, ctx);
-            }
+            },
             SyntaxKind::Expression => {
                 // Found the expression wrapper - look inside for the actual expression
                 if !has_trailing_semicolon(&child) {
@@ -781,19 +781,19 @@ fn try_extract_trailing_expression(
                         return Some(resolve_expression(&child, ctx));
                     }
                 }
-            }
+            },
             // Also handle direct expression kinds (ExprIf, ExprMatch without Expression wrapper)
             SyntaxKind::ExprIf => {
                 if !has_trailing_semicolon(&child) && has_value_else_branch(&child) {
                     return Some(resolve_expression(&child, ctx));
                 }
-            }
+            },
             SyntaxKind::ExprMatch => {
                 if !has_trailing_semicolon(&child) {
                     return Some(resolve_expression(&child, ctx));
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -803,24 +803,24 @@ fn try_extract_trailing_expression(
 /// Check if an expression can be a trailing expression (produces a value).
 fn can_be_trailing_expression(expr_node: &SyntaxNode) -> bool {
     // Look for the actual expression type inside the Expression wrapper
-    for child in expr_node.children() {
+    if let Some(child) = expr_node.children().next() {
         match child.kind() {
             SyntaxKind::ExprIf => {
                 // If-expression can be a trailing expression only if it has an else branch
                 return has_value_else_branch(&child);
-            }
+            },
             SyntaxKind::ExprMatch => {
                 // Match expressions are always exhaustive and can be trailing expressions
                 return true;
-            }
+            },
             SyntaxKind::ExprLoop | SyntaxKind::ExprWhile => {
                 // Loops cannot be trailing expressions - they return () or Never
                 return false;
-            }
+            },
             _ => {
                 // Other expressions can be trailing expressions
                 return true;
-            }
+            },
         }
     }
     // If we found nothing inside, it's probably a simple expression
@@ -843,11 +843,11 @@ fn has_value_else_branch(if_node: &SyntaxNode) -> bool {
                     SyntaxKind::ExprIf => {
                         // It's an "else if" - recursively check
                         return has_value_else_branch(&child);
-                    }
+                    },
                     SyntaxKind::CodeBlock => {
                         // It's a final "else { ... }" - it exists, so we have a value
                         return true;
-                    }
+                    },
                     SyntaxKind::Expression => {
                         // The else if might be wrapped in an Expression node
                         // Look inside for ExprIf
@@ -856,12 +856,12 @@ fn has_value_else_branch(if_node: &SyntaxNode) -> bool {
                                 return has_value_else_branch(&inner);
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
             false
-        }
+        },
     }
 }
 
@@ -1067,25 +1067,25 @@ fn resolve_while_let_body(
                 if let Some(stmt) = resolve_statement(&child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 if let Some(stmt) = super::statements::resolve_variable_declaration(&child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::Expression => {
                 // Expressions in loop body become expression statements
                 let expr = resolve_expression(&child, ctx);
                 let stmt_span = get_node_span(&child, ctx.file_id);
                 statements.push(Statement::expr(expr, stmt_span));
-            }
+            },
             _ if is_expression_kind(child.kind()) => {
                 // Handle bare expression kinds
                 let expr = resolve_expression(&child, ctx);
                 let stmt_span = get_node_span(&child, ctx.file_id);
                 statements.push(Statement::expr(expr, stmt_span));
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -1151,7 +1151,7 @@ fn resolve_break_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) 
                 ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             }
             return Expression::error(span);
-        }
+        },
     };
 
     Expression::break_expr(loop_id, label_info, span)
@@ -1185,7 +1185,7 @@ fn resolve_continue_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             }
             return Expression::error(span);
-        }
+        },
     };
 
     Expression::continue_expr(loop_id, label_info, span)
@@ -1286,7 +1286,8 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
     );
 
     // Body for continue arm: just reference the value
-    let continue_body = Expression::local_ref(value_local_id, Ty::infer(span.clone()), false, span.clone());
+    let continue_body =
+        Expression::local_ref(value_local_id, Ty::infer(span.clone()), false, span.clone());
     let continue_arm = MatchArm::new(continue_pattern, continue_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1311,20 +1312,14 @@ fn resolve_try_expression_impl(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         span.clone(),
     );
     let break_binding = EnumPatternBinding::unlabeled(early_binding_pattern, span.clone());
-    let break_pattern = Pattern::unresolved_enum_variant(
-        "Break".to_string(),
-        vec![break_binding],
-        span.clone(),
-    );
+    let break_pattern =
+        Pattern::unresolved_enum_variant("Break".to_string(), vec![break_binding], span.clone());
 
     // Body for break arm: return (error placeholder for now)
     // TODO: Implement proper fromResidual call
     // For now, just create an error expression that will produce a type error
     // This allows parsing to work while we implement the full desugaring
-    let break_body = Expression::return_expr(
-        Some(Expression::error(span.clone())),
-        span.clone(),
-    );
+    let break_body = Expression::return_expr(Some(Expression::error(span.clone())), span.clone());
     let break_arm = MatchArm::new(break_pattern, break_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1346,25 +1341,25 @@ fn resolve_loop_body(block_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -
                 if let Some(stmt) = resolve_statement(&child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 if let Some(stmt) = super::statements::resolve_variable_declaration(&child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::Expression => {
                 // Expressions in loop body become expression statements
                 let expr = resolve_expression(&child, ctx);
                 let stmt_span = get_node_span(&child, ctx.file_id);
                 statements.push(Statement::expr(expr, stmt_span));
-            }
+            },
             _ if is_expression_kind(child.kind()) => {
                 // Handle bare expression kinds
                 let expr = resolve_expression(&child, ctx);
                 let stmt_span = get_node_span(&child, ctx.file_id);
                 statements.push(Statement::expr(expr, stmt_span));
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -1441,11 +1436,13 @@ fn resolve_tuple_index_expression(
     let (index, index_span) = match index_token {
         Some(token) => {
             let text_range = token.text_range();
-            let idx_span =
-                Span::new(ctx.file_id, text_range.start().into()..text_range.end().into());
+            let idx_span = Span::new(
+                ctx.file_id,
+                text_range.start().into()..text_range.end().into(),
+            );
             let index_value = token.text().parse::<usize>().unwrap_or(0);
             (index_value, idx_span)
-        }
+        },
         None => return Expression::error(span),
     };
 
@@ -1468,7 +1465,7 @@ fn resolve_tuple_index_expression(
             // Get the element type at the index
             let element_ty = elements[index].clone();
             Expression::tuple_index(base, index, element_ty, span)
-        }
+        },
         None => {
             // Not a tuple type
             let error = TupleIndexOnNonTupleError {
@@ -1478,7 +1475,7 @@ fn resolve_tuple_index_expression(
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             Expression::error(span)
-        }
+        },
     }
 }
 
@@ -1503,10 +1500,10 @@ fn check_it_referenced_in_closure(
     }
 
     // Check tail expression
-    if let Some(expr) = tail_expr {
-        if expression_references_local(expr, it_local_id) {
-            return true;
-        }
+    if let Some(expr) = tail_expr
+        && expression_references_local(expr, it_local_id)
+    {
+        return true;
     }
 
     false
@@ -1525,7 +1522,7 @@ fn statement_references_local(
             } else {
                 false
             }
-        }
+        },
         StatementKind::Expr(expr) => expression_references_local(expr, local_id),
         StatementKind::GuardLet {
             conditions,
@@ -1538,12 +1535,12 @@ fn statement_references_local(
                         if expression_references_local(expr, local_id) {
                             return true;
                         }
-                    }
+                    },
                     IfCondition::Let { value, .. } => {
                         if expression_references_local(value, local_id) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             // Check else block statements
@@ -1552,20 +1549,20 @@ fn statement_references_local(
                     return true;
                 }
             }
-            if let Some(yield_expr) = &else_block.yield_expr {
-                if expression_references_local(yield_expr, local_id) {
-                    return true;
-                }
+            if let Some(yield_expr) = &else_block.yield_expr
+                && expression_references_local(yield_expr, local_id)
+            {
+                return true;
             }
             false
-        }
+        },
         StatementKind::Deinit {
             local_id: deinit_id,
             ..
         } => {
             // The deinit statement references the variable being deinited
             *deinit_id == local_id
-        }
+        },
     }
 }
 
@@ -1595,7 +1592,7 @@ fn expression_references_local(
 
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             expression_references_local(receiver, local_id)
-        }
+        },
 
         ExprKind::Call {
             callee, arguments, ..
@@ -1604,7 +1601,7 @@ fn expression_references_local(
                 || arguments
                     .iter()
                     .any(|arg| expression_references_local(&arg.value, local_id))
-        }
+        },
 
         ExprKind::PrimitiveMethodCall {
             receiver,
@@ -1615,7 +1612,7 @@ fn expression_references_local(
                 || arguments
                     .iter()
                     .any(|arg| expression_references_local(&arg.value, local_id))
-        }
+        },
 
         ExprKind::DeferredMethodCall {
             receiver,
@@ -1626,7 +1623,7 @@ fn expression_references_local(
                 || arguments
                     .iter()
                     .any(|arg| expression_references_local(&arg.value, local_id))
-        }
+        },
 
         ExprKind::ImplicitStructInit { arguments, .. } => arguments
             .iter()
@@ -1639,7 +1636,7 @@ fn expression_references_local(
         ExprKind::Assignment { target, value } => {
             expression_references_local(target, local_id)
                 || expression_references_local(value, local_id)
-        }
+        },
 
         ExprKind::If {
             conditions,
@@ -1654,12 +1651,12 @@ fn expression_references_local(
                         if expression_references_local(expr, local_id) {
                             return true;
                         }
-                    }
+                    },
                     IfCondition::Let { value, .. } => {
                         if expression_references_local(value, local_id) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
 
@@ -1669,10 +1666,10 @@ fn expression_references_local(
                 }
             }
 
-            if let Some(then_val) = then_value {
-                if expression_references_local(then_val, local_id) {
-                    return true;
-                }
+            if let Some(then_val) = then_value
+                && expression_references_local(then_val, local_id)
+            {
+                return true;
             }
 
             if let Some(else_br) = else_branch {
@@ -1683,22 +1680,22 @@ fn expression_references_local(
                                 return true;
                             }
                         }
-                        if let Some(val) = value {
-                            if expression_references_local(val, local_id) {
-                                return true;
-                            }
+                        if let Some(val) = value
+                            && expression_references_local(val, local_id)
+                        {
+                            return true;
                         }
-                    }
+                    },
                     ElseBranch::ElseIf(if_expr) => {
                         if expression_references_local(if_expr, local_id) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
 
             false
-        }
+        },
 
         ExprKind::While {
             condition, body, ..
@@ -1712,7 +1709,7 @@ fn expression_references_local(
                 }
             }
             false
-        }
+        },
 
         ExprKind::WhileLet {
             conditions, body, ..
@@ -1724,12 +1721,12 @@ fn expression_references_local(
                         if expression_references_local(expr, local_id) {
                             return true;
                         }
-                    }
+                    },
                     IfCondition::Let { value, .. } => {
                         if expression_references_local(value, local_id) {
                             return true;
                         }
-                    }
+                    },
                 }
             }
             for stmt in body {
@@ -1738,7 +1735,7 @@ fn expression_references_local(
                 }
             }
             false
-        }
+        },
 
         ExprKind::Loop { body, .. } => {
             for stmt in body {
@@ -1747,7 +1744,7 @@ fn expression_references_local(
                 }
             }
             false
-        }
+        },
 
         ExprKind::Closure {
             body, tail_expr, ..
@@ -1758,13 +1755,13 @@ fn expression_references_local(
                     return true;
                 }
             }
-            if let Some(tail) = tail_expr {
-                if expression_references_local(tail, local_id) {
-                    return true;
-                }
+            if let Some(tail) = tail_expr
+                && expression_references_local(tail, local_id)
+            {
+                return true;
             }
             false
-        }
+        },
 
         ExprKind::Return { value } => {
             if let Some(val) = value {
@@ -1772,7 +1769,7 @@ fn expression_references_local(
             } else {
                 false
             }
-        }
+        },
 
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
@@ -1782,7 +1779,7 @@ fn expression_references_local(
             } else {
                 false
             }
-        }
+        },
 
         ExprKind::Match { scrutinee, arms } => {
             expression_references_local(scrutinee, local_id)
@@ -1793,7 +1790,7 @@ fn expression_references_local(
                         .unwrap_or(false)
                         || expression_references_local(&arm.body, local_id)
                 })
-        }
+        },
 
         ExprKind::Block { statements, value } => {
             for stmt in statements {
@@ -1801,13 +1798,13 @@ fn expression_references_local(
                     return true;
                 }
             }
-            if let Some(val) = value {
-                if expression_references_local(val, local_id) {
-                    return true;
-                }
+            if let Some(val) = value
+                && expression_references_local(val, local_id)
+            {
+                return true;
             }
             false
-        }
+        },
 
         // Lang intrinsic calls - check arguments
         ExprKind::LangIntrinsic { arguments, .. } => arguments
@@ -1824,7 +1821,7 @@ fn expression_references_local(
                 || arguments
                     .iter()
                     .any(|arg| expression_references_local(&arg.value, local_id))
-        }
+        },
 
         // Leaf expressions - no references
         ExprKind::Literal(_)
@@ -1981,7 +1978,7 @@ fn resolve_closure_params(
                     );
                     let resolved_ty = resolver.resolve(&tn);
                     (resolved_ty, true)
-                }
+                },
                 None => (
                     kestrel_semantic_tree::ty::Ty::infer(param_span.clone()),
                     false,
@@ -2040,12 +2037,12 @@ fn resolve_closure_body(
                 if let Some(stmt) = resolve_statement(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::VariableDeclaration => {
                 if let Some(stmt) = super::statements::resolve_variable_declaration(child, ctx) {
                     statements.push(stmt);
                 }
-            }
+            },
             SyntaxKind::Expression => {
                 // If last child and no semicolon, it's the trailing expression
                 if is_last && !has_trailing_semicolon(child) {
@@ -2055,7 +2052,7 @@ fn resolve_closure_body(
                     let stmt_span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, stmt_span));
                 }
-            }
+            },
             _ if is_expression_kind(child.kind()) => {
                 // Handle bare expression kinds (not wrapped in Expression)
                 if is_last {
@@ -2065,9 +2062,9 @@ fn resolve_closure_body(
                     let stmt_span = get_node_span(child, ctx.file_id);
                     statements.push(Statement::expr(expr, stmt_span));
                 }
-            }
+            },
             // Skip tokens like braces, 'in' keyword
-            _ => {}
+            _ => {},
         }
     }
 
@@ -2139,23 +2136,23 @@ fn collect_captures(
 
         // Check if this local was declared before the closure scope
         // Variables at closure_entry_depth or below are from outer scopes
-        if let Some(local_depth) = local_scope.scope_depth_of(local_id) {
-            if local_depth <= closure_entry_depth {
-                // This is a capture! Get the name from the local_scope
-                let name = local_scope
-                    .get_local(local_id)
-                    .map(|l| l.name().to_string())
-                    .unwrap_or_default();
+        if let Some(local_depth) = local_scope.scope_depth_of(local_id)
+            && local_depth <= closure_entry_depth
+        {
+            // This is a capture! Get the name from the local_scope
+            let name = local_scope
+                .get_local(local_id)
+                .map(|l| l.name().to_string())
+                .unwrap_or_default();
 
-                seen_ids.insert(local_id);
-                captures.push(Capture {
-                    local_id,
-                    name,
-                    ty: ty.clone(),
-                    kind: CaptureKind::Value,
-                    span: span.clone(),
-                });
-            }
+            seen_ids.insert(local_id);
+            captures.push(Capture {
+                local_id,
+                name,
+                ty: ty.clone(),
+                kind: CaptureKind::Value,
+                span: span.clone(),
+            });
         }
     };
 
@@ -2187,13 +2184,13 @@ where
     match &stmt.kind {
         StatementKind::Expr(expr) => {
             collect_captures_from_expression(expr, process);
-        }
+        },
         StatementKind::Binding { value, .. } => {
             // Walk the initializer value if present
             if let Some(expr) = value {
                 collect_captures_from_expression(expr, process);
             }
-        }
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -2203,10 +2200,10 @@ where
                 match condition {
                     IfCondition::Expr(expr) => {
                         collect_captures_from_expression(expr, process);
-                    }
+                    },
                     IfCondition::Let { value, .. } => {
                         collect_captures_from_expression(value, process);
-                    }
+                    },
                 }
             }
             // Walk else block
@@ -2216,10 +2213,10 @@ where
             if let Some(yield_expr) = &else_block.yield_expr {
                 collect_captures_from_expression(yield_expr, process);
             }
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit statement doesn't contain expressions that could capture variables
-        }
+        },
     }
 }
 
@@ -2243,12 +2240,12 @@ where
             // For now, we'll use the expression span to identify the capture location.
             // The actual name will be retrieved later during capture creation.
             process(*local_id, "", &expr.ty, &expr.span);
-        }
+        },
 
         // Recursively walk compound expressions
         ExprKind::Grouping(inner) => {
             collect_captures_from_expression(inner, process);
-        }
+        },
         ExprKind::Call {
             callee, arguments, ..
         } => {
@@ -2256,7 +2253,7 @@ where
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
@@ -2266,7 +2263,7 @@ where
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
         ExprKind::DeferredMethodCall {
             receiver,
             arguments,
@@ -2276,43 +2273,43 @@ where
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
         ExprKind::MethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
-        }
+        },
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             collect_captures_from_expression(receiver, process);
-        }
+        },
         ExprKind::FieldAccess { object, .. } => {
             collect_captures_from_expression(object, process);
-        }
+        },
         ExprKind::TupleIndex { tuple, .. } => {
             collect_captures_from_expression(tuple, process);
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
         ExprKind::Assignment { target, value } => {
             collect_captures_from_expression(target, process);
             collect_captures_from_expression(value, process);
-        }
+        },
         ExprKind::Tuple(elements) => {
             for elem in elements {
                 collect_captures_from_expression(elem, process);
             }
-        }
+        },
         ExprKind::Array(elements) => {
             for elem in elements {
                 collect_captures_from_expression(elem, process);
             }
-        }
+        },
         ExprKind::If {
             conditions,
             then_branch,
@@ -2324,10 +2321,10 @@ where
                 match condition {
                     IfCondition::Expr(expr) => {
                         collect_captures_from_expression(expr, process);
-                    }
+                    },
                     IfCondition::Let { value, .. } => {
                         collect_captures_from_expression(value, process);
-                    }
+                    },
                 }
             }
             for stmt in then_branch {
@@ -2339,7 +2336,7 @@ where
             if let Some(else_br) = else_branch {
                 collect_captures_from_else_branch(else_br, process);
             }
-        }
+        },
         ExprKind::While {
             condition,
             body: while_body,
@@ -2349,7 +2346,7 @@ where
             for stmt in while_body {
                 collect_captures_from_statement(stmt, process);
             }
-        }
+        },
         ExprKind::WhileLet {
             conditions,
             body: while_body,
@@ -2360,32 +2357,32 @@ where
                 match condition {
                     IfCondition::Expr(expr) => {
                         collect_captures_from_expression(expr, process);
-                    }
+                    },
                     IfCondition::Let { value, .. } => {
                         collect_captures_from_expression(value, process);
-                    }
+                    },
                 }
             }
             for stmt in while_body {
                 collect_captures_from_statement(stmt, process);
             }
-        }
+        },
         ExprKind::Loop {
             body: loop_body, ..
         } => {
             for stmt in loop_body {
                 collect_captures_from_statement(stmt, process);
             }
-        }
+        },
         ExprKind::Break { .. } => {
             // Break doesn't have a value in this AST
-        }
-        ExprKind::Continue { .. } => {}
+        },
+        ExprKind::Continue { .. } => {},
         ExprKind::Return { value } => {
             if let Some(val) = value {
                 collect_captures_from_expression(val, process);
             }
-        }
+        },
         ExprKind::Closure {
             body, tail_expr, ..
         } => {
@@ -2397,7 +2394,7 @@ where
             if let Some(tail) = tail_expr {
                 collect_captures_from_expression(tail, process);
             }
-        }
+        },
 
         // Implicit member access - check arguments if present
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
@@ -2406,7 +2403,7 @@ where
                     collect_captures_from_expression(&arg.value, process);
                 }
             }
-        }
+        },
 
         // Match expression - walk scrutinee and all arms
         ExprKind::Match { scrutinee, arms } => {
@@ -2418,7 +2415,7 @@ where
                 }
                 collect_captures_from_expression(&arm.body, process);
             }
-        }
+        },
 
         // Block expression - walk statements and value
         ExprKind::Block { statements, value } => {
@@ -2428,14 +2425,14 @@ where
             if let Some(val) = value {
                 collect_captures_from_expression(val, process);
             }
-        }
+        },
 
         // Lang intrinsic calls - walk arguments
         ExprKind::LangIntrinsic { arguments, .. } => {
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
 
         // Subscript call - walk receiver and arguments
         ExprKind::SubscriptCall {
@@ -2447,7 +2444,7 @@ where
             for arg in arguments {
                 collect_captures_from_expression(&arg.value, process);
             }
-        }
+        },
 
         // Leaf nodes - no recursion needed
         ExprKind::Literal(_)
@@ -2458,7 +2455,7 @@ where
         | ExprKind::AssociatedTypeRef
         | ExprKind::EnumCase { .. }
         | ExprKind::LangIntrinsicRef(_)
-        | ExprKind::Error => {}
+        | ExprKind::Error => {},
     }
 }
 
@@ -2482,10 +2479,10 @@ fn collect_captures_from_else_branch<F>(
             if let Some(val) = value {
                 collect_captures_from_expression(val, process);
             }
-        }
+        },
         kestrel_semantic_tree::expr::ElseBranch::ElseIf(expr) => {
             collect_captures_from_expression(expr, process);
-        }
+        },
     }
 }
 
@@ -2584,8 +2581,8 @@ fn resolve_match_arm(
     // Pop the arm scope
     ctx.local_scope.pop_scope();
 
-    Some(if guard.is_some() {
-        MatchArm::with_guard(pattern, guard.unwrap(), body, span)
+    Some(if let Some(guard_expr) = guard {
+        MatchArm::with_guard(pattern, guard_expr, body, span)
     } else {
         MatchArm::new(pattern, body, span)
     })

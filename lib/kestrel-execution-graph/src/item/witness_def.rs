@@ -61,7 +61,8 @@ impl WitnessDef {
         implementation: Id<QualifiedName>,
         type_args: Vec<Id<Ty>>,
     ) {
-        self.method_bindings.insert(name.into(), (implementation, type_args));
+        self.method_bindings
+            .insert(name.into(), (implementation, type_args));
     }
 
     /// Create a display wrapper for printing this witness.

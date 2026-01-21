@@ -159,7 +159,7 @@ impl MirTy {
             {
                 let actual_name = ctx.name(*name);
                 actual_name.to_string() == *expected_name
-            }
+            },
 
             // Named types with generics
             (
@@ -177,18 +177,18 @@ impl MirTy {
                     .iter()
                     .zip(type_args.iter())
                     .all(|(e, a)| e.matches(*a, ctx))
-            }
+            },
 
             // References
             (MirTy::Ref(expected_inner), ActualTy::Ref(actual_inner)) => {
                 expected_inner.matches(*actual_inner, ctx)
-            }
+            },
             (MirTy::RefMut(expected_inner), ActualTy::RefMut(actual_inner)) => {
                 expected_inner.matches(*actual_inner, ctx)
-            }
+            },
             (MirTy::Pointer(expected_inner), ActualTy::Pointer(actual_inner)) => {
                 expected_inner.matches(*actual_inner, ctx)
-            }
+            },
 
             // Tuples
             (MirTy::Tuple(expected_elems), ActualTy::Tuple(actual_elems)) => {
@@ -199,7 +199,7 @@ impl MirTy {
                     .iter()
                     .zip(actual_elems.iter())
                     .all(|(e, a)| e.matches(*a, ctx))
-            }
+            },
 
             // Function types (thin)
             (
@@ -221,7 +221,7 @@ impl MirTy {
                     }
                 }
                 expected_ret.matches(*actual_ret, ctx)
-            }
+            },
 
             // Function types (thick/escaping)
             (
@@ -243,13 +243,13 @@ impl MirTy {
                     }
                 }
                 expected_ret.matches(*actual_ret, ctx)
-            }
+            },
 
             // Type parameters
             (MirTy::TypeParam(expected_name), ActualTy::TypeParam(actual_id)) => {
                 let actual_param = ctx.type_param(*actual_id);
                 actual_param.name == *expected_name
-            }
+            },
 
             // Associated type projections
             (
@@ -268,7 +268,7 @@ impl MirTy {
                 expected_base.matches(*actual_base, ctx)
                     && actual_protocol_name.to_string() == *expected_protocol
                     && actual_associated == expected_associated
-            }
+            },
 
             // No match
             _ => false,
@@ -292,18 +292,18 @@ impl MirTy {
             MirTy::NamedGeneric(name, args) => {
                 let args_str: Vec<_> = args.iter().map(|a| a.display()).collect();
                 format!("{}[{}]", name, args_str.join(", "))
-            }
+            },
             MirTy::Ref(inner) => format!("&{}", inner.display()),
             MirTy::RefMut(inner) => format!("&var {}", inner.display()),
             MirTy::Pointer(inner) => format!("*{}", inner.display()),
             MirTy::Tuple(elems) => {
                 let elems_str: Vec<_> = elems.iter().map(|e| e.display()).collect();
                 format!("({})", elems_str.join(", "))
-            }
+            },
             MirTy::Func { params, ret } => {
                 let params_str: Vec<_> = params.iter().map(|p| p.display()).collect();
                 format!("func({}) -> {}", params_str.join(", "), ret.display())
-            }
+            },
             MirTy::FuncThick { params, ret } => {
                 let params_str: Vec<_> = params.iter().map(|p| p.display()).collect();
                 format!(
@@ -311,7 +311,7 @@ impl MirTy {
                     params_str.join(", "),
                     ret.display()
                 )
-            }
+            },
             MirTy::TypeParam(name) => name.clone(),
             MirTy::AssociatedType {
                 base,

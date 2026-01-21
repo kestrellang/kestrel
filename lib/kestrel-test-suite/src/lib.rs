@@ -366,7 +366,7 @@ impl TestContext {
     pub fn mir(&self) -> &kestrel_execution_graph_lowering::LoweringResult {
         self.mir_result.get_or_init(|| {
             let root = self.semantic_model.root();
-            kestrel_execution_graph_lowering::lower_module(&self.semantic_model, &root)
+            kestrel_execution_graph_lowering::lower_module(&self.semantic_model, root)
         })
     }
 
@@ -383,10 +383,7 @@ impl TestContext {
         // Get MIR (this already handles errors)
         let mir_result = self.mir();
         if !mir_result.diagnostics.is_empty() {
-            return Err(format!(
-                "MIR lowering failed: {:?}",
-                mir_result.diagnostics
-            ));
+            return Err(format!("MIR lowering failed: {:?}", mir_result.diagnostics));
         }
 
         // Create temp directory
@@ -432,7 +429,7 @@ impl TestContext {
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&temp_dir);
                 return Err(format!("Failed to run executable: {}", e));
-            }
+            },
         };
 
         // Cleanup
@@ -535,7 +532,7 @@ impl Test {
                 Err(e) => {
                     // Create context with error
                     let diagnostic = kestrel_reporting::Diagnostic::error()
-                        .with_message(&format!("Failed to load stdlib: {}", e));
+                        .with_message(format!("Failed to load stdlib: {}", e));
                     diagnostics.add_diagnostic(diagnostic);
                     self.context = Some(TestContext {
                         semantic_model: builder.build(),
@@ -545,7 +542,7 @@ impl Test {
                         run_result: OnceCell::new(),
                     });
                     return;
-                }
+                },
             }
         } else {
             Vec::new()
@@ -822,7 +819,8 @@ impl Expectable for ExitCode {
         if ctx.has_errors {
             return Err(format!(
                 "Expected program to run with exit code {}, but compilation failed with {} error(s)",
-                self.0, ctx.diagnostics.len()
+                self.0,
+                ctx.diagnostics.len()
             ));
         }
 
@@ -846,7 +844,8 @@ impl Expectable for StdoutContains {
         if ctx.has_errors {
             return Err(format!(
                 "Expected stdout to contain '{}', but compilation failed with {} error(s)",
-                self.0, ctx.diagnostics.len()
+                self.0,
+                ctx.diagnostics.len()
             ));
         }
 
@@ -870,7 +869,8 @@ impl Expectable for StdoutEquals {
         if ctx.has_errors {
             return Err(format!(
                 "Expected stdout to equal '{}', but compilation failed with {} error(s)",
-                self.0, ctx.diagnostics.len()
+                self.0,
+                ctx.diagnostics.len()
             ));
         }
 
@@ -894,7 +894,8 @@ impl Expectable for StderrContains {
         if ctx.has_errors {
             return Err(format!(
                 "Expected stderr to contain '{}', but compilation failed with {} error(s)",
-                self.0, ctx.diagnostics.len()
+                self.0,
+                ctx.diagnostics.len()
             ));
         }
 
@@ -918,7 +919,8 @@ impl Expectable for StderrEquals {
         if ctx.has_errors {
             return Err(format!(
                 "Expected stderr to equal '{}', but compilation failed with {} error(s)",
-                self.0, ctx.diagnostics.len()
+                self.0,
+                ctx.diagnostics.len()
             ));
         }
 
@@ -1220,7 +1222,7 @@ impl Behavior {
                             (Some(SemanticVisibility::Internal), Visibility::Internal) => true,
                             (Some(SemanticVisibility::Fileprivate), Visibility::Fileprivate) => {
                                 true
-                            }
+                            },
                             (None, Visibility::Internal) => true, // Default is internal
                             _ => false,
                         };
@@ -1230,7 +1232,7 @@ impl Behavior {
                                 path, actual, expected
                             ));
                         }
-                    }
+                    },
                     None => {
                         // No visibility behavior means internal (default)
                         if *expected != Visibility::Internal {
@@ -1239,10 +1241,10 @@ impl Behavior {
                                 path, expected
                             ));
                         }
-                    }
+                    },
                 }
                 Ok(())
-            }
+            },
             Behavior::TypeParamCount(expected) => {
                 let count = get_type_param_count(symbol);
                 if count != *expected {
@@ -1252,7 +1254,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::IsGeneric(expected) => {
                 let is_generic = get_type_param_count(symbol) > 0;
                 if is_generic != *expected {
@@ -1264,7 +1266,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::FieldCount(expected) => {
                 let count = get_field_count(symbol);
                 if count != *expected {
@@ -1274,7 +1276,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::IsStatic(expected) => {
                 let is_static = get_is_static(symbol);
                 if is_static != Some(*expected) {
@@ -1284,7 +1286,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::HasBody(expected) => {
                 let has_body = get_has_body(symbol);
                 if has_body != Some(*expected) {
@@ -1294,7 +1296,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ParameterCount(expected) => {
                 let count = get_parameter_count(symbol);
                 if count != Some(*expected) {
@@ -1304,7 +1306,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ConformanceCount(expected) => {
                 let count = get_conformance_count(symbol);
                 if count != *expected {
@@ -1314,7 +1316,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::IsInstanceMethod(expected) => {
                 let is_instance = get_is_instance_method(symbol);
                 if is_instance != Some(*expected) {
@@ -1324,7 +1326,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ReceiverKind(expected) => {
                 let receiver = get_receiver_kind(symbol);
                 if receiver != Some(*expected) {
@@ -1334,7 +1336,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ChildCount(expected) => {
                 // Count children excluding type parameters (they're structural, not semantic)
                 let count = symbol
@@ -1350,7 +1352,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::ImplementsProtocol(protocol_name, method_name) => {
                 let implements_info = get_implements_protocol_info(symbol);
                 match implements_info {
@@ -1361,16 +1363,16 @@ impl Behavior {
                                 path, actual_protocol, actual_method, protocol_name, method_name
                             ));
                         }
-                    }
+                    },
                     None => {
                         return Err(format!(
                             "Symbol '{}' does not implement any protocol method, expected '{}.{}'",
                             path, protocol_name, method_name
                         ));
-                    }
+                    },
                 }
                 Ok(())
-            }
+            },
             Behavior::ImplementsProtocolNone => {
                 let implements_info = get_implements_protocol_info(symbol);
                 if let Some((protocol_name, method_name)) = implements_info {
@@ -1380,7 +1382,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::HasAttribute(attr_name) => {
                 let has_attr = get_has_attribute(symbol, attr_name);
                 if !has_attr {
@@ -1390,7 +1392,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::AttributeCount(expected) => {
                 let count = get_attribute_count(symbol);
                 if count != *expected {
@@ -1400,7 +1402,7 @@ impl Behavior {
                     ));
                 }
                 Ok(())
-            }
+            },
             Behavior::AttributeArgCount(attr_name, expected) => {
                 let count = get_attribute_arg_count(symbol, attr_name);
                 match count {
@@ -1414,7 +1416,7 @@ impl Behavior {
                         path, attr_name
                     )),
                 }
-            }
+            },
             Behavior::HasNegativeConformance(protocol_name) => {
                 let has_neg = has_negative_conformance_to(symbol, protocol_name);
                 if has_neg {
@@ -1425,7 +1427,7 @@ impl Behavior {
                         path, protocol_name
                     ))
                 }
-            }
+            },
             Behavior::ConformsTo(protocol_name) => {
                 let conforms = conforms_to_protocol(symbol, protocol_name);
                 if conforms {
@@ -1436,7 +1438,7 @@ impl Behavior {
                         path, protocol_name
                     ))
                 }
-            }
+            },
             Behavior::IsCopyable(expected) => {
                 let is_copyable = get_is_copyable(symbol);
                 match is_copyable {
@@ -1455,9 +1457,9 @@ impl Behavior {
                                 path
                             ))
                         }
-                    }
+                    },
                 }
-            }
+            },
             Behavior::IsCloneable(expected) => {
                 let is_cloneable = get_is_cloneable(symbol);
                 match is_cloneable {
@@ -1476,9 +1478,9 @@ impl Behavior {
                                 path
                             ))
                         }
-                    }
+                    },
                 }
-            }
+            },
             Behavior::HasDeinit(expected) => {
                 let has_deinit = get_has_deinit(symbol);
                 if has_deinit == *expected {
@@ -1489,7 +1491,7 @@ impl Behavior {
                         path, has_deinit, expected
                     ))
                 }
-            }
+            },
         }
     }
 }
@@ -1515,7 +1517,7 @@ impl std::fmt::Debug for Behavior {
             Behavior::AttributeArgCount(name, n) => write!(f, "AttributeArgCount({}, {})", name, n),
             Behavior::HasNegativeConformance(name) => {
                 write!(f, "HasNegativeConformance({})", name)
-            }
+            },
             Behavior::ConformsTo(name) => write!(f, "ConformsTo({})", name),
             Behavior::IsCopyable(b) => write!(f, "IsCopyable({})", b),
             Behavior::IsCloneable(b) => write!(f, "IsCloneable({})", b),

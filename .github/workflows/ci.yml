@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+env:
+  RUSTFLAGS: "-D warnings"
+
 jobs:
   rust:
     name: Rust
@@ -22,7 +25,10 @@ jobs:
         run: cargo fmt --check
 
       - name: Rust clippy
-        run: cargo clippy --workspace --lib --bins --examples -- -D clippy::correctness -D clippy::suspicious
+        run: cargo clippy --workspace --lib --bins --examples -- -D warnings
+
+      - name: Rust build
+        run: cargo build --workspace
 
       - name: Rust test
         run: cargo test --workspace

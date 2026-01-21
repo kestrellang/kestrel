@@ -87,8 +87,10 @@ impl IntoDiagnostic for OperatorOnLangIntrinsicType {
                 "operators cannot be used on lang intrinsic type '{}'",
                 self.type_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!("use '{}' instead", self.suggested_intrinsic))])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message(format!("use '{}' instead", self.suggested_intrinsic)),
+            ])
             .with_notes(vec![format!(
                 "lang intrinsic types require explicit intrinsic function calls"
             )])

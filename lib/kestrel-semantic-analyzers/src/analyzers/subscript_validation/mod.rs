@@ -62,12 +62,11 @@ impl Analyzer for SubscriptValidationAnalyzer {
 
         // Check 1: Subscript must have at least one parameter
         // Get parameters from the getter's CallableBehavior
-        if let Some(getter) = subscript.getter() {
-            if let Some(callable) = getter.metadata().get_behavior::<CallableBehavior>() {
-                if callable.parameters().is_empty() {
-                    ctx.report(SubscriptMissingParametersError { span: span.clone() });
-                }
-            }
+        if let Some(getter) = subscript.getter()
+            && let Some(callable) = getter.metadata().get_behavior::<CallableBehavior>()
+            && callable.parameters().is_empty()
+        {
+            ctx.report(SubscriptMissingParametersError { span: span.clone() });
         }
 
         // Check 2: Subscript must have a body (unless protocol requirement)

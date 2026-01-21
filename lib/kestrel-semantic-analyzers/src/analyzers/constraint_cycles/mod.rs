@@ -111,10 +111,7 @@ fn check_constraint_cycles(
                 let referenced_params = collect_type_param_references(bound);
                 for ref_id in referenced_params {
                     if param_map.contains_key(&ref_id) && ref_id != *param_id {
-                        dependencies
-                            .entry(*param_id)
-                            .or_insert_with(Vec::new)
-                            .push(ref_id);
+                        dependencies.entry(*param_id).or_default().push(ref_id);
                     }
                 }
             }
@@ -184,12 +181,12 @@ fn collect_type_param_refs_recursive(ty: &Ty, refs: &mut Vec<SymbolId>) {
             for sub_ty in substitutions.types() {
                 collect_type_param_refs_recursive(sub_ty, refs);
             }
-        }
+        },
         TyKind::Tuple(elements) => {
             for e in elements {
                 collect_type_param_refs_recursive(e, refs);
             }
-        }
+        },
         TyKind::Array(elem) => collect_type_param_refs_recursive(elem, refs),
         TyKind::Function {
             params,
@@ -199,8 +196,8 @@ fn collect_type_param_refs_recursive(ty: &Ty, refs: &mut Vec<SymbolId>) {
                 collect_type_param_refs_recursive(p, refs);
             }
             collect_type_param_refs_recursive(return_type, refs);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 

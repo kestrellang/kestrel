@@ -96,7 +96,7 @@ impl ExtensionSymbol {
         self.metadata
             .get_behavior::<ExtensionTargetBehavior>()
             .map(|b| b.where_clause().clone())
-            .unwrap_or_else(WhereClause::new)
+            .unwrap_or_default()
     }
 
     /// Calculate the specificity of this extension.

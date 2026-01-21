@@ -87,7 +87,7 @@ impl Substitution {
                 } else {
                     mir.intern_type(MirTy::Pointer(new_inner))
                 }
-            }
+            },
 
             MirTy::Ref(inner) => {
                 let new_inner = self.apply_ty(mir, inner);
@@ -96,7 +96,7 @@ impl Substitution {
                 } else {
                     mir.intern_type(MirTy::Ref(new_inner))
                 }
-            }
+            },
 
             MirTy::RefMut(inner) => {
                 let new_inner = self.apply_ty(mir, inner);
@@ -105,7 +105,7 @@ impl Substitution {
                 } else {
                     mir.intern_type(MirTy::RefMut(new_inner))
                 }
-            }
+            },
 
             // Tuple - recurse into each element
             MirTy::Tuple(elems) => {
@@ -115,7 +115,7 @@ impl Substitution {
                 } else {
                     mir.intern_type(MirTy::Tuple(new_elems))
                 }
-            }
+            },
 
             // Named type - recurse into type arguments
             MirTy::Named { name, type_args } => {
@@ -128,7 +128,7 @@ impl Substitution {
                         type_args: new_args,
                     })
                 }
-            }
+            },
 
             // Function types - recurse into params and return type
             MirTy::FuncThin { params, ret } => {
@@ -142,7 +142,7 @@ impl Substitution {
                         ret: new_ret,
                     })
                 }
-            }
+            },
 
             MirTy::FuncThick { params, ret } => {
                 let new_params: Vec<_> = params.iter().map(|p| self.apply_ty(mir, *p)).collect();
@@ -155,7 +155,7 @@ impl Substitution {
                         ret: new_ret,
                     })
                 }
-            }
+            },
 
             // Associated type projection - substitute the base type
             // Note: Full resolution of associated types requires witness lookup,
@@ -175,7 +175,7 @@ impl Substitution {
                         associated,
                     })
                 }
-            }
+            },
         }
     }
 
@@ -226,7 +226,7 @@ impl Substitution {
                         }
                     })
                 }
-            }
+            },
 
             MirTy::Ref(inner) => {
                 let new_inner = self.apply_ty_readonly(mir, *inner)?;
@@ -239,7 +239,7 @@ impl Substitution {
                         }
                     })
                 }
-            }
+            },
 
             MirTy::RefMut(inner) => {
                 let new_inner = self.apply_ty_readonly(mir, *inner)?;
@@ -252,7 +252,7 @@ impl Substitution {
                         }
                     })
                 }
-            }
+            },
 
             // Tuple - recurse into each element
             MirTy::Tuple(elems) => {
@@ -268,7 +268,7 @@ impl Substitution {
                             description: format!("Tuple({:?})", new_elems),
                         })
                 }
-            }
+            },
 
             // Named type - recurse into type arguments
             MirTy::Named { name, type_args } => {
@@ -287,7 +287,7 @@ impl Substitution {
                         description: format!("Named({:?}, {:?})", name, new_args),
                     })
                 }
-            }
+            },
 
             // Function types - recurse into params and return type
             MirTy::FuncThin { params, ret } => {
@@ -307,7 +307,7 @@ impl Substitution {
                         description: format!("FuncThin({:?}, {:?})", new_params, new_ret),
                     })
                 }
-            }
+            },
 
             MirTy::FuncThick { params, ret } => {
                 let new_params: Vec<_> = params
@@ -326,7 +326,7 @@ impl Substitution {
                         description: format!("FuncThick({:?}, {:?})", new_params, new_ret),
                     })
                 }
-            }
+            },
 
             // Associated type projection - substitute the base type
             MirTy::AssociatedTypeProjection {
@@ -350,7 +350,7 @@ impl Substitution {
                         ),
                     })
                 }
-            }
+            },
         }
     }
 }
@@ -360,7 +360,7 @@ impl Substitution {
 /// Given a generic function `func identity[T](x: T) -> T` and a call `identity[Int]`,
 /// this creates a substitution `{T → Int}`.
 pub fn build_substitution(
-    mir: &MirContext,
+    _mir: &MirContext,
     type_params: &[Id<TypeParam>],
     type_args: &[Id<Ty>],
 ) -> Substitution {

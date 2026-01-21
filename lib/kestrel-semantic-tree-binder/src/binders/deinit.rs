@@ -9,7 +9,6 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::body_resolver::MoveTracker;
 use crate::declaration_binder::{BindingContext, DeclarationBinder};
 use crate::diagnostics::DuplicateDeinitError;
 use crate::resolution::LocalScope;
@@ -178,7 +177,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        }
+        },
         _ => None,
     }
 }

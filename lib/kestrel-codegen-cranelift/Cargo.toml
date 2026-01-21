@@ -3,6 +3,9 @@ name = "kestrel-codegen-cranelift"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-execution-graph = { path = "../kestrel-execution-graph" }

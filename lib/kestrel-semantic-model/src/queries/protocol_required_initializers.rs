@@ -12,9 +12,9 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::{ExtensionsFor, SymbolFor};
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Get all initializers required by a protocol, including inherited protocol initializers.
 ///
@@ -57,6 +57,7 @@ impl Query for ProtocolRequiredInitializers {
     }
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn collect_protocol_initializers_recursive(
     protocol: &Arc<ProtocolSymbol>,
     model: &SemanticModel,

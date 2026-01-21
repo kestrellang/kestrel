@@ -26,20 +26,20 @@ use super::{
 /// to their specific lowering implementations.
 pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLanguage>>) {
     let kind = symbol.metadata().kind();
-    let span = symbol.metadata().span().clone();
+    let _span = symbol.metadata().span().clone();
 
     match kind {
         KestrelSymbolKind::Function => {
             if let Ok(func_symbol) = symbol.clone().downcast_arc::<FunctionSymbol>() {
                 lower_function(ctx, &func_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Initializer => {
             if let Ok(init_symbol) = symbol.clone().downcast_arc::<InitializerSymbol>() {
                 lower_initializer(ctx, &init_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Struct => {
             if let Ok(struct_symbol) = symbol.clone().downcast_arc::<StructSymbol>() {
@@ -69,21 +69,21 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
                 // Generate witnesses for protocol conformances
                 generate_witnesses_for_struct(ctx, &struct_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Module => {
             // Recursively lower all children
             for child in symbol.metadata().children() {
                 lower_item(ctx, &child);
             }
-        }
+        },
 
         KestrelSymbolKind::SourceFile => {
             // Recursively lower all children
             for child in symbol.metadata().children() {
                 lower_item(ctx, &child);
             }
-        }
+        },
 
         KestrelSymbolKind::Enum => {
             if let Ok(enum_symbol) = symbol.clone().downcast_arc::<EnumSymbol>() {
@@ -110,13 +110,13 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
                 // Generate witnesses for protocol conformances
                 generate_witnesses_for_enum(ctx, &enum_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Protocol => {
             if let Ok(protocol_symbol) = symbol.clone().downcast_arc::<ProtocolSymbol>() {
                 lower_protocol(ctx, &protocol_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Extension => {
             // Extensions don't have their own MIR representation - they just add methods
@@ -148,57 +148,57 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
             if let Ok(extension_symbol) = symbol.clone().downcast_arc::<ExtensionSymbol>() {
                 generate_witnesses_for_extension(ctx, &extension_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::TypeAlias => {
             // Type aliases don't generate MIR - they're expanded during type lowering
-        }
+        },
 
         KestrelSymbolKind::EnumCase => {
             // Enum cases are handled as part of enum lowering
-        }
+        },
 
         KestrelSymbolKind::Field => {
             // Fields are handled as part of struct lowering
-        }
+        },
 
         KestrelSymbolKind::Import => {
             // Imports don't generate MIR
-        }
+        },
 
         KestrelSymbolKind::TypeParameter => {
             // Type parameters are handled during type lowering
-        }
+        },
 
         KestrelSymbolKind::AssociatedType => {
             // Associated types are handled during protocol lowering
-        }
+        },
 
         KestrelSymbolKind::Deinit => {
             // Deinit blocks will generate drop instructions in the future
             // For now, just skip - drop handling is Phase 5.3
-        }
+        },
 
         KestrelSymbolKind::Getter => {
             // Lower getter as a function
             if let Ok(getter_symbol) = symbol.clone().downcast_arc::<GetterSymbol>() {
                 lower_getter(ctx, &getter_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Setter => {
             // Lower setter as a function
             if let Ok(setter_symbol) = symbol.clone().downcast_arc::<SetterSymbol>() {
                 lower_setter(ctx, &setter_symbol);
             }
-        }
+        },
 
         KestrelSymbolKind::Subscript => {
             // Subscripts are lowered on-demand when accessing via subscript syntax.
             // They're children of struct/enum symbols and will be called during
             // subscript call lowering. The getter and setter children are handled
             // similarly to computed property accessors.
-        }
+        },
     }
 }
 

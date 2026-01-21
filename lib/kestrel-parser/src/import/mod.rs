@@ -98,7 +98,7 @@ where
     {
         Ok((import_span, path_segments, alias, items)) => {
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        }
+        },
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
@@ -106,7 +106,7 @@ where
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

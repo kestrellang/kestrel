@@ -468,13 +468,11 @@ mod automatic_deinit {
         "#,
         )
         .expect(Compiles)
-        .expect(
-            MirFunction::new("Test.example").any_block(|b| {
-                b.has_statement(StatementPattern::DeinitCall {
-                    ty: "Test.Handle".to_string(),
-                })
-            }),
-        );
+        .expect(MirFunction::new("Test.example").any_block(|b| {
+            b.has_statement(StatementPattern::DeinitCall {
+                ty: "Test.Handle".to_string(),
+            })
+        }));
     }
 
     #[test]

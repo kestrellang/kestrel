@@ -55,7 +55,7 @@ impl Analyzer for StaticContextAnalyzer {
                 KestrelSymbolKind::Enum,
             ],
         });
-        if !(data.is_static() && !in_valid_context) {
+        if !data.is_static() || in_valid_context {
             return;
         }
 

@@ -251,7 +251,10 @@ impl SemanticModel {
             if let Some(eb) = b.downcast_ref::<ExecutableBehavior>() {
                 let stmt_count = eb.body().statements.len();
                 let has_yield = eb.body().yield_expr().is_some();
-                return Some(format!("Executable(stmts={}, has_yield={})", stmt_count, has_yield));
+                return Some(format!(
+                    "Executable(stmts={}, has_yield={})",
+                    stmt_count, has_yield
+                ));
             }
 
             if let Some(eb) = b.downcast_ref::<ResolvedExecutableBehavior>() {
@@ -319,9 +322,9 @@ impl SemanticModel {
             // In full mode, print the executable body as an indented block
             if let Some((body, is_resolved)) = executable_body {
                 use kestrel_semantic_tree::expr::Expression;
-                use kestrel_semantic_tree::stmt::{Statement, StatementKind};
-                use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
                 use kestrel_semantic_tree::expr::IfCondition;
+                use kestrel_semantic_tree::pattern::{Mutability, PatternKind};
+                use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 
                 /// Format an expression as (value: type)
                 fn format_expr_with_type(expr: &Expression) -> String {
@@ -334,11 +337,19 @@ impl SemanticModel {
                         StatementKind::Binding { pattern, value } => {
                             let keyword = match &pattern.kind {
                                 PatternKind::Local { mutability, .. } => {
-                                    if *mutability == Mutability::Mutable { "var" } else { "let" }
-                                }
+                                    if *mutability == Mutability::Mutable {
+                                        "var"
+                                    } else {
+                                        "let"
+                                    }
+                                },
                                 PatternKind::At { mutability, .. } => {
-                                    if *mutability == Mutability::Mutable { "var" } else { "let" }
-                                }
+                                    if *mutability == Mutability::Mutable {
+                                        "var"
+                                    } else {
+                                        "let"
+                                    }
+                                },
                                 _ => "let",
                             };
                             let name = pattern.name().unwrap_or("<error>");
@@ -348,31 +359,40 @@ impl SemanticModel {
                                 .map(|v| format!(" = {}", format_expr_with_type(v)))
                                 .unwrap_or_default();
                             format!("{} {}: {}{};", keyword, name, ty, value_str)
-                        }
+                        },
                         StatementKind::Expr(expr) => {
                             format!("{};", format_expr_with_type(expr))
-                        }
+                        },
                         StatementKind::GuardLet { conditions, .. } => {
                             let conds: Vec<_> = conditions
                                 .iter()
                                 .map(|c| match c {
                                     IfCondition::Let { pattern, value, .. } => {
                                         let name = pattern.name().unwrap_or("<pattern>");
-                                        format!("let {}: {} = {}", name, pattern.ty, format_expr_with_type(value))
-                                    }
+                                        format!(
+                                            "let {}: {} = {}",
+                                            name,
+                                            pattern.ty,
+                                            format_expr_with_type(value)
+                                        )
+                                    },
                                     IfCondition::Expr(e) => format_expr_with_type(e),
                                 })
                                 .collect();
                             format!("guard {} else {{ ... }}", conds.join(", "))
-                        }
+                        },
                         StatementKind::Deinit { name, .. } => {
                             format!("deinit {};", name)
-                        }
+                        },
                     }
                 }
 
                 let body_indent = "  ".repeat(level + 1);
-                let label = if is_resolved { "ResolvedExecutable" } else { "Executable" };
+                let label = if is_resolved {
+                    "ResolvedExecutable"
+                } else {
+                    "Executable"
+                };
                 println!("{}{} {{", body_indent, label);
                 let stmt_indent = "  ".repeat(level + 2);
                 for stmt in &body.statements {

@@ -37,14 +37,16 @@ mod local_variables {
     #[test]
     fn variable_with_string_type() {
         // Variable holding string value
-        Test::new("module Main\nfunc getString() -> lang.str { let msg: lang.str = \"hello\"; msg }")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("getString")
-                    .is(SymbolKind::Function)
-                    .has(Behavior::ParameterCount(0))
-                    .has(Behavior::HasBody(true)),
-            );
+        Test::new(
+            "module Main\nfunc getString() -> lang.str { let msg: lang.str = \"hello\"; msg }",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("getString")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true)),
+        );
     }
 
     #[test]
@@ -62,13 +64,15 @@ mod local_variables {
     #[test]
     fn array_variable_declaration() {
         // Variable with array type
-        Test::new("module Main\nfunc getArray() -> [lang.i64] { let arr: [lang.i64] = [1, 2, 3]; arr }")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("getArray")
-                    .is(SymbolKind::Function)
-                    .has(Behavior::ParameterCount(0)),
-            );
+        Test::new(
+            "module Main\nfunc getArray() -> [lang.i64] { let arr: [lang.i64] = [1, 2, 3]; arr }",
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("getArray")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]

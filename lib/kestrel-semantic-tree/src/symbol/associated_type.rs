@@ -5,7 +5,10 @@ use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::{KestrelBehaviorKind, generics::GenericsBehavior, typed::TypedBehavior, visibility::VisibilityBehavior},
+    behavior::{
+        KestrelBehaviorKind, generics::GenericsBehavior, typed::TypedBehavior,
+        visibility::VisibilityBehavior,
+    },
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     ty::{Ty, WhereClause},
@@ -109,7 +112,7 @@ impl AssociatedTypeSymbol {
         self.metadata
             .get_behavior::<GenericsBehavior>()
             .map(|g| g.where_clause().clone())
-            .unwrap_or_else(WhereClause::new)
+            .unwrap_or_default()
     }
 }
 

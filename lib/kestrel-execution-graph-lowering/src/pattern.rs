@@ -54,12 +54,12 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
             };
             // Use copy for copyable types, move for non-copyable types
             ctx.emit_copy_or_move_value(Place::local(mir_local), value, &pattern.ty);
-        }
+        },
 
         PatternKind::Wildcard => {
             // Wildcard pattern - discard the value, nothing to do
             // The value is simply not used
-        }
+        },
 
         PatternKind::Tuple {
             prefix,
@@ -67,7 +67,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
             suffix,
         } => {
             lower_tuple_pattern(ctx, prefix, *has_rest, suffix, value, pattern);
-        }
+        },
 
         PatternKind::Struct {
             struct_id: _,
@@ -76,7 +76,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
             has_rest: _,
         } => {
             lower_struct_pattern(ctx, fields, value, pattern);
-        }
+        },
 
         PatternKind::EnumVariant {
             case_id: _,
@@ -86,7 +86,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
             // For single-variant enums, this is irrefutable
             // We need to downcast and extract bindings
             lower_enum_variant_pattern(ctx, case_name, bindings, value, pattern);
-        }
+        },
 
         PatternKind::Literal { value: lit_value } => {
             // Literal patterns in let bindings are refutable (error caught by semantic analysis)
@@ -95,7 +95,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
                 format!("Literal pattern '{:?}' in let binding", lit_value),
                 pattern.span.clone(),
             ));
-        }
+        },
 
         PatternKind::Range { .. } => {
             // Range patterns are refutable
@@ -103,7 +103,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
                 "Range pattern in let binding",
                 pattern.span.clone(),
             ));
-        }
+        },
 
         PatternKind::Array {
             prefix,
@@ -111,7 +111,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
             suffix,
         } => {
             lower_array_pattern(ctx, prefix, suffix, value, pattern);
-        }
+        },
 
         PatternKind::Or { alternatives: _ } => {
             // Or patterns in let bindings - should be caught by semantic analysis
@@ -119,7 +119,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
                 "Or pattern in let binding",
                 pattern.span.clone(),
             ));
-        }
+        },
 
         PatternKind::At {
             name: _,
@@ -129,7 +129,7 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
         } => {
             // @ pattern: bind the whole value AND match subpattern
             lower_at_pattern(ctx, *local_id, subpattern, value, pattern);
-        }
+        },
 
         PatternKind::Rest => {
             // Rest pattern by itself shouldn't appear at top level
@@ -138,11 +138,11 @@ pub fn lower_pattern(ctx: &mut LoweringContext, pattern: &Pattern, value: Value)
                 "Rest pattern",
                 pattern.span.clone(),
             ));
-        }
+        },
 
         PatternKind::Error => {
             // Error pattern - skip (error already reported)
-        }
+        },
     }
 }
 
@@ -311,11 +311,11 @@ fn ensure_place(
             let place = Place::local(temp_local);
             ctx.emit_assign(place.clone(), Rvalue::Use(imm));
             place
-        }
+        },
         Value::Unreachable => {
             // This shouldn't happen - callers should check for Unreachable before calling
             panic!("ensure_place called with Unreachable value");
-        }
+        },
     }
 }
 

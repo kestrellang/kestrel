@@ -133,7 +133,7 @@ impl<'a> LayoutCache<'a> {
                     (_, layout) = layout.append(field_layout);
                 }
                 layout.pad_to_align()
-            }
+            },
 
             // Named types need struct/enum lookup
             MirTy::Named { name, type_args } => {
@@ -157,7 +157,7 @@ impl<'a> LayoutCache<'a> {
                 }
                 // Unknown named type - use pointer size as fallback
                 Layout::new(ptr_size, ptr_size)
-            }
+            },
 
             // Type parameters should be substituted before layout computation
             MirTy::TypeParam(tp) => {
@@ -165,7 +165,7 @@ impl<'a> LayoutCache<'a> {
                     "TypeParam {:?} reached layout computation without substitution - this is a bug",
                     tp
                 )
-            }
+            },
 
             // Function pointers
             MirTy::FuncThin { .. } => Layout::new(ptr_size, ptr_size),
@@ -175,15 +175,19 @@ impl<'a> LayoutCache<'a> {
             // Self type should be substituted before layout computation
             MirTy::SelfType => {
                 panic!("SelfType reached layout computation without substitution - this is a bug")
-            }
+            },
 
             // Associated type projection should be resolved before layout computation
-            MirTy::AssociatedTypeProjection { base, protocol, associated } => {
+            MirTy::AssociatedTypeProjection {
+                base,
+                protocol,
+                associated,
+            } => {
                 panic!(
                     "AssociatedTypeProjection (base={:?}, protocol={:?}, associated={}) reached layout computation without resolution - this is a bug",
                     base, protocol, associated
                 )
-            }
+            },
 
             // Error type
             MirTy::Error => Layout::zero(1),
@@ -194,7 +198,11 @@ impl<'a> LayoutCache<'a> {
     ///
     /// For generic structs like `Box[T]`, the `type_args` (e.g., `[Int]`) are used to
     /// substitute type parameters in field types before computing their layouts.
-    fn compute_struct_layout(&mut self, struct_id: Id<Struct>, type_args: &[Id<Ty>]) -> StructLayout {
+    fn compute_struct_layout(
+        &mut self,
+        struct_id: Id<Struct>,
+        type_args: &[Id<Ty>],
+    ) -> StructLayout {
         let struct_def = self.ctx.struct_def(struct_id);
         // Clone the field IDs and type_params to avoid borrowing issues
         let field_ids: Vec<_> = struct_def.fields.clone();
@@ -253,7 +261,7 @@ impl<'a> LayoutCache<'a> {
                         tp
                     )
                 }
-            }
+            },
 
             // For Named types, recursively substitute type_args and compute layout
             MirTy::Named { name, type_args } => {
@@ -284,7 +292,7 @@ impl<'a> LayoutCache<'a> {
 
                 // Unknown named type - use pointer size as fallback
                 Layout::new(ptr_size, ptr_size)
-            }
+            },
 
             // Pointer/Ref types - always pointer-sized
             MirTy::Pointer(_) | MirTy::Ref(_) | MirTy::RefMut(_) => Layout::new(ptr_size, ptr_size),
@@ -298,7 +306,7 @@ impl<'a> LayoutCache<'a> {
                     (_, layout) = layout.append(elem_layout);
                 }
                 layout.pad_to_align()
-            }
+            },
 
             // All other types - compute layout normally
             _ => self.layout_of(ty),

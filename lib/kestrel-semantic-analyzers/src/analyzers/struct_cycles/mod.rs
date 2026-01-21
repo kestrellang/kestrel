@@ -47,13 +47,13 @@ impl Analyzer for StructCycleAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _ctx: &mut AnalysisContext,
     ) {
-        if symbol.metadata().kind() == KestrelSymbolKind::Struct {
-            if let Ok(struct_sym) = symbol.clone().downcast_arc::<StructSymbol>() {
-                self.structs
-                    .lock()
-                    .unwrap()
-                    .push(CollectedStruct { struct_sym });
-            }
+        if symbol.metadata().kind() == KestrelSymbolKind::Struct
+            && let Ok(struct_sym) = symbol.clone().downcast_arc::<StructSymbol>()
+        {
+            self.structs
+                .lock()
+                .unwrap()
+                .push(CollectedStruct { struct_sym });
         }
     }
 
@@ -148,7 +148,7 @@ fn check_type_for_struct_cycle(
             }
             detector.exit();
             None
-        }
+        },
         TyKind::Tuple(elements) => {
             for e in elements {
                 if let Some(c) = check_type_for_struct_cycle(e, detector, model) {
@@ -156,7 +156,7 @@ fn check_type_for_struct_cycle(
                 }
             }
             None
-        }
+        },
         TyKind::Array(_) => None,
         TyKind::Function { .. } => None,
         _ => None,

@@ -94,7 +94,7 @@ impl MirWitness {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             WitnessExpectation::HasMethodByName { name } => {
                 if !def.method_bindings.contains_key(name) {
@@ -105,7 +105,7 @@ impl MirWitness {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             WitnessExpectation::MethodCount(expected) => {
                 let actual = def.method_bindings.len();
@@ -116,7 +116,7 @@ impl MirWitness {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             WitnessExpectation::HasAssociatedType { name, ty } => {
                 let binding = def.type_bindings.get(name).ok_or_else(|| {
@@ -135,7 +135,7 @@ impl MirWitness {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             WitnessExpectation::HasAssociatedTypeByName { name } => {
                 if !def.type_bindings.contains_key(name) {
@@ -146,7 +146,7 @@ impl MirWitness {
                     ));
                 }
                 Ok(())
-            }
+            },
         }
     }
 }

@@ -65,7 +65,7 @@ fn get_concrete_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<T
             }
 
             Some(Ty::generic_struct(struct_arc, substitutions, span))
-        }
+        },
 
         KestrelSymbolKind::Enum => {
             // Downcast Arc<dyn Symbol> to Arc<EnumSymbol>
@@ -82,12 +82,12 @@ fn get_concrete_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<T
             }
 
             Some(Ty::generic_enum(enum_arc, substitutions, span))
-        }
+        },
 
         KestrelSymbolKind::Protocol => {
             // Protocol methods keep Self abstract
             None
-        }
+        },
         _ => None,
     }
 }
@@ -161,9 +161,17 @@ impl Analyzer for TypeInferenceAnalyzer {
         // Also resolves SelfType to the concrete type for the `self` local.
         let concrete_self_type = get_concrete_self_type(symbol);
         if let Some(func) = symbol.as_ref().downcast_ref::<FunctionSymbol>() {
-            apply_solution_to_locals(func as &dyn LocalContainer, &solution, concrete_self_type.as_ref());
+            apply_solution_to_locals(
+                func as &dyn LocalContainer,
+                &solution,
+                concrete_self_type.as_ref(),
+            );
         } else if let Some(init) = symbol.as_ref().downcast_ref::<InitializerSymbol>() {
-            apply_solution_to_locals(init as &dyn LocalContainer, &solution, concrete_self_type.as_ref());
+            apply_solution_to_locals(
+                init as &dyn LocalContainer,
+                &solution,
+                concrete_self_type.as_ref(),
+            );
         }
 
         // Add ResolvedExecutableBehavior to the symbol

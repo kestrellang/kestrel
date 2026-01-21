@@ -392,20 +392,20 @@ impl std::fmt::Display for InferenceError {
                 expected, found, ..
             } => {
                 write!(f, "type mismatch: expected {}, found {}", expected, found)
-            }
+            },
             InferenceError::OccursCheck { var, ty, .. } => {
                 write!(f, "infinite type: {:?} = {}", var, ty)
-            }
+            },
             InferenceError::ConformanceFailure {
                 ty, protocol_name, ..
             } => {
                 write!(f, "type {} does not conform to {}", ty, protocol_name)
-            }
+            },
             InferenceError::MemberNotFound {
                 receiver, member, ..
             } => {
                 write!(f, "no member '{}' on type {}", member, receiver)
-            }
+            },
             InferenceError::AssociatedTypeNotFound {
                 container,
                 assoc_name,
@@ -416,13 +416,13 @@ impl std::fmt::Display for InferenceError {
                     "no associated type '{}' on type {}",
                     assoc_name, container
                 )
-            }
+            },
             InferenceError::Ambiguous { unresolved } => {
                 write!(f, "ambiguous type: {} unresolved", unresolved.len())
-            }
+            },
             InferenceError::Internal { message } => {
                 write!(f, "internal error: {}", message)
-            }
+            },
             InferenceError::ClosureArityMismatch {
                 actual, expected, ..
             } => {
@@ -431,7 +431,7 @@ impl std::fmt::Display for InferenceError {
                     "closure has {} parameters but {} expected",
                     actual, expected
                 )
-            }
+            },
             InferenceError::ClosureReturnTypeMismatch {
                 actual, expected, ..
             } => {
@@ -440,7 +440,7 @@ impl std::fmt::Display for InferenceError {
                     "closure returns `{}` but `{}` expected",
                     actual, expected
                 )
-            }
+            },
             InferenceError::ClosureParamTypeMismatch {
                 index,
                 actual,
@@ -454,14 +454,14 @@ impl std::fmt::Display for InferenceError {
                     actual,
                     expected
                 )
-            }
+            },
             InferenceError::ItUsedWithWrongArity { expected_arity, .. } => {
                 write!(
                     f,
                     "`it` can only be used when closure has exactly 1 parameter, but {} expected",
                     expected_arity
                 )
-            }
+            },
             InferenceError::NoMatchingOverload {
                 name,
                 receiver_ty,
@@ -485,17 +485,17 @@ impl std::fmt::Display for InferenceError {
                     provided.join(", "),
                     expected.join(", ")
                 )
-            }
+            },
             InferenceError::CannotInferEnumType { member_name, .. } => {
                 write!(f, "cannot infer enum type for shorthand '.{}'", member_name)
-            }
+            },
             InferenceError::UnknownStructField {
                 struct_name,
                 field_name,
                 ..
             } => {
                 write!(f, "struct `{}` has no field `{}`", struct_name, field_name)
-            }
+            },
             InferenceError::MissingStructFields {
                 struct_name,
                 missing_fields,
@@ -507,14 +507,14 @@ impl std::fmt::Display for InferenceError {
                     missing_fields.join(", "),
                     struct_name
                 )
-            }
+            },
             InferenceError::UnknownEnumCase {
                 enum_name,
                 case_name,
                 ..
             } => {
                 write!(f, "enum `{}` has no case `{}`", enum_name, case_name)
-            }
+            },
             InferenceError::TupleArityMismatch {
                 expected, found, ..
             } => {
@@ -523,7 +523,7 @@ impl std::fmt::Display for InferenceError {
                     "tuple pattern arity mismatch: expected {} elements, found {}",
                     expected, found
                 )
-            }
+            },
             InferenceError::PrimitiveMethodNotCalled {
                 method_name,
                 receiver_type,
@@ -534,7 +534,7 @@ impl std::fmt::Display for InferenceError {
                     "primitive method '{}' on '{}' must be called",
                     method_name, receiver_type
                 )
-            }
+            },
         }
     }
 }

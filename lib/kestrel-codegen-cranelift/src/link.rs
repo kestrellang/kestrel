@@ -10,8 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 fn compile_malloc_debug(cc: &str) -> Result<Option<std::path::PathBuf>, CodegenError> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    let source_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime").join("malloc_debug.c");
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("runtime")
+        .join("malloc_debug.c");
     if !source_path.exists() {
         return Ok(None);
     }
@@ -80,9 +81,8 @@ pub fn link_executable(
     // Supports library names (e.g., "ssl") and literal filenames starting with ":"
     // If it starts with ":" and ends with ".o" or ".a", pass it directly as an object/archive file
     for lib in &options.libraries {
-        if lib.starts_with(':') {
+        if let Some(path) = lib.strip_prefix(':') {
             // Strip the leading ":" and pass the file directly
-            let path = &lib[1..];
             cmd.arg(path);
         } else {
             cmd.arg(format!("-l{}", lib));

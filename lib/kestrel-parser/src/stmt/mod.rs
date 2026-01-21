@@ -160,11 +160,12 @@ fn variable_declaration_parser<'tokens>()
 /// Syntax: expr ;
 fn expression_statement_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (ExprVariant, Span), ParserExtra<'tokens>> + Clone {
-    expr_parser().then(
-        skip_trivia()
-            .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
-    )
-    .boxed()
+    expr_parser()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .boxed()
 }
 
 /// Parser for deinit statement
@@ -219,13 +220,13 @@ pub fn emit_stmt_variant(sink: &mut EventSink, variant: &StmtVariant) {
     match variant {
         StmtVariant::VariableDeclaration(data) => {
             emit_variable_declaration(sink, data);
-        }
+        },
         StmtVariant::Expression(expr, semicolon) => {
             emit_expression_statement(sink, expr, semicolon.clone());
-        }
+        },
         StmtVariant::Deinit(data) => {
             emit_deinit_statement(sink, data);
-        }
+        },
     }
 }
 
@@ -299,13 +300,13 @@ where
     match stmt_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_stmt_variant(sink, &variant);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

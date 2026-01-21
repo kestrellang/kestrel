@@ -141,14 +141,16 @@ impl IntoDiagnostic for MissingProtocolPropertyError {
                 "type '{}' does not implement property '{}' from protocol '{}'",
                 self.struct_name, self.property_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "missing property '{}' of type '{}'",
                     self.property_name, self.property_type
-                ))])
+                )),
+            ])
     }
 }
 
+#[allow(dead_code)]
 pub struct ProtocolPropertyTypeMismatchError {
     pub span: Span,
     pub struct_name: String,
@@ -165,14 +167,16 @@ impl IntoDiagnostic for ProtocolPropertyTypeMismatchError {
                 "property '{}' has wrong type for protocol '{}'",
                 self.property_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message(format!(
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range()).with_message(format!(
                     "expected '{}', found '{}'",
                     self.expected_type, self.actual_type
-                ))])
+                )),
+            ])
     }
 }
 
+#[allow(dead_code)]
 pub struct ProtocolPropertyMissingSetterError {
     pub span: Span,
     pub struct_name: String,
@@ -187,8 +191,10 @@ impl IntoDiagnostic for ProtocolPropertyMissingSetterError {
                 "property '{}' requires a setter for protocol '{}'",
                 self.property_name, self.protocol_name
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("property must be mutable (var) or have a setter")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("property must be mutable (var) or have a setter"),
+            ])
             .with_notes(vec![format!(
                 "protocol '{}' requires '{{ get set }}' but '{}' only provides '{{ get }}'",
                 self.protocol_name, self.property_name

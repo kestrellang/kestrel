@@ -101,7 +101,7 @@ impl Constructor {
             } => {
                 // Array constructor arity is prefix + suffix (rest is handled separately)
                 prefix_len + suffix_len + if *has_rest { 1 } else { 0 }
-            }
+            },
             Constructor::NonExhaustive => 0,
             Constructor::Missing => 0,
         }
@@ -119,7 +119,7 @@ impl Constructor {
         match &pattern.kind {
             PatternKind::Wildcard | PatternKind::Local { .. } | PatternKind::Rest => {
                 Constructor::Wildcard
-            }
+            },
 
             PatternKind::Literal { value } => match value {
                 LiteralValue::Bool(true) => Constructor::True,
@@ -154,7 +154,7 @@ impl Constructor {
                     prefix.len() // No rest, suffix should be empty
                 };
                 Constructor::Tuple { arity }
-            }
+            },
 
             PatternKind::Struct {
                 struct_name,
@@ -178,7 +178,7 @@ impl Constructor {
                     name: struct_name.clone(),
                     arity: full_arity,
                 }
-            }
+            },
 
             PatternKind::Range {
                 start,
@@ -191,7 +191,7 @@ impl Constructor {
                         start: *s,
                         end: end_val,
                     }
-                }
+                },
                 (RangeBound::Char(s), RangeBound::Char(e)) => {
                     let end_val = if *inclusive {
                         *e
@@ -202,7 +202,7 @@ impl Constructor {
                         start: *s,
                         end: end_val,
                     }
-                }
+                },
                 // Mismatched range bounds - treat as non-exhaustive
                 _ => Constructor::NonExhaustive,
             },
@@ -226,12 +226,12 @@ impl Constructor {
                 } else {
                     Constructor::Wildcard
                 }
-            }
+            },
 
             PatternKind::At { subpattern, .. } => {
                 // @-pattern: the constructor is determined by the subpattern
                 Constructor::from_pattern(subpattern)
-            }
+            },
 
             PatternKind::Error => Constructor::Wildcard,
         }
@@ -266,7 +266,7 @@ impl Constructor {
                         })
                         .collect(),
                 )
-            }
+            },
 
             TyKind::Tuple(elements) => Some(vec![Constructor::Tuple {
                 arity: elements.len(),
@@ -276,12 +276,13 @@ impl Constructor {
                 // Check if this struct conforms to ExpressibleByBoolLiteral
                 // If so, use True/False constructors for exhaustiveness checking
                 use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-                if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>() {
+                if let Some(conformances) = symbol.metadata().get_behavior::<ConformancesBehavior>()
+                {
                     for conf in conformances.conformances() {
-                        if let TyKind::Protocol { symbol: proto, .. } = conf.kind() {
-                            if proto.metadata().name().value == "ExpressibleByBoolLiteral" {
-                                return Some(vec![Constructor::True, Constructor::False]);
-                            }
+                        if let TyKind::Protocol { symbol: proto, .. } = conf.kind()
+                            && proto.metadata().name().value == "ExpressibleByBoolLiteral"
+                        {
+                            return Some(vec![Constructor::True, Constructor::False]);
                         }
                     }
                 }
@@ -297,7 +298,7 @@ impl Constructor {
                     name: symbol.metadata().name().value.clone(),
                     arity: field_count,
                 }])
-            }
+            },
 
             // Infinite constructor spaces
             TyKind::Int(_) | TyKind::Float(_) | TyKind::String => None,
@@ -322,7 +323,7 @@ impl Constructor {
                 } else {
                     false
                 }
-            }
+            },
         }
     }
 
@@ -343,7 +344,7 @@ impl Constructor {
             Some(all) => {
                 let missing: Vec<_> = all.into_iter().filter(|c| !covered.contains(c)).collect();
                 Some(missing)
-            }
+            },
             None => {
                 // Infinite constructors case
                 // For arrays, check if patterns cover all possible lengths
@@ -354,7 +355,7 @@ impl Constructor {
                 // Other infinite constructor types need a wildcard to be exhaustive
                 // Return NonExhaustive marker to indicate uncovered values exist
                 Some(vec![Constructor::NonExhaustive])
-            }
+            },
         }
     }
 
@@ -423,11 +424,11 @@ impl Constructor {
                 } else {
                     format!(".{}(_)", name)
                 }
-            }
+            },
             Constructor::Tuple { arity } => {
                 let wildcards = vec!["_"; *arity].join(", ");
                 format!("({})", wildcards)
-            }
+            },
             Constructor::Struct { name, .. } => format!("{} {{ .. }}", name),
             Constructor::IntLiteral(n) => n.to_string(),
             Constructor::IntRange { start, end } => format!("{}..={}", start, end),
@@ -447,7 +448,7 @@ impl Constructor {
                 }
                 parts.extend(vec!["_"; *suffix_len]);
                 format!("[{}]", parts.join(", "))
-            }
+            },
             Constructor::NonExhaustive => "_".to_string(),
             Constructor::Missing => "_".to_string(),
         }

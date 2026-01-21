@@ -76,7 +76,7 @@ impl MirProtocol {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             ProtocolExpectation::MethodCount(expected) => {
                 let actual = def.methods.len();
@@ -87,7 +87,7 @@ impl MirProtocol {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             ProtocolExpectation::HasAssociatedType(name) => {
                 let found = def.associated_types.iter().any(|&at| {
@@ -106,7 +106,7 @@ impl MirProtocol {
                     ));
                 }
                 Ok(())
-            }
+            },
 
             ProtocolExpectation::TypeParamCount(expected) => {
                 let actual = def.type_params.len();
@@ -117,7 +117,7 @@ impl MirProtocol {
                     ));
                 }
                 Ok(())
-            }
+            },
         }
     }
 }

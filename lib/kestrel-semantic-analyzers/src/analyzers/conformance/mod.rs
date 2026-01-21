@@ -7,8 +7,8 @@ use crate::context::AnalysisContext;
 use kestrel_semantic_model::{
     AssociatedTypeBindingsForEnum, AssociatedTypeBindingsForStruct, ConformancesForSymbol,
     ExtensionsFor, PropertyRequirement, ProtocolAssociatedTypesWithDefaults,
-    ProtocolInitializersWithDefiner, ProtocolMethodsWithDefiner, ProtocolRequiredInitializers,
-    ProtocolRequiredMethods, ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
+    ProtocolInitializersWithDefiner, ProtocolMethodsWithDefiner, ProtocolRequiredMethods,
+    ProtocolRequiredProperties, SemanticModel, StructFields, SymbolFor,
 };
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, ReceiverKind, SignatureType};
@@ -66,29 +66,28 @@ impl Analyzer for ConformanceAnalyzer {
                 if let Some(protocol) = get_protocol_arc_from_symbol(symbol) {
                     self.protocols.push((symbol.clone(), protocol));
                 }
-            }
+            },
             KestrelSymbolKind::Struct => {
                 let conformances = ctx.model.query(ConformancesForSymbol {
                     symbol_id: symbol.metadata().id(),
                 });
-                if !conformances.is_empty() {
-                    if let Ok(struct_sym) = symbol.clone().into_any_arc().downcast::<StructSymbol>()
-                    {
-                        self.structs.push((symbol.clone(), struct_sym));
-                    }
+                if !conformances.is_empty()
+                    && let Ok(struct_sym) = symbol.clone().into_any_arc().downcast::<StructSymbol>()
+                {
+                    self.structs.push((symbol.clone(), struct_sym));
                 }
-            }
+            },
             KestrelSymbolKind::Enum => {
                 let conformances = ctx.model.query(ConformancesForSymbol {
                     symbol_id: symbol.metadata().id(),
                 });
-                if !conformances.is_empty() {
-                    if let Ok(enum_sym) = symbol.clone().into_any_arc().downcast::<EnumSymbol>() {
-                        self.enums.push((symbol.clone(), enum_sym));
-                    }
+                if !conformances.is_empty()
+                    && let Ok(enum_sym) = symbol.clone().into_any_arc().downcast::<EnumSymbol>()
+                {
+                    self.enums.push((symbol.clone(), enum_sym));
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -118,7 +117,7 @@ impl Analyzer for ConformanceAnalyzer {
                             extra_structs
                                 .push((s.clone() as Arc<dyn Symbol<KestrelLanguage>>, s.clone()));
                         }
-                    }
+                    },
                     TyKind::Enum { symbol: e, .. } => {
                         let id = e.metadata().id();
                         let already = self.enums.iter().any(|(_, es)| es.metadata().id() == id);
@@ -126,8 +125,8 @@ impl Analyzer for ConformanceAnalyzer {
                             extra_enums
                                 .push((e.clone() as Arc<dyn Symbol<KestrelLanguage>>, e.clone()));
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -212,11 +211,11 @@ fn check_inheritance_cycle(
         return Some(cycle);
     }
     for inherited_ty in model.query(ConformancesForSymbol { symbol_id: id }) {
-        if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
-            if let Some(c) = check_inheritance_cycle(symbol, model, detector) {
-                detector.exit();
-                return Some(c);
-            }
+        if let TyKind::Protocol { symbol, .. } = inherited_ty.kind()
+            && let Some(c) = check_inheritance_cycle(symbol, model, detector)
+        {
+            detector.exit();
+            return Some(c);
         }
     }
     detector.exit();
@@ -313,10 +312,10 @@ fn check_struct_conformance(
             effective_bindings.insert(name.clone(), binding.clone());
         }
         for (type_name, default_type) in &protocol_associated_types {
-            if !effective_bindings.contains_key(type_name) {
-                if let Some(default) = default_type {
-                    effective_bindings.insert(type_name.clone(), default.clone());
-                }
+            if !effective_bindings.contains_key(type_name)
+                && let Some(default) = default_type
+            {
+                effective_bindings.insert(type_name.clone(), default.clone());
             }
         }
         // Use the already-computed self_type
@@ -340,7 +339,7 @@ fn check_struct_conformance(
                         protocol_name: protocol_name.clone(),
                         method_name: method_name.clone(),
                     });
-                }
+                },
                 Some((_struct_method, struct_return_type)) => {
                     if struct_return_type != &required_return_type {
                         let span = struct_sym.metadata().declaration_span().clone();
@@ -352,7 +351,7 @@ fn check_struct_conformance(
                             actual_type: format!("{:?}", struct_return_type),
                         });
                     }
-                }
+                },
             }
         }
 
@@ -402,7 +401,7 @@ fn resolve_protocol_type(ty: &Ty) -> Option<(Arc<ProtocolSymbol>, HashMap<String
                 }
             }
             Some((symbol.clone(), type_param_bindings))
-        }
+        },
         _ => None,
     }
 }
@@ -427,10 +426,10 @@ fn check_protocol_associated_type_defaults(
 ) {
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
     for child in protocol_dyn.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::AssociatedType {
-            if let Ok(assoc_type) = child.downcast_arc::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>() {
-                if let Some(bounds) = assoc_type.bounds() {
-                    if let Some(default_type) = assoc_type.default_type() {
+        if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+            && let Ok(assoc_type) = child.downcast_arc::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>()
+                && let Some(bounds) = assoc_type.bounds()
+                    && let Some(default_type) = assoc_type.default_type() {
                         validate_type_satisfies_protocol_bounds(
                             &default_type,
                             &bounds,
@@ -439,9 +438,6 @@ fn check_protocol_associated_type_defaults(
                             ctx,
                         );
                     }
-                }
-            }
-        }
     }
 }
 
@@ -456,12 +452,12 @@ fn validate_type_satisfies_protocol_bounds(
         TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
         TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-        TyKind::Error { .. } => return,
+        TyKind::Error => return,
         _ => format!("{:?}", bound_type.kind()),
     };
 
     for required_protocol in required_bounds {
-        if matches!(required_protocol.kind(), TyKind::Error { .. }) {
+        if matches!(required_protocol.kind(), TyKind::Error) {
             continue;
         }
         if let TyKind::Protocol {
@@ -485,9 +481,9 @@ fn validate_type_satisfies_protocol_bounds(
                             false
                         }
                     })
-                }
+                },
                 TyKind::TypeParameter(_) => true,
-                TyKind::Error { .. } => true,
+                TyKind::Error => true,
                 _ => false,
             };
             if !conforms {
@@ -529,7 +525,7 @@ fn substitute_associated_types_recursive(
             } else {
                 sig_type.clone()
             }
-        }
+        },
         SignatureType::Tuple(elements) => SignatureType::Tuple(
             elements
                 .iter()
@@ -643,8 +639,11 @@ fn link_protocol_methods_for_struct(
         let method_name = &struct_method.metadata().name().value;
         let method_span = struct_method.metadata().declaration_span().clone();
 
-        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, SignatureType)> = Vec::new();
-        for (protocol, protocol_method, substituted_sig, _bindings, conformance_sig) in &protocol_methods {
+        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, SignatureType)> =
+            Vec::new();
+        for (protocol, protocol_method, substituted_sig, _bindings, conformance_sig) in
+            &protocol_methods
+        {
             if &struct_sig == substituted_sig {
                 let struct_receiver = struct_method
                     .metadata()
@@ -655,7 +654,11 @@ fn link_protocol_methods_for_struct(
                     .get_behavior::<CallableBehavior>()
                     .and_then(|cb| cb.receiver());
                 if struct_receiver == protocol_receiver {
-                    matches.push((protocol.clone(), protocol_method.clone(), conformance_sig.clone()));
+                    matches.push((
+                        protocol.clone(),
+                        protocol_method.clone(),
+                        conformance_sig.clone(),
+                    ));
                 } else {
                     let protocol_name = protocol.metadata().name().value.clone();
                     ctx.report(ProtocolMethodReceiverMismatchError {
@@ -693,11 +696,12 @@ fn link_protocol_methods_for_struct(
             });
         } else if matches.len() == 1 {
             let (protocol, protocol_method, conformance_sig) = &matches[0];
-            let implements = kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
-                protocol.metadata().id(),
-                protocol_method.metadata().id(),
-                conformance_sig.clone(),
-            );
+            let implements =
+                kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
+                    protocol.metadata().id(),
+                    protocol_method.metadata().id(),
+                    conformance_sig.clone(),
+                );
             struct_method.metadata().add_behavior(implements);
         }
     }
@@ -748,7 +752,7 @@ fn resolve_protocol_type_for_link(
                 }
             }
             Some((symbol.clone(), bindings))
-        }
+        },
         _ => None,
     }
 }
@@ -784,31 +788,29 @@ fn check_property_requirements(
     for extension in extensions {
         // Get fields from extension
         for child in extension.metadata().children() {
-            if child.metadata().kind() == KestrelSymbolKind::Field {
-                if let Ok(field) = child.clone().into_any_arc().downcast::<FieldSymbol>() {
-                    let ty = child
-                        .metadata()
-                        .get_behavior::<TypedBehavior>()
-                        .map(|typed| typed.ty().clone())
-                        .unwrap_or_else(|| field.field_type().clone());
-                    all_fields.push(kestrel_semantic_model::StructFieldInfo {
-                        field_id: field.metadata().id(),
-                        name: field.metadata().name().value.clone(),
-                        span: field.metadata().span().clone(),
-                        is_mutable: field.is_mutable(),
-                        is_computed: field.is_computed(),
-                        ty,
-                    });
-                }
+            if child.metadata().kind() == KestrelSymbolKind::Field
+                && let Ok(field) = child.clone().into_any_arc().downcast::<FieldSymbol>()
+            {
+                let ty = child
+                    .metadata()
+                    .get_behavior::<TypedBehavior>()
+                    .map(|typed| typed.ty().clone())
+                    .unwrap_or_else(|| field.field_type().clone());
+                all_fields.push(kestrel_semantic_model::StructFieldInfo {
+                    field_id: field.metadata().id(),
+                    name: field.metadata().name().value.clone(),
+                    span: field.metadata().span().clone(),
+                    is_mutable: field.is_mutable(),
+                    is_computed: field.is_computed(),
+                    ty,
+                });
             }
         }
     }
 
     // Build a map of field name -> field info for quick lookup
-    let field_map: HashMap<String, &kestrel_semantic_model::StructFieldInfo> = all_fields
-        .iter()
-        .map(|f| (f.name.clone(), f))
-        .collect();
+    let field_map: HashMap<String, &kestrel_semantic_model::StructFieldInfo> =
+        all_fields.iter().map(|f| (f.name.clone(), f)).collect();
 
     for requirement in required_properties {
         // TODO: Handle static properties when needed
@@ -827,7 +829,7 @@ fn check_property_requirements(
                     property_name: requirement.name.clone(),
                     property_type: format!("{}", requirement.property_type),
                 });
-            }
+            },
             Some(field_info) => {
                 // Check type compatibility
                 // TODO: More sophisticated type comparison with substitutions
@@ -890,7 +892,7 @@ fn check_property_requirements(
                         });
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -973,8 +975,9 @@ fn link_protocol_initializers_for_struct(
         target_id: struct_id,
     });
     for extension in extensions {
-        let extension_inits =
-            collect_initializers_from_symbol(&(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+        let extension_inits = collect_initializers_from_symbol(
+            &(extension.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        );
         all_initializers.extend(extension_inits);
     }
 
@@ -983,11 +986,18 @@ fn link_protocol_initializers_for_struct(
         let struct_sig = struct_init.signature();
         let init_span = struct_init.metadata().declaration_span().clone();
 
-        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<InitializerSymbol>, SignatureType)> = Vec::new();
-        for (protocol, protocol_init, substituted_sig, _bindings, conformance_sig) in &protocol_initializers {
+        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<InitializerSymbol>, SignatureType)> =
+            Vec::new();
+        for (protocol, protocol_init, substituted_sig, _bindings, conformance_sig) in
+            &protocol_initializers
+        {
             if &struct_sig == substituted_sig {
                 // Initializers always have "initializing" receiver, so no receiver check needed
-                matches.push((protocol.clone(), protocol_init.clone(), conformance_sig.clone()));
+                matches.push((
+                    protocol.clone(),
+                    protocol_init.clone(),
+                    conformance_sig.clone(),
+                ));
             }
         }
 
@@ -1013,11 +1023,12 @@ fn link_protocol_initializers_for_struct(
             });
         } else if matches.len() == 1 {
             let (protocol, protocol_init, conformance_sig) = &matches[0];
-            let implements = kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
-                protocol.metadata().id(),
-                protocol_init.metadata().id(),
-                conformance_sig.clone(),
-            );
+            let implements =
+                kestrel_semantic_tree::behavior::implements::ImplementsBehavior::with_conformance(
+                    protocol.metadata().id(),
+                    protocol_init.metadata().id(),
+                    conformance_sig.clone(),
+                );
             struct_init.metadata().add_behavior(implements);
         }
     }
@@ -1112,10 +1123,10 @@ fn check_enum_conformance(
             effective_bindings.insert(name.clone(), binding.clone());
         }
         for (type_name, default_type) in &protocol_associated_types {
-            if !effective_bindings.contains_key(type_name) {
-                if let Some(default) = default_type {
-                    effective_bindings.insert(type_name.clone(), default.clone());
-                }
+            if !effective_bindings.contains_key(type_name)
+                && let Some(default) = default_type
+            {
+                effective_bindings.insert(type_name.clone(), default.clone());
             }
         }
         // Use the already-computed self_type
@@ -1139,7 +1150,7 @@ fn check_enum_conformance(
                         protocol_name: protocol_name.clone(),
                         method_name: method_name.clone(),
                     });
-                }
+                },
                 Some((_enum_method, enum_return_type)) => {
                     if enum_return_type != &required_return_type {
                         let span = enum_sym.metadata().declaration_span().clone();
@@ -1151,7 +1162,7 @@ fn check_enum_conformance(
                             actual_type: format!("{:?}", enum_return_type),
                         });
                     }
-                }
+                },
             }
         }
     }
@@ -1225,7 +1236,8 @@ fn link_protocol_methods_for_enum(
         let method_name = &enum_method.metadata().name().value;
         let method_span = enum_method.metadata().declaration_span().clone();
 
-        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, SignatureType)> = Vec::new();
+        let mut matches: Vec<(Arc<ProtocolSymbol>, Arc<FunctionSymbol>, SignatureType)> =
+            Vec::new();
         for (protocol, protocol_method, substituted_sig, _bindings, conformance_sig) in
             &protocol_methods
         {
@@ -1331,7 +1343,7 @@ fn resolve_protocol_type_for_link_enum(
                 }
             }
             Some((symbol.clone(), bindings))
-        }
+        },
         _ => None,
     }
 }

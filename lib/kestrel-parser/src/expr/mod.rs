@@ -528,7 +528,7 @@ fn attach_trailing_closures(expr: ExprVariant, trailing: Vec<CallArg>) -> ExprVa
                 commas,
                 rparen,
             }
-        }
+        },
 
         // Path becomes a call with no parens
         path @ ExprVariant::Path { .. } => ExprVariant::Call {
@@ -703,10 +703,10 @@ pub fn expr_parser<'tokens>()
                 ParenContent::Unit(rparen) => ExprVariant::Unit(lparen, rparen),
                 ParenContent::Grouping(inner, rparen) => {
                     ExprVariant::Grouping(lparen, Box::new(inner), rparen)
-                }
+                },
                 ParenContent::Tuple(elements, commas, rparen) => {
                     ExprVariant::Tuple(lparen, elements, commas, rparen)
-                }
+                },
             })
             .boxed();
 
@@ -1364,8 +1364,8 @@ pub fn expr_parser<'tokens>()
             .map(|(return_span, value)| ExprVariant::Return { return_span, value });
 
         // Try expression - note: we'll connect it to postfix later for high precedence
-        let try_keyword = skip_trivia()
-            .ignore_then(just(Token::Try).map_with(|_, e| to_kestrel_span(e.span())));
+        let try_keyword =
+            skip_trivia().ignore_then(just(Token::Try).map_with(|_, e| to_kestrel_span(e.span())));
 
         // Match expression: match scrutinee { pattern => expr, ... }
         let match_expr =
@@ -1852,37 +1852,37 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
     match variant {
         ExprVariant::Unit(lparen, rparen) => {
             emit_unit_expr(sink, lparen.clone(), rparen.clone());
-        }
+        },
         ExprVariant::Integer(span) => {
             emit_integer_expr(sink, span.clone());
-        }
+        },
         ExprVariant::Float(span) => {
             emit_float_expr(sink, span.clone());
-        }
+        },
         ExprVariant::String(span) => {
             emit_string_expr(sink, span.clone());
-        }
+        },
         ExprVariant::RawString(span) => {
             emit_raw_string_expr(sink, span.clone());
-        }
+        },
         ExprVariant::Bool(span) => {
             emit_bool_expr(sink, span.clone());
-        }
+        },
         ExprVariant::Null(span) => {
             emit_null_expr(sink, span.clone());
-        }
+        },
         ExprVariant::Array(lbracket, elements, commas, rbracket) => {
             emit_array_expr(sink, lbracket.clone(), elements, commas, rbracket.clone());
-        }
+        },
         ExprVariant::Tuple(lparen, elements, commas, rparen) => {
             emit_tuple_expr(sink, lparen.clone(), elements, commas, rparen.clone());
-        }
+        },
         ExprVariant::Grouping(lparen, inner, rparen) => {
             emit_grouping_expr(sink, lparen.clone(), inner, rparen.clone());
-        }
+        },
         ExprVariant::Path { segments, dots } => {
             emit_path_expr(sink, segments, dots);
-        }
+        },
         ExprVariant::MemberAccess {
             base,
             dot,
@@ -1890,13 +1890,13 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             type_args,
         } => {
             emit_member_access_expr(sink, base, dot.clone(), member.clone(), type_args.as_ref());
-        }
+        },
         ExprVariant::TupleIndex { base, dot, index } => {
             emit_tuple_index_expr(sink, base, dot.clone(), index.clone());
-        }
+        },
         ExprVariant::Unary(tok, span, operand) => {
             emit_unary_expr(sink, tok.clone(), span.clone(), operand);
-        }
+        },
         ExprVariant::Call {
             callee,
             lparen,
@@ -1912,17 +1912,17 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
                 commas,
                 rparen.as_ref(),
             );
-        }
+        },
         ExprVariant::Assignment { lhs, equals, rhs } => {
             emit_assignment_expr(sink, lhs, equals.clone(), rhs);
-        }
+        },
         ExprVariant::Postfix {
             operand,
             operator,
             operator_span,
         } => {
             emit_postfix_expr(sink, operand, operator.clone(), operator_span.clone());
-        }
+        },
         ExprVariant::Binary {
             lhs,
             operator,
@@ -1930,7 +1930,7 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             rhs,
         } => {
             emit_binary_expr(sink, lhs, operator.clone(), operator_span.clone(), rhs);
-        }
+        },
         ExprVariant::If {
             if_span,
             conditions,
@@ -1944,7 +1944,7 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
                 then_block,
                 else_clause.as_ref(),
             );
-        }
+        },
         ExprVariant::While {
             label,
             while_span,
@@ -1952,7 +1952,7 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             body,
         } => {
             emit_while_expr(sink, label.as_ref(), while_span.clone(), condition, body);
-        }
+        },
         ExprVariant::WhileLet {
             label,
             while_span,
@@ -1960,29 +1960,29 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             body,
         } => {
             emit_while_let_expr(sink, label.as_ref(), while_span.clone(), conditions, body);
-        }
+        },
         ExprVariant::Loop {
             label,
             loop_span,
             body,
         } => {
             emit_loop_expr(sink, label.as_ref(), loop_span.clone(), body);
-        }
+        },
         ExprVariant::Break { break_span, label } => {
             emit_break_expr(sink, break_span.clone(), label.as_ref());
-        }
+        },
         ExprVariant::Continue {
             continue_span,
             label,
         } => {
             emit_continue_expr(sink, continue_span.clone(), label.as_ref());
-        }
+        },
         ExprVariant::Return { return_span, value } => {
             emit_return_expr(sink, return_span.clone(), value.as_deref());
-        }
+        },
         ExprVariant::Try { try_span, operand } => {
             emit_try_expr(sink, try_span.clone(), operand);
-        }
+        },
         ExprVariant::Closure {
             lbrace,
             params,
@@ -1991,14 +1991,14 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             rbrace,
         } => {
             emit_closure_expr(sink, lbrace.clone(), params, in_span, body, rbrace.clone());
-        }
+        },
         ExprVariant::ImplicitMemberAccess {
             dot,
             member,
             arguments,
         } => {
             emit_implicit_member_access_expr(sink, dot.clone(), member.clone(), arguments.as_ref());
-        }
+        },
         ExprVariant::Match {
             match_span,
             scrutinee,
@@ -2014,7 +2014,7 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
                 arms,
                 rbrace.clone(),
             );
-        }
+        },
     }
 }
 
@@ -2166,7 +2166,7 @@ fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
                     sink.add_token(SyntaxKind::Dot, dots[i].clone());
                 }
             }
-        }
+        },
         ExprVariant::MemberAccess {
             base,
             dot,
@@ -2179,12 +2179,12 @@ fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
             if let Some(type_args) = type_args {
                 emit_type_args(sink, type_args);
             }
-        }
+        },
         ExprVariant::TupleIndex { base, dot, index } => {
             emit_expr_variant_inner(sink, base);
             sink.add_token(SyntaxKind::Dot, dot.clone());
             sink.add_token(SyntaxKind::Integer, index.clone());
-        }
+        },
         _ => emit_expr_variant(sink, variant),
     }
 }
@@ -2314,7 +2314,7 @@ pub fn emit_if_condition(
     match condition {
         IfCondition::Expr(expr) => {
             emit_expr_variant(sink, expr);
-        }
+        },
         IfCondition::Let {
             let_span,
             pattern,
@@ -2327,7 +2327,7 @@ pub fn emit_if_condition(
             sink.add_token(SyntaxKind::Equals, equals_span.clone());
             emit_expr_variant(sink, value);
             sink.finish_node();
-        }
+        },
     }
 }
 
@@ -2357,11 +2357,11 @@ fn emit_if_expr(
             ElseClause::Block { else_span, block } => {
                 sink.add_token(SyntaxKind::Else, else_span.clone());
                 emit_code_block(sink, block);
-            }
+            },
             ElseClause::ElseIf { else_span, if_expr } => {
                 sink.add_token(SyntaxKind::Else, else_span.clone());
                 emit_expr_variant(sink, if_expr);
-            }
+            },
         }
         sink.finish_node();
     }
@@ -2556,13 +2556,13 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
         BlockItem::Statement(stmt) => {
             use crate::stmt::emit_stmt_variant;
             emit_stmt_variant(sink, stmt);
-        }
+        },
         BlockItem::StatementExpr(expr) => {
             emit_expr_variant(sink, expr);
-        }
+        },
         BlockItem::TrailingExpression(expr) => {
             emit_expr_variant(sink, expr);
-        }
+        },
         BlockItem::GuardLet(guard_data) => {
             // Guard-let in a closure/expression context
             use crate::block::ElseBlockItem;
@@ -2583,17 +2583,17 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
                 match else_item {
                     ElseBlockItem::Statement(stmt) => {
                         emit_stmt_variant(sink, stmt);
-                    }
+                    },
                     ElseBlockItem::StatementExpr(expr) => {
                         sink.start_node(SyntaxKind::Statement);
                         sink.start_node(SyntaxKind::ExpressionStatement);
                         emit_expr_variant(sink, expr);
                         sink.finish_node();
                         sink.finish_node();
-                    }
+                    },
                     ElseBlockItem::TrailingExpression(expr) => {
                         emit_expr_variant(sink, expr);
-                    }
+                    },
                 }
             }
             sink.add_token(SyntaxKind::RBrace, guard_data.else_rbrace.clone());
@@ -2601,7 +2601,7 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
 
             sink.finish_node(); // GuardLetStatement
             sink.finish_node(); // Statement
-        }
+        },
     }
 }
 
@@ -2650,7 +2650,7 @@ where
     match expr_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_expr_variant(sink, &variant);
-        }
+        },
         Err(errors) => {
             // Even on error, we need to emit a valid tree structure
             // Wrap errors in an Error node so the tree builder doesn't panic
@@ -2662,7 +2662,7 @@ where
             }
             sink.finish_node(); // Error
             sink.finish_node(); // Expression
-        }
+        },
     }
 }
 

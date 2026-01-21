@@ -14,7 +14,9 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use kestrel_syntax_tree::utils::{extract_visibility, find_child, get_node_span, get_visibility_span};
+use kestrel_syntax_tree::utils::{
+    extract_visibility, find_child, get_node_span, get_visibility_span,
+};
 
 use crate::builder::Builder;
 use crate::builders::type_parameter::{add_type_params_as_children, extract_type_parameters};
@@ -56,10 +58,10 @@ impl Builder for SubscriptBuilder {
 
         // Get spans
         let full_span = get_node_span(syntax, file_id);
-        let declaration_span = find_subscript_keyword_span(syntax, file_id)
-            .unwrap_or_else(|| full_span.clone());
-        let visibility_span = get_visibility_span(syntax, file_id)
-            .unwrap_or_else(|| declaration_span.clone());
+        let declaration_span =
+            find_subscript_keyword_span(syntax, file_id).unwrap_or_else(|| full_span.clone());
+        let visibility_span =
+            get_visibility_span(syntax, file_id).unwrap_or_else(|| declaration_span.clone());
 
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), Some(parent), root);
         let visibility_behavior =
@@ -107,14 +109,14 @@ impl Builder for SubscriptBuilder {
 /// Find the span of the `subscript` keyword in the syntax
 fn find_subscript_keyword_span(syntax: &SyntaxNode, file_id: usize) -> Option<Span> {
     for child in syntax.children_with_tokens() {
-        if let Some(token) = child.into_token() {
-            if token.kind() == SyntaxKind::Subscript {
-                let text_range = token.text_range();
-                return Some(Span::new(
-                    file_id,
-                    (text_range.start().into())..(text_range.end().into()),
-                ));
-            }
+        if let Some(token) = child.into_token()
+            && token.kind() == SyntaxKind::Subscript
+        {
+            let text_range = token.text_range();
+            return Some(Span::new(
+                file_id,
+                (text_range.start().into())..(text_range.end().into()),
+            ));
         }
     }
     None

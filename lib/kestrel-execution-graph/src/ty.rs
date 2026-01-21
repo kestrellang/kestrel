@@ -132,13 +132,13 @@ impl fmt::Display for MirTyDisplay<'_> {
 
             MirTy::Pointer(inner) => {
                 write!(f, "p[{}]", self.ctx.ty(*inner).display(self.ctx))
-            }
+            },
             MirTy::Ref(inner) => {
                 write!(f, "&{}", self.ctx.ty(*inner).display(self.ctx))
-            }
+            },
             MirTy::RefMut(inner) => {
                 write!(f, "&var {}", self.ctx.ty(*inner).display(self.ctx))
-            }
+            },
 
             MirTy::Tuple(elems) => {
                 write!(f, "(")?;
@@ -149,7 +149,7 @@ impl fmt::Display for MirTyDisplay<'_> {
                     write!(f, "{}", self.ctx.ty(*elem).display(self.ctx))?;
                 }
                 write!(f, ")")
-            }
+            },
 
             MirTy::Named { name, type_args } => {
                 write!(f, "{}", self.ctx.name(*name))?;
@@ -164,11 +164,11 @@ impl fmt::Display for MirTyDisplay<'_> {
                     write!(f, "]")?;
                 }
                 Ok(())
-            }
+            },
 
             MirTy::TypeParam(id) => {
                 write!(f, "{}", self.ctx.type_param(*id).name)
-            }
+            },
 
             MirTy::FuncThin { params, ret } => {
                 write!(f, "func(")?;
@@ -179,7 +179,7 @@ impl fmt::Display for MirTyDisplay<'_> {
                     write!(f, "{}", self.ctx.ty(*p).display(self.ctx))?;
                 }
                 write!(f, ") -> {}", self.ctx.ty(*ret).display(self.ctx))
-            }
+            },
 
             MirTy::FuncThick { params, ret } => {
                 write!(f, "func escaping(")?;
@@ -190,7 +190,7 @@ impl fmt::Display for MirTyDisplay<'_> {
                     write!(f, "{}", self.ctx.ty(*p).display(self.ctx))?;
                 }
                 write!(f, ") -> {}", self.ctx.ty(*ret).display(self.ctx))
-            }
+            },
 
             MirTy::SelfType => write!(f, "Self"),
 
@@ -206,7 +206,7 @@ impl fmt::Display for MirTyDisplay<'_> {
                     associated,
                     self.ctx.ty(*base).display(self.ctx),
                 )
-            }
+            },
 
             MirTy::Error => write!(f, "<error>"),
         }

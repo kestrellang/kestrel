@@ -56,10 +56,10 @@ pub fn compute_block_type(statements: &[Statement], value: Option<&Expression>, 
     }
 
     // Check if the last statement is an expression statement - use its type
-    if let Some(last_stmt) = statements.last() {
-        if let StatementKind::Expr(expr) = &last_stmt.kind {
-            return expr.ty.clone();
-        }
+    if let Some(last_stmt) = statements.last()
+        && let StatementKind::Expr(expr) = &last_stmt.kind
+    {
+        return expr.ty.clone();
     }
 
     // Default to Unit
@@ -402,6 +402,7 @@ pub enum LangPrimitive {
 
 impl LangPrimitive {
     /// Parse a primitive type from a string (e.g., "i32", "f64").
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "i1" => Some(LangPrimitive::I1),
@@ -444,7 +445,10 @@ impl LangPrimitive {
 
     /// Check if this is a floating point type.
     pub fn is_float(&self) -> bool {
-        matches!(self, LangPrimitive::F16 | LangPrimitive::F32 | LangPrimitive::F64)
+        matches!(
+            self,
+            LangPrimitive::F16 | LangPrimitive::F32 | LangPrimitive::F64
+        )
     }
 
     /// Get the bit width of this primitive type.
@@ -753,7 +757,7 @@ impl LangIntrinsic {
             LangIntrinsic::PanicUnwind => "lang.panic_unwind".to_string(),
             LangIntrinsic::Cast { from, to } => {
                 format!("lang.cast_{}_{}", from.as_str(), to.as_str())
-            }
+            },
             LangIntrinsic::IntBinary { primitive, op } => {
                 let op_str = match op {
                     IntBinaryOp::Add => "add",
@@ -767,7 +771,7 @@ impl LangIntrinsic {
                     IntBinaryOp::Shl => "shl",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
+            },
             LangIntrinsic::IntBinarySigned { primitive, op } => {
                 let op_str = match op {
                     SignedOp::Div => "signed_div",
@@ -779,7 +783,7 @@ impl LangIntrinsic {
                     SignedOp::Ge => "signed_ge",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
+            },
             LangIntrinsic::IntBinaryUnsigned { primitive, op } => {
                 let op_str = match op {
                     SignedOp::Div => "unsigned_div",
@@ -791,14 +795,14 @@ impl LangIntrinsic {
                     SignedOp::Ge => "unsigned_ge",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
+            },
             LangIntrinsic::IntUnary { primitive, op } => {
                 let op_str = match op {
                     IntUnaryOp::Neg => "neg",
                     IntUnaryOp::Not => "not",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
+            },
             LangIntrinsic::FloatBinary { primitive, op } => {
                 let op_str = match op {
                     FloatBinaryOp::Add => "add",
@@ -813,27 +817,30 @@ impl LangIntrinsic {
                     FloatBinaryOp::Ge => "ge",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
+            },
             LangIntrinsic::FloatUnary { primitive, op } => {
                 let op_str = match op {
                     FloatUnaryOp::Neg => "neg",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
-            LangIntrinsic::FloatConst { primitive, constant } => {
+            },
+            LangIntrinsic::FloatConst {
+                primitive,
+                constant,
+            } => {
                 let const_str = match constant {
                     FloatConstant::Infinity => "infinity",
                     FloatConstant::Nan => "nan",
                 };
                 format!("lang.{}_{}", primitive.as_str(), const_str)
-            }
+            },
             LangIntrinsic::FloatPred { primitive, pred } => {
                 let pred_str = match pred {
                     FloatPredicate::IsNan => "is_nan",
                     FloatPredicate::IsInfinite => "is_infinite",
                 };
                 format!("lang.{}_{}", primitive.as_str(), pred_str)
-            }
+            },
             LangIntrinsic::FloatMath { primitive, op } => {
                 let op_str = match op {
                     FloatMathOp::Floor => "floor",
@@ -843,7 +850,7 @@ impl LangIntrinsic {
                     FloatMathOp::Sqrt => "sqrt",
                 };
                 format!("lang.{}_{}", primitive.as_str(), op_str)
-            }
+            },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { .. } => "lang.ptr_null".to_string(),
             LangIntrinsic::PtrFromAddress { .. } => "lang.ptr_from_address".to_string(),
@@ -872,14 +879,14 @@ impl LangIntrinsic {
         match self {
             LangIntrinsic::IntBinary { op, .. } => {
                 matches!(op, IntBinaryOp::Eq | IntBinaryOp::Ne)
-            }
+            },
             LangIntrinsic::IntBinarySigned { op, .. }
             | LangIntrinsic::IntBinaryUnsigned { op, .. } => {
                 matches!(
                     op,
                     SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge
                 )
-            }
+            },
             LangIntrinsic::FloatBinary { op, .. } => {
                 matches!(
                     op,
@@ -890,13 +897,16 @@ impl LangIntrinsic {
                         | FloatBinaryOp::Gt
                         | FloatBinaryOp::Ge
                 )
-            }
+            },
             // FloatPred always returns bool (is_nan, is_infinite)
             LangIntrinsic::FloatPred { .. } => true,
             // PtrIsNull returns bool
             LangIntrinsic::PtrIsNull => true,
             // Boolean (i1) intrinsics all return bool
-            LangIntrinsic::I1Eq | LangIntrinsic::I1And | LangIntrinsic::I1Or | LangIntrinsic::I1Not => true,
+            LangIntrinsic::I1Eq
+            | LangIntrinsic::I1And
+            | LangIntrinsic::I1Or
+            | LangIntrinsic::I1Not => true,
             _ => false,
         }
     }
@@ -1356,7 +1366,7 @@ impl ElseBranch {
         match self {
             ElseBranch::Block { statements, value } => {
                 compute_block_type(statements, value.as_ref().map(|v| v.as_ref()), span)
-            }
+            },
             ElseBranch::ElseIf(if_expr) => if_expr.ty.clone(),
         }
     }
@@ -1435,11 +1445,11 @@ impl Expression {
             ExprKind::Array(elements) => {
                 let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
                 format!("[{}]", items.join(", "))
-            }
+            },
             ExprKind::Tuple(elements) => {
                 let items: Vec<_> = elements.iter().map(|e| e.debug_compact()).collect();
                 format!("({})", items.join(", "))
-            }
+            },
             ExprKind::Grouping(inner) => format!("({})", inner.debug_compact()),
             ExprKind::LocalRef(id) => format!("local_{}", id.0),
             ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
@@ -1449,10 +1459,10 @@ impl Expression {
             ExprKind::AssociatedTypeRef => "<assoc_type>".to_string(),
             ExprKind::FieldAccess { object, field } => {
                 format!("{}.{}", object.debug_compact(), field)
-            }
+            },
             ExprKind::TupleIndex { tuple, index } => {
                 format!("{}.{}", tuple.debug_compact(), index)
-            }
+            },
             ExprKind::MethodRef {
                 receiver,
                 method_name,
@@ -1472,7 +1482,7 @@ impl Expression {
                     })
                     .collect();
                 format!("{}({})", callee.debug_compact(), args.join(", "))
-            }
+            },
             ExprKind::PrimitiveMethodCall {
                 receiver,
                 method,
@@ -1485,10 +1495,10 @@ impl Expression {
                     method.name(),
                     args.join(", ")
                 )
-            }
+            },
             ExprKind::PrimitiveMethodRef { receiver, method } => {
                 format!("{}.{}", receiver.debug_compact(), method.name())
-            }
+            },
             ExprKind::DeferredMethodCall {
                 receiver,
                 method_name,
@@ -1501,7 +1511,7 @@ impl Expression {
                     method_name,
                     args.join(", ")
                 )
-            }
+            },
             ExprKind::ImplicitStructInit {
                 struct_type,
                 arguments,
@@ -1517,7 +1527,7 @@ impl Expression {
                     })
                     .collect();
                 format!("{}({})", struct_type, args.join(", "))
-            }
+            },
             ExprKind::DelegatingInit { arguments, .. } => {
                 let args: Vec<String> = arguments
                     .iter()
@@ -1530,10 +1540,10 @@ impl Expression {
                     })
                     .collect();
                 format!("self.init({})", args.join(", "))
-            }
+            },
             ExprKind::Assignment { target, value } => {
                 format!("{} = {}", target.debug_compact(), value.debug_compact())
-            }
+            },
             ExprKind::If {
                 conditions,
                 then_value,
@@ -1546,7 +1556,7 @@ impl Expression {
                         IfCondition::Expr(e) => e.debug_compact(),
                         IfCondition::Let { pattern, value, .. } => {
                             format!("let {:?} = {}", pattern, value.debug_compact())
-                        }
+                        },
                     })
                     .collect();
                 let cond_str = cond_strs.join(", ");
@@ -1563,29 +1573,29 @@ impl Expression {
                             } else {
                                 " else { ... }".to_string()
                             }
-                        }
+                        },
                         ElseBranch::ElseIf(_) => " else if ...".to_string(),
                     }
                 } else {
                     String::new()
                 };
                 format!("if {} {{ {} }}{}", cond_str, then_str, else_str)
-            }
+            },
             ExprKind::While { condition, .. } => {
                 format!("while {} {{ ... }}", condition.debug_compact())
-            }
+            },
             ExprKind::WhileLet { conditions, .. } => {
                 let conds: Vec<_> = conditions
                     .iter()
                     .map(|c| match c {
                         IfCondition::Let { pattern, value, .. } => {
                             format!("let {:?} = {}", pattern, value.debug_compact())
-                        }
+                        },
                         IfCondition::Expr(e) => e.debug_compact(),
                     })
                     .collect();
                 format!("while {} {{ ... }}", conds.join(", "))
-            }
+            },
             ExprKind::Loop { .. } => "loop { ... }".to_string(),
             ExprKind::Break { label, .. } => {
                 if let Some(l) = label {
@@ -1593,46 +1603,40 @@ impl Expression {
                 } else {
                     "break".to_string()
                 }
-            }
+            },
             ExprKind::Continue { label, .. } => {
                 if let Some(l) = label {
                     format!("continue {}", l.name)
                 } else {
                     "continue".to_string()
                 }
-            }
+            },
             ExprKind::Return { value } => {
                 if let Some(v) = value {
                     format!("return {}", v.debug_compact())
                 } else {
                     "return".to_string()
                 }
-            }
+            },
             ExprKind::Closure {
                 params,
                 tail_expr,
-                uses_it,
+                uses_it: _,
                 ..
             } => {
                 let params_str = match params {
                     Some(ps) => {
                         let p: Vec<_> = ps.iter().map(|p| p.name.clone()).collect();
                         format!("({}) in ", p.join(", "))
-                    }
-                    None => {
-                        if *uses_it {
-                            String::new() // Implicit `it` style
-                        } else {
-                            String::new() // No params, no `it`
-                        }
-                    }
+                    },
+                    None => String::new(), // No explicit params (may use `it` implicitly)
                 };
                 let body_str = tail_expr
                     .as_ref()
                     .map(|e| e.debug_compact())
                     .unwrap_or_else(|| "...".to_string());
                 format!("{{ {}{} }}", params_str, body_str)
-            }
+            },
             ExprKind::EnumCase { case_id } => format!("case_{:?}", case_id),
             ExprKind::ImplicitMemberAccess {
                 member_name,
@@ -1653,21 +1657,21 @@ impl Expression {
                 } else {
                     format!(".{}", member_name)
                 }
-            }
+            },
             ExprKind::Match { scrutinee, arms } => {
                 format!(
                     "match {} {{ {} arms }}",
                     scrutinee.debug_compact(),
                     arms.len()
                 )
-            }
+            },
             ExprKind::Block { value, .. } => {
                 let body_str = value
                     .as_ref()
                     .map(|e| e.debug_compact())
                     .unwrap_or_else(|| "...".to_string());
                 format!("{{ {} }}", body_str)
-            }
+            },
             ExprKind::Error => "<error>".to_string(),
             ExprKind::LangIntrinsic {
                 intrinsic,
@@ -1675,7 +1679,7 @@ impl Expression {
             } => {
                 let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
                 format!("{}({})", intrinsic.name(), args.join(", "))
-            }
+            },
             ExprKind::LangIntrinsicRef(intrinsic) => intrinsic.name(),
             ExprKind::SubscriptCall {
                 receiver,
@@ -1693,7 +1697,7 @@ impl Expression {
                     })
                     .collect();
                 format!("{}({})", receiver.debug_compact(), args.join(", "))
-            }
+            },
         }
     }
 
@@ -2304,7 +2308,7 @@ impl Expression {
 
                 // Join the types - handles Never propagation
                 then_ty.join(&else_ty)
-            }
+            },
             None => Ty::unit(span.clone()),
         };
 
@@ -2543,7 +2547,11 @@ impl Expression {
     ///
     /// Used for `lang.*` intrinsic functions that are handled specially by the compiler.
     /// The return type is `Never` for panic_unwind, or the target type for casts.
-    pub fn lang_intrinsic(intrinsic: LangIntrinsic, arguments: Vec<CallArgument>, span: Span) -> Self {
+    pub fn lang_intrinsic(
+        intrinsic: LangIntrinsic,
+        arguments: Vec<CallArgument>,
+        span: Span,
+    ) -> Self {
         let ty = match &intrinsic {
             LangIntrinsic::PanicUnwind => Ty::never(span.clone()),
             LangIntrinsic::Cast { to, .. } => to.to_ty(span.clone()),
@@ -2554,16 +2562,19 @@ impl Expression {
                 } else {
                     primitive.to_ty(span.clone())
                 }
-            }
+            },
             LangIntrinsic::IntBinarySigned { primitive, op }
             | LangIntrinsic::IntBinaryUnsigned { primitive, op } => {
                 // Comparison ops return bool (i1), others return the same type
-                if matches!(op, SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge) {
+                if matches!(
+                    op,
+                    SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge
+                ) {
                     Ty::bool(span.clone())
                 } else {
                     primitive.to_ty(span.clone())
                 }
-            }
+            },
             LangIntrinsic::IntUnary { primitive, .. } => primitive.to_ty(span.clone()),
             LangIntrinsic::FloatBinary { primitive, op } => {
                 // Comparison ops return bool (i1), others return the same type
@@ -2580,7 +2591,7 @@ impl Expression {
                 } else {
                     primitive.to_ty(span.clone())
                 }
-            }
+            },
             LangIntrinsic::FloatUnary { primitive, .. } => primitive.to_ty(span.clone()),
             // FloatConst returns the float type
             LangIntrinsic::FloatConst { primitive, .. } => primitive.to_ty(span.clone()),
@@ -2589,30 +2600,24 @@ impl Expression {
             // FloatMath returns the float type
             LangIntrinsic::FloatMath { primitive, .. } => primitive.to_ty(span.clone()),
             // Pointer intrinsics
-            LangIntrinsic::PtrNull { pointee_ty } => {
-                Ty::pointer(pointee_ty.clone(), span.clone())
-            }
+            LangIntrinsic::PtrNull { pointee_ty } => Ty::pointer(pointee_ty.clone(), span.clone()),
             LangIntrinsic::PtrFromAddress { pointee_ty } => {
                 Ty::pointer(pointee_ty.clone(), span.clone())
-            }
+            },
             LangIntrinsic::PtrToAddress => Ty::int(IntBits::I64, span.clone()),
-            LangIntrinsic::PtrTo { pointee_ty } => {
-                Ty::pointer(pointee_ty.clone(), span.clone())
-            }
+            LangIntrinsic::PtrTo { pointee_ty } => Ty::pointer(pointee_ty.clone(), span.clone()),
             LangIntrinsic::PtrRead { pointee_ty } => pointee_ty.clone(),
             LangIntrinsic::PtrWrite { .. } => Ty::unit(span.clone()),
             LangIntrinsic::PtrOffset => {
                 // Return type matches first argument (pointer type)
                 // For now, use an inference variable
                 Ty::pointer(Ty::infer(span.clone()), span.clone())
-            }
+            },
             LangIntrinsic::PtrIsNull => Ty::bool(span.clone()),
-            LangIntrinsic::CastPtr { target_ty } => {
-                Ty::pointer(target_ty.clone(), span.clone())
-            }
+            LangIntrinsic::CastPtr { target_ty } => Ty::pointer(target_ty.clone(), span.clone()),
             LangIntrinsic::SizeOf { .. } | LangIntrinsic::AlignOf { .. } => {
                 Ty::int(IntBits::I64, span.clone())
-            }
+            },
             // Boolean (i1) intrinsics all return bool
             LangIntrinsic::I1Eq
             | LangIntrinsic::I1And
@@ -2622,7 +2627,7 @@ impl Expression {
             LangIntrinsic::AtomicAdd | LangIntrinsic::AtomicSub => {
                 // Return type inferred from first argument
                 Ty::infer(span.clone())
-            }
+            },
         };
         Expression {
             id: ExprId::new(),
@@ -2650,7 +2655,7 @@ impl Expression {
                     Ty::never(span.clone()),
                     span.clone(),
                 )
-            }
+            },
             LangIntrinsic::Cast { from, to } => {
                 // (From) -> To
                 Ty::function(
@@ -2658,7 +2663,7 @@ impl Expression {
                     to.to_ty(span.clone()),
                     span.clone(),
                 )
-            }
+            },
             LangIntrinsic::IntBinary { primitive, op } => {
                 // (T, T) -> T or (T, T) -> Bool for comparisons
                 let prim_ty = primitive.to_ty(span.clone());
@@ -2668,24 +2673,26 @@ impl Expression {
                     prim_ty.clone()
                 };
                 Ty::function(vec![prim_ty.clone(), prim_ty], ret_ty, span.clone())
-            }
+            },
             LangIntrinsic::IntBinarySigned { primitive, op }
             | LangIntrinsic::IntBinaryUnsigned { primitive, op } => {
                 // (T, T) -> T or (T, T) -> Bool for comparisons
                 let prim_ty = primitive.to_ty(span.clone());
-                let ret_ty =
-                    if matches!(op, SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge) {
-                        Ty::bool(span.clone())
-                    } else {
-                        prim_ty.clone()
-                    };
+                let ret_ty = if matches!(
+                    op,
+                    SignedOp::Lt | SignedOp::Le | SignedOp::Gt | SignedOp::Ge
+                ) {
+                    Ty::bool(span.clone())
+                } else {
+                    prim_ty.clone()
+                };
                 Ty::function(vec![prim_ty.clone(), prim_ty], ret_ty, span.clone())
-            }
+            },
             LangIntrinsic::IntUnary { primitive, .. } => {
                 // (T) -> T
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
-            }
+            },
             LangIntrinsic::FloatBinary { primitive, op } => {
                 // (T, T) -> T or (T, T) -> Bool for comparisons
                 let prim_ty = primitive.to_ty(span.clone());
@@ -2703,55 +2710,55 @@ impl Expression {
                     prim_ty.clone()
                 };
                 Ty::function(vec![prim_ty.clone(), prim_ty], ret_ty, span.clone())
-            }
+            },
             LangIntrinsic::FloatUnary { primitive, .. } => {
                 // (T) -> T
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
-            }
+            },
             LangIntrinsic::FloatConst { primitive, .. } => {
                 // () -> T
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![], prim_ty, span.clone())
-            }
+            },
             LangIntrinsic::FloatPred { primitive, .. } => {
                 // (T) -> Bool
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty], Ty::bool(span.clone()), span.clone())
-            }
+            },
             LangIntrinsic::FloatMath { primitive, .. } => {
                 // (T) -> T
                 let prim_ty = primitive.to_ty(span.clone());
                 Ty::function(vec![prim_ty.clone()], prim_ty, span.clone())
-            }
+            },
             // Pointer intrinsics
             LangIntrinsic::PtrNull { pointee_ty } => {
                 // () -> lang.ptr[T]
                 let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
                 Ty::function(vec![], ptr_ty, span.clone())
-            }
+            },
             LangIntrinsic::PtrFromAddress { pointee_ty } => {
                 // (UInt) -> lang.ptr[T]
                 let uint_ty = Ty::int(IntBits::I64, span.clone());
                 let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
                 Ty::function(vec![uint_ty], ptr_ty, span.clone())
-            }
+            },
             LangIntrinsic::PtrToAddress => {
                 // (lang.ptr[_]) -> UInt
                 let ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
                 let uint_ty = Ty::int(IntBits::I64, span.clone());
                 Ty::function(vec![ptr_ty], uint_ty, span.clone())
-            }
+            },
             LangIntrinsic::PtrTo { pointee_ty } => {
                 // (T) -> lang.ptr[T]
                 let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
                 Ty::function(vec![pointee_ty.clone()], ptr_ty, span.clone())
-            }
+            },
             LangIntrinsic::PtrRead { pointee_ty } => {
                 // (lang.ptr[T]) -> T
                 let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
                 Ty::function(vec![ptr_ty], pointee_ty.clone(), span.clone())
-            }
+            },
             LangIntrinsic::PtrWrite { pointee_ty } => {
                 // (lang.ptr[T], T) -> ()
                 let ptr_ty = Ty::pointer(pointee_ty.clone(), span.clone());
@@ -2760,40 +2767,44 @@ impl Expression {
                     Ty::unit(span.clone()),
                     span.clone(),
                 )
-            }
+            },
             LangIntrinsic::PtrOffset => {
                 // (lang.ptr[_], Int) -> lang.ptr[_]
                 let ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
                 let int_ty = Ty::int(IntBits::I64, span.clone());
                 Ty::function(vec![ptr_ty.clone(), int_ty], ptr_ty, span.clone())
-            }
+            },
             LangIntrinsic::PtrIsNull => {
                 // (lang.ptr[_]) -> Bool
                 let ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
                 Ty::function(vec![ptr_ty], Ty::bool(span.clone()), span.clone())
-            }
+            },
             LangIntrinsic::CastPtr { target_ty } => {
                 // (lang.ptr[_]) -> lang.ptr[T]
                 let src_ptr_ty = Ty::pointer(Ty::infer(span.clone()), span.clone());
                 let dst_ptr_ty = Ty::pointer(target_ty.clone(), span.clone());
                 Ty::function(vec![src_ptr_ty], dst_ptr_ty, span.clone())
-            }
+            },
             LangIntrinsic::SizeOf { .. } | LangIntrinsic::AlignOf { .. } => {
                 // () -> Int
                 let int_ty = Ty::int(IntBits::I64, span.clone());
                 Ty::function(vec![], int_ty, span.clone())
-            }
+            },
             // Boolean (i1) intrinsics
             LangIntrinsic::I1Eq | LangIntrinsic::I1And | LangIntrinsic::I1Or => {
                 // (lang.i1, lang.i1) -> lang.i1
                 let bool_ty = Ty::bool(span.clone());
-                Ty::function(vec![bool_ty.clone(), bool_ty.clone()], bool_ty, span.clone())
-            }
+                Ty::function(
+                    vec![bool_ty.clone(), bool_ty.clone()],
+                    bool_ty,
+                    span.clone(),
+                )
+            },
             LangIntrinsic::I1Not => {
                 // (lang.i1) -> lang.i1
                 let bool_ty = Ty::bool(span.clone());
                 Ty::function(vec![bool_ty.clone()], bool_ty, span.clone())
-            }
+            },
             // Atomic intrinsics: (T, T) -> T where T is integer type
             LangIntrinsic::AtomicAdd | LangIntrinsic::AtomicSub => {
                 // (infer, infer) -> infer - type inferred from arguments
@@ -2803,7 +2814,7 @@ impl Expression {
                     infer_ty,
                     span.clone(),
                 )
-            }
+            },
         };
         Expression {
             id: ExprId::new(),

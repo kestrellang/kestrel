@@ -55,7 +55,7 @@ pub fn lower_bound_method(
                 Some(span.clone()),
             ));
             return Value::Immediate(kestrel_execution_graph::Immediate::error());
-        }
+        },
     };
 
     // Look up the method symbol to get its signature
@@ -67,7 +67,7 @@ pub fn lower_bound_method(
                 Some(span.clone()),
             ));
             return Value::Immediate(kestrel_execution_graph::Immediate::error());
-        }
+        },
     };
 
     // Get the callable behavior to extract parameter info
@@ -79,7 +79,7 @@ pub fn lower_bound_method(
                 Some(span.clone()),
             ));
             return Value::Immediate(kestrel_execution_graph::Immediate::error());
-        }
+        },
     };
 
     // For static methods, we don't need to capture anything - just return a function reference

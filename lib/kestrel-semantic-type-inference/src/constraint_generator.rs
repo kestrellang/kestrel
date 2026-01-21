@@ -65,10 +65,10 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
                 ctx.register_type(&init.ty);
                 ctx.equate(pattern.ty.id(), init.ty.id(), stmt.span.clone());
             }
-        }
+        },
         StatementKind::Expr(expr) => {
             generate_expression_constraints(ctx, expr);
-        }
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -86,11 +86,11 @@ fn generate_statement_constraints(ctx: &mut InferenceContext<'_>, stmt: &Stateme
             if let Some(yield_expr) = else_block.yield_expr() {
                 generate_expression_constraints(ctx, yield_expr);
             }
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit statement doesn't generate any type constraints
             // The move tracking is already handled during body resolution
-        }
+        },
     }
 }
 
@@ -111,15 +111,15 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
     match &pattern.kind {
         PatternKind::Local { .. } => {
             // Local bindings just register their type - nothing more needed
-        }
+        },
 
         PatternKind::Wildcard => {
             // Wildcard patterns match anything - type is already registered
-        }
+        },
 
         PatternKind::Tuple {
             prefix,
-            has_rest,
+            has_rest: _,
             suffix,
         } => {
             // For tuple patterns, generate constraints for each element
@@ -149,7 +149,7 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                     generate_pattern_constraints(ctx, elem);
                 }
             }
-        }
+        },
 
         PatternKind::Literal { value } => {
             // For literal patterns with inference placeholders, add ExpressibleBy* constraints
@@ -173,16 +173,16 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 LiteralValue::Unit => None,
             };
 
-            if let Some(feature) = feature {
-                if let Some(protocol_id) = ctx.oracle().builtin_protocol(feature) {
-                    // Protocol is registered - add conformance constraint
-                    let protocol_ref = ProtocolRef::new(protocol_id, pattern.span.clone());
-                    ctx.conforms(pattern.ty.id(), protocol_ref);
-                }
-                // If protocol not registered, don't add any constraint - the match
-                // expression's equate constraint will handle unification directly
+            if let Some(feature) = feature
+                && let Some(protocol_id) = ctx.oracle().builtin_protocol(feature)
+            {
+                // Protocol is registered - add conformance constraint
+                let protocol_ref = ProtocolRef::new(protocol_id, pattern.span.clone());
+                ctx.conforms(pattern.ty.id(), protocol_ref);
             }
-        }
+            // If protocol not registered, don't add any constraint - the match
+            // expression's equate constraint will handle unification directly
+        },
 
         PatternKind::EnumVariant {
             case_name,
@@ -210,11 +210,11 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 binding_tys,
                 pattern.span.clone(),
             );
-        }
+        },
 
         PatternKind::Range { .. } => {
             // Range patterns have concrete types (Int or Char) - type is already set
-        }
+        },
 
         PatternKind::Struct {
             struct_name,
@@ -244,7 +244,7 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 *has_rest,
                 pattern.span.clone(),
             );
-        }
+        },
 
         PatternKind::Array { prefix, suffix, .. } => {
             // For array patterns, generate constraints for prefix and suffix patterns
@@ -255,7 +255,7 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 generate_pattern_constraints(ctx, elem);
             }
             // The rest pattern (.. or ..name) is just a marker/binding - no pattern constraints needed
-        }
+        },
 
         PatternKind::Or { alternatives } => {
             // For or-patterns, generate constraints for each alternative
@@ -265,22 +265,22 @@ pub fn generate_pattern_constraints(ctx: &mut InferenceContext<'_>, pattern: &Pa
                 // Each alternative's type must equal the or-pattern's type
                 ctx.equate(pattern.ty.id(), alt.ty.id(), alt.span.clone());
             }
-        }
+        },
 
         PatternKind::At { subpattern, .. } => {
             // For at-patterns, generate constraints for the subpattern
             generate_pattern_constraints(ctx, subpattern);
             // The @ pattern's type must equal the subpattern's type
             ctx.equate(pattern.ty.id(), subpattern.ty.id(), pattern.span.clone());
-        }
+        },
 
         PatternKind::Rest => {
             // Rest patterns are just markers - no additional constraints needed
-        }
+        },
 
         PatternKind::Error => {
             // Error patterns are poison values - don't generate constraints
-        }
+        },
     }
 }
 
@@ -296,14 +296,14 @@ fn generate_if_condition_constraints(
             // Note: We don't add a conformance constraint for BooleanConditional here
             // because primitive lang.bool doesn't implement protocols. Instead, the
             // type checker validates conditions in check_if_condition().
-        }
+        },
         IfCondition::Let { pattern, value, .. } => {
             // Generate constraints for the scrutinee expression
             generate_expression_constraints(ctx, value);
             // Generate constraints for the pattern (pattern type == scrutinee type)
             generate_pattern_constraints(ctx, pattern);
             ctx.equate(pattern.ty.id(), value.ty.id(), value.span.clone());
-        }
+        },
     }
 }
 
@@ -350,7 +350,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(expr.ty.id(), default_ty.id(), expr.span.clone());
                 }
             }
-        }
+        },
 
         // Arrays: all elements must have the same type
         ExprKind::Array(elements) => {
@@ -361,7 +361,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
                 }
             }
-        }
+        },
 
         // Tuples: each element has its corresponding type
         ExprKind::Tuple(elements) => {
@@ -372,19 +372,19 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(elem.ty.id(), elem_ty.id(), elem.span.clone());
                 }
             }
-        }
+        },
 
         // Grouping: just process the inner expression
         ExprKind::Grouping(inner) => {
             generate_expression_constraints(ctx, inner);
             ctx.equate(inner.ty.id(), expr.ty.id(), expr.span.clone());
-        }
+        },
 
         // References: type is already set during binding
-        ExprKind::LocalRef(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) => {}
+        ExprKind::LocalRef(_) | ExprKind::SymbolRef(_) | ExprKind::TypeRef(_) => {},
         ExprKind::OverloadedRef(_)
         | ExprKind::TypeParameterRef(_)
-        | ExprKind::AssociatedTypeRef => {}
+        | ExprKind::AssociatedTypeRef => {},
 
         // Field access: type is the field type
         ExprKind::FieldAccess { object, field } => {
@@ -397,24 +397,24 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 ctx.member_access(
                     object.ty.id(),
                     field.clone(),
-                    false, // instance access
+                    false,  // instance access
                     vec![], // no arguments for field access
                     expr.ty.id(),
                     expr.id,
                     expr.span.clone(),
                 );
             }
-        }
+        },
 
         // Tuple index: type is the element type
         ExprKind::TupleIndex { tuple, .. } => {
             generate_expression_constraints(ctx, tuple);
-        }
+        },
 
         // Method reference: process receiver
         ExprKind::MethodRef { receiver, .. } => {
             generate_expression_constraints(ctx, receiver);
-        }
+        },
 
         // Primitive method reference: this should only appear if the primitive method
         // was NOT called. Emit an error because primitive methods can't be first-class values.
@@ -426,7 +426,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 receiver.ty.to_string(),
                 expr.span.clone(),
             ));
-        }
+        },
 
         // Calls
         ExprKind::Call {
@@ -446,27 +446,25 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         ctx.register_type(param_ty);
                         ctx.equate(arg.value.ty.id(), param_ty.id(), arg.span.clone());
                     }
-                }
+                },
                 TyKind::UnresolvedFunction { .. } => {
                     // For unresolved functions, create a concrete function type from
                     // the call site and equate it with the callee's type. This allows
                     // the solver to unify the UnresolvedFunction with the expected
                     // function signature based on how it's being called.
-                    let arg_types: Vec<Ty> = arguments
-                        .iter()
-                        .map(|arg| arg.value.ty.clone())
-                        .collect();
+                    let arg_types: Vec<Ty> =
+                        arguments.iter().map(|arg| arg.value.ty.clone()).collect();
                     let expected_fn_ty =
                         Ty::function(arg_types, expr.ty.clone(), expr.span.clone());
                     ctx.register_type(&expected_fn_ty);
                     ctx.register_type(&callee.ty);
                     ctx.equate(callee.ty.id(), expected_fn_ty.id(), expr.span.clone());
-                }
+                },
                 _ => {
                     // Callee type is not a function - might be an error or inference needed
-                }
+                },
             }
-        }
+        },
 
         ExprKind::PrimitiveMethodCall {
             receiver,
@@ -477,7 +475,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
-        }
+        },
 
         ExprKind::DeferredMethodCall {
             receiver,
@@ -498,7 +496,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             ctx.member_access(
                 receiver.ty.id(),
                 method_name.clone(),
-                false, // instance method call
+                false,      // instance method call
                 arg_ty_ids, // argument types for parameter constraint generation
                 expr.ty.id(),
                 expr.id,
@@ -513,7 +511,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             if arguments.is_empty() && matches!(receiver.ty.kind(), TyKind::Infer) {
                 ctx.equate(receiver.ty.id(), expr.ty.id(), expr.span.clone());
             }
-        }
+        },
 
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
@@ -546,21 +544,21 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(arg.value.ty.id(), field_ty.id(), arg.span.clone());
                 }
             }
-        }
+        },
 
         // Delegating init - just generate constraints for arguments
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
-        }
+        },
 
         // Assignment
         ExprKind::Assignment { target, value } => {
             generate_expression_constraints(ctx, target);
             generate_expression_constraints(ctx, value);
             ctx.equate(target.ty.id(), value.ty.id(), expr.span.clone());
-        }
+        },
 
         // Control flow
         ExprKind::If {
@@ -599,15 +597,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                             // Else branch value type equals expression type
                             ctx.equate(expr.ty.id(), else_val.ty.id(), else_val.span.clone());
                         }
-                    }
+                    },
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(else_if) => {
                         generate_expression_constraints(ctx, else_if);
                         // Else-if expression type equals this expression type
                         ctx.equate(expr.ty.id(), else_if.ty.id(), else_if.span.clone());
-                    }
+                    },
                 }
             }
-        }
+        },
 
         ExprKind::While {
             condition, body, ..
@@ -620,7 +618,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for stmt in body {
                 generate_statement_constraints(ctx, stmt);
             }
-        }
+        },
 
         ExprKind::WhileLet {
             conditions, body, ..
@@ -634,15 +632,15 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for stmt in body {
                 generate_statement_constraints(ctx, stmt);
             }
-        }
+        },
 
         ExprKind::Loop { body, .. } => {
             for stmt in body {
                 generate_statement_constraints(ctx, stmt);
             }
-        }
+        },
 
-        ExprKind::Break { .. } | ExprKind::Continue { .. } => {}
+        ExprKind::Break { .. } | ExprKind::Continue { .. } => {},
 
         ExprKind::Return { value } => {
             if let Some(val) = value {
@@ -663,7 +661,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     ctx.equate(unit_ty.id(), ret_ty.id(), expr.span.clone());
                 }
             }
-        }
+        },
 
         ExprKind::Closure {
             body,
@@ -708,13 +706,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     }
 
                     // Handle implicit `it` parameter constraints
-                    if let Some((_, it_ty, it_span)) = implicit_param {
-                        if let Some(first_param_ty) = closure_param_tys.first() {
-                            ctx.register_type(it_ty);
-                            ctx.register_type(first_param_ty);
-                            // Equate `it` type with the first function parameter type
-                            ctx.equate(it_ty.id(), first_param_ty.id(), it_span.clone());
-                        }
+                    if let Some((_, it_ty, it_span)) = implicit_param
+                        && let Some(first_param_ty) = closure_param_tys.first()
+                    {
+                        ctx.register_type(it_ty);
+                        ctx.register_type(first_param_ty);
+                        // Equate `it` type with the first function parameter type
+                        ctx.equate(it_ty.id(), first_param_ty.id(), it_span.clone());
                     }
 
                     // Generate constraints for body statements
@@ -733,7 +731,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         ctx.register_type(&unit_ty);
                         ctx.equate(unit_ty.id(), closure_return_ty.id(), expr.span.clone());
                     }
-                }
+                },
 
                 // UnresolvedFunction - closure without explicit params
                 TyKind::UnresolvedFunction {
@@ -758,7 +756,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                                 span: expr.span.clone(),
                                 ty_id: expr.ty.id(),
                             });
-                        }
+                        },
                         ParamInfo::Unconstrained => {
                             // Record closure metadata for better error messages
                             ctx.register_closure_metadata(crate::context::ClosureMetadata {
@@ -769,7 +767,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                                 span: expr.span.clone(),
                                 ty_id: expr.ty.id(),
                             });
-                        }
+                        },
                         ParamInfo::Explicit { param_types } => {
                             for pt in param_types {
                                 ctx.register_type(pt);
@@ -783,7 +781,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                                 span: expr.span.clone(),
                                 ty_id: expr.ty.id(),
                             });
-                        }
+                        },
                     }
 
                     // Generate constraints for body statements
@@ -801,7 +799,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         ctx.register_type(&unit_ty);
                         ctx.equate(unit_ty.id(), return_type.id(), expr.span.clone());
                     }
-                }
+                },
 
                 // Fallback - shouldn't happen with well-formed trees
                 _ => {
@@ -811,12 +809,12 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     if let Some(tail) = tail_expr {
                         generate_expression_constraints(ctx, tail);
                     }
-                }
+                },
             }
-        }
+        },
 
         // Enum case reference: type is already set during binding
-        ExprKind::EnumCase { .. } => {}
+        ExprKind::EnumCase { .. } => {},
 
         // Implicit member access: will be resolved during type inference
         ExprKind::ImplicitMemberAccess {
@@ -848,7 +846,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 expr.id,
                 expr.span.clone(),
             );
-        }
+        },
 
         ExprKind::Match { scrutinee, arms } => {
             // Generate constraints for the scrutinee
@@ -885,7 +883,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 // All arms should have compatible types
                 ctx.equate(expr.ty.id(), arm.body.ty.id(), arm.body.span.clone());
             }
-        }
+        },
 
         ExprKind::Block { statements, value } => {
             // Generate constraints for statements
@@ -900,7 +898,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                 ctx.equate(expr.ty.id(), val.ty.id(), val.span.clone());
             }
             // If no value, block type should be unit (already set in AST)
-        }
+        },
 
         // Language intrinsics - process arguments and generate parameter constraints
         ExprKind::LangIntrinsic {
@@ -935,7 +933,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                             }
                         }
                     }
-                }
+                },
 
                 // Other pointer intrinsics with type parameters
                 LangIntrinsic::PtrRead { pointee_ty } => {
@@ -947,7 +945,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                             ctx.equate(arg_pointee.id(), pointee_ty.id(), arg.span.clone());
                         }
                     }
-                }
+                },
 
                 LangIntrinsic::PtrWrite { pointee_ty } => {
                     if let Some(ptr_arg) = arguments.first() {
@@ -961,9 +959,13 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     if let Some(value_arg) = arguments.get(1) {
                         // Second argument should be T
                         ctx.register_type(pointee_ty);
-                        ctx.equate(value_arg.value.ty.id(), pointee_ty.id(), value_arg.span.clone());
+                        ctx.equate(
+                            value_arg.value.ty.id(),
+                            pointee_ty.id(),
+                            value_arg.span.clone(),
+                        );
                     }
-                }
+                },
 
                 LangIntrinsic::PtrTo { pointee_ty } => {
                     if let Some(arg) = arguments.first() {
@@ -971,23 +973,23 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                         ctx.register_type(pointee_ty);
                         ctx.equate(arg.value.ty.id(), pointee_ty.id(), arg.span.clone());
                     }
-                }
+                },
 
                 LangIntrinsic::PtrFromAddress { pointee_ty } => {
                     // Argument is an integer, pointee_ty is the type parameter
                     // Just register it for resolution
                     ctx.register_type(pointee_ty);
-                }
+                },
 
                 LangIntrinsic::PtrNull { pointee_ty } => {
                     // No arguments, but register pointee_ty for resolution
                     ctx.register_type(pointee_ty);
-                }
+                },
 
                 LangIntrinsic::SizeOf { ty } | LangIntrinsic::AlignOf { ty } => {
                     // No arguments, but register ty for resolution
                     ctx.register_type(ty);
-                }
+                },
 
                 // Numeric binary intrinsics - constrain both arguments to match the primitive type
                 LangIntrinsic::IntBinary { primitive, .. }
@@ -999,7 +1001,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     for arg in arguments {
                         ctx.equate(arg.value.ty.id(), prim_ty.id(), arg.span.clone());
                     }
-                }
+                },
 
                 // Numeric unary intrinsics - constrain argument to match the primitive type
                 LangIntrinsic::IntUnary { primitive, .. }
@@ -1009,7 +1011,7 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     if let Some(arg) = arguments.first() {
                         ctx.equate(arg.value.ty.id(), prim_ty.id(), arg.span.clone());
                     }
-                }
+                },
 
                 // Float predicates (isNan, isInfinite) - constrain argument to float type
                 LangIntrinsic::FloatPred { primitive, .. } => {
@@ -1018,52 +1020,56 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
                     if let Some(arg) = arguments.first() {
                         ctx.equate(arg.value.ty.id(), prim_ty.id(), arg.span.clone());
                     }
-                }
+                },
 
                 LangIntrinsic::PtrOffset => {
                     // Argument 1: Pointer[T]
                     // Argument 2: lang.i64
                     // Returns: Pointer[T]
-                    if let Some(ptr_arg) = arguments.first() {
-                        if let TyKind::Pointer(pointee) = ptr_arg.value.ty.kind() {
-                            ctx.register_type(pointee);
-                        }
+                    if let Some(ptr_arg) = arguments.first()
+                        && let TyKind::Pointer(pointee) = ptr_arg.value.ty.kind()
+                    {
+                        ctx.register_type(pointee);
                     }
                     if let Some(offset_arg) = arguments.get(1) {
                         use kestrel_semantic_tree::ty::IntBits;
                         let i64_ty = Ty::int(IntBits::I64, offset_arg.span.clone());
                         ctx.register_type(&i64_ty);
-                        ctx.equate(offset_arg.value.ty.id(), i64_ty.id(), offset_arg.span.clone());
+                        ctx.equate(
+                            offset_arg.value.ty.id(),
+                            i64_ty.id(),
+                            offset_arg.span.clone(),
+                        );
                     }
-                }
+                },
 
                 LangIntrinsic::PtrToAddress => {
                     // Argument 1: Pointer[T]
                     // Returns: lang.i64
-                    if let Some(arg) = arguments.first() {
-                        if let TyKind::Pointer(pointee) = arg.value.ty.kind() {
-                            ctx.register_type(pointee);
-                        }
+                    if let Some(arg) = arguments.first()
+                        && let TyKind::Pointer(pointee) = arg.value.ty.kind()
+                    {
+                        ctx.register_type(pointee);
                     }
-                }
+                },
 
                 LangIntrinsic::PtrIsNull => {
                     // Argument 1: Pointer[T]
                     // Returns: lang.i1
-                    if let Some(arg) = arguments.first() {
-                        if let TyKind::Pointer(pointee) = arg.value.ty.kind() {
-                            ctx.register_type(pointee);
-                        }
+                    if let Some(arg) = arguments.first()
+                        && let TyKind::Pointer(pointee) = arg.value.ty.kind()
+                    {
+                        ctx.register_type(pointee);
                     }
-                }
+                },
 
                 // Other intrinsics don't have type parameters that need constraint generation
-                _ => {}
+                _ => {},
             }
-        }
+        },
 
         // Language intrinsic reference - no constraints needed
-        ExprKind::LangIntrinsicRef(_) => {}
+        ExprKind::LangIntrinsicRef(_) => {},
 
         // Subscript call - process receiver and arguments
         ExprKind::SubscriptCall {
@@ -1075,9 +1081,9 @@ fn generate_expression_constraints(ctx: &mut InferenceContext<'_>, expr: &Expres
             for arg in arguments {
                 generate_expression_constraints(ctx, &arg.value);
             }
-        }
+        },
 
-        ExprKind::Error => {}
+        ExprKind::Error => {},
     }
 }
 

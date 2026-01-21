@@ -99,12 +99,16 @@ impl FieldDeclaration {
 
     /// Get the getter clause if present (for explicit getter syntax)
     pub fn getter_clause(&self) -> Option<SyntaxNode> {
-        self.property_accessors()?.children().find(|child| child.kind() == SyntaxKind::GetterClause)
+        self.property_accessors()?
+            .children()
+            .find(|child| child.kind() == SyntaxKind::GetterClause)
     }
 
     /// Get the setter clause if present
     pub fn setter_clause(&self) -> Option<SyntaxNode> {
-        self.property_accessors()?.children().find(|child| child.kind() == SyntaxKind::SetterClause)
+        self.property_accessors()?
+            .children()
+            .find(|child| child.kind() == SyntaxKind::SetterClause)
     }
 
     /// Check if this computed property is getter-only (no setter)
@@ -131,13 +135,13 @@ where
     {
         Ok(data) => {
             emit_field_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

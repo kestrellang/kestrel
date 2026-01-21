@@ -3,6 +3,9 @@ name = "kestrel-semantic-tree-binder"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }

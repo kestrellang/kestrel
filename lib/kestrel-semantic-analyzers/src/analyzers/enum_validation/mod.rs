@@ -64,10 +64,10 @@ impl Analyzer for DuplicateCaseAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _ctx: &mut AnalysisContext,
     ) {
-        if symbol.metadata().kind() == KestrelSymbolKind::Enum {
-            if let Ok(enum_sym) = symbol.clone().downcast_arc::<EnumSymbol>() {
-                self.enums.lock().unwrap().push(enum_sym);
-            }
+        if symbol.metadata().kind() == KestrelSymbolKind::Enum
+            && let Ok(enum_sym) = symbol.clone().downcast_arc::<EnumSymbol>()
+        {
+            self.enums.lock().unwrap().push(enum_sym);
         }
     }
 
@@ -138,10 +138,10 @@ impl Analyzer for DuplicateLabelAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _ctx: &mut AnalysisContext,
     ) {
-        if symbol.metadata().kind() == KestrelSymbolKind::Enum {
-            if let Ok(enum_sym) = symbol.clone().downcast_arc::<EnumSymbol>() {
-                self.enums.lock().unwrap().push(enum_sym);
-            }
+        if symbol.metadata().kind() == KestrelSymbolKind::Enum
+            && let Ok(enum_sym) = symbol.clone().downcast_arc::<EnumSymbol>()
+        {
+            self.enums.lock().unwrap().push(enum_sym);
         }
     }
 
@@ -229,10 +229,10 @@ impl Analyzer for RecursiveEnumAnalyzer {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         _ctx: &mut AnalysisContext,
     ) {
-        if symbol.metadata().kind() == KestrelSymbolKind::Enum {
-            if let Ok(enum_sym) = symbol.clone().downcast_arc::<EnumSymbol>() {
-                self.enums.lock().unwrap().push(enum_sym);
-            }
+        if symbol.metadata().kind() == KestrelSymbolKind::Enum
+            && let Ok(enum_sym) = symbol.clone().downcast_arc::<EnumSymbol>()
+        {
+            self.enums.lock().unwrap().push(enum_sym);
         }
     }
 
@@ -299,7 +299,7 @@ fn type_contains_enum(
                 }
             }
             false
-        }
+        },
         _ => false,
     }
 }

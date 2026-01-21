@@ -448,20 +448,20 @@ impl OperatorRegistry {
     /// Determine what action to take given current token and minimum precedence.
     pub fn infix_action(&self, token: SyntaxKind, min_precedence: u8) -> InfixAction {
         // Check postfix first (higher precedence)
-        if let Some(entry) = self.postfix.get(&token) {
-            if entry.precedence >= min_precedence {
-                return InfixAction::Postfix(entry.op);
-            }
+        if let Some(entry) = self.postfix.get(&token)
+            && entry.precedence >= min_precedence
+        {
+            return InfixAction::Postfix(entry.op);
         }
 
         // Check infix
-        if let Some(entry) = self.infix.get(&token) {
-            if entry.precedence >= min_precedence {
-                return match entry.associativity {
-                    Associativity::Left => InfixAction::InfixLeft(entry.op, entry.precedence),
-                    Associativity::Right => InfixAction::InfixRight(entry.op, entry.precedence),
-                };
-            }
+        if let Some(entry) = self.infix.get(&token)
+            && entry.precedence >= min_precedence
+        {
+            return match entry.associativity {
+                Associativity::Left => InfixAction::InfixLeft(entry.op, entry.precedence),
+                Associativity::Right => InfixAction::InfixRight(entry.op, entry.precedence),
+            };
         }
 
         InfixAction::Stop
@@ -518,10 +518,10 @@ mod tests {
                             mul_prec > add_prec,
                             "* should have higher precedence than +"
                         );
-                    }
+                    },
                     _ => panic!("Expected InfixLeft for *"),
                 }
-            }
+            },
             _ => panic!("Expected InfixLeft for +"),
         }
     }
@@ -541,7 +541,7 @@ mod tests {
         let registry = OperatorRegistry::new();
 
         match registry.infix_action(SyntaxKind::Bang, 0) {
-            InfixAction::Postfix(UnaryOp::Unwrap) => {}
+            InfixAction::Postfix(UnaryOp::Unwrap) => {},
             _ => panic!("Expected Postfix(Unwrap) for !"),
         }
     }

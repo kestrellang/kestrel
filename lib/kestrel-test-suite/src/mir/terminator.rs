@@ -53,7 +53,7 @@ impl TerminatorPattern {
             (TerminatorPattern::Jump, TerminatorKind::Jump(_)) => true,
             (TerminatorPattern::JumpTo(expected_idx), TerminatorKind::Jump(target)) => {
                 block_index(*target, all_blocks) == Some(*expected_idx)
-            }
+            },
             (TerminatorPattern::Branch, TerminatorKind::Branch { .. }) => true,
             (
                 TerminatorPattern::BranchTo {
@@ -68,7 +68,7 @@ impl TerminatorPattern {
             ) => {
                 block_index(*actual_then, all_blocks) == Some(*expected_then)
                     && block_index(*actual_else, all_blocks) == Some(*expected_else)
-            }
+            },
             (TerminatorPattern::Switch, TerminatorKind::Switch { .. }) => true,
             (
                 TerminatorPattern::SwitchCases(expected_cases),
@@ -81,7 +81,7 @@ impl TerminatorPattern {
                 let actual_case_names: Vec<_> =
                     cases.iter().map(|(name, _)| name.clone()).collect();
                 expected_cases.iter().all(|e| actual_case_names.contains(e))
-            }
+            },
             (TerminatorPattern::Panic, TerminatorKind::Panic(_)) => true,
             (TerminatorPattern::Unreachable, TerminatorKind::Unreachable) => true,
             _ => false,

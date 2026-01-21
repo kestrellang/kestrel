@@ -86,7 +86,7 @@ fn match_pattern(
                 bindings.insert(*tp, concrete);
             }
             Ok(())
-        }
+        },
 
         // SelfType in pattern - matches any concrete type
         // (SelfType is used in protocol method signatures)
@@ -119,7 +119,7 @@ fn match_pattern(
                 match_pattern(mir, *a1, *a2, bindings)?;
             }
             Ok(())
-        }
+        },
 
         // Structural types - recurse
         (MirTy::Ref(a), MirTy::Ref(b)) => match_pattern(mir, *a, *b, bindings),
@@ -138,7 +138,7 @@ fn match_pattern(
                 match_pattern(mir, *e1, *e2, bindings)?;
             }
             Ok(())
-        }
+        },
 
         // Function types - match params and return
         (
@@ -161,7 +161,7 @@ fn match_pattern(
                 match_pattern(mir, *p1, *p2, bindings)?;
             }
             match_pattern(mir, *r1, *r2, bindings)
-        }
+        },
 
         (
             MirTy::FuncThick {
@@ -183,7 +183,7 @@ fn match_pattern(
                 match_pattern(mir, *p1, *p2, bindings)?;
             }
             match_pattern(mir, *r1, *r2, bindings)
-        }
+        },
 
         // Primitives - must be equal
         (MirTy::I8, MirTy::I8) => Ok(()),
@@ -220,7 +220,7 @@ fn match_pattern(
                 });
             }
             match_pattern(mir, *b1, *b2, bindings)
-        }
+        },
 
         // Anything else doesn't match
         _ => Err(MonomorphizeError::TypeMismatch {
@@ -251,13 +251,14 @@ pub fn resolve_witness(
     let witness_def = &mir.witnesses[witness_match.witness_id];
 
     // Look up the method binding
-    let (impl_func_name, method_type_args) = witness_def.method_bindings.get(method).ok_or_else(|| {
-        MonomorphizeError::MethodNotFoundInWitness {
-            protocol,
-            method: method.to_string(),
-            for_type,
-        }
-    })?;
+    let (impl_func_name, method_type_args) =
+        witness_def.method_bindings.get(method).ok_or_else(|| {
+            MonomorphizeError::MethodNotFoundInWitness {
+                protocol,
+                method: method.to_string(),
+                for_type,
+            }
+        })?;
 
     // Build the type arguments:
     // 1. First, the witness's type params (from pattern matching the implementing type)

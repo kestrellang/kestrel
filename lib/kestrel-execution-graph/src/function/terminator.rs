@@ -146,10 +146,10 @@ impl fmt::Display for TerminatorDisplay<'_> {
         match &self.term.kind {
             TerminatorKind::Return(v) => {
                 write!(f, "return {}", v.display(self.ctx))
-            }
+            },
             TerminatorKind::Jump(target) => {
                 write!(f, "jump bb{}", block_index(*target))
-            }
+            },
             TerminatorKind::Branch {
                 condition,
                 then_block,
@@ -162,7 +162,7 @@ impl fmt::Display for TerminatorDisplay<'_> {
                     block_index(*then_block),
                     block_index(*else_block)
                 )
-            }
+            },
             TerminatorKind::Switch {
                 discriminant,
                 cases,
@@ -172,13 +172,13 @@ impl fmt::Display for TerminatorDisplay<'_> {
                     writeln!(f, "    {} => bb{}", case_name, block_index(*target))?;
                 }
                 write!(f, "}}")
-            }
+            },
             TerminatorKind::Panic(msg) => {
                 write!(f, "panic {:?}", msg)
-            }
+            },
             TerminatorKind::Unreachable => {
                 write!(f, "unreachable")
-            }
+            },
         }
     }
 }

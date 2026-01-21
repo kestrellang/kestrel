@@ -391,7 +391,7 @@ impl<'a> LoweringContext<'a> {
             Value::Unreachable => {
                 // Expression diverged (return/break/continue), no value to assign.
                 // The block should already be terminated, so this is a no-op.
-            }
+            },
         }
     }
 
@@ -409,11 +409,11 @@ impl<'a> LoweringContext<'a> {
                 if let Some(local) = p.as_local() {
                     self.mark_moved(local);
                 }
-            }
+            },
             Value::Immediate(i) => self.emit_imm(dest, i),
             Value::Unreachable => {
                 // Expression diverged, no value to assign.
-            }
+            },
         }
     }
 
@@ -441,11 +441,11 @@ impl<'a> LoweringContext<'a> {
                         self.mark_moved(local);
                     }
                 }
-            }
+            },
             Value::Immediate(i) => self.emit_imm(dest, i),
             Value::Unreachable => {
                 // Expression diverged, no value to assign.
-            }
+            },
         }
     }
 
@@ -531,7 +531,7 @@ impl<'a> LoweringContext<'a> {
     /// This will be updated when parameter access modes are available during lowering.
     pub fn emit_call(&mut self, dest: Place, callee: Callee, args: Vec<Value>) {
         // Convert values to CallArgs with default Ref passing mode
-        let call_args: Vec<CallArg> = args.into_iter().map(|v| CallArg::borrow(v)).collect();
+        let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
         self.emit_assign(
             dest,
             Rvalue::Call {
@@ -567,7 +567,7 @@ impl<'a> LoweringContext<'a> {
     /// For now, all arguments default to `PassingMode::Ref` (borrow).
     pub fn emit_call_unit(&mut self, callee: Callee, args: Vec<Value>) {
         // Convert values to CallArgs with default Ref passing mode
-        let call_args: Vec<CallArg> = args.into_iter().map(|v| CallArg::borrow(v)).collect();
+        let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
         self.emit_statement(StatementKind::Call {
             callee,
             args: call_args,
@@ -631,17 +631,17 @@ impl<'a> LoweringContext<'a> {
                 match status {
                     DeinitStatus::Valid => {
                         self.emit_deinit_for_place(&place, ty);
-                    }
+                    },
                     DeinitStatus::MaybeMoved { flag } => {
                         // For conditional deinit, we still need to expand struct fields
                         // but wrap them in the conditional check.
                         // For now, emit a simple DeinitIf - the expanded form would need
                         // conditional blocks which adds complexity.
                         self.emit_statement(StatementKind::DeinitIf { place, flag: *flag });
-                    }
+                    },
                     DeinitStatus::Moved => {
                         // Already moved, no deinit needed
-                    }
+                    },
                 }
             }
         }
@@ -720,8 +720,10 @@ impl<'a> LoweringContext<'a> {
     /// Searches all scopes from innermost to outermost.
     pub fn mark_moved(&mut self, local: Id<Local>) {
         for scope in self.scope_stack.iter_mut().rev() {
-            if scope.deinit_status.contains_key(&local) {
-                scope.deinit_status.insert(local, DeinitStatus::Moved);
+            if let std::collections::hash_map::Entry::Occupied(mut e) =
+                scope.deinit_status.entry(local)
+            {
+                e.insert(DeinitStatus::Moved);
                 return;
             }
         }
@@ -743,10 +745,10 @@ impl<'a> LoweringContext<'a> {
 
         // Update status in the appropriate scope
         for scope in self.scope_stack.iter_mut().rev() {
-            if scope.deinit_status.contains_key(&local) {
-                scope
-                    .deinit_status
-                    .insert(local, DeinitStatus::MaybeMoved { flag });
+            if let std::collections::hash_map::Entry::Occupied(mut e) =
+                scope.deinit_status.entry(local)
+            {
+                e.insert(DeinitStatus::MaybeMoved { flag });
                 return flag;
             }
         }
@@ -780,8 +782,10 @@ impl<'a> LoweringContext<'a> {
     /// Update the deinit status of a local in the appropriate scope.
     pub fn update_deinit_status(&mut self, local: Id<Local>, status: DeinitStatus) {
         for scope in self.scope_stack.iter_mut().rev() {
-            if scope.deinit_status.contains_key(&local) {
-                scope.deinit_status.insert(local, status);
+            if let std::collections::hash_map::Entry::Occupied(mut e) =
+                scope.deinit_status.entry(local)
+            {
+                e.insert(status);
                 return;
             }
         }
@@ -824,25 +828,20 @@ impl<'a> LoweringContext<'a> {
                     self.emit_statement(StatementKind::Deinit {
                         place: Place::local(local),
                     });
-                }
+                },
                 Some(DeinitStatus::MaybeMoved { flag }) => {
                     self.emit_statement(StatementKind::DeinitIf {
                         place: Place::local(local),
                         flag,
                     });
-                }
+                },
                 Some(DeinitStatus::Moved) => {
                     // Already moved, no deinit needed
-                }
+                },
             }
         }
     }
 
-    // ==========================================================================
-    // Type Queries for Deinit
-    // ==========================================================================
-
-    /// Check if a semantic type needs deinit at scope exit.
     // ==========================================================================
     // Branch Merging for Conditional Drops
     // ==========================================================================
@@ -907,7 +906,7 @@ impl<'a> LoweringContext<'a> {
             // If either is MaybeMoved, result is MaybeMoved (keep existing flag)
             (DeinitStatus::MaybeMoved { flag }, _) | (_, DeinitStatus::MaybeMoved { flag }) => {
                 DeinitStatus::MaybeMoved { flag: *flag }
-            }
+            },
 
             // One moved, one valid → MaybeMoved (create new flag)
             (DeinitStatus::Valid, DeinitStatus::Moved)
@@ -915,7 +914,7 @@ impl<'a> LoweringContext<'a> {
                 // Create a flag for this local
                 let flag = self.create_deinit_flag();
                 DeinitStatus::MaybeMoved { flag }
-            }
+            },
         }
     }
 
@@ -1018,42 +1017,42 @@ impl<'a> LoweringContext<'a> {
             match (then_status, else_status) {
                 (DeinitStatus::Valid, DeinitStatus::Valid) => {
                     // Both valid - no change needed
-                }
+                },
                 (DeinitStatus::Moved, DeinitStatus::Moved) => {
                     // Both moved - update parent to Moved
                     if *before_status != DeinitStatus::Moved {
                         updates.push((local, DeinitStatus::Moved));
                     }
-                }
+                },
                 (DeinitStatus::Valid, DeinitStatus::Moved) => {
                     // Moved in else, valid in then -> need conditional deinit
                     let flag = self.create_deinit_flag_uninit();
                     updates.push((local, DeinitStatus::MaybeMoved { flag }));
                     then_flag_true.push(flag); // then: still valid, needs deinit
                     else_flag_false.push(flag); // else: moved, no deinit
-                }
+                },
                 (DeinitStatus::Moved, DeinitStatus::Valid) => {
                     // Moved in then, valid in else -> need conditional deinit
                     let flag = self.create_deinit_flag_uninit();
                     updates.push((local, DeinitStatus::MaybeMoved { flag }));
                     then_flag_false.push(flag); // then: moved, no deinit
                     else_flag_true.push(flag); // else: still valid, needs deinit
-                }
+                },
                 // If either is already MaybeMoved, keep the flag
                 (DeinitStatus::MaybeMoved { flag }, DeinitStatus::Valid) => {
                     then_flag_true.push(*flag); // might have been set in nested if
                     else_flag_true.push(*flag);
-                }
+                },
                 (DeinitStatus::Valid, DeinitStatus::MaybeMoved { flag }) => {
                     then_flag_true.push(*flag);
                     else_flag_true.push(*flag); // might have been set in nested if
-                }
+                },
                 (DeinitStatus::MaybeMoved { flag }, DeinitStatus::Moved) => {
                     else_flag_false.push(*flag);
-                }
+                },
                 (DeinitStatus::Moved, DeinitStatus::MaybeMoved { flag }) => {
                     then_flag_false.push(*flag);
-                }
+                },
                 (DeinitStatus::MaybeMoved { flag: f1 }, DeinitStatus::MaybeMoved { flag: f2 }) => {
                     // Both maybe moved - this is complex, use the first flag
                     // In practice, they should be the same flag if from the same source
@@ -1062,7 +1061,7 @@ impl<'a> LoweringContext<'a> {
                         // but just in case, we keep f1
                     }
                     let _ = f2; // suppress warning
-                }
+                },
             }
         }
 
@@ -1086,7 +1085,6 @@ impl<'a> LoweringContext<'a> {
     /// 2. It contains fields that need deinit (recursive check), AND
     /// 3. It is NOT copyable
     pub fn type_needs_deinit(&self, ty: &kestrel_semantic_tree::ty::Ty) -> bool {
-        use kestrel_semantic_tree::behavior::callable::CallableBehavior;
         use kestrel_semantic_tree::symbol::field::FieldSymbol;
         use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
@@ -1095,10 +1093,10 @@ impl<'a> LoweringContext<'a> {
                 let meta = symbol.metadata();
 
                 // Check if copyable - copyable types don't need deinit
-                if let Some(copy_beh) = meta.get_behavior::<CopySemanticsBehavior>() {
-                    if copy_beh.is_copyable() {
-                        return false;
-                    }
+                if let Some(copy_beh) = meta.get_behavior::<CopySemanticsBehavior>()
+                    && copy_beh.is_copyable()
+                {
+                    return false;
                 }
 
                 // Check if has deinit behavior
@@ -1117,16 +1115,16 @@ impl<'a> LoweringContext<'a> {
                 fields
                     .iter()
                     .any(|f| self.type_needs_deinit(f.field_type()))
-            }
+            },
 
             TyKind::Enum { symbol, .. } => {
                 let meta = symbol.metadata();
 
                 // Check if copyable - copyable types don't need deinit
-                if let Some(copy_beh) = meta.get_behavior::<CopySemanticsBehavior>() {
-                    if copy_beh.is_copyable() {
-                        return false;
-                    }
+                if let Some(copy_beh) = meta.get_behavior::<CopySemanticsBehavior>()
+                    && copy_beh.is_copyable()
+                {
+                    return false;
                 }
 
                 // Check if has deinit behavior
@@ -1136,7 +1134,7 @@ impl<'a> LoweringContext<'a> {
 
                 // Check if any variant payload needs deinit
                 self.enum_has_payload_needing_deinit(symbol)
-            }
+            },
 
             // Primitives, references, functions don't need deinit
             _ => false,
@@ -1226,7 +1224,7 @@ impl<'a> LoweringContext<'a> {
                         self.emit_deinit_for_place(&field_place, Some(field_ty));
                     }
                 }
-            }
+            },
 
             TyKind::Enum { symbol, .. } => {
                 let meta = symbol.metadata();
@@ -1305,14 +1303,14 @@ impl<'a> LoweringContext<'a> {
 
                 // Continue from join block
                 self.set_current_block(join_block);
-            }
+            },
 
             // For other types that somehow need deinit, emit simple Deinit
             _ => {
                 self.emit_statement(StatementKind::Deinit {
                     place: place.clone(),
                 });
-            }
+            },
         }
     }
 
@@ -1402,7 +1400,7 @@ impl<'a> LoweringContext<'a> {
         }
 
         match kind {
-            KestrelSymbolKind::SourceFile => {}
+            KestrelSymbolKind::SourceFile => {},
             KestrelSymbolKind::Module
             | KestrelSymbolKind::Struct
             | KestrelSymbolKind::Enum
@@ -1410,8 +1408,8 @@ impl<'a> LoweringContext<'a> {
             | KestrelSymbolKind::TypeAlias
             | KestrelSymbolKind::Extension => {
                 segments.push(name_value.clone());
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

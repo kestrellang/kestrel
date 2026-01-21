@@ -46,7 +46,7 @@ impl Query for ResolveModulePath {
                     path_span: Span::new(0, 0..0),
                     failed_segment_span: Span::new(0, 0..0),
                 });
-            }
+            },
         };
 
         // Resolve remaining segments
@@ -66,7 +66,7 @@ impl Query for ResolveModulePath {
                         path_span: Span::new(0, 0..0),
                         failed_segment_span: Span::new(0, 0..0),
                     });
-                }
+                },
             }
         }
 

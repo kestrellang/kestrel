@@ -70,7 +70,7 @@ fn resolve_match_scrutinee_type(scrutinee_ty: &Ty, ctx: &AnalysisContext) -> Ty 
                     .map(|b| b.target_type().clone())
                     .unwrap_or(scrutinee_ty);
                 return ty.expand_aliases();
-            }
+            },
 
             // Methods inside a struct/enum: `Self` is the container type.
             KestrelSymbolKind::Struct => {
@@ -80,7 +80,7 @@ fn resolve_match_scrutinee_type(scrutinee_ty: &Ty, ctx: &AnalysisContext) -> Ty 
                     .map(|sym| Ty::r#struct(sym, scrutinee_ty.span().clone()))
                     .unwrap_or(scrutinee_ty);
                 return ty.expand_aliases();
-            }
+            },
             KestrelSymbolKind::Enum => {
                 let ty = symbol
                     .clone()
@@ -88,12 +88,12 @@ fn resolve_match_scrutinee_type(scrutinee_ty: &Ty, ctx: &AnalysisContext) -> Ty 
                     .map(|sym| Ty::r#enum(sym, scrutinee_ty.span().clone()))
                     .unwrap_or(scrutinee_ty);
                 return ty.expand_aliases();
-            }
+            },
 
             // Protocol methods keep `Self` abstract (can't enumerate constructors).
             KestrelSymbolKind::Protocol => return scrutinee_ty,
 
-            _ => {}
+            _ => {},
         }
 
         let Some(parent) = symbol.metadata().parent() else {

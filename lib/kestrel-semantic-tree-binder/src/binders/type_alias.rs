@@ -57,14 +57,16 @@ impl DeclarationBinder for TypeAliasBinder {
             KestrelSymbolKind::AssociatedType => {
                 // Associated type in protocol: resolve bounds and optional default
                 bind_associated_type(symbol, syntax, &source, file_id, context);
-            }
+            },
             KestrelSymbolKind::TypeAlias => {
                 // Regular type alias or struct binding: resolve aliased type
                 // Enter cycle detector
-                if let Err(_) = semantic_tree::cycle::CycleDetector::enter_ref(
+                if semantic_tree::cycle::CycleDetector::enter_ref(
                     context.type_alias_cycle_detector,
                     symbol_id,
-                ) {
+                )
+                .is_err()
+                {
                     return;
                 }
 
@@ -99,20 +101,19 @@ impl DeclarationBinder for TypeAliasBinder {
                 }
 
                 // Validate associated type bindings in struct context
-                if alias_context == TypeAliasContext::Struct
-                    || alias_context == TypeAliasContext::Extension
+                if (alias_context == TypeAliasContext::Struct
+                    || alias_context == TypeAliasContext::Extension)
+                    && let Some(parent) = symbol.metadata().parent()
                 {
-                    if let Some(parent) = symbol.metadata().parent() {
-                        validate_conformance_associated_type_binding(
-                            syntax,
-                            &source,
-                            file_id,
-                            &name,
-                            &parent,
-                            conformance_parent_display_name(&parent),
-                            context,
-                        );
-                    }
+                    validate_conformance_associated_type_binding(
+                        syntax,
+                        &source,
+                        file_id,
+                        &name,
+                        &parent,
+                        conformance_parent_display_name(&parent),
+                        context,
+                    );
                 }
 
                 // Extract type parameters and resolve where clause bounds
@@ -126,21 +127,20 @@ impl DeclarationBinder for TypeAliasBinder {
                     resolve_aliased_type_from_syntax(syntax, &source, file_id, symbol_id, context)
                 {
                     // Validate constraint satisfaction for struct bindings
-                    if alias_context == TypeAliasContext::Struct
-                        || alias_context == TypeAliasContext::Extension
+                    if (alias_context == TypeAliasContext::Struct
+                        || alias_context == TypeAliasContext::Extension)
+                        && let Some(parent) = symbol.metadata().parent()
                     {
-                        if let Some(parent) = symbol.metadata().parent() {
-                            validate_struct_binding_constraint_satisfaction(
-                                &resolved_type,
-                                &name,
-                                &parent,
-                                span.clone(),
-                                context,
-                            );
+                        validate_struct_binding_constraint_satisfaction(
+                            &resolved_type,
+                            &name,
+                            &parent,
+                            span.clone(),
+                            context,
+                        );
 
-                            // Add ConformsToBehavior to track which protocol's associated type this binds
-                            add_conforms_to_behavior(symbol, &name, &parent);
-                        }
+                        // Add ConformsToBehavior to track which protocol's associated type this binds
+                        add_conforms_to_behavior(symbol, &name, &parent);
                     }
 
                     let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
@@ -152,10 +152,10 @@ impl DeclarationBinder for TypeAliasBinder {
                         TypeAliasContext::Module => Some(DiagTypeAliasContext::ModuleLevel),
                         TypeAliasContext::Struct => {
                             Some(DiagTypeAliasContext::StructWithoutConformance)
-                        }
+                        },
                         TypeAliasContext::Extension => {
                             Some(DiagTypeAliasContext::ExtensionWithoutConformance)
-                        }
+                        },
                         TypeAliasContext::Protocol => None, // Abstract associated types are valid
                     };
 
@@ -170,8 +170,8 @@ impl DeclarationBinder for TypeAliasBinder {
 
                 // Exit cycle detector
                 semantic_tree::cycle::CycleDetector::exit_ref(context.type_alias_cycle_detector);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
@@ -265,11 +265,11 @@ fn resolve_associated_type_bounds(
         match &child {
             SyntaxElement::Token(tok) if tok.kind() == SyntaxKind::Colon => {
                 after_colon = true;
-            }
+            },
             SyntaxElement::Token(tok) if tok.kind() == SyntaxKind::Equals => {
                 // Stop collecting bounds once we hit equals
                 break;
-            }
+            },
             SyntaxElement::Node(node)
                 if after_colon
                     && (node.kind() == SyntaxKind::Ty || node.kind() == SyntaxKind::TyPath) =>
@@ -282,7 +282,7 @@ fn resolve_associated_type_bounds(
                 // Validate it's a protocol
                 match bound_ty.kind() {
                     TyKind::Protocol { .. } => bounds.push(bound_ty),
-                    TyKind::Error { .. } => bounds.push(bound_ty), // Keep errors for diagnostics
+                    TyKind::Error => bounds.push(bound_ty), // Keep errors for diagnostics
                     _ => {
                         // Not a protocol - emit error
                         // Extract type name without using Debug format (which can cause cyclic reference issues)
@@ -292,10 +292,10 @@ fn resolve_associated_type_bounds(
                             name: type_name,
                             context: NotAProtocolContext::Bound,
                         });
-                    }
+                    },
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -410,15 +410,15 @@ fn validate_conformance_associated_type_binding(
 
                 // Check 2: Does the protocol have this associated type?
                 let protocol_has_type = conformances.iter().any(|conf| {
-                    if let TyKind::Protocol { symbol, .. } = conf.kind() {
-                        if symbol.metadata().name().value == protocol_name {
-                            // Check if protocol has the associated type
-                            let protocol_dyn = symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
-                            return protocol_dyn.metadata().children().iter().any(|child| {
-                                child.metadata().kind() == KestrelSymbolKind::AssociatedType
-                                    && child.metadata().name().value == type_name
-                            });
-                        }
+                    if let TyKind::Protocol { symbol, .. } = conf.kind()
+                        && symbol.metadata().name().value == protocol_name
+                    {
+                        // Check if protocol has the associated type
+                        let protocol_dyn = symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+                        return protocol_dyn.metadata().children().iter().any(|child| {
+                            child.metadata().kind() == KestrelSymbolKind::AssociatedType
+                                && child.metadata().name().value == type_name
+                        });
                     }
                     false
                 });
@@ -467,19 +467,19 @@ fn validate_conformance_associated_type_binding(
 }
 
 fn conformance_parent_display_name(parent: &Arc<dyn Symbol<KestrelLanguage>>) -> String {
-    if parent.metadata().kind() == KestrelSymbolKind::Extension {
-        if let Some(target) = parent.metadata().get_behavior::<ExtensionTargetBehavior>() {
-            let ty = target.target_type();
-            return match ty.kind() {
-                TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
-                TyKind::Enum { symbol, .. } => symbol.metadata().name().value.clone(),
-                TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
-                TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
-                TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
-                TyKind::Error { .. } => "(extension)".to_string(),
-                _ => "(extension)".to_string(),
-            };
-        }
+    if parent.metadata().kind() == KestrelSymbolKind::Extension
+        && let Some(target) = parent.metadata().get_behavior::<ExtensionTargetBehavior>()
+    {
+        let ty = target.target_type();
+        return match ty.kind() {
+            TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::Enum { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
+            TyKind::Error => "(extension)".to_string(),
+            _ => "(extension)".to_string(),
+        };
     }
 
     parent.metadata().name().value.clone()
@@ -492,10 +492,10 @@ fn extract_path_name_from_ty_node(ty_node: &SyntaxNode) -> Option<String> {
         for child in path_node.children() {
             if child.kind() == SyntaxKind::PathElement {
                 for elem in child.children_with_tokens() {
-                    if let Some(token) = elem.into_token() {
-                        if token.kind() == SyntaxKind::Identifier {
-                            return Some(token.text().to_string());
-                        }
+                    if let Some(token) = elem.into_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        return Some(token.text().to_string());
                     }
                 }
             }
@@ -503,16 +503,16 @@ fn extract_path_name_from_ty_node(ty_node: &SyntaxNode) -> Option<String> {
     }
 
     // Try TyPath which contains Path
-    if let Some(ty_path) = find_child(ty_node, SyntaxKind::TyPath) {
-        if let Some(path_node) = find_child(&ty_path, SyntaxKind::Path) {
-            for child in path_node.children() {
-                if child.kind() == SyntaxKind::PathElement {
-                    for elem in child.children_with_tokens() {
-                        if let Some(token) = elem.into_token() {
-                            if token.kind() == SyntaxKind::Identifier {
-                                return Some(token.text().to_string());
-                            }
-                        }
+    if let Some(ty_path) = find_child(ty_node, SyntaxKind::TyPath)
+        && let Some(path_node) = find_child(&ty_path, SyntaxKind::Path)
+    {
+        for child in path_node.children() {
+            if child.kind() == SyntaxKind::PathElement {
+                for elem in child.children_with_tokens() {
+                    if let Some(token) = elem.into_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        return Some(token.text().to_string());
                     }
                 }
             }
@@ -520,16 +520,16 @@ fn extract_path_name_from_ty_node(ty_node: &SyntaxNode) -> Option<String> {
     }
 
     // Also try TyPath directly at ty_node level
-    if ty_node.kind() == SyntaxKind::TyPath {
-        if let Some(path_node) = find_child(ty_node, SyntaxKind::Path) {
-            for child in path_node.children() {
-                if child.kind() == SyntaxKind::PathElement {
-                    for elem in child.children_with_tokens() {
-                        if let Some(token) = elem.into_token() {
-                            if token.kind() == SyntaxKind::Identifier {
-                                return Some(token.text().to_string());
-                            }
-                        }
+    if ty_node.kind() == SyntaxKind::TyPath
+        && let Some(path_node) = find_child(ty_node, SyntaxKind::Path)
+    {
+        for child in path_node.children() {
+            if child.kind() == SyntaxKind::PathElement {
+                for elem in child.children_with_tokens() {
+                    if let Some(token) = elem.into_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        return Some(token.text().to_string());
                     }
                 }
             }
@@ -598,17 +598,17 @@ fn validate_struct_binding_constraint_satisfaction(
                     && child.metadata().name().value == type_name
                 {
                     // Found the associated type - check if it has bounds
-                    if let Ok(assoc_type_symbol) = child.downcast_arc::<AssociatedTypeSymbol>() {
-                        if let Some(bounds) = assoc_type_symbol.bounds() {
-                            // Validate that bound_type satisfies these bounds
-                            validate_type_satisfies_bounds(
-                                bound_type,
-                                &bounds,
-                                type_name,
-                                binding_span.clone(),
-                                ctx,
-                            );
-                        }
+                    if let Ok(assoc_type_symbol) = child.downcast_arc::<AssociatedTypeSymbol>()
+                        && let Some(bounds) = assoc_type_symbol.bounds()
+                    {
+                        // Validate that bound_type satisfies these bounds
+                        validate_type_satisfies_bounds(
+                            bound_type,
+                            &bounds,
+                            type_name,
+                            binding_span.clone(),
+                            ctx,
+                        );
                     }
                 }
             }
@@ -645,7 +645,7 @@ fn validate_type_satisfies_bounds(
     // For each required protocol bound, check if the type conforms to it
     for required_protocol in required_bounds {
         // Skip error bounds - they've already been reported
-        if matches!(required_protocol.kind(), TyKind::Error { .. }) {
+        if matches!(required_protocol.kind(), TyKind::Error) {
             continue;
         }
 
@@ -678,20 +678,20 @@ fn validate_type_satisfies_bounds(
                             false
                         }
                     })
-                }
+                },
                 TyKind::TypeParameter(_) => {
                     // Type parameters might conform through bounds - for now we allow them
                     // A more sophisticated implementation would check the type parameter's bounds
                     true
-                }
-                TyKind::Error { .. } => {
+                },
+                TyKind::Error => {
                     // Don't report additional errors for error types
                     true
-                }
+                },
                 _ => {
                     // Other types (primitives, protocols, etc.) don't have conformances
                     false
-                }
+                },
             };
 
             if !conforms {
@@ -769,19 +769,19 @@ fn validate_inherited_where_clause_constraints(
                         } => {
                             // Check if this constraint is for an associated type
                             // Format is like "Iterator.Item" or just "Item"
-                            if let Some(assoc_name) = param_name.split('.').last() {
-                                if assoc_name == type_name {
-                                    // Validate that the bound type satisfies these bounds
-                                    validate_type_satisfies_bounds(
-                                        bound_type,
-                                        bounds,
-                                        type_name,
-                                        binding_span.clone(),
-                                        ctx,
-                                    );
-                                }
+                            if let Some(assoc_name) = param_name.split('.').next_back()
+                                && assoc_name == type_name
+                            {
+                                // Validate that the bound type satisfies these bounds
+                                validate_type_satisfies_bounds(
+                                    bound_type,
+                                    bounds,
+                                    type_name,
+                                    binding_span.clone(),
+                                    ctx,
+                                );
                             }
-                        }
+                        },
                         kestrel_semantic_tree::ty::Constraint::InheritedAssociatedTypeBound {
                             path,
                             bounds,
@@ -789,24 +789,24 @@ fn validate_inherited_where_clause_constraints(
                         } => {
                             // For inherited associated type bounds like "Iterator.Item: Comparable"
                             // Extract the associated type name from the path
-                            if let Some(assoc_name) = path.split('.').last() {
-                                if assoc_name == type_name {
-                                    validate_type_satisfies_bounds(
-                                        bound_type,
-                                        bounds,
-                                        type_name,
-                                        binding_span.clone(),
-                                        ctx,
-                                    );
-                                }
+                            if let Some(assoc_name) = path.split('.').next_back()
+                                && assoc_name == type_name
+                            {
+                                validate_type_satisfies_bounds(
+                                    bound_type,
+                                    bounds,
+                                    type_name,
+                                    binding_span.clone(),
+                                    ctx,
+                                );
                             }
-                        }
+                        },
                         // TypeEquality constraints are handled during type checking, not here
-                        kestrel_semantic_tree::ty::Constraint::TypeEquality { .. } => {}
+                        kestrel_semantic_tree::ty::Constraint::TypeEquality { .. } => {},
                         // NegativeBound constraints don't affect associated type validation
-                        kestrel_semantic_tree::ty::Constraint::NegativeBound { .. } => {}
+                        kestrel_semantic_tree::ty::Constraint::NegativeBound { .. } => {},
                         // SelfBound constraints are for protocol extensions, not struct associated types
-                        kestrel_semantic_tree::ty::Constraint::SelfBound { .. } => {}
+                        kestrel_semantic_tree::ty::Constraint::SelfBound { .. } => {},
                     }
                 }
             }

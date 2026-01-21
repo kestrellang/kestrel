@@ -1,8 +1,8 @@
 use semantic_tree::behavior::Behavior;
 use semantic_tree::symbol::SymbolId;
 
-use crate::behavior::callable::SignatureType;
 use crate::behavior::KestrelBehaviorKind;
+use crate::behavior::callable::SignatureType;
 use crate::language::KestrelLanguage;
 
 /// ImplementsBehavior tracks which protocol method(s) a struct method implements.

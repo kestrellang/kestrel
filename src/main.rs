@@ -54,7 +54,12 @@ enum Commands {
         #[arg(required = true)]
         files: Vec<String>,
         /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
-        #[arg(short = 'O', long = "opt-level", value_name = "LEVEL", default_value = "0")]
+        #[arg(
+            short = 'O',
+            long = "opt-level",
+            value_name = "LEVEL",
+            default_value = "0"
+        )]
         opt_level: u8,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
@@ -75,7 +80,12 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
         /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
-        #[arg(short = 'O', long = "opt-level", value_name = "LEVEL", default_value = "0")]
+        #[arg(
+            short = 'O',
+            long = "opt-level",
+            value_name = "LEVEL",
+            default_value = "0"
+        )]
         opt_level: u8,
         /// Link with a library (can be repeated, use :libname.a for static libs)
         #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
@@ -95,7 +105,7 @@ fn read_source(path: &str) -> Option<String> {
         Err(e) => {
             eprintln!("error: cannot read '{}': {}", path, e);
             None
-        }
+        },
     }
 }
 
@@ -184,30 +194,26 @@ fn run_check(
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(1);
-        }
+        },
     };
 
-    if let Some(mode) = show_tree {
-        if let Some(model) = compilation.semantic_model() {
-            model.print_semantic_model(mode == "full");
-        }
+    if let Some(mode) = show_tree
+        && let Some(model) = compilation.semantic_model()
+    {
+        model.print_semantic_model(mode == "full");
     }
 
-    if show_symbols {
-        if let Some(model) = compilation.semantic_model() {
-            model.print_model_symbols();
-        }
+    if show_symbols && let Some(model) = compilation.semantic_model() {
+        model.print_model_symbols();
     }
 
-    if show_execution_graph {
-        if let Some(model) = compilation.semantic_model() {
-            let root = model.root();
-            let result = kestrel_execution_graph_lowering::lower_module(model, &root);
-            for diag in &result.diagnostics {
-                eprintln!("warning: {:?}", diag);
-            }
-            print!("{}", result.mir.display());
+    if show_execution_graph && let Some(model) = compilation.semantic_model() {
+        let root = model.root();
+        let result = kestrel_execution_graph_lowering::lower_module(model, root);
+        for diag in &result.diagnostics {
+            eprintln!("warning: {:?}", diag);
         }
+        print!("{}", result.mir.display());
     }
 
     if compilation.has_errors() {
@@ -254,7 +260,7 @@ fn run_program(
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(1);
-        }
+        },
     };
 
     if compilation.has_errors() {
@@ -277,15 +283,15 @@ fn run_program(
                 eprint!("{}", result.stderr);
             }
             ExitCode::from(result.exit_code as u8)
-        }
+        },
         Err(CompileError::LoweringFailed(diagnostics)) => {
             compilation.diagnostics().emit_additional(&diagnostics).ok();
             ExitCode::from(1)
-        }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(1)
-        }
+        },
     }
 }
 
@@ -328,7 +334,7 @@ fn run_build(
             } else {
                 stem.to_string()
             }
-        }
+        },
     };
 
     let compilation = match builder.build() {
@@ -336,7 +342,7 @@ fn run_build(
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(1);
-        }
+        },
     };
 
     if compilation.has_errors() {
@@ -356,15 +362,15 @@ fn run_build(
                 eprintln!("  Built successfully: {}", output_path);
             }
             ExitCode::SUCCESS
-        }
+        },
         Err(CompileError::LoweringFailed(diagnostics)) => {
             compilation.diagnostics().emit_additional(&diagnostics).ok();
             ExitCode::from(1)
-        }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(1)
-        }
+        },
     }
 }
 
@@ -421,6 +427,6 @@ fn main() -> ExitCode {
             eprintln!("error: no command specified");
             eprintln!("Run 'kestrel --help' for usage.");
             ExitCode::from(1)
-        }
+        },
     }
 }

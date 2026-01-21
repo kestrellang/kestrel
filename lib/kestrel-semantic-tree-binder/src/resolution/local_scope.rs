@@ -90,10 +90,10 @@ impl LocalScope {
                 match prev_id {
                     Some(id) => {
                         self.current_bindings.insert(name, id);
-                    }
+                    },
                     None => {
                         self.current_bindings.remove(&name);
-                    }
+                    },
                 }
             }
         }

@@ -89,10 +89,12 @@ impl SubscriptDeclaration {
     /// Get the getter clause if present (for explicit getter syntax)
     pub fn getter_clause(&self) -> Option<SyntaxNode> {
         // First try in PropertyAccessors (explicit form)
-        if let Some(accessors) = self.property_accessors() {
-            if let Some(getter) = accessors.children().find(|child| child.kind() == SyntaxKind::GetterClause) {
-                return Some(getter);
-            }
+        if let Some(accessors) = self.property_accessors()
+            && let Some(getter) = accessors
+                .children()
+                .find(|child| child.kind() == SyntaxKind::GetterClause)
+        {
+            return Some(getter);
         }
         None
     }
@@ -100,10 +102,12 @@ impl SubscriptDeclaration {
     /// Get the setter clause if present
     pub fn setter_clause(&self) -> Option<SyntaxNode> {
         // Try in PropertyAccessors
-        if let Some(accessors) = self.property_accessors() {
-            if let Some(setter) = accessors.children().find(|child| child.kind() == SyntaxKind::SetterClause) {
-                return Some(setter);
-            }
+        if let Some(accessors) = self.property_accessors()
+            && let Some(setter) = accessors
+                .children()
+                .find(|child| child.kind() == SyntaxKind::SetterClause)
+        {
+            return Some(setter);
         }
         None
     }
@@ -113,7 +117,10 @@ impl SubscriptDeclaration {
         let body = self.body()?;
 
         // For shorthand form, the body is directly a CodeBlock
-        if let Some(code_block) = body.children().find(|child| child.kind() == SyntaxKind::CodeBlock) {
+        if let Some(code_block) = body
+            .children()
+            .find(|child| child.kind() == SyntaxKind::CodeBlock)
+        {
             // Check if it's inside a PropertyAccessors (explicit form)
             if self.property_accessors().is_none() {
                 return Some(code_block);
@@ -142,8 +149,11 @@ impl SubscriptDeclaration {
     pub fn is_protocol_requirement(&self) -> bool {
         if let Some(accessors) = self.property_accessors() {
             // Protocol requirements have Get/Set tokens but no GetterClause/SetterClause children
-            let has_getter_clause = accessors.children().any(|c| c.kind() == SyntaxKind::GetterClause);
-            let has_get_token = accessors.children_with_tokens()
+            let has_getter_clause = accessors
+                .children()
+                .any(|c| c.kind() == SyntaxKind::GetterClause);
+            let has_get_token = accessors
+                .children_with_tokens()
                 .filter_map(|e| e.into_token())
                 .any(|t| t.kind() == SyntaxKind::Get);
 
@@ -157,8 +167,11 @@ impl SubscriptDeclaration {
     /// Check if this has a protocol setter requirement (has `{ get set }` without bodies)
     fn has_protocol_setter_requirement(&self) -> bool {
         if let Some(accessors) = self.property_accessors() {
-            let has_setter_clause = accessors.children().any(|c| c.kind() == SyntaxKind::SetterClause);
-            let has_set_token = accessors.children_with_tokens()
+            let has_setter_clause = accessors
+                .children()
+                .any(|c| c.kind() == SyntaxKind::SetterClause);
+            let has_set_token = accessors
+                .children_with_tokens()
                 .filter_map(|e| e.into_token())
                 .any(|t| t.kind() == SyntaxKind::Set);
 
@@ -202,13 +215,13 @@ where
     {
         Ok(data) => {
             emit_subscript_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -389,7 +402,8 @@ mod tests {
 
     #[test]
     fn test_subscript_declaration_full() {
-        let source = "public static subscript[T](index: Int) -> T where T: Copyable { self.data(index) }";
+        let source =
+            "public static subscript[T](index: Int) -> T where T: Copyable { self.data(index) }";
         let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))

@@ -6,12 +6,12 @@ use crate::monomorphize::Substitution;
 use crate::types::translate_type_with_subst;
 
 use kestrel_execution_graph::{
-    Block, FunctionDef, Id, Local, LocalDef, MirTy, Place, PlaceKind, Rvalue, StatementKind, Ty,
+    Block, FunctionDef, Id, Local, MirTy, Place, PlaceKind, Rvalue, StatementKind, Ty,
 };
 
 use cranelift_codegen::ir::types as cl_types;
 use cranelift_codegen::ir::{
-    Function as CraneliftFunction, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value,
+    Function as CraneliftFunction, InstBuilder, MemFlags, StackSlotData, StackSlotKind,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 
@@ -36,11 +36,11 @@ fn collect_address_taken_locals(
                         if let Some(local_id) = get_root_local(place) {
                             result.insert(local_id);
                         }
-                    }
+                    },
                     Rvalue::Call { args, .. } => {
                         add_call_arg_locals(&mut result, args);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             } else if let StatementKind::Call { args, .. } = &stmt.kind {
                 add_call_arg_locals(&mut result, args);
@@ -51,21 +51,16 @@ fn collect_address_taken_locals(
     result
 }
 
-fn add_call_arg_locals(
-    result: &mut HashSet<Id<Local>>,
-    args: &[kestrel_execution_graph::CallArg],
-) {
+fn add_call_arg_locals(result: &mut HashSet<Id<Local>>, args: &[kestrel_execution_graph::CallArg]) {
     for arg in args {
         if matches!(
             arg.mode,
             kestrel_execution_graph::PassingMode::Ref
                 | kestrel_execution_graph::PassingMode::MutRef
-        ) {
-            if let kestrel_execution_graph::Value::Place(place) = &arg.value {
-                if let Some(local_id) = get_root_local(place) {
-                    result.insert(local_id);
-                }
-            }
+        ) && let kestrel_execution_graph::Value::Place(place) = &arg.value
+            && let Some(local_id) = get_root_local(place)
+        {
+            result.insert(local_id);
         }
     }
 }
@@ -199,7 +194,7 @@ fn compile_blocks(
     let mut param_offset = 0;
     let mut sret_ptr = None;
     if needs_sret {
-        sret_ptr = params.get(0).copied();
+        sret_ptr = params.first().copied();
         param_offset = 1;
     }
 

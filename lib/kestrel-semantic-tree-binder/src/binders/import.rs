@@ -24,7 +24,7 @@ impl DeclarationBinder for ImportBinder {
             None => {
                 eprintln!("Warning: ImportSymbol missing ImportDataBehavior");
                 return;
-            }
+            },
         };
 
         let import_id = symbol.metadata().id();
@@ -38,7 +38,7 @@ impl DeclarationBinder for ImportBinder {
             Err(_) => {
                 // Error will be reported by ImportValidationPass
                 return;
-            }
+            },
         };
 
         // Get the module symbol to resolve import items

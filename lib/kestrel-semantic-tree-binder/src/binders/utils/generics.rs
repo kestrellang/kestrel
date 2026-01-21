@@ -139,7 +139,11 @@ fn resolve_type_bound(
 
             // Create SelfBound with the associated type path (everything after "Self")
             let associated_type_path: Vec<String> = path_segments[1..].to_vec();
-            return Some(Constraint::self_bound(associated_type_path, target_span, bounds));
+            return Some(Constraint::self_bound(
+                associated_type_path,
+                target_span,
+                bounds,
+            ));
         }
 
         if path_segments.len() >= 2 {
@@ -366,7 +370,7 @@ fn resolve_path_in_where_clause(
                     match c {
                         Constraint::TypeBound { bounds, .. } => {
                             Some(bounds.iter().collect::<Vec<_>>())
-                        }
+                        },
                         _ => None,
                     }
                 } else {
@@ -382,8 +386,7 @@ fn resolve_path_in_where_clause(
                 for child in symbol.metadata().children() {
                     if child.metadata().kind() == KestrelSymbolKind::AssociatedType
                         && child.metadata().name().value == *assoc_type_name
-                    {
-                        if let Ok(assoc_sym) = child
+                        && let Ok(assoc_sym) = child
                             .clone()
                             .into_any_arc()
                             .downcast::<kestrel_semantic_tree::symbol::associated_type::AssociatedTypeSymbol>()
@@ -391,22 +394,19 @@ fn resolve_path_in_where_clause(
                             let container = Ty::type_parameter(type_param.clone(), span.clone());
                             return Ty::qualified_associated_type(assoc_sym, container, span.clone());
                         }
-                    }
                 }
 
                 if let Some(flattened) = symbol
                     .metadata()
                     .get_behavior::<FlattenedProtocolBehavior>()
+                    && let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name)
                 {
-                    if let Some(flattened_assoc) = flattened.associated_types().get(assoc_type_name)
-                    {
-                        let container = Ty::type_parameter(type_param.clone(), span.clone());
-                        return Ty::qualified_associated_type(
-                            flattened_assoc.symbol.clone(),
-                            container,
-                            span.clone(),
-                        );
-                    }
+                    let container = Ty::type_parameter(type_param.clone(), span.clone());
+                    return Ty::qualified_associated_type(
+                        flattened_assoc.symbol.clone(),
+                        container,
+                        span.clone(),
+                    );
                 }
             }
         }
@@ -570,10 +570,10 @@ fn extract_path_from_node(node: &SyntaxNode) -> Vec<String> {
         for child in path_node.children() {
             if child.kind() == SyntaxKind::PathElement {
                 for elem in child.children_with_tokens() {
-                    if let Some(token) = elem.into_token() {
-                        if token.kind() == SyntaxKind::Identifier {
-                            segments.push(token.text().to_string());
-                        }
+                    if let Some(token) = elem.into_token()
+                        && token.kind() == SyntaxKind::Identifier
+                    {
+                        segments.push(token.text().to_string());
                     }
                 }
             }
@@ -618,7 +618,10 @@ fn check_duplicate_type_parameters(
 
     for param in type_params {
         let name = &param.metadata().name().value;
-        if let Some(outer_param) = outer_type_params.iter().find(|p| &p.metadata().name().value == name) {
+        if let Some(outer_param) = outer_type_params
+            .iter()
+            .find(|p| &p.metadata().name().value == name)
+        {
             // If this is a static method and the outer param is from the immediate parent (struct/enum),
             // skip the shadowing error
             if allow_parent_shadowing && is_from_immediate_parent(outer_param, symbol) {
@@ -645,10 +648,10 @@ fn collect_outer_type_parameters(
         // Collect type parameters from this ancestor
         let children: Vec<Arc<dyn Symbol<KestrelLanguage>>> = parent.metadata().children();
         for child in children {
-            if child.metadata().kind() == KestrelSymbolKind::TypeParameter {
-                if let Ok(type_param) = child.downcast_arc::<TypeParameterSymbol>() {
-                    result.push(type_param);
-                }
+            if child.metadata().kind() == KestrelSymbolKind::TypeParameter
+                && let Ok(type_param) = child.downcast_arc::<TypeParameterSymbol>()
+            {
+                result.push(type_param);
             }
         }
         current = parent.metadata().parent();

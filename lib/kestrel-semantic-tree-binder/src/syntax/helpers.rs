@@ -20,7 +20,11 @@ use crate::diagnostics::{
 /// arguments (e.g. `protocol P[T = Self]` => `P[T = Self]`), rather than leaving inferred `_`
 /// placeholders from raw type reference resolution.
 fn apply_default_protocol_type_arguments_for_conformance(ty: Ty) -> Ty {
-    let TyKind::Protocol { symbol, substitutions } = ty.kind() else {
+    let TyKind::Protocol {
+        symbol,
+        substitutions,
+    } = ty.kind()
+    else {
         return ty;
     };
 
@@ -119,7 +123,8 @@ pub fn resolve_conformance_list(
                 symbol: protocol_sym,
                 ..
             } => {
-                let resolved_ty = apply_default_protocol_type_arguments_for_conformance(resolved_ty);
+                let resolved_ty =
+                    apply_default_protocol_type_arguments_for_conformance(resolved_ty);
                 if is_negative {
                     // Validate that this protocol allows negation
                     let protocol_id = protocol_sym.metadata().id();
@@ -150,7 +155,7 @@ pub fn resolve_conformance_list(
                 } else {
                     resolved.push(resolved_ty);
                 }
-            }
+            },
             TyKind::Struct {
                 symbol: struct_sym, ..
             } => {
@@ -162,13 +167,13 @@ pub fn resolve_conformance_list(
                 if !is_negative {
                     resolved.push(Ty::error(span));
                 }
-            }
+            },
             TyKind::Error => {
                 // Error already reported by type resolver
                 if !is_negative {
                     resolved.push(resolved_ty);
                 }
-            }
+            },
             _ => {
                 let type_name = format!("{:?}", resolved_ty.kind());
                 ctx.diagnostics.throw(NotAProtocolError {
@@ -179,7 +184,7 @@ pub fn resolve_conformance_list(
                 if !is_negative {
                     resolved.push(Ty::error(span));
                 }
-            }
+            },
         }
     }
 
@@ -254,27 +259,25 @@ fn validate_no_conflicting_conformances(
             if let Some(parent_conformances) = protocol_symbol
                 .metadata()
                 .get_behavior::<ConformancesBehavior>()
+                && let Some(copyable_id) = copyable_id
             {
-                if let Some(copyable_id) = copyable_id {
-                    let inherits_copyable =
-                        parent_conformances.conformances().iter().any(|parent| {
-                            if let TyKind::Protocol {
-                                symbol: parent_sym, ..
-                            } = parent.kind()
-                            {
-                                parent_sym.metadata().id() == copyable_id
-                            } else {
-                                false
-                            }
-                        });
-
-                    if inherits_copyable {
-                        ctx.diagnostics.throw(ConflictingCopyableConformanceError {
-                            span: symbol.metadata().span().clone(),
-                            refining_protocol: protocol_symbol.metadata().name().value.clone(),
-                        });
-                        return; // Only report once
+                let inherits_copyable = parent_conformances.conformances().iter().any(|parent| {
+                    if let TyKind::Protocol {
+                        symbol: parent_sym, ..
+                    } = parent.kind()
+                    {
+                        parent_sym.metadata().id() == copyable_id
+                    } else {
+                        false
                     }
+                });
+
+                if inherits_copyable {
+                    ctx.diagnostics.throw(ConflictingCopyableConformanceError {
+                        span: symbol.metadata().span().clone(),
+                        refining_protocol: protocol_symbol.metadata().name().value.clone(),
+                    });
+                    return; // Only report once
                 }
             }
         }
@@ -296,8 +299,8 @@ fn validate_parent_protocol_conformances(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     ctx: &mut BindingContext,
 ) {
-    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
     use kestrel_semantic_model::queries::ProtocolRequiredMethods;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 
     // Only validate structs, not protocols
     // Protocol inheritance (protocol B: A) is different from struct conformance (struct S: A, B)
@@ -341,14 +344,12 @@ fn validate_parent_protocol_conformances(
                         // All types implicitly conform to these unless opted out
                         if let Some(feature) =
                             ctx.model.builtin_registry().protocol_feature(parent_id)
-                        {
-                            if let kestrel_semantic_tree::builtins::BuiltinKind::Protocol {
+                            && let kestrel_semantic_tree::builtins::BuiltinKind::Protocol {
                                 implicit_conformance: true,
                                 ..
                             } = feature.definition().kind
-                            {
-                                continue;
-                            }
+                        {
+                            continue;
                         }
 
                         // Check if the parent protocol is in our declared conformances

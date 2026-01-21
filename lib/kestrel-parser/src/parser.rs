@@ -19,7 +19,7 @@
 //!     .map(|spanned| (spanned.value, spanned.span))
 //!     .collect();
 //!
-//! let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+//! let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
 //!
 //! println!("Syntax tree: {:?}", result.tree);
 //! for error in result.errors {

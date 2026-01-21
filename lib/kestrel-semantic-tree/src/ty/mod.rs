@@ -89,7 +89,7 @@ impl fmt::Display for Ty {
                     write!(f, "{}", elem)?;
                 }
                 f.write_char(')')
-            }
+            },
             TyKind::Array(elem) => write!(f, "lang.array[{}]", elem),
             TyKind::Pointer(elem) => write!(f, "lang.ptr[{}]", elem),
             TyKind::Function {
@@ -104,10 +104,10 @@ impl fmt::Display for Ty {
                     write!(f, "{}", p)?;
                 }
                 write!(f, ") -> {}", return_type)
-            }
+            },
             TyKind::TypeParameter(param_symbol) => {
                 f.write_str(&param_symbol.metadata().name().value)
-            }
+            },
             TyKind::Protocol {
                 symbol,
                 substitutions,
@@ -127,7 +127,7 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::Struct {
                 symbol,
                 substitutions,
@@ -147,7 +147,7 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::Enum {
                 symbol,
                 substitutions,
@@ -167,7 +167,7 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::TypeAlias {
                 symbol,
                 substitutions,
@@ -187,13 +187,13 @@ impl fmt::Display for Ty {
                         .filter_map(|tp| substitutions.get(tp.metadata().id()).cloned()),
                 )?;
                 f.write_char(']')
-            }
+            },
             TyKind::AssociatedType { symbol, container } => {
                 if let Some(container_ty) = container {
                     write!(f, "{}.", container_ty)?;
                 }
                 f.write_str(&symbol.metadata().name().value)
-            }
+            },
             TyKind::SelfType => f.write_str("Self"),
             TyKind::Infer => f.write_str("_"),
             TyKind::Error => f.write_str("<error>"),
@@ -203,10 +203,10 @@ impl fmt::Display for Ty {
             } => match param_info {
                 ParamInfo::Unconstrained => {
                     write!(f, "(...) -> {}", return_type)
-                }
+                },
                 ParamInfo::ImplicitIt { it_type } => {
                     write!(f, "({}) -> {}", it_type, return_type)
-                }
+                },
                 ParamInfo::Explicit { param_types } => {
                     f.write_char('(')?;
                     for (i, p) in param_types.iter().enumerate() {
@@ -216,7 +216,7 @@ impl fmt::Display for Ty {
                         write!(f, "{}", p)?;
                     }
                     write!(f, ") -> {}", return_type)
-                }
+                },
             },
         }
     }
@@ -556,11 +556,11 @@ impl Ty {
                         } else {
                             ty.apply_substitutions(substitutions).expand_aliases()
                         }
-                    }
+                    },
                     // Alias not yet resolved - return as-is
                     None => self.clone(),
                 }
-            }
+            },
             // Not a type alias - return as-is
             _ => self.clone(),
         }
@@ -578,17 +578,17 @@ impl Ty {
                     .map(|e| e.substitute_self(replacement))
                     .collect();
                 Ty::tuple(new_elements, self.span.clone())
-            }
+            },
 
             TyKind::Array(element_type) => {
                 let new_element = element_type.substitute_self(replacement);
                 Ty::array(new_element, self.span.clone())
-            }
+            },
 
             TyKind::Pointer(element_type) => {
                 let new_element = element_type.substitute_self(replacement);
                 Ty::pointer(new_element, self.span.clone())
-            }
+            },
 
             TyKind::Function {
                 params,
@@ -600,13 +600,13 @@ impl Ty {
                     .collect();
                 let new_return = return_type.substitute_self(replacement);
                 Ty::function(new_params, new_return, self.span.clone())
-            }
+            },
 
             TyKind::AssociatedType { symbol, container } => match container {
                 Some(container_ty) => {
                     let new_container = container_ty.substitute_self(replacement);
                     Ty::qualified_associated_type(symbol.clone(), new_container, self.span.clone())
-                }
+                },
                 None => {
                     // Implicitly Self.Symbol, replace with replacement.Symbol
                     Ty::qualified_associated_type(
@@ -614,7 +614,7 @@ impl Ty {
                         replacement.clone(),
                         self.span.clone(),
                     )
-                }
+                },
             },
 
             TyKind::Struct {
@@ -626,7 +626,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_struct(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::Enum {
                 symbol,
@@ -637,7 +637,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_enum(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::Protocol {
                 symbol,
@@ -648,7 +648,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_protocol(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::TypeAlias {
                 symbol,
@@ -659,7 +659,7 @@ impl Ty {
                     new_subs.insert(*id, ty.substitute_self(replacement));
                 }
                 Ty::generic_type_alias(symbol.clone(), new_subs, self.span.clone())
-            }
+            },
 
             TyKind::UnresolvedFunction {
                 param_info,
@@ -679,7 +679,7 @@ impl Ty {
                     },
                 };
                 Ty::unresolved_function(new_param_info, new_return, self.span.clone())
-            }
+            },
 
             _ => self.clone(),
         }
@@ -714,7 +714,7 @@ impl Ty {
                         .iter()
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.is_specialization_of(b))
-            }
+            },
 
             // Arrays
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_specialization_of(b_elem),
@@ -722,7 +722,7 @@ impl Ty {
             // Pointers
             (TyKind::Pointer(a_elem), TyKind::Pointer(b_elem)) => {
                 a_elem.is_specialization_of(b_elem)
-            }
+            },
 
             // Functions
             (
@@ -741,7 +741,7 @@ impl Ty {
                         .zip(b_params.iter())
                         .all(|(a, b)| a.is_specialization_of(b))
                     && a_ret.is_specialization_of(b_ret)
-            }
+            },
 
             // Structs
             (
@@ -757,7 +757,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.is_specialization_of(b_subs)
-            }
+            },
 
             // Enums
             (
@@ -773,7 +773,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.is_specialization_of(b_subs)
-            }
+            },
 
             // Protocols
             (
@@ -789,7 +789,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.is_specialization_of(b_subs)
-            }
+            },
 
             // Error types match anything
             (TyKind::Error, _) | (_, TyKind::Error) => true,
@@ -821,7 +821,7 @@ impl Ty {
                         .iter()
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.overlaps_with(b))
-            }
+            },
 
             // Arrays
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.overlaps_with(b_elem),
@@ -846,7 +846,7 @@ impl Ty {
                         .zip(b_params.iter())
                         .all(|(a, b)| a.overlaps_with(b))
                     && a_ret.overlaps_with(b_ret)
-            }
+            },
 
             // Structs
             (
@@ -862,7 +862,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.overlaps_with(b_subs)
-            }
+            },
 
             // Enums
             (
@@ -878,7 +878,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.overlaps_with(b_subs)
-            }
+            },
 
             // Protocols
             (
@@ -894,7 +894,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && a_subs.overlaps_with(b_subs)
-            }
+            },
 
             // Error types overlap anything
             (TyKind::Error, _) | (_, TyKind::Error) => true,
@@ -950,7 +950,7 @@ impl Ty {
                         .iter()
                         .zip(b_elems.iter())
                         .all(|(a, b)| a.is_assignable_to(b))
-            }
+            },
 
             // Arrays - element type comparison
             (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_assignable_to(b_elem),
@@ -976,7 +976,7 @@ impl Ty {
                         .zip(b_params.iter())
                         .all(|(a, b)| a.is_assignable_to(b))
                     && a_ret.is_assignable_to(b_ret)
-            }
+            },
 
             // Structs - nominal equality (same symbol by ID)
             (
@@ -993,7 +993,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && substitutions_equal(a_subs, b_subs)
-            }
+            },
 
             // Enums - nominal equality (same symbol by ID)
             (
@@ -1010,7 +1010,7 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && substitutions_equal(a_subs, b_subs)
-            }
+            },
 
             // Protocols - nominal equality (same symbol by ID)
             (
@@ -1026,14 +1026,14 @@ impl Ty {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
                     && substitutions_equal(a_subs, b_subs)
-            }
+            },
 
             // Type parameters - only the same type parameter is assignable to itself
             // Different type parameters (T vs U) are not compatible even with shared bounds
             (TyKind::TypeParameter(a), TyKind::TypeParameter(b)) => {
                 Symbol::<KestrelLanguage>::metadata(a.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b.as_ref()).id()
-            }
+            },
 
             // Type parameter vs concrete type - not assignable
             // Future: where clause equality constraints (T == U, T.Item == Int) could allow this
@@ -1055,7 +1055,7 @@ impl Ty {
             ) => {
                 Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
                     == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
-            }
+            },
 
             // Associated type can be assigned to anything (and vice versa) for now
             // This allows generic code to compile before constraint checking
@@ -1273,7 +1273,7 @@ impl Ty {
         match &self.kind {
             TyKind::AssociatedType { symbol, container } => {
                 Some((symbol, container.as_ref().map(|b| b.as_ref())))
-            }
+            },
             _ => None,
         }
     }
@@ -1437,7 +1437,7 @@ impl Ty {
                 let param_id = param.metadata().id();
                 // If there's a `not Copyable` bound, the type parameter is not copyable
                 !where_clause.has_not_copyable(param_id)
-            }
+            },
 
             // For all other types, delegate to the regular is_copyable check
             _ => self.is_copyable(),

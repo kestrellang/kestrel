@@ -285,7 +285,7 @@ where
                 let rhs = pratt_parse_bp(operands, operators, prec + 1, full_span.clone(), ctx);
                 let expr_span = Span::new(lhs.span.file_id, lhs.span.start..rhs.span.end);
                 lhs = desugar_binary_op(op, lhs, rhs, op_span, expr_span, ctx);
-            }
+            },
 
             InfixAction::InfixRight(op, prec) => {
                 let op_span = op_span.clone();
@@ -294,7 +294,7 @@ where
                 let rhs = pratt_parse_bp(operands, operators, prec, full_span.clone(), ctx);
                 let expr_span = Span::new(lhs.span.file_id, lhs.span.start..rhs.span.end);
                 lhs = desugar_binary_op(op, lhs, rhs, op_span, expr_span, ctx);
-            }
+            },
 
             InfixAction::Postfix(op) => {
                 let op_span = op_span.clone();
@@ -302,7 +302,7 @@ where
 
                 let expr_span = Span::new(lhs.span.file_id, lhs.span.start..op_span.end);
                 lhs = desugar_unary_op(op, lhs, op_span, expr_span, ctx);
-            }
+            },
         }
     }
 
@@ -342,7 +342,13 @@ fn desugar_binary_op(
     // from the resolved method (e.g., Bool for comparisons, Output associated type for arithmetic).
     let result_ty = Ty::infer(full_span.clone());
     let arg = CallArgument::unlabeled(rhs.clone(), rhs.span.clone());
-    Expression::deferred_method_call(lhs, method_name.to_string(), vec![arg], result_ty, full_span)
+    Expression::deferred_method_call(
+        lhs,
+        method_name.to_string(),
+        vec![arg],
+        result_ty,
+        full_span,
+    )
 }
 
 /// Desugar a unary operator into a method call: operand.method_name()
@@ -376,7 +382,13 @@ fn desugar_unary_op(
     // Type inference will resolve this to a concrete protocol method call.
     // Use Infer so type inference determines the actual return type from the resolved method.
     let result_ty = Ty::infer(full_span.clone());
-    Expression::deferred_method_call(operand, method_name.to_string(), vec![], result_ty, full_span)
+    Expression::deferred_method_call(
+        operand,
+        method_name.to_string(),
+        vec![],
+        result_ty,
+        full_span,
+    )
 }
 
 /// Check if a type is a lang intrinsic type that should not support operators.
@@ -485,6 +497,7 @@ fn suggested_unary_intrinsic(ty: &Ty, op: UnaryOp) -> String {
 
 /// Look up a primitive method on a type for binary operators.
 /// Uses the centralized PrimitiveMethod::lookup.
+#[allow(dead_code)]
 fn lookup_primitive_binary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
     PrimitiveMethod::lookup(ty, method_name)
 }
@@ -492,6 +505,7 @@ fn lookup_primitive_binary_method(ty: &Ty, method_name: &str) -> Option<Primitiv
 /// Look up a primitive method on a type for unary operators.
 /// Uses the centralized PrimitiveMethod::lookup, with special handling
 /// for `!` (bitwiseNot) on Bool which maps to logicalNot.
+#[allow(dead_code)]
 fn lookup_primitive_unary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
     // Special case: `!` (bitwiseNot) on Bool maps to logicalNot for compatibility
     if matches!(ty.kind(), TyKind::Bool) && method_name == "bitwiseNot" {

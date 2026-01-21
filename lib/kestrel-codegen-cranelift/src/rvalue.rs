@@ -33,12 +33,12 @@ fn type_uses_self(mir: &MirContext, ty_id: Id<Ty>) -> bool {
         MirTy::SelfType => true,
         MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
             type_uses_self(mir, *inner)
-        }
+        },
         MirTy::Tuple(elems) => elems.iter().any(|e| type_uses_self(mir, *e)),
         MirTy::Named { type_args, .. } => type_args.iter().any(|a| type_uses_self(mir, *a)),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().any(|p| type_uses_self(mir, *p)) || type_uses_self(mir, *ret)
-        }
+        },
         _ => false,
     }
 }
@@ -54,7 +54,7 @@ fn func_uses_self(mir: &MirContext, func_def: &FunctionDef) -> bool {
 /// Check if a function has a self receiver (first parameter named "self").
 /// This is used to determine if a witness call needs a self_type for mangling.
 fn has_self_receiver(mir: &MirContext, func_def: &FunctionDef) -> bool {
-    func_def.params.first().map_or(false, |&param_id| {
+    func_def.params.first().is_some_and(|&param_id| {
         let param = &mir.params[param_id];
         param.name == "self"
     })
@@ -72,12 +72,12 @@ fn type_is_concrete(mir: &MirContext, ty_id: Id<Ty>) -> bool {
         MirTy::AssociatedTypeProjection { .. } => false,
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
             type_is_concrete(mir, *inner)
-        }
+        },
         MirTy::Tuple(elems) => elems.iter().all(|e| type_is_concrete(mir, *e)),
         MirTy::Named { type_args, .. } => type_args.iter().all(|a| type_is_concrete(mir, *a)),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().all(|p| type_is_concrete(mir, *p)) && type_is_concrete(mir, *ret)
-        }
+        },
         _ => true,
     }
 }
@@ -113,14 +113,12 @@ fn copy_aggregate_value(
     // Skip copy if src_ptr is a constant 0 (null pointer from Unit value).
     // This can happen when if-else expressions have aggregate types but
     // the branch values are from discarded statement results.
-    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr) {
-        if let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
+    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr)
+        && let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
             builder.func.dfg.insts[inst]
-        {
-            if imm.bits() == 0 {
-                return;
-            }
-        }
+        && imm.bits() == 0
+    {
+        return;
     }
 
     for offset in 0..layout.size {
@@ -166,7 +164,7 @@ pub fn compile_rvalue(
 
         Rvalue::Copy(place) | Rvalue::Move(place) => {
             compile_place_read(ctx, place, builder, local_map, subst, stack_locals)
-        }
+        },
 
         Rvalue::BinaryOp { op, lhs, rhs } => {
             let lhs_val =
@@ -180,103 +178,167 @@ pub fn compile_rvalue(
             let rhs_val = ensure_primitive_value(ctx, subst, rhs_val, rhs_ty_opt, builder)?;
 
             compile_binop(ctx, *op, lhs_val, rhs_val, builder)
-        }
+        },
 
         Rvalue::UnaryOp { op, operand } => {
-            let operand_val =
-                compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
+            let operand_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                operand,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
             let (_, ty_opt) = get_value_layout(ctx, operand, local_map, subst)?;
             let operand_val = ensure_primitive_value(ctx, subst, operand_val, ty_opt, builder)?;
             compile_unop(ctx, *op, operand_val, builder)
-        }
+        },
 
-        Rvalue::Call { callee, args } => {
-            compile_call(ctx, func_def, subst, callee, args, builder, local_map, stack_locals)
-        }
+        Rvalue::Call { callee, args } => compile_call(
+            ctx,
+            func_def,
+            subst,
+            callee,
+            args,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
-        Rvalue::Construct { ty, fields } => {
-            compile_construct(ctx, func_def, subst, *ty, fields, builder, local_map, stack_locals)
-        }
+        Rvalue::Construct { ty, fields } => compile_construct(
+            ctx,
+            func_def,
+            subst,
+            *ty,
+            fields,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
         Rvalue::EnumVariant {
             enum_ty,
             variant,
             payload,
         } => compile_enum_variant(
-            ctx, func_def, subst, *enum_ty, variant, payload, builder, local_map, stack_locals,
+            ctx,
+            func_def,
+            subst,
+            *enum_ty,
+            variant,
+            payload,
+            builder,
+            local_map,
+            stack_locals,
         ),
 
         Rvalue::Ref(place) | Rvalue::RefMut(place) => {
             compile_ref(ctx, place, builder, local_map, subst, stack_locals)
-        }
+        },
 
         // Pointer/reference conversions - these are no-ops at runtime
         Rvalue::PtrToRef(value) | Rvalue::PtrToRefMut(value) | Rvalue::RefToPtr(value) => {
             // All three are semantically different but have the same runtime representation
-            compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)
-        }
+            compile_value(
+                ctx,
+                func_def,
+                subst,
+                value,
+                builder,
+                local_map,
+                stack_locals,
+            )
+        },
 
-        Rvalue::PtrOffset { ptr, offset } => {
-            compile_ptr_offset(ctx, func_def, subst, ptr, offset, builder, local_map, stack_locals)
-        }
+        Rvalue::PtrOffset { ptr, offset } => compile_ptr_offset(
+            ctx,
+            func_def,
+            subst,
+            ptr,
+            offset,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
         Rvalue::Cast {
             kind,
             operand,
             target,
         } => compile_cast(
-            ctx, func_def, subst, *kind, operand, *target, builder, local_map, stack_locals,
+            ctx,
+            func_def,
+            subst,
+            *kind,
+            operand,
+            *target,
+            builder,
+            local_map,
+            stack_locals,
         ),
 
         // String intrinsics
-        Rvalue::StrPtr(value) => {
-            compile_str_ptr(ctx, func_def, subst, value, builder, local_map, stack_locals)
-        }
-        Rvalue::StrLen(value) => {
-            compile_str_len(ctx, func_def, subst, value, builder, local_map, stack_locals)
-        }
-        Rvalue::StrFromParts { ptr, len } => {
-            compile_str_from_parts(
-                ctx,
-                func_def,
-                subst,
-                ptr,
-                len,
-                builder,
-                local_map,
-                stack_locals,
-            )
-        }
+        Rvalue::StrPtr(value) => compile_str_ptr(
+            ctx,
+            func_def,
+            subst,
+            value,
+            builder,
+            local_map,
+            stack_locals,
+        ),
+        Rvalue::StrLen(value) => compile_str_len(
+            ctx,
+            func_def,
+            subst,
+            value,
+            builder,
+            local_map,
+            stack_locals,
+        ),
+        Rvalue::StrFromParts { ptr, len } => compile_str_from_parts(
+            ctx,
+            func_def,
+            subst,
+            ptr,
+            len,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
-        Rvalue::Tuple(values) => {
-            compile_tuple(ctx, func_def, subst, values, builder, local_map, stack_locals)
-        }
+        Rvalue::Tuple(values) => compile_tuple(
+            ctx,
+            func_def,
+            subst,
+            values,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
-        Rvalue::StackAlloc { element_ty, count } => {
-            compile_stack_alloc(
-                ctx,
-                func_def,
-                subst,
-                *element_ty,
-                count,
-                builder,
-                local_map,
-                stack_locals,
-            )
-        }
+        Rvalue::StackAlloc { element_ty, count } => compile_stack_alloc(
+            ctx,
+            func_def,
+            subst,
+            *element_ty,
+            count,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
-        Rvalue::ApplyPartial { func, captures } => {
-            compile_apply_partial(
-                ctx,
-                func_def,
-                subst,
-                *func,
-                captures,
-                builder,
-                local_map,
-                stack_locals,
-            )
-        }
+        Rvalue::ApplyPartial { func, captures } => compile_apply_partial(
+            ctx,
+            func_def,
+            subst,
+            *func,
+            captures,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
         Rvalue::FuncToEscaping(func) => compile_func_to_escaping(ctx, *func, builder),
 
@@ -293,58 +355,96 @@ pub fn compile_rvalue(
             match (bits, constant) {
                 (FloatBits::F32, FloatConstantKind::Infinity) => {
                     Ok(builder.ins().f32const(Ieee32::with_float(f32::INFINITY)))
-                }
+                },
                 (FloatBits::F32, FloatConstantKind::Nan) => {
                     Ok(builder.ins().f32const(Ieee32::with_float(f32::NAN)))
-                }
+                },
                 (FloatBits::F64, FloatConstantKind::Infinity) => {
                     Ok(builder.ins().f64const(Ieee64::with_float(f64::INFINITY)))
-                }
+                },
                 (FloatBits::F64, FloatConstantKind::Nan) => {
                     Ok(builder.ins().f64const(Ieee64::with_float(f64::NAN)))
-                }
+                },
                 (FloatBits::F16, _) => Err(CodegenError::Unsupported("f16 not supported".into())),
             }
-        }
+        },
 
-        Rvalue::FloatPred { bits, pred, operand } => {
+        Rvalue::FloatPred {
+            bits,
+            pred,
+            operand,
+        } => {
             use kestrel_execution_graph::function::{FloatBits, FloatPredicateKind};
 
-            let operand_val =
-                compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
+            let operand_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                operand,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
 
             match (bits, pred) {
                 (FloatBits::F32, FloatPredicateKind::IsNan) => {
                     // NaN is the only value that is not equal to itself
-                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Unordered, operand_val, operand_val);
+                    let result = builder.ins().fcmp(
+                        cranelift_codegen::ir::condcodes::FloatCC::Unordered,
+                        operand_val,
+                        operand_val,
+                    );
                     Ok(result)
-                }
+                },
                 (FloatBits::F64, FloatPredicateKind::IsNan) => {
-                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Unordered, operand_val, operand_val);
+                    let result = builder.ins().fcmp(
+                        cranelift_codegen::ir::condcodes::FloatCC::Unordered,
+                        operand_val,
+                        operand_val,
+                    );
                     Ok(result)
-                }
+                },
                 (FloatBits::F32, FloatPredicateKind::IsInfinite) => {
                     // Check if absolute value equals infinity
                     let abs = builder.ins().fabs(operand_val);
-                    let inf = builder.ins().f32const(cranelift_codegen::ir::immediates::Ieee32::with_float(f32::INFINITY));
-                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Equal, abs, inf);
+                    let inf = builder.ins().f32const(
+                        cranelift_codegen::ir::immediates::Ieee32::with_float(f32::INFINITY),
+                    );
+                    let result = builder.ins().fcmp(
+                        cranelift_codegen::ir::condcodes::FloatCC::Equal,
+                        abs,
+                        inf,
+                    );
                     Ok(result)
-                }
+                },
                 (FloatBits::F64, FloatPredicateKind::IsInfinite) => {
                     let abs = builder.ins().fabs(operand_val);
-                    let inf = builder.ins().f64const(cranelift_codegen::ir::immediates::Ieee64::with_float(f64::INFINITY));
-                    let result = builder.ins().fcmp(cranelift_codegen::ir::condcodes::FloatCC::Equal, abs, inf);
+                    let inf = builder.ins().f64const(
+                        cranelift_codegen::ir::immediates::Ieee64::with_float(f64::INFINITY),
+                    );
+                    let result = builder.ins().fcmp(
+                        cranelift_codegen::ir::condcodes::FloatCC::Equal,
+                        abs,
+                        inf,
+                    );
                     Ok(result)
-                }
+                },
                 (FloatBits::F16, _) => Err(CodegenError::Unsupported("f16 not supported".into())),
             }
-        }
+        },
 
         Rvalue::FloatMath { bits, op, operand } => {
             use kestrel_execution_graph::function::{FloatBits, FloatMathKind};
 
-            let operand_val =
-                compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
+            let operand_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                operand,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
 
             match bits {
                 FloatBits::F16 => Err(CodegenError::Unsupported("f16 not supported".into())),
@@ -356,7 +456,7 @@ pub fn compile_rvalue(
                     FloatMathKind::Round => Ok(builder.ins().nearest(operand_val)),
                 },
             }
-        }
+        },
 
         // === Pointer intrinsics ===
         Rvalue::PtrNull { .. } => {
@@ -367,34 +467,55 @@ pub fn compile_rvalue(
                 cranelift_codegen::ir::types::I32
             };
             Ok(builder.ins().iconst(ptr_ty, 0))
-        }
+        },
 
         Rvalue::PtrFromAddress { address, .. } => {
             // Address is already a pointer at the IR level
-            compile_value(ctx, func_def, subst, address, builder, local_map, stack_locals)
-        }
+            compile_value(
+                ctx,
+                func_def,
+                subst,
+                address,
+                builder,
+                local_map,
+                stack_locals,
+            )
+        },
 
         Rvalue::PtrToAddress { ptr } => {
             // Pointer is already an integer at the IR level
             compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)
-        }
+        },
 
         Rvalue::PtrRead { ptr, ty } => {
             // Load value from pointer
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
-            let pointee_ty =
-                subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for PtrRead");
+            let ptr_val =
+                compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let pointee_ty = subst
+                .apply_ty_readonly(ctx.mir, *ty)
+                .expect("type substitution failed for PtrRead");
             if is_aggregate_value_type(ctx.mir, pointee_ty) {
                 return Ok(ptr_val);
             }
             let cl_ty = translate_type(ctx.mir, pointee_ty, ctx.target);
-            Ok(builder.ins().load(cl_ty, cranelift_codegen::ir::MemFlags::new(), ptr_val, 0))
-        }
+            Ok(builder
+                .ins()
+                .load(cl_ty, cranelift_codegen::ir::MemFlags::new(), ptr_val, 0))
+        },
 
         Rvalue::PtrWrite { ptr, value } => {
             // Store value through pointer
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
-            let val = compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
+            let ptr_val =
+                compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                value,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
 
             // Check if the value being written is an aggregate type
             // This is more reliable than checking the pointer's pointee type because
@@ -413,7 +534,9 @@ pub fn compile_rvalue(
                 }
             }
 
-            builder.ins().store(cranelift_codegen::ir::MemFlags::new(), val, ptr_val, 0);
+            builder
+                .ins()
+                .store(cranelift_codegen::ir::MemFlags::new(), val, ptr_val, 0);
             // Return unit - use pointer type for phi node compatibility
             let ptr_type = if ctx.target.is_64bit() {
                 cranelift_codegen::ir::types::I64
@@ -421,11 +544,12 @@ pub fn compile_rvalue(
                 cranelift_codegen::ir::types::I32
             };
             Ok(builder.ins().iconst(ptr_type, 0))
-        }
+        },
 
         Rvalue::PtrIsNull { ptr } => {
             // Compare pointer to null (0)
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let ptr_val =
+                compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
             let ptr_ty = builder.func.dfg.value_type(ptr_val);
             let zero = builder.ins().iconst(ptr_ty, 0);
             Ok(builder.ins().icmp(
@@ -433,16 +557,18 @@ pub fn compile_rvalue(
                 ptr_val,
                 zero,
             ))
-        }
+        },
 
         Rvalue::PtrCast { ptr, .. } => {
             // Pointer cast is a no-op at the IR level (same representation)
             compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)
-        }
+        },
 
         Rvalue::SizeOf { ty } => {
             // Return the size of the type as a constant
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for SizeOf");
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, *ty)
+                .expect("type substitution failed for SizeOf");
             let layout = ctx.layouts.layout_of(concrete_ty);
             let size = layout.size as i64;
             let int_ty = if ctx.target.is_64bit() {
@@ -451,11 +577,13 @@ pub fn compile_rvalue(
                 cranelift_codegen::ir::types::I32
             };
             Ok(builder.ins().iconst(int_ty, size))
-        }
+        },
 
         Rvalue::AlignOf { ty } => {
             // Return the alignment of the type as a constant
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for AlignOf");
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, *ty)
+                .expect("type substitution failed for AlignOf");
             let layout = ctx.layouts.layout_of(concrete_ty);
             let align = layout.align as i64;
             let int_ty = if ctx.target.is_64bit() {
@@ -464,38 +592,61 @@ pub fn compile_rvalue(
                 cranelift_codegen::ir::types::I32
             };
             Ok(builder.ins().iconst(int_ty, align))
-        }
+        },
 
         // Boolean (i1) intrinsics
         Rvalue::I1Eq { lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
+            let lhs_val =
+                compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val =
+                compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             // Boolean equality is just integer equality
             Ok(builder.ins().icmp(IntCC::Equal, lhs_val, rhs_val))
-        }
+        },
         Rvalue::I1And { lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
+            let lhs_val =
+                compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val =
+                compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             // Boolean AND is just bitwise AND on i8/i1
             Ok(builder.ins().band(lhs_val, rhs_val))
-        }
+        },
         Rvalue::I1Or { lhs, rhs } => {
-            let lhs_val = compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
-            let rhs_val = compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
+            let lhs_val =
+                compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
+            let rhs_val =
+                compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
             // Boolean OR is just bitwise OR on i8/i1
             Ok(builder.ins().bor(lhs_val, rhs_val))
-        }
+        },
         Rvalue::I1Not { operand } => {
-            let val = compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
+            let val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                operand,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
             // Boolean NOT: XOR with 1
             let one = builder.ins().iconst(cranelift_codegen::ir::types::I8, 1);
             Ok(builder.ins().bxor(val, one))
-        }
+        },
 
         // Atomic intrinsics
         Rvalue::AtomicAdd { ptr, delta } => {
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
-            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map, stack_locals)?;
+            let ptr_val =
+                compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let delta_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                delta,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
             let delta_ty = builder.func.dfg.value_type(delta_val);
             // Cranelift atomic_rmw with Add operation
             Ok(builder.ins().atomic_rmw(
@@ -505,10 +656,19 @@ pub fn compile_rvalue(
                 ptr_val,
                 delta_val,
             ))
-        }
+        },
         Rvalue::AtomicSub { ptr, delta } => {
-            let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
-            let delta_val = compile_value(ctx, func_def, subst, delta, builder, local_map, stack_locals)?;
+            let ptr_val =
+                compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
+            let delta_val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                delta,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
             let delta_ty = builder.func.dfg.value_type(delta_val);
             // Cranelift atomic_rmw with Sub operation
             Ok(builder.ins().atomic_rmw(
@@ -518,7 +678,7 @@ pub fn compile_rvalue(
                 ptr_val,
                 delta_val,
             ))
-        }
+        },
     }
 }
 
@@ -561,13 +721,13 @@ fn compile_construct(
                 .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
                 .collect();
             (struct_id, type_args)
-        }
+        },
         _ => {
             return Err(CodegenError::Unsupported(format!(
                 "construct non-struct type: {:?}",
                 mir_ty
             )));
-        }
+        },
     };
 
     // Get struct layout with field offsets
@@ -635,9 +795,13 @@ fn compile_construct(
         // Apply the struct's type param -> type arg substitution to get the concrete field type
         // This handles generic struct fields like T becoming Int64 for Storage[Int64]
         let concrete_field_ty = if let Some(ref struct_subst) = struct_subst {
-            struct_subst.apply_ty_readonly(ctx.mir, field_ty).unwrap_or(field_ty)
+            struct_subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty)
         } else {
-            subst.apply_ty_readonly(ctx.mir, field_ty).unwrap_or(field_ty)
+            subst
+                .apply_ty_readonly(ctx.mir, field_ty)
+                .unwrap_or(field_ty)
         };
 
         // Check if this is a nested aggregate - if so, copy its data
@@ -723,14 +887,22 @@ fn compile_tuple(
         let elem_ty = element_types[i];
 
         // Compile the element value
-        let val =
-            compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
+        let val = compile_value(
+            ctx,
+            func_def,
+            subst,
+            value,
+            builder,
+            local_map,
+            stack_locals,
+        )?;
 
         // Check if this is a nested compound type - if so, copy the data
         let compound_ty = if let Some(ty) = elem_ty {
             // Apply substitution to get concrete type for generic tuples
-            let concrete_ty =
-                subst.apply_ty_readonly(ctx.mir, ty).expect("type substitution failed for tuple element");
+            let concrete_ty = subst
+                .apply_ty_readonly(ctx.mir, ty)
+                .expect("type substitution failed for tuple element");
             if is_aggregate_value_type(ctx.mir, concrete_ty) {
                 Some(concrete_ty)
             } else {
@@ -787,19 +959,19 @@ fn compile_stack_alloc(
             _ => {
                 return Err(CodegenError::Unsupported(
                     "stack_alloc count must be an integer literal".into(),
-                ))
-            }
+                ));
+            },
         },
         Value::Place(_) => {
             return Err(CodegenError::Unsupported(
                 "stack_alloc with dynamic count not yet supported".into(),
-            ))
-        }
+            ));
+        },
         Value::Unreachable => {
             return Err(CodegenError::Unsupported(
                 "stack_alloc with unreachable count".into(),
-            ))
-        }
+            ));
+        },
     };
 
     // Calculate total size (count * element_size)
@@ -848,7 +1020,7 @@ fn get_value_layout(
             let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
             let layout = ctx.layouts.layout_of(concrete_ty);
             Ok((layout, Some(ty)))
-        }
+        },
         Value::Immediate(imm) => {
             let layout = get_immediate_layout_readonly(ctx, imm)?;
             let mir_ty = match &imm.kind {
@@ -866,7 +1038,9 @@ fn get_value_layout(
                 ImmediateKind::BoolLiteral(_) => MirTy::Bool,
                 ImmediateKind::Unit => MirTy::Unit,
                 ImmediateKind::StringLiteral(_) => MirTy::Str,
-                ImmediateKind::StringPointer(_) => MirTy::Pointer(ctx.mir.lookup_type(&MirTy::I8).unwrap()),
+                ImmediateKind::StringPointer(_) => {
+                    MirTy::Pointer(ctx.mir.lookup_type(&MirTy::I8).unwrap())
+                },
                 ImmediateKind::FunctionRef { name, type_args } => MirTy::Named {
                     name: *name,
                     type_args: type_args.clone(),
@@ -877,7 +1051,7 @@ fn get_value_layout(
             };
             let ty = ctx.mir.lookup_type(&mir_ty);
             Ok((layout, ty))
-        }
+        },
         Value::Unreachable => Err(CodegenError::Unsupported(
             "cannot get layout of unreachable value".into(),
         )),
@@ -910,8 +1084,15 @@ fn compile_call_arg(
 
     match arg.mode {
         PassingMode::Copy => {
-            let mut val =
-                compile_value(ctx, func_def, subst, &arg.value, builder, local_map, stack_locals)?;
+            let mut val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                &arg.value,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
             if is_extern {
                 val = ensure_primitive_value(ctx, subst, val, ty_opt, builder)?;
                 return Ok(val);
@@ -931,15 +1112,22 @@ fn compile_call_arg(
                 return Ok(addr);
             }
             Ok(val)
-        }
+        },
         PassingMode::Move => {
-            let mut val =
-                compile_value(ctx, func_def, subst, &arg.value, builder, local_map, stack_locals)?;
+            let mut val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                &arg.value,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
             if is_extern {
                 val = ensure_primitive_value(ctx, subst, val, ty_opt, builder)?;
             }
             Ok(val)
-        }
+        },
         PassingMode::Ref | PassingMode::MutRef => {
             if is_ref_value || is_aggregate {
                 return compile_value(
@@ -954,14 +1142,9 @@ fn compile_call_arg(
             }
 
             match &arg.value {
-                Value::Place(place) => compile_ref(
-                    ctx,
-                    place,
-                    builder,
-                    local_map,
-                    subst,
-                    stack_locals,
-                ),
+                Value::Place(place) => {
+                    compile_ref(ctx, place, builder, local_map, subst, stack_locals)
+                },
                 Value::Immediate(_) => {
                     let val = compile_value(
                         ctx,
@@ -982,12 +1165,12 @@ fn compile_call_arg(
                     let addr = builder.ins().stack_addr(ptr_type, slot, 0);
                     builder.ins().store(MemFlags::new(), val, addr, 0);
                     Ok(addr)
-                }
+                },
                 Value::Unreachable => Err(CodegenError::Unsupported(
                     "cannot take reference to unreachable value".into(),
                 )),
             }
-        }
+        },
     }
 }
 
@@ -1006,7 +1189,7 @@ fn get_immediate_layout_readonly(
                 IntBits::I64 => Layout::new(8, 8),
             };
             Ok(layout)
-        }
+        },
         ImmediateKind::FloatLiteral { bits, .. } => {
             let layout = match bits {
                 FloatBits::F16 => Layout::new(2, 2),
@@ -1014,34 +1197,35 @@ fn get_immediate_layout_readonly(
                 FloatBits::F64 => Layout::new(8, 8),
             };
             Ok(layout)
-        }
+        },
         ImmediateKind::BoolLiteral(_) => Ok(Layout::new(1, 1)),
         ImmediateKind::Unit => Ok(Layout::new(0, 1)),
         ImmediateKind::StringLiteral(_) => {
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
             Ok(Layout::new(ptr_size * 2, ptr_size))
-        }
+        },
         ImmediateKind::StringPointer(_) => {
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
             Ok(Layout::new(ptr_size, ptr_size))
-        }
+        },
         ImmediateKind::FunctionRef { .. } => {
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
             Ok(Layout::new(ptr_size, ptr_size))
-        }
+        },
         ImmediateKind::WitnessMethod { .. } => {
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
             Ok(Layout::new(ptr_size, ptr_size))
-        }
+        },
         ImmediateKind::NullPtr(_) => {
             let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
             Ok(Layout::new(ptr_size, ptr_size))
-        }
+        },
         ImmediateKind::Error => Ok(Layout::new(0, 1)),
     }
 }
 
 /// Get the layout of an immediate value.
+#[allow(dead_code)]
 fn get_immediate_layout(
     ctx: &mut CodegenContext<'_>,
     imm: &Immediate,
@@ -1057,7 +1241,7 @@ fn get_immediate_layout(
                 IntBits::I64 => Layout::new(8, 8),
             };
             Ok(layout)
-        }
+        },
         ImmediateKind::FloatLiteral { bits, .. } => {
             let layout = match bits {
                 FloatBits::F16 => Layout::new(2, 2),
@@ -1065,31 +1249,31 @@ fn get_immediate_layout(
                 FloatBits::F64 => Layout::new(8, 8),
             };
             Ok(layout)
-        }
+        },
         ImmediateKind::BoolLiteral(_) => Ok(Layout::new(1, 1)),
         ImmediateKind::Unit => Ok(Layout::new(0, 1)),
         ImmediateKind::StringLiteral(_) => {
             // String is a fat pointer: { ptr, len }
             let ptr_size = ctx.target.pointer_size();
             Ok(Layout::new(ptr_size * 2, ptr_size))
-        }
+        },
         ImmediateKind::StringPointer(_) => {
             // String pointer is just a pointer
             let ptr_size = ctx.target.pointer_size();
             Ok(Layout::new(ptr_size, ptr_size))
-        }
+        },
         ImmediateKind::NullPtr(ty) => {
             let layout = ctx.layouts.layout_of(*ty);
             Ok(layout)
-        }
+        },
         ImmediateKind::FunctionRef { .. } => {
             // Function references are pointer-sized
             let ptr_size = ctx.target.pointer_size();
             Ok(Layout::new(ptr_size, ptr_size))
-        }
+        },
         ImmediateKind::WitnessMethod { .. } => {
             Err(CodegenError::Unsupported("witness method layout".into()))
-        }
+        },
         ImmediateKind::Error => Err(CodegenError::Unsupported("error immediate".into())),
     }
 }
@@ -1132,13 +1316,13 @@ fn compile_enum_variant(
                 CodegenError::Unsupported(format!("enum not found: {}", name_data))
             })?;
             (enum_id, type_args)
-        }
+        },
         _ => {
             return Err(CodegenError::Unsupported(format!(
                 "enum variant on non-named type: {:?}",
                 mir_ty
             )));
-        }
+        },
     };
 
     // Apply substitution to get concrete type before computing layout
@@ -1183,7 +1367,9 @@ fn compile_enum_variant(
             CodegenError::Unsupported(format!("enum case {} has no struct_def", variant))
         })?;
         // Pass the enum's type_args since payload struct uses the same type parameters
-        let payload_layout = ctx.layouts.struct_layout(payload_struct_id, &enum_type_args);
+        let payload_layout = ctx
+            .layouts
+            .struct_layout(payload_struct_id, &enum_type_args);
         let field_offsets = payload_layout.field_offsets.clone();
 
         // Compute the payload offset based on the MAXIMUM payload alignment across all cases.
@@ -1196,7 +1382,8 @@ fn compile_enum_variant(
                 let pl = ctx.layouts.struct_layout(struct_id, &enum_type_args);
                 if pl.layout.align > max_payload_layout.align
                     || (pl.layout.align == max_payload_layout.align
-                        && pl.layout.size > max_payload_layout.size) {
+                        && pl.layout.size > max_payload_layout.size)
+                {
                     max_payload_layout = pl.layout;
                 }
             }
@@ -1227,8 +1414,15 @@ fn compile_enum_variant(
             let total_offset = payload_base_offset + field_offset as i32;
 
             // Compile the payload value
-            let val =
-                compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
+            let val = compile_value(
+                ctx,
+                func_def,
+                subst,
+                value,
+                builder,
+                local_map,
+                stack_locals,
+            )?;
 
             // Check if this is a nested struct
             let field_ty = field_def.ty;
@@ -1310,7 +1504,7 @@ fn compile_ref(
                 .get(local_id)
                 .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
             if is_aggregate_value_type(ctx.mir, concrete_local_ty)
-                || stack_locals.contains(&local_id)
+                || stack_locals.contains(local_id)
             {
                 Ok(builder.use_var(*var))
             } else {
@@ -1325,7 +1519,7 @@ fn compile_ref(
                 builder.ins().store(MemFlags::new(), value, addr, 0);
                 Ok(addr)
             }
-        }
+        },
 
         PlaceKind::Field { parent, name } => {
             // Taking a reference to a field means getting the field's address
@@ -1342,7 +1536,7 @@ fn compile_ref(
             } else {
                 Ok(builder.ins().iadd_imm(struct_ptr, field_offset as i64))
             }
-        }
+        },
 
         PlaceKind::Index { parent, index } => {
             // Taking a reference to an indexed element
@@ -1351,14 +1545,15 @@ fn compile_ref(
 
             // Get the field offset
             let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (field_offset, _field_ty) = get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
+            let (field_offset, _field_ty) =
+                get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
 
             if field_offset == 0 {
                 Ok(parent_ptr)
             } else {
                 Ok(builder.ins().iadd_imm(parent_ptr, field_offset as i64))
             }
-        }
+        },
 
         PlaceKind::Downcast { parent, variant } => {
             // Taking a reference to a downcast - return pointer to payload
@@ -1366,19 +1561,18 @@ fn compile_ref(
                 compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
             let enum_ty = get_place_type(ctx, parent, local_map, subst)?;
             let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant, subst)?;
-            Ok(builder
-                .ins()
-                .iadd_imm(enum_ptr, payload_offset as i64))
-        }
+            Ok(builder.ins().iadd_imm(enum_ptr, payload_offset as i64))
+        },
 
         PlaceKind::Deref(inner) => {
             // Taking a reference to a dereference: &*ptr is just ptr
             compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)
-        }
+        },
     }
 }
 
 /// Get the type of a place expression.
+#[allow(clippy::only_used_in_recursion)]
 fn get_place_type(
     ctx: &mut CodegenContext<'_>,
     place: &Place,
@@ -1389,26 +1583,26 @@ fn get_place_type(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
-        }
+        },
 
         PlaceKind::Field { parent, name } => {
             let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
             let (_, field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
             Ok(field_ty)
-        }
+        },
 
         PlaceKind::Index { parent, index } => {
             let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
             let (_, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
             Ok(field_ty)
-        }
+        },
 
         PlaceKind::Downcast { parent, .. } => get_place_type(ctx, parent, local_map, subst),
 
         PlaceKind::Deref(inner) => {
             let inner_ty = get_place_type(ctx, inner, local_map, subst)?;
             get_pointee_type(ctx, inner_ty)
-        }
+        },
     }
 }
 
@@ -1451,13 +1645,13 @@ fn get_field_info(
                 CodegenError::Unsupported(format!("struct not found: {}", name_data))
             })?;
             (struct_id, type_args)
-        }
+        },
         _ => {
             return Err(CodegenError::Unsupported(format!(
                 "field access on non-struct type: {:?}",
                 mir_ty
             )));
-        }
+        },
     };
 
     // Get field offset from layout (pass substituted type_args for generic structs)
@@ -1520,7 +1714,7 @@ fn get_field_by_index(
             let type_args = type_args.clone();
 
             // Find the enum
-            for (enum_id, enum_def) in ctx.mir.enums.iter() {
+            for (_enum_id, enum_def) in ctx.mir.enums.iter() {
                 let def_name = ctx.mir.name(enum_def.name);
                 if def_name == name_data {
                     // Find the case
@@ -1568,7 +1762,7 @@ fn get_field_by_index(
                 "struct not found for index access: {}",
                 name_data
             )))
-        }
+        },
         MirTy::Tuple(elements) => {
             // For tuples, calculate offset sequentially
             let elements = elements.clone();
@@ -1584,7 +1778,9 @@ fn get_field_by_index(
             // Apply substitution to element types to get correct layouts
             let mut offset = 0usize;
             for (i, elem_ty) in elements.iter().enumerate() {
-                let concrete_ty = subst.apply_ty_readonly(ctx.mir, *elem_ty).unwrap_or(*elem_ty);
+                let concrete_ty = subst
+                    .apply_ty_readonly(ctx.mir, *elem_ty)
+                    .unwrap_or(*elem_ty);
                 let elem_layout = ctx.layouts.layout_of(concrete_ty);
                 // Align to this element's alignment
                 offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
@@ -1595,7 +1791,7 @@ fn get_field_by_index(
             }
 
             unreachable!()
-        }
+        },
         _ => Err(CodegenError::Unsupported(format!(
             "index access on unsupported type: {:?}",
             mir_ty
@@ -1661,21 +1857,21 @@ fn ensure_primitive_value(
                 .ins()
                 .load(cl_field_ty, MemFlags::new(), val, field_offset as i32))
         } else if let MirTy::Named { name, .. } = ctx.mir.ty(concrete_ty) {
-            if let Some((_, struct_def)) = ctx.mir.structs.iter().find(|(_, s)| s.name == *name) {
-                if struct_def.fields.len() == 1 {
-                    let field_id = struct_def.fields[0];
-                    let field_def = &ctx.mir.fields[field_id];
-                    if let Ok((field_offset, field_ty)) =
-                        get_field_info(ctx, concrete_ty, &field_def.name, subst)
-                    {
-                        let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
-                        return Ok(builder.ins().load(
-                            cl_field_ty,
-                            MemFlags::new(),
-                            val,
-                            field_offset as i32,
-                        ));
-                    }
+            if let Some((_, struct_def)) = ctx.mir.structs.iter().find(|(_, s)| s.name == *name)
+                && struct_def.fields.len() == 1
+            {
+                let field_id = struct_def.fields[0];
+                let field_def = &ctx.mir.fields[field_id];
+                if let Ok((field_offset, field_ty)) =
+                    get_field_info(ctx, concrete_ty, &field_def.name, subst)
+                {
+                    let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
+                    return Ok(builder.ins().load(
+                        cl_field_ty,
+                        MemFlags::new(),
+                        val,
+                        field_offset as i32,
+                    ));
                 }
             }
             Ok(val)
@@ -1702,7 +1898,9 @@ fn wrap_extern_return_value(
     mir_ret_ty: Id<Ty>,
     builder: &mut FunctionBuilder<'_>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let concrete_ret_ty = subst.apply_ty_readonly(ctx.mir, mir_ret_ty).unwrap_or(mir_ret_ty);
+    let concrete_ret_ty = subst
+        .apply_ty_readonly(ctx.mir, mir_ret_ty)
+        .unwrap_or(mir_ret_ty);
 
     // Check if wrapper type (single-field struct wrapping primitive)
     let Some(inner_ty) = get_wrapper_primitive(ctx.mir, concrete_ret_ty) else {
@@ -1745,20 +1943,19 @@ fn wrap_extern_return_value(
     if let MirTy::Named { name, type_args } = ctx.mir.ty(concrete_ret_ty) {
         let type_args = type_args.clone();
         if let Some((struct_id, struct_def)) = ctx.mir.structs.iter().find(|(_, s)| s.name == *name)
+            && struct_def.fields.len() == 1
         {
-            if struct_def.fields.len() == 1 {
-                let field_def = &ctx.mir.fields[struct_def.fields[0]];
-                let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
-                let field_offset = struct_layout
-                    .field_offsets
-                    .get(&field_def.name)
-                    .copied()
-                    .unwrap_or(0);
-                builder
-                    .ins()
-                    .store(MemFlags::new(), val, struct_ptr, field_offset as i32);
-                return Ok(struct_ptr);
-            }
+            let field_def = &ctx.mir.fields[struct_def.fields[0]];
+            let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
+            let field_offset = struct_layout
+                .field_offsets
+                .get(&field_def.name)
+                .copied()
+                .unwrap_or(0);
+            builder
+                .ins()
+                .store(MemFlags::new(), val, struct_ptr, field_offset as i32);
+            return Ok(struct_ptr);
         }
     }
 
@@ -1779,8 +1976,15 @@ fn compile_ptr_offset(
     stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
     let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
-    let offset_val =
-        compile_value(ctx, func_def, subst, offset, builder, local_map, stack_locals)?;
+    let offset_val = compile_value(
+        ctx,
+        func_def,
+        subst,
+        offset,
+        builder,
+        local_map,
+        stack_locals,
+    )?;
     let (_, offset_ty_opt) = get_value_layout(ctx, offset, local_map, subst)?;
 
     let mut offset_val = ensure_primitive_value(ctx, subst, offset_val, offset_ty_opt, builder)?;
@@ -1798,7 +2002,7 @@ fn compile_ptr_offset(
 /// Compile a value (place or immediate).
 pub fn compile_value(
     ctx: &mut CodegenContext<'_>,
-    func_def: &FunctionDef,
+    _func_def: &FunctionDef,
     subst: &Substitution,
     value: &Value,
     builder: &mut FunctionBuilder<'_>,
@@ -1808,7 +2012,7 @@ pub fn compile_value(
     match value {
         Value::Place(place) => {
             compile_place_read(ctx, place, builder, local_map, subst, stack_locals)
-        }
+        },
         Value::Immediate(imm) => compile_immediate(ctx, subst, imm, builder),
         Value::Unreachable => Err(CodegenError::Unsupported(
             "cannot compile unreachable value - this indicates a MIR lowering bug".into(),
@@ -1832,7 +2036,7 @@ fn compile_immediate(
                 IntBits::I64 => cl_types::I64,
             };
             Ok(builder.ins().iconst(cl_type, *value as i64))
-        }
+        },
 
         ImmediateKind::FloatLiteral { bits, value } => {
             match bits {
@@ -1841,13 +2045,13 @@ fn compile_immediate(
                 FloatBits::F16 => {
                     // F16 needs special handling
                     Err(CodegenError::Unsupported("f16 literals".to_string()))
-                }
+                },
             }
-        }
+        },
 
         ImmediateKind::BoolLiteral(b) => {
             Ok(builder.ins().iconst(cl_types::I8, if *b { 1 } else { 0 }))
-        }
+        },
 
         ImmediateKind::Unit => {
             // Unit is zero-sized. Use pointer type to avoid type mismatches in phi nodes
@@ -1858,7 +2062,7 @@ fn compile_immediate(
                 cl_types::I32
             };
             Ok(builder.ins().iconst(ptr_type, 0))
-        }
+        },
 
         ImmediateKind::StringLiteral(s) => compile_string_literal(ctx, s, builder),
 
@@ -1872,7 +2076,7 @@ fn compile_immediate(
             let data_id = ctx.add_string_data(s)?;
             let data_ref = ctx.module.declare_data_in_func(data_id, builder.func);
             Ok(builder.ins().global_value(ptr_type, data_ref))
-        }
+        },
 
         ImmediateKind::FunctionRef { name, type_args } => {
             // Get the function address as a pointer value
@@ -1886,7 +2090,11 @@ fn compile_immediate(
             // Apply substitution to type args
             let concrete_args: Vec<_> = type_args
                 .iter()
-                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for intrinsic call"))
+                .map(|ty| {
+                    subst
+                        .apply_ty_readonly(ctx.mir, *ty)
+                        .expect("type substitution failed for intrinsic call")
+                })
                 .collect();
             ensure_concrete_type_args(
                 ctx.mir,
@@ -1895,11 +2103,7 @@ fn compile_immediate(
             )?;
 
             // Look up the function by name to get func_id for mangling
-            let func_lookup = ctx
-                .mir
-                .functions
-                .iter()
-                .find(|(_, def)| def.name == *name);
+            let func_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == *name);
 
             let self_type = match func_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
@@ -1916,7 +2120,7 @@ fn compile_immediate(
                         )));
                     }
                     Some(st)
-                }
+                },
                 _ => None,
             };
 
@@ -1952,10 +2156,10 @@ fn compile_immediate(
             let null_env = builder.ins().iconst(ptr_type, 0);
             builder
                 .ins()
-                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size);
 
             Ok(thick_ptr)
-        }
+        },
 
         ImmediateKind::WitnessMethod {
             protocol,
@@ -2032,10 +2236,10 @@ fn compile_immediate(
             let null_env = builder.ins().iconst(ptr_type, 0);
             builder
                 .ins()
-                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size);
 
             Ok(thick_ptr)
-        }
+        },
 
         ImmediateKind::NullPtr(_) => Ok(builder.ins().iconst(cl_types::I64, 0)),
 
@@ -2082,7 +2286,7 @@ fn compile_string_literal(
     // Store len at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), str_len, struct_ptr, ptr_size as i32);
+        .store(MemFlags::new(), str_len, struct_ptr, ptr_size);
 
     Ok(struct_ptr)
 }
@@ -2133,7 +2337,7 @@ fn compile_binop(
             builder
                 .ins()
                 .icmp(cranelift_codegen::ir::condcodes::IntCC::NotEqual, lhs, rhs)
-        }
+        },
         BinOp::LtSigned => builder.ins().icmp(
             cranelift_codegen::ir::condcodes::IntCC::SignedLessThan,
             lhs,
@@ -2181,7 +2385,7 @@ fn compile_binop(
             builder
                 .ins()
                 .fcmp(cranelift_codegen::ir::condcodes::FloatCC::Equal, lhs, rhs)
-        }
+        },
         BinOp::FNe => builder.ins().fcmp(
             cranelift_codegen::ir::condcodes::FloatCC::NotEqual,
             lhs,
@@ -2276,7 +2480,7 @@ fn compile_binop(
             builder.switch_to_block(join_block);
             builder.seal_block(join_block);
             builder.block_params(join_block)[0]
-        }
+        },
     };
 
     Ok(result)
@@ -2284,7 +2488,7 @@ fn compile_binop(
 
 /// Compile a unary operation.
 fn compile_unop(
-    ctx: &CodegenContext<'_>,
+    _ctx: &CodegenContext<'_>,
     op: UnOp,
     operand: CraneliftValue,
     builder: &mut FunctionBuilder<'_>,
@@ -2297,7 +2501,7 @@ fn compile_unop(
             // Boolean not: xor with 1
             let one = builder.ins().iconst(cl_types::I8, 1);
             builder.ins().bxor(operand, one)
-        }
+        },
     };
 
     Ok(result)
@@ -2322,7 +2526,11 @@ pub fn compile_call(
             // Apply substitution to type args
             let concrete_args: Vec<_> = type_args
                 .iter()
-                .map(|ty| subst.apply_ty_readonly(ctx.mir, *ty).expect("type substitution failed for direct call"))
+                .map(|ty| {
+                    subst
+                        .apply_ty_readonly(ctx.mir, *ty)
+                        .expect("type substitution failed for direct call")
+                })
                 .collect();
             ensure_concrete_type_args(
                 ctx.mir,
@@ -2333,11 +2541,7 @@ pub fn compile_call(
             // Look up the Cranelift FuncId for this function.
             // For extern functions, use the symbol name from extern_info.
             // Otherwise, use the mangled name (with param types for overloads).
-            let callee_lookup = ctx
-                .mir
-                .functions
-                .iter()
-                .find(|(_, def)| def.name == *name);
+            let callee_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == *name);
 
             let self_type = match callee_lookup {
                 Some((_, def)) if func_uses_self(ctx.mir, def) => {
@@ -2354,7 +2558,7 @@ pub fn compile_call(
                         )));
                     }
                     Some(st)
-                }
+                },
                 _ => None,
             };
             let lookup_name = ctx.resolve_symbol_name(*name, &concrete_args, self_type);
@@ -2405,8 +2609,7 @@ pub fn compile_call(
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
 
             // Compile arguments with proper PassingMode handling
-            let mut arg_values =
-                Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
+            let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
             if let Some(ptr) = ret_ptr {
                 arg_values.push(ptr);
             }
@@ -2459,33 +2662,29 @@ pub fn compile_call(
                     Ok(raw_result)
                 }
             }
-        }
+        },
 
-        Callee::Thin(place) => {
-            compile_thin_call(
-                ctx,
-                func_def,
-                subst,
-                place,
-                args,
-                builder,
-                local_map,
-                stack_locals,
-            )
-        }
+        Callee::Thin(place) => compile_thin_call(
+            ctx,
+            func_def,
+            subst,
+            place,
+            args,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
-        Callee::Thick(place) => {
-            compile_thick_call(
-                ctx,
-                func_def,
-                subst,
-                place,
-                args,
-                builder,
-                local_map,
-                stack_locals,
-            )
-        }
+        Callee::Thick(place) => compile_thick_call(
+            ctx,
+            func_def,
+            subst,
+            place,
+            args,
+            builder,
+            local_map,
+            stack_locals,
+        ),
 
         Callee::Witness {
             protocol,
@@ -2592,8 +2791,7 @@ pub fn compile_call(
             }
 
             // Compile arguments with proper PassingMode handling
-            let mut arg_values =
-                Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
+            let mut arg_values = Vec::with_capacity(args.len() + if needs_sret { 1 } else { 0 });
             if let Some(ptr) = ret_ptr {
                 arg_values.push(ptr);
             }
@@ -2631,7 +2829,7 @@ pub fn compile_call(
             } else {
                 Ok(results[0])
             }
-        }
+        },
     }
 }
 
@@ -2647,7 +2845,15 @@ fn compile_cast(
     local_map: &HashMap<Id<Local>, Variable>,
     stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let val = compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
+    let val = compile_value(
+        ctx,
+        func_def,
+        subst,
+        operand,
+        builder,
+        local_map,
+        stack_locals,
+    )?;
     let target_ty = translate_type(ctx.mir, target, ctx.target);
 
     match kind {
@@ -2662,7 +2868,7 @@ fn compile_cast(
                 // but handle gracefully
                 Ok(val)
             }
-        }
+        },
 
         CastKind::IntTruncate => {
             // Integer narrowing - truncate to smaller integer type
@@ -2673,39 +2879,39 @@ fn compile_cast(
                 // Same size or larger - this shouldn't happen for IntTruncate
                 Ok(val)
             }
-        }
+        },
 
         CastKind::IntToFloat => {
             // Convert signed integer to float
             Ok(builder.ins().fcvt_from_sint(target_ty, val))
-        }
+        },
 
         CastKind::FloatToInt => {
             // Convert float to signed integer
             // Use fcvt_to_sint_sat for saturating conversion (safer, no undefined behavior)
             Ok(builder.ins().fcvt_to_sint_sat(target_ty, val))
-        }
+        },
 
         CastKind::FloatWiden => {
             // f32 -> f64 promotion
             Ok(builder.ins().fpromote(target_ty, val))
-        }
+        },
 
         CastKind::FloatTruncate => {
             // f64 -> f32 demotion
             Ok(builder.ins().fdemote(target_ty, val))
-        }
+        },
 
         CastKind::PtrBitcast => {
             // Pointer bitcast - same representation, just reinterpret the type
             // At the IR level, all pointers have the same representation
             Ok(val)
-        }
+        },
 
         CastKind::RefToImmut => {
             // &var T -> &T conversion - same representation, just type change
             Ok(val)
-        }
+        },
     }
 }
 
@@ -2719,7 +2925,15 @@ fn compile_str_ptr(
     local_map: &HashMap<Id<Local>, Variable>,
     stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
+    let str_ptr = compile_value(
+        ctx,
+        func_def,
+        subst,
+        value,
+        builder,
+        local_map,
+        stack_locals,
+    )?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2742,7 +2956,15 @@ fn compile_str_len(
     local_map: &HashMap<Id<Local>, Variable>,
     stack_locals: &std::collections::HashSet<Id<Local>>,
 ) -> Result<CraneliftValue, CodegenError> {
-    let str_ptr = compile_value(ctx, func_def, subst, value, builder, local_map, stack_locals)?;
+    let str_ptr = compile_value(
+        ctx,
+        func_def,
+        subst,
+        value,
+        builder,
+        local_map,
+        stack_locals,
+    )?;
 
     let ptr_type = if ctx.target.is_64bit() {
         cl_types::I64
@@ -2831,6 +3053,7 @@ mod tests {
 }
 
 /// Get the type of a place expression (for determining function signature in indirect calls).
+#[allow(clippy::only_used_in_recursion)]
 fn get_place_type_for_call(
     ctx: &CodegenContext<'_>,
     place: &Place,
@@ -2840,17 +3063,17 @@ fn get_place_type_for_call(
         PlaceKind::Local(local_id) => {
             let local_def = ctx.mir.local(*local_id);
             Ok(local_def.ty)
-        }
+        },
 
         PlaceKind::Field { parent, name } => {
             let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
             get_field_type_for_call(ctx, parent_ty, name)
-        }
+        },
 
         PlaceKind::Index { parent, index } => {
             let parent_ty = get_place_type_for_call(ctx, parent, local_map)?;
             get_field_type_by_index_for_call(ctx, parent_ty, *index)
-        }
+        },
 
         PlaceKind::Downcast { parent, .. } => get_place_type_for_call(ctx, parent, local_map),
 
@@ -2859,13 +3082,13 @@ fn get_place_type_for_call(
             match ctx.mir.ty(inner_ty) {
                 MirTy::Pointer(pointee) | MirTy::Ref(pointee) | MirTy::RefMut(pointee) => {
                     Ok(*pointee)
-                }
+                },
                 _ => Err(CodegenError::Unsupported(format!(
                     "deref of non-pointer type: {:?}",
                     ctx.mir.ty(inner_ty)
                 ))),
             }
-        }
+        },
     }
 }
 
@@ -2926,34 +3149,32 @@ fn get_field_type_by_index_for_call(
                     index
                 )))
             }
-        }
+        },
         MirTy::Named { name, type_args } => {
             let name_data = ctx.mir.name(*name);
             for (_struct_id, def) in ctx.mir.structs.iter() {
-                if ctx.mir.name(def.name) == name_data {
-                    if index < def.fields.len() {
-                        let field_id = def.fields[index];
-                        let field_def = &ctx.mir.fields[field_id];
-                        let mut field_ty = field_def.ty;
+                if ctx.mir.name(def.name) == name_data && index < def.fields.len() {
+                    let field_id = def.fields[index];
+                    let field_def = &ctx.mir.fields[field_id];
+                    let mut field_ty = field_def.ty;
 
-                        // Apply substitution from struct's type params to concrete type args
-                        let type_params = &def.type_params;
-                        if !type_params.is_empty() && type_params.len() == type_args.len() {
-                            let subst = build_substitution(ctx.mir, type_params, type_args);
-                            if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
-                                field_ty = substituted_ty;
-                            }
+                    // Apply substitution from struct's type params to concrete type args
+                    let type_params = &def.type_params;
+                    if !type_params.is_empty() && type_params.len() == type_args.len() {
+                        let subst = build_substitution(ctx.mir, type_params, type_args);
+                        if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
+                            field_ty = substituted_ty;
                         }
-
-                        return Ok(field_ty);
                     }
+
+                    return Ok(field_ty);
                 }
             }
             Err(CodegenError::Unsupported(format!(
                 "field index {} out of bounds in {:?}",
                 index, name_data
             )))
-        }
+        },
         _ => Err(CodegenError::Unsupported(format!(
             "index access on unsupported type: {:?}",
             mir_ty
@@ -2967,7 +3188,7 @@ fn resolve_func_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> Id<Ty> {
     match mir_ty {
         MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
             resolve_func_type(ctx, *inner)
-        }
+        },
         _ => ty,
     }
 }
@@ -2988,7 +3209,7 @@ fn build_signature_from_func_type(
                 "not a function type: {:?}",
                 mir_ty
             )));
-        }
+        },
     };
 
     let call_conv = builder.func.signature.call_conv;
@@ -3147,7 +3368,7 @@ fn compile_apply_partial(
                 } else {
                     builder.ins().iadd_imm(env_ptr, offset as i64)
                 };
-                let words = (nested_layout.size + 7) / 8;
+                let words = nested_layout.size.div_ceil(8);
                 for w in 0..words {
                     let word_offset = (w * 8) as i32;
                     let word = builder
@@ -3185,7 +3406,7 @@ fn compile_apply_partial(
     // Store env_ptr at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size);
 
     Ok(thick_ptr)
 }
@@ -3240,11 +3461,7 @@ fn compile_func_to_escaping(
     let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
     // Look up the function by name to get func_id for mangling
-    let func_lookup = ctx
-        .mir
-        .functions
-        .iter()
-        .find(|(_, def)| def.name == func);
+    let func_lookup = ctx.mir.functions.iter().find(|(_, def)| def.name == func);
 
     // Get the function pointer
     let mangled_name = match func_lookup {
@@ -3262,7 +3479,7 @@ fn compile_func_to_escaping(
                 )));
             }
             ctx.resolve_symbol_name(func, &[], None)
-        }
+        },
         None => mangle_name(ctx.mir, func, &[]), // Fallback
     };
     let cl_func_id = ctx.func_ids_by_name.get(&mangled_name).ok_or_else(|| {
@@ -3292,7 +3509,7 @@ fn compile_func_to_escaping(
     // Store env_ptr at offset ptr_size
     builder
         .ins()
-        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size as i32);
+        .store(MemFlags::new(), env_ptr, thick_ptr, ptr_size);
 
     Ok(thick_ptr)
 }
@@ -3341,7 +3558,7 @@ fn compile_thin_call(
                 "not a function type: {:?}",
                 ctx.mir.ty(resolved_ty)
             )));
-        }
+        },
     };
     let needs_sret = needs_sret_for_type(ctx.mir, ret_ty);
     let mut ret_ptr = None;
@@ -3520,15 +3737,15 @@ fn compile_thick_call(
                 } else {
                     cl_types::I32
                 };
-                return Ok(builder.ins().iconst(ptr_type, 0));
+                Ok(builder.ins().iconst(ptr_type, 0))
             } else {
                 // Check if return type is string - if so, copy the fat pointer
                 if matches!(ctx.mir.ty(*ret), MirTy::Str) {
                     return Ok(copy_string_return_value(ctx, results[0], builder));
                 }
-                return Ok(results[0]);
+                Ok(results[0])
             }
-        }
+        },
         MirTy::FuncThick { params, ret } => {
             // Apply substitution to params and ret to handle generic closures
             let params: Vec<_> = params
@@ -3562,7 +3779,7 @@ fn compile_thick_call(
             // Load the environment pointer from offset ptr_size
             let env_ptr = builder
                 .ins()
-                .load(ptr_type, MemFlags::new(), thick_ptr, ptr_size as i32);
+                .load(ptr_type, MemFlags::new(), thick_ptr, ptr_size);
 
             let call_conv = builder.func.signature.call_conv;
             let mut sig = Signature::new(call_conv);
@@ -3636,21 +3853,19 @@ fn compile_thick_call(
                 } else {
                     cl_types::I32
                 };
-                return Ok(builder.ins().iconst(ptr_type, 0));
+                Ok(builder.ins().iconst(ptr_type, 0))
             } else {
                 // Check if return type is string - if so, copy the fat pointer
                 if matches!(ctx.mir.ty(ret), MirTy::Str) {
                     return Ok(copy_string_return_value(ctx, results[0], builder));
                 }
-                return Ok(results[0]);
+                Ok(results[0])
             }
-        }
-        _ => {
-            return Err(CodegenError::Unsupported(format!(
-                "not a function type: {:?}",
-                mir_ty
-            )));
-        }
+        },
+        _ => Err(CodegenError::Unsupported(format!(
+            "not a function type: {:?}",
+            mir_ty
+        ))),
     }
 }
 
@@ -3683,10 +3898,10 @@ fn copy_string_return_value(
     // Copy the len field (offset ptr_size)
     let str_len = builder
         .ins()
-        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size as i32);
+        .load(ptr_type, MemFlags::new(), src_ptr, ptr_size);
     builder
         .ins()
-        .store(MemFlags::new(), str_len, dest_ptr, ptr_size as i32);
+        .store(MemFlags::new(), str_len, dest_ptr, ptr_size);
 
     dest_ptr
 }

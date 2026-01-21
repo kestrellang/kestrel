@@ -119,7 +119,7 @@ impl WhereClause {
                 } else {
                     false
                 }
-            }
+            },
             _ => false,
         })
     }

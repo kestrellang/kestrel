@@ -1,0 +1,26 @@
+# Rustfmt configuration for the Kestrel compiler project
+# See: https://rust-lang.github.io/rustfmt/
+# Only stable options are used to avoid nightly dependency
+
+# Use the 2021 edition style (compatible with 2024)
+edition = "2021"
+
+# Maximum line width
+max_width = 100
+
+# Use spaces, not tabs
+hard_tabs = false
+tab_spaces = 4
+
+# Newline style - native for cross-platform compatibility
+newline_style = "Auto"
+
+# Reorder imports and modules alphabetically
+reorder_imports = true
+reorder_modules = true
+
+# Keep attributes on the same line as items when possible
+use_small_heuristics = "Default"
+
+# Preserve block structure in match arms
+match_block_trailing_comma = true

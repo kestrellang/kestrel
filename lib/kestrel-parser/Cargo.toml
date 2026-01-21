@@ -3,6 +3,9 @@ name = "kestrel-parser"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 chumsky = { workspace = true }
 stacker = "0.1"

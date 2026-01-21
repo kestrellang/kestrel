@@ -55,23 +55,24 @@ impl Query for ResolveName {
             let imports = model.query(crate::queries::ImportsInScope { symbol_id: id });
             for import in imports {
                 // Only consider whole-module imports (no items, no alias)
-                if import.items.is_empty() && import.alias.is_none() {
-                    if let Ok(module_id) = model.query(crate::queries::ResolveModulePath {
+                if import.items.is_empty()
+                    && import.alias.is_none()
+                    && let Ok(module_id) = model.query(crate::queries::ResolveModulePath {
                         path: import.module_path.clone(),
                         context: id,
-                    }) {
-                        // Check if the name exists in the module's visible children
-                        if let Some(child) = model
-                            .query(crate::queries::VisibleChildrenByName {
-                                parent: module_id,
-                                name: self.name.clone(),
-                                context: self.context,
-                            })
-                            .into_iter()
-                            .next()
-                        {
-                            wildcard_candidates.push(child.metadata().id());
-                        }
+                    })
+                {
+                    // Check if the name exists in the module's visible children
+                    if let Some(child) = model
+                        .query(crate::queries::VisibleChildrenByName {
+                            parent: module_id,
+                            name: self.name.clone(),
+                            context: self.context,
+                        })
+                        .into_iter()
+                        .next()
+                    {
+                        wildcard_candidates.push(child.metadata().id());
                     }
                 }
             }
@@ -101,13 +102,13 @@ impl Query for ResolveName {
 
                 // Check inherited associated types from parent protocols
                 // (conformances are resolved after scope computation, so we check at lookup time)
-                if symbol.metadata().kind() == KestrelSymbolKind::Protocol {
-                    if let Some(member_id) = model.query(InheritedProtocolMember {
+                if symbol.metadata().kind() == KestrelSymbolKind::Protocol
+                    && let Some(member_id) = model.query(InheritedProtocolMember {
                         protocol_id: id,
                         name: self.name.clone(),
-                    }) {
-                        return SymbolResolution::Found(vec![member_id]);
-                    }
+                    })
+                {
+                    return SymbolResolution::Found(vec![member_id]);
                 }
             }
 
@@ -159,5 +160,7 @@ fn find_in_protocol_extension_associated_types(
 
     let assoc_type = flattened.associated_types().get(name)?;
 
-    Some(SymbolResolution::Found(vec![assoc_type.symbol.metadata().id()]))
+    Some(SymbolResolution::Found(vec![
+        assoc_type.symbol.metadata().id(),
+    ]))
 }

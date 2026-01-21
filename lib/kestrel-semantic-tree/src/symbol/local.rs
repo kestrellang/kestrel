@@ -134,7 +134,13 @@ mod tests {
     fn test_local_mutable() {
         use crate::ty::IntBits;
         let ty = Ty::int(IntBits::I64, Span::new(0, 0..3));
-        let local = Local::new(LocalId::new(1), "y".to_string(), ty, true, Span::new(0, 0..5));
+        let local = Local::new(
+            LocalId::new(1),
+            "y".to_string(),
+            ty,
+            true,
+            Span::new(0, 0..5),
+        );
 
         assert_eq!(local.id().index(), 1);
         assert_eq!(local.name(), "y");

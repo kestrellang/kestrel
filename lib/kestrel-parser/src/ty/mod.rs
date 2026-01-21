@@ -271,13 +271,13 @@ where
     match ty_parser().parse(input).into_result() {
         Ok(variant) => {
             emit_ty_variant(sink, &variant);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 
@@ -286,16 +286,16 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
     match variant {
         TyVariant::Unit(lparen_span, rparen_span) => {
             emit_unit_type(sink, lparen_span.clone(), rparen_span.clone());
-        }
+        },
         TyVariant::Never(bang_span) => {
             emit_never_type(sink, bang_span.clone());
-        }
+        },
         TyVariant::Inferred(underscore_span) => {
             emit_inferred_type(sink, underscore_span.clone());
-        }
+        },
         TyVariant::Tuple(lparen, types, rparen) => {
             emit_tuple_type(sink, lparen.clone(), types, rparen.clone());
-        }
+        },
         TyVariant::Function(lparen, params, rparen, arrow, return_ty) => {
             emit_function_type(
                 sink,
@@ -305,16 +305,16 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
                 arrow.clone(),
                 return_ty,
             );
-        }
+        },
         TyVariant::Path { segments, args } => {
             emit_path_type(sink, segments, args.as_ref());
-        }
+        },
         TyVariant::Array(lbracket, element_ty, rbracket) => {
             emit_array_type(sink, lbracket.clone(), element_ty, rbracket.clone());
-        }
+        },
         TyVariant::Optional(base_ty, question_span) => {
             emit_optional_type(sink, base_ty, question_span.clone());
-        }
+        },
     }
 }
 

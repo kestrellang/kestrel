@@ -76,7 +76,7 @@ fn validate_assignment_target(
                     },
                 ));
             }
-        }
+        },
         ExprKind::FieldAccess { object, field } => {
             let is_self_in_init = is_initializer && is_self_expr(object);
             if !is_self_in_init && !target.is_mutable() {
@@ -87,7 +87,7 @@ fn validate_assignment_target(
                     },
                 ));
             }
-        }
+        },
         ExprKind::TupleIndex { tuple: _, index } => {
             if !target.is_mutable() {
                 out.push(AssignmentError::ImmutableField(
@@ -97,7 +97,7 @@ fn validate_assignment_target(
                     },
                 ));
             }
-        }
+        },
         // Invalid targets
         ExprKind::Literal(_)
         | ExprKind::Array(_)
@@ -139,7 +139,7 @@ fn validate_assignment_target(
                     span: target.span.clone(),
                 },
             ));
-        }
+        },
     }
     out
 }

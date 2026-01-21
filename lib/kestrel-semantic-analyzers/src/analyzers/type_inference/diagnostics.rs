@@ -82,8 +82,7 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                 let labels: Vec<_> = unresolved
                     .iter()
                     .map(|(_, span)| {
-                        Label::primary(span.file_id, span.range())
-                            .with_message("cannot infer type")
+                        Label::primary(span.file_id, span.range()).with_message("cannot infer type")
                     })
                     .collect();
                 Diagnostic::error()
@@ -95,11 +94,11 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                     .with_notes(vec![
                         "try adding explicit type annotations to help the compiler".to_string(),
                     ])
-            }
+            },
 
             InferenceError::Internal { message } => {
                 Diagnostic::error().with_message(format!("internal inference error: {}", message))
-            }
+            },
 
             InferenceError::ClosureArityMismatch {
                 actual,
@@ -174,7 +173,7 @@ impl IntoDiagnostic for InferenceErrorDiagnostic {
                         )),
                     ])
                     .with_notes(vec![format!("on type `{}`", receiver_ty)])
-            }
+            },
 
             InferenceError::CannotInferEnumType { member_name, span } => Diagnostic::error()
                 .with_message(format!(

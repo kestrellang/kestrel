@@ -3,6 +3,9 @@ name = "kestrel-execution-graph-lowering"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-execution-graph = { path = "../kestrel-execution-graph" }
 kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }

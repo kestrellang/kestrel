@@ -94,7 +94,7 @@ impl Mir {
             MirFunction::new(&format!(
                 "{}.\"{}\"",
                 module,
-                format!("{}.closure.{}", func, index)
+                format_args!("{func}.closure.{index}")
             ))
         } else {
             // No dot - just use parent as-is
@@ -113,7 +113,7 @@ impl Mir {
             MirStruct::new(&format!(
                 "{}.\"{}\"",
                 module,
-                format!("{}.closure.{}.env", func, index)
+                format_args!("{func}.closure.{index}.env")
             ))
         } else {
             MirStruct::new(&format!("\"{}.closure.{}.env\"", parent, index))

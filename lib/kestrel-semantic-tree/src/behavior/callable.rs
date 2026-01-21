@@ -224,14 +224,14 @@ impl SignatureType {
             TyKind::String => SignatureType::String,
             TyKind::Tuple(elements) => {
                 SignatureType::Tuple(elements.iter().map(SignatureType::from_ty).collect())
-            }
+            },
             TyKind::Array(element_type) => {
                 SignatureType::Array(Box::new(SignatureType::from_ty(element_type)))
-            }
+            },
             TyKind::Pointer(_) => {
                 // Pointer types are represented as a named type for signature matching
                 SignatureType::Named(vec!["lang".to_string(), "ptr".to_string()])
-            }
+            },
             TyKind::Function {
                 params,
                 return_type,
@@ -244,13 +244,13 @@ impl SignatureType {
             TyKind::Infer => SignatureType::Named(vec!["_".to_string()]),
             TyKind::TypeParameter(param) => {
                 SignatureType::Named(vec![param.metadata().name().value.clone()])
-            }
+            },
             TyKind::Struct { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::Enum { symbol, .. } => {
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::Protocol {
                 symbol,
                 substitutions,
@@ -267,23 +267,23 @@ impl SignatureType {
                     }
                 }
                 SignatureType::Named(parts)
-            }
+            },
             TyKind::TypeAlias { symbol, .. } => {
                 // For type aliases, use the alias name
                 // (could also resolve to underlying type)
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::AssociatedType { symbol, .. } => {
                 // For associated types, use the associated type name
                 SignatureType::Named(vec![symbol.metadata().name().value.clone()])
-            }
+            },
             TyKind::UnresolvedFunction { return_type, .. } => {
                 // Treat as a function type with unknown params
                 SignatureType::Function {
                     params: vec![], // Unknown params
                     return_type: Box::new(SignatureType::from_ty(return_type)),
                 }
-            }
+            },
         }
     }
 }

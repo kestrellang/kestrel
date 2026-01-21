@@ -77,11 +77,7 @@ fn extract_attributes(syntax: &SyntaxNode, source: &str, file_id: usize) -> Vec<
 }
 
 /// Extract a single attribute from an Attribute syntax node.
-fn extract_single_attribute(
-    node: &SyntaxNode,
-    source: &str,
-    file_id: usize,
-) -> Option<Attribute> {
+fn extract_single_attribute(node: &SyntaxNode, source: &str, file_id: usize) -> Option<Attribute> {
     // Find the @ token and the identifier (name)
     let mut name: Option<String> = None;
     let mut at_span: Option<Span> = None;
@@ -101,12 +97,8 @@ fn extract_single_attribute(
         }
     }
 
-    let Some(attr_name) = name else {
-        return None;
-    };
-    let Some(start_span) = at_span else {
-        return None;
-    };
+    let attr_name = name?;
+    let start_span = at_span?;
 
     // Extract arguments if present
     let args = extract_attribute_args(node, source, file_id);
@@ -169,17 +161,17 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str, file_id: usize) -> Optio
                     // This could be a label or a path value
                     // We'll treat it as a label if followed by colon
                     label = Some(tok.text().to_string());
-                }
+                },
                 SyntaxKind::Colon => {
                     has_colon = true;
-                }
+                },
                 SyntaxKind::Identifier if has_colon => {
                     // This is a value identifier (after colon)
                     value_span = Some(Span::new(
                         file_id,
                         tok.text_range().start().into()..tok.text_range().end().into(),
                     ));
-                }
+                },
                 SyntaxKind::String
                 | SyntaxKind::Integer
                 | SyntaxKind::Float
@@ -188,11 +180,11 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str, file_id: usize) -> Optio
                         file_id,
                         tok.text_range().start().into()..tok.text_range().end().into(),
                     ));
-                }
+                },
                 SyntaxKind::Dot => {
                     // Part of implicit member access - skip
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
@@ -210,12 +202,8 @@ fn extract_single_arg(node: &SyntaxNode, _source: &str, file_id: usize) -> Optio
         // Unlabeled path value (identifier was stored in label)
         // The value_span is the whole arg span since it's just an identifier
         Some(AttributeArg::unlabeled(full_span))
-    } else if let Some(val) = value_span {
-        // Unlabeled literal value
-        Some(AttributeArg::unlabeled(val))
     } else {
-        // Unable to extract meaningful data
-        None
+        value_span.map(AttributeArg::unlabeled)
     }
 }
 
@@ -295,7 +283,7 @@ pub fn parse_builtin_attribute(
                 name: feature_name.to_string(),
             });
             BuiltinParseResult::Error
-        }
+        },
     }
 }
 
@@ -376,7 +364,7 @@ pub fn parse_extern_attribute(
                 name: conv_name.to_string(),
             });
             return ExternParseResult::Error;
-        }
+        },
     };
 
     // Check for optional mangleName parameter

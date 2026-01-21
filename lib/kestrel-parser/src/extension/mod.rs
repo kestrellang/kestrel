@@ -94,7 +94,8 @@ fn extension_body_item_parser_internal<'tokens>()
 
     let function_parser = function_declaration_parser_internal().map(ExtensionBodyItem::Function);
 
-    let subscript_parser = subscript_declaration_parser_internal().map(ExtensionBodyItem::Subscript);
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(ExtensionBodyItem::Subscript);
 
     let type_alias_parser =
         type_alias_declaration_parser_internal().map(ExtensionBodyItem::TypeAlias);
@@ -160,13 +161,13 @@ where
     {
         Ok(data) => {
             emit_extension_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

@@ -15,8 +15,10 @@ impl IntoDiagnostic for InvalidEscapeSequenceError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message(format!("invalid escape sequence `{}`", self.sequence))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("unknown escape sequence")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("unknown escape sequence"),
+            ])
             .with_notes(vec![
                 "valid escape sequences are: \\n, \\r, \\t, \\\\, \\\", \\', \\0, \\xNN, \\u{NNNN}"
                     .to_string(),
@@ -37,8 +39,10 @@ impl IntoDiagnostic for AsciiEscapeOutOfRangeError {
                 "ASCII escape `\\x{:02X}` is out of range",
                 self.value
             ))
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("value must be in range 0x00-0x7F")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("value must be in range 0x00-0x7F"),
+            ])
             .with_notes(vec![
                 "ASCII escapes (\\xNN) can only represent 7-bit values (0x00-0x7F)".to_string(),
                 "use a Unicode escape (\\u{NN}) for values above 0x7F".to_string(),
@@ -74,19 +78,19 @@ impl IntoDiagnostic for InvalidUnicodeEscapeError {
         let message = match self.reason {
             UnicodeEscapeErrorReason::MissingOpenBrace => {
                 "Unicode escape must be followed by `{`".to_string()
-            }
+            },
             UnicodeEscapeErrorReason::MissingCloseBrace => {
                 "Unicode escape missing closing `}`".to_string()
-            }
+            },
             UnicodeEscapeErrorReason::EmptyBraces => {
                 "Unicode escape cannot have empty braces".to_string()
-            }
+            },
             UnicodeEscapeErrorReason::TooManyDigits => {
                 "Unicode escape can have at most 6 hex digits".to_string()
-            }
+            },
             UnicodeEscapeErrorReason::InvalidHexDigit => {
                 "Unicode escape contains invalid hex digit".to_string()
-            }
+            },
             UnicodeEscapeErrorReason::OutOfRange => format!(
                 "Unicode escape `{}` is out of range (max 0x10FFFF)",
                 self.value
@@ -96,7 +100,7 @@ impl IntoDiagnostic for InvalidUnicodeEscapeError {
         Diagnostic::error()
             .with_message(format!("invalid Unicode escape `{}`", self.value))
             .with_labels(vec![
-                Label::primary(self.span.file_id, self.span.range()).with_message(message)
+                Label::primary(self.span.file_id, self.span.range()).with_message(message),
             ])
             .with_notes(vec![
                 "Unicode escapes use the format \\u{NNNN} with 1-6 hex digits".to_string(),
@@ -114,7 +118,9 @@ impl IntoDiagnostic for IncompleteEscapeSequenceError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("incomplete escape sequence at end of string")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("escape sequence is incomplete")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("escape sequence is incomplete"),
+            ])
     }
 }

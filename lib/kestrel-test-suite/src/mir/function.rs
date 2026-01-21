@@ -182,7 +182,7 @@ impl MirFunction {
                         expected_ty.display()
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::HasParam { name, ty } => {
                 let param_id = def.params_by_name.get(name).ok_or_else(|| {
@@ -203,7 +203,7 @@ impl MirFunction {
                         ty.display()
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::ParamCount(expected) => {
                 let actual = def.params.len();
@@ -213,7 +213,7 @@ impl MirFunction {
                         self.name, actual, expected
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::HasLocal { name, ty } => {
                 let local_id = def.local_by_name(name).ok_or_else(|| {
@@ -233,7 +233,7 @@ impl MirFunction {
                         ty.display()
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::LocalCount(expected) => {
                 // Count locals that are NOT parameters
@@ -253,7 +253,7 @@ impl MirFunction {
                         self.name, actual, expected
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::TypeParamCount(expected) => {
                 let actual = def.type_params.len();
@@ -263,7 +263,7 @@ impl MirFunction {
                         self.name, actual, expected
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::BlockCount(expected) => {
                 let actual = def.blocks.len();
@@ -273,7 +273,7 @@ impl MirFunction {
                         self.name, actual, expected
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::AtLeastBlocks(expected) => {
                 let actual = def.blocks.len();
@@ -283,7 +283,7 @@ impl MirFunction {
                         self.name, actual, expected
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::HasWhereClause => {
                 if def.where_clause.is_none() {
@@ -292,7 +292,7 @@ impl MirFunction {
                         self.name
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::Block(index, block_exp) => {
                 if *index >= def.blocks.len() {
@@ -305,7 +305,7 @@ impl MirFunction {
                 }
                 let block = mir_ctx.mir.block(def.blocks[*index]);
                 block_exp.check(*index, block, &def.blocks, mir_ctx.mir)?;
-            }
+            },
 
             FunctionExpectation::AnyBlock(block_exp) => {
                 let mut any_passed = false;
@@ -317,7 +317,7 @@ impl MirFunction {
                         Ok(()) => {
                             any_passed = true;
                             break;
-                        }
+                        },
                         Err(e) => errors.push(format!("bb{}: {}", idx, e)),
                     }
                 }
@@ -329,7 +329,7 @@ impl MirFunction {
                         errors.join("\n  ")
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::NoBlock(block_exp) => {
                 // Ensure NO block matches the expectation
@@ -345,7 +345,7 @@ impl MirFunction {
                         ));
                     }
                 }
-            }
+            },
 
             FunctionExpectation::Calls(callee) => {
                 if !self.function_calls(def, callee, mir_ctx) {
@@ -354,7 +354,7 @@ impl MirFunction {
                         self.name, callee
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::DoesNotCall(callee) => {
                 if self.function_calls(def, callee, mir_ctx) {
@@ -363,7 +363,7 @@ impl MirFunction {
                         self.name, callee
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::CallsEscaping => {
                 if !self.function_has_escaping_call(def, mir_ctx) {
@@ -372,7 +372,7 @@ impl MirFunction {
                         self.name
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::CallsWitness { protocol, method } => {
                 if !self.function_calls_witness(def, protocol, method, mir_ctx) {
@@ -381,7 +381,7 @@ impl MirFunction {
                         self.name, protocol, method
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::IsNonCapturing => {
                 // A non-capturing closure should not have a ClosureCall origin with an env struct.
@@ -397,7 +397,7 @@ impl MirFunction {
                         // Check if the env_struct has any fields (captures)
                         let env_def = mir_ctx.mir.struct_def(*env_struct);
                         !env_def.fields.is_empty()
-                    }
+                    },
                     _ => false,
                 };
                 if is_capturing {
@@ -406,7 +406,7 @@ impl MirFunction {
                         self.name
                     ));
                 }
-            }
+            },
 
             FunctionExpectation::CaptureCount(expected) => {
                 // Look for env-prefixed parameters to determine capture count
@@ -435,7 +435,7 @@ impl MirFunction {
                         self.name
                     ));
                 }
-            }
+            },
         }
 
         Ok(())
@@ -471,7 +471,7 @@ impl MirFunction {
                 } else {
                     false
                 }
-            }
+            },
             StatementKind::Call {
                 callee: actual_callee,
                 ..
@@ -497,21 +497,21 @@ impl MirFunction {
                 let stmt = mir_ctx.mir.statement(stmt_id);
                 match &stmt.kind {
                     StatementKind::Assign { rvalue, .. } => {
-                        if let Rvalue::Call { callee, .. } = rvalue {
-                            if matches!(callee, Callee::Thick(_)) {
-                                return true;
-                            }
+                        if let Rvalue::Call { callee, .. } = rvalue
+                            && matches!(callee, Callee::Thick(_))
+                        {
+                            return true;
                         }
-                    }
+                    },
                     StatementKind::Call { callee, .. } => {
                         if matches!(callee, Callee::Thick(_)) {
                             return true;
                         }
-                    }
+                    },
                     // Deinit statements don't involve function calls
                     StatementKind::Deinit { .. }
                     | StatementKind::DeinitIf { .. }
-                    | StatementKind::SetDeinitFlag { .. } => {}
+                    | StatementKind::SetDeinitFlag { .. } => {},
                 }
             }
         }
@@ -531,21 +531,21 @@ impl MirFunction {
                 let stmt = mir_ctx.mir.statement(stmt_id);
                 match &stmt.kind {
                     StatementKind::Assign { rvalue, .. } => {
-                        if let Rvalue::Call { callee, .. } = rvalue {
-                            if self.is_witness_call(callee, protocol, method, mir_ctx) {
-                                return true;
-                            }
+                        if let Rvalue::Call { callee, .. } = rvalue
+                            && self.is_witness_call(callee, protocol, method, mir_ctx)
+                        {
+                            return true;
                         }
-                    }
+                    },
                     StatementKind::Call { callee, .. } => {
                         if self.is_witness_call(callee, protocol, method, mir_ctx) {
                             return true;
                         }
-                    }
+                    },
                     // Deinit statements don't involve function calls
                     StatementKind::Deinit { .. }
                     | StatementKind::DeinitIf { .. }
-                    | StatementKind::SetDeinitFlag { .. } => {}
+                    | StatementKind::SetDeinitFlag { .. } => {},
                 }
             }
         }

@@ -59,19 +59,19 @@ pub fn lower_protocol(ctx: &mut LoweringContext, protocol_symbol: &Arc<ProtocolS
 
     // Lower associated types (children with kind AssociatedType)
     for child in protocol_symbol.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::AssociatedType {
-            if let Ok(assoc_symbol) = child.downcast_arc::<AssociatedTypeSymbol>() {
-                lower_protocol_associated_type(ctx, protocol_id, &assoc_symbol);
-            }
+        if child.metadata().kind() == KestrelSymbolKind::AssociatedType
+            && let Ok(assoc_symbol) = child.downcast_arc::<AssociatedTypeSymbol>()
+        {
+            lower_protocol_associated_type(ctx, protocol_id, &assoc_symbol);
         }
     }
 
     // Lower method signatures (children with kind Function)
     for child in protocol_symbol.metadata().children() {
-        if child.metadata().kind() == KestrelSymbolKind::Function {
-            if let Ok(func_symbol) = child.downcast_arc::<FunctionSymbol>() {
-                lower_protocol_method(ctx, protocol_id, &func_symbol);
-            }
+        if child.metadata().kind() == KestrelSymbolKind::Function
+            && let Ok(func_symbol) = child.downcast_arc::<FunctionSymbol>()
+        {
+            lower_protocol_method(ctx, protocol_id, &func_symbol);
         }
     }
 
@@ -168,18 +168,18 @@ fn build_self_type_for_receiver(
         ReceiverKind::Consuming => {
             // consuming: takes ownership of Self
             self_ty
-        }
+        },
         ReceiverKind::Borrowing => {
             // regular method: &Self
             ctx.mir.ty_ref(self_ty)
-        }
+        },
         ReceiverKind::Mutating => {
             // mutating method: &var Self
             ctx.mir.ty_ref_mut(self_ty)
-        }
+        },
         ReceiverKind::Initializing => {
             // initializer: &var Self
             ctx.mir.ty_ref_mut(self_ty)
-        }
+        },
     }
 }

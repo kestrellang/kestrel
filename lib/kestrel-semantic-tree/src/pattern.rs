@@ -538,7 +538,7 @@ impl Pattern {
         match &self.kind {
             PatternKind::Tuple { prefix, suffix, .. } => {
                 Some(prefix.iter().chain(suffix.iter()).collect())
-            }
+            },
             _ => None,
         }
     }
@@ -622,7 +622,7 @@ impl Pattern {
             PatternKind::Struct { fields, .. } => {
                 // A struct pattern is irrefutable if all field patterns are irrefutable
                 fields.iter().all(|f| f.pattern.is_irrefutable())
-            }
+            },
             PatternKind::Literal { .. } => false,
             PatternKind::EnumVariant { .. } => false, // TODO: single-case enums are irrefutable
             PatternKind::Range { .. } => false,       // Ranges don't cover all values
@@ -816,7 +816,10 @@ mod tests {
 
     #[test]
     fn test_wildcard_pattern() {
-        let pattern = Pattern::wildcard(Ty::int(IntBits::I64, Span::new(0, 0..1)), Span::new(0, 0..1));
+        let pattern = Pattern::wildcard(
+            Ty::int(IntBits::I64, Span::new(0, 0..1)),
+            Span::new(0, 0..1),
+        );
         assert!(pattern.is_wildcard());
         assert!(pattern.is_irrefutable());
     }
@@ -824,7 +827,10 @@ mod tests {
     #[test]
     fn test_tuple_pattern() {
         let elements = vec![
-            Pattern::wildcard(Ty::int(IntBits::I64, Span::new(0, 1..2)), Span::new(0, 1..2)),
+            Pattern::wildcard(
+                Ty::int(IntBits::I64, Span::new(0, 1..2)),
+                Span::new(0, 1..2),
+            ),
             Pattern::local(
                 LocalId(0),
                 Mutability::Immutable,

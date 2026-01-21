@@ -23,7 +23,10 @@ pub enum MonomorphizeError {
     FunctionNotFound { name: Id<QualifiedName> },
 
     /// A function reference could not be instantiated.
-    UnsupportedFunctionReference { name: Id<QualifiedName>, reason: String },
+    UnsupportedFunctionReference {
+        name: Id<QualifiedName>,
+        reason: String,
+    },
 
     /// Type mismatch during pattern matching.
     TypeMismatch { expected: Id<Ty>, found: Id<Ty> },
@@ -44,7 +47,7 @@ impl fmt::Display for MonomorphizeError {
                     "no witness found: protocol {:?} for type {:?}",
                     protocol, for_type
                 )
-            }
+            },
             MonomorphizeError::MethodNotFoundInWitness {
                 protocol,
                 method,
@@ -55,27 +58,27 @@ impl fmt::Display for MonomorphizeError {
                     "method '{}' not found in witness: protocol {:?} for type {:?}",
                     method, protocol, for_type
                 )
-            }
+            },
             MonomorphizeError::FunctionNotFound { name } => {
                 write!(f, "function not found: {:?}", name)
-            }
+            },
             MonomorphizeError::UnsupportedFunctionReference { name, reason } => {
                 write!(f, "unsupported function reference: {:?} ({})", name, reason)
-            }
+            },
             MonomorphizeError::TypeMismatch { expected, found } => {
                 write!(
                     f,
                     "type mismatch: expected {:?}, found {:?}",
                     expected, found
                 )
-            }
+            },
             MonomorphizeError::TypeNotInterned { description } => {
                 write!(
                     f,
                     "type not interned (bug in collection phase): {}",
                     description
                 )
-            }
+            },
         }
     }
 }

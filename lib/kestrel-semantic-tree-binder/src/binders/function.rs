@@ -268,15 +268,15 @@ impl FunctionBinder {
             .unwrap_or_else(|| symbol.metadata().span().clone());
 
         // Validation 1: Cannot be generic
-        if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>() {
-            if generics.is_generic() {
-                context
-                    .diagnostics
-                    .throw(ExternFunctionCannotBeGenericError {
-                        span: attr_span.clone(),
-                    });
-                return;
-            }
+        if let Some(generics) = symbol.metadata().get_behavior::<GenericsBehavior>()
+            && generics.is_generic()
+        {
+            context
+                .diagnostics
+                .throw(ExternFunctionCannotBeGenericError {
+                    span: attr_span.clone(),
+                });
+            return;
         }
 
         // Validation 2: Cannot have a body
@@ -295,7 +295,7 @@ impl FunctionBinder {
                                 SyntaxKind::Statement | SyntaxKind::Expression
                             )
                         })
-                    }
+                    },
                     SyntaxKind::Expression => true, // Expression body like `func foo() -> Int = 42`
                     _ => false,
                 }
@@ -317,28 +317,27 @@ impl FunctionBinder {
             .model
             .builtin_registry()
             .protocol(LanguageFeature::FFISafe)
+            && let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>()
         {
-            if let Some(callable) = symbol.metadata().get_behavior::<CallableBehavior>() {
-                // Check each parameter type
-                for param in callable.parameters() {
-                    if !context.model.conforms_to(&param.ty, ffi_safe_id) {
-                        context.diagnostics.throw(TypeNotFFISafeError {
-                            span: param.ty.span().clone(),
-                            ty: param.ty.to_string(),
-                            context: "parameter".to_string(),
-                        });
-                    }
-                }
-
-                // Check return type (skip if Unit - void is always valid for extern)
-                let return_ty = callable.return_type();
-                if !return_ty.is_unit() && !context.model.conforms_to(return_ty, ffi_safe_id) {
+            // Check each parameter type
+            for param in callable.parameters() {
+                if !context.model.conforms_to(&param.ty, ffi_safe_id) {
                     context.diagnostics.throw(TypeNotFFISafeError {
-                        span: return_ty.span().clone(),
-                        ty: return_ty.to_string(),
-                        context: "return type".to_string(),
+                        span: param.ty.span().clone(),
+                        ty: param.ty.to_string(),
+                        context: "parameter".to_string(),
                     });
                 }
+            }
+
+            // Check return type (skip if Unit - void is always valid for extern)
+            let return_ty = callable.return_type();
+            if !return_ty.is_unit() && !context.model.conforms_to(return_ty, ffi_safe_id) {
+                context.diagnostics.throw(TypeNotFFISafeError {
+                    span: return_ty.span().clone(),
+                    ty: return_ty.to_string(),
+                    context: "return type".to_string(),
+                });
             }
         }
 
@@ -499,7 +498,7 @@ fn resolve_function_body(
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 
     // Downcast to FunctionSymbol to get Arc<FunctionSymbol> for LocalScope
-    let Some(func_sym) = symbol.as_ref().downcast_ref::<FunctionSymbol>() else {
+    let Some(_func_sym) = symbol.as_ref().downcast_ref::<FunctionSymbol>() else {
         return;
     };
 
@@ -519,20 +518,20 @@ fn resolve_function_body(
         .and_then(|cb| cb.receiver());
 
     // If this is an instance method, inject `self` as the first local
-    if let Some(receiver) = receiver_kind {
-        if let Some(self_type) = get_self_type(symbol) {
-            let is_mutable = matches!(receiver, ReceiverKind::Mutating);
-            let decl_span = symbol.metadata().span().clone();
-            let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
+    if let Some(receiver) = receiver_kind
+        && let Some(self_type) = get_self_type(symbol)
+    {
+        let is_mutable = matches!(receiver, ReceiverKind::Mutating);
+        let decl_span = symbol.metadata().span().clone();
+        let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
 
-            // Add self to local scope
-            local_scope.bind(
-                "self".to_string(),
-                self_type.clone(),
-                is_mutable,
-                self_span.clone(),
-            );
-        }
+        // Add self to local scope
+        local_scope.bind(
+            "self".to_string(),
+            self_type.clone(),
+            is_mutable,
+            self_span.clone(),
+        );
     }
 
     // Add parameters to local scope
@@ -583,12 +582,12 @@ fn resolve_return_type_from_syntax(
     ctx: &mut BindingContext,
 ) -> Ty {
     // Find the return type node: FunctionDeclaration -> ReturnType -> Ty
-    if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
-        if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
-            let mut type_ctx =
-                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
-            return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
-        }
+    if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType)
+        && let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty)
+    {
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
+        return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 
     // No explicit return type - default to Unit
@@ -623,7 +622,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        }
+        },
         KestrelSymbolKind::Enum => {
             // Create concrete enum type with type parameters mapping to themselves
             let enum_arc = Arc::clone(&parent).downcast_arc::<EnumSymbol>().ok()?;
@@ -636,12 +635,12 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_enum(enum_arc, substitutions, parent_span))
-        }
+        },
         KestrelSymbolKind::Protocol => {
             // For protocol methods, Self remains abstract
             // (protocol methods can be implemented by different concrete types)
             Some(Ty::self_type(parent_span))
-        }
+        },
         KestrelSymbolKind::Extension => {
             // For extension methods, use the target type from ExtensionTargetBehavior
             // For protocol extensions, use SelfType so constraint methods can be resolved
@@ -657,7 +656,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                         b.target_type().clone()
                     }
                 })
-        }
+        },
         _ => None,
     }
 }

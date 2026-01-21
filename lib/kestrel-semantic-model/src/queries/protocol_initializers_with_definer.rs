@@ -10,9 +10,9 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::ty::TyKind;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::SemanticModel;
 use crate::queries::{ConformancesForSymbol, SymbolFor};
 use crate::query::Query;
-use crate::SemanticModel;
 
 /// Collect all initializers visible to a protocol, paired with the protocol that defined each initializer.
 ///

@@ -36,15 +36,15 @@ impl Query for ScopeFor {
         // Collect resolved imports from Import children
         let mut imports: HashMap<String, Vec<SymbolId>> = HashMap::new();
         for child in &visible {
-            if child.metadata().kind() == KestrelSymbolKind::Import {
-                if let Some(import_data) = child.metadata().get_behavior::<ImportDataBehavior>() {
-                    // Collect each resolved import item
-                    for item in import_data.items() {
-                        if let Some(target_id) = item.target_id {
-                            // Use alias if present, otherwise use original name
-                            let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
-                            imports.entry(name).or_default().push(target_id);
-                        }
+            if child.metadata().kind() == KestrelSymbolKind::Import
+                && let Some(import_data) = child.metadata().get_behavior::<ImportDataBehavior>()
+            {
+                // Collect each resolved import item
+                for item in import_data.items() {
+                    if let Some(target_id) = item.target_id {
+                        // Use alias if present, otherwise use original name
+                        let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
+                        imports.entry(name).or_default().push(target_id);
                     }
                 }
             }

@@ -224,8 +224,10 @@ impl IntoDiagnostic for DelegatingInitOutsideInitializerError {
     fn into_diagnostic(&self) -> Diagnostic<usize> {
         Diagnostic::error()
             .with_message("'self.init(...)' can only be used inside an initializer")
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())
-                .with_message("delegating initializer not allowed here")])
+            .with_labels(vec![
+                Label::primary(self.span.file_id, self.span.range())
+                    .with_message("delegating initializer not allowed here"),
+            ])
             .with_notes(vec![
                 "'self.init(...)' delegates to another initializer on the same type".to_string(),
                 "this is only valid inside an init { } body".to_string(),

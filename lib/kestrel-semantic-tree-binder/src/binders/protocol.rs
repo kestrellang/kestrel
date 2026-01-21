@@ -71,10 +71,10 @@ impl DeclarationBinder for ProtocolBinder {
         symbol.metadata().add_behavior(generics_behavior);
 
         // Flatten protocol inheritance hierarchy
-        if let Ok(protocol_symbol) = symbol.clone().downcast_arc::<ProtocolSymbol>() {
-            if let Some(flattened) = flatten_protocol(&protocol_symbol, context) {
-                symbol.metadata().add_behavior(flattened);
-            }
+        if let Ok(protocol_symbol) = symbol.clone().downcast_arc::<ProtocolSymbol>()
+            && let Some(flattened) = flatten_protocol(&protocol_symbol, context)
+        {
+            symbol.metadata().add_behavior(flattened);
         }
     }
 }
@@ -116,14 +116,15 @@ impl ProtocolBinder {
         }
 
         // Validate: if must_be_marker, check that protocol has no required members
-        if let BuiltinKind::Protocol { must_be_marker, .. } = &definition.kind {
-            if *must_be_marker && !self.is_marker_protocol(symbol) {
-                context.diagnostics.throw(BuiltinMustBeMarkerError {
-                    span: attr_span,
-                    feature_name: feature.name().to_string(),
-                });
-                return;
-            }
+        if let BuiltinKind::Protocol { must_be_marker, .. } = &definition.kind
+            && *must_be_marker
+            && !self.is_marker_protocol(symbol)
+        {
+            context.diagnostics.throw(BuiltinMustBeMarkerError {
+                span: attr_span,
+                feature_name: feature.name().to_string(),
+            });
+            return;
         }
 
         // Register the builtin

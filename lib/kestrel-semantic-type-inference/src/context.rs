@@ -107,12 +107,12 @@ impl<'a> InferenceContext<'a> {
         match ty.kind() {
             TyKind::Array(elem_ty) | TyKind::Pointer(elem_ty) => {
                 self.register_type(elem_ty);
-            }
+            },
             TyKind::Tuple(elem_tys) => {
                 for elem_ty in elem_tys {
                     self.register_type(elem_ty);
                 }
-            }
+            },
             TyKind::Function {
                 params,
                 return_type,
@@ -121,7 +121,7 @@ impl<'a> InferenceContext<'a> {
                     self.register_type(param_ty);
                 }
                 self.register_type(return_type);
-            }
+            },
             TyKind::Struct { substitutions, .. }
             | TyKind::Enum { substitutions, .. }
             | TyKind::Protocol { substitutions, .. }
@@ -129,12 +129,12 @@ impl<'a> InferenceContext<'a> {
                 for (_, sub_ty) in substitutions.iter() {
                     self.register_type(sub_ty);
                 }
-            }
+            },
             TyKind::AssociatedType { container, .. } => {
                 if let Some(container_ty) = container {
                     self.register_type(container_ty);
                 }
-            }
+            },
             TyKind::UnresolvedFunction {
                 param_info,
                 return_type,
@@ -143,15 +143,15 @@ impl<'a> InferenceContext<'a> {
                 match param_info {
                     ParamInfo::ImplicitIt { it_type } => {
                         self.register_type(it_type);
-                    }
+                    },
                     ParamInfo::Explicit { param_types } => {
                         for pt in param_types {
                             self.register_type(pt);
                         }
-                    }
-                    ParamInfo::Unconstrained => {}
+                    },
+                    ParamInfo::Unconstrained => {},
                 }
-            }
+            },
             // Leaf types - no nested types to register
             TyKind::Int(_)
             | TyKind::Float(_)
@@ -162,7 +162,7 @@ impl<'a> InferenceContext<'a> {
             | TyKind::Infer
             | TyKind::Error
             | TyKind::SelfType
-            | TyKind::TypeParameter(_) => {}
+            | TyKind::TypeParameter(_) => {},
         }
     }
 
@@ -355,6 +355,7 @@ impl<'a> InferenceContext<'a> {
         self.errors.push(error);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn errors(&self) -> &[InferenceError] {
         &self.errors
     }

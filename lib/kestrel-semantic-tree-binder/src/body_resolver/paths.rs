@@ -149,22 +149,20 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         // e.g., lang.cast_i64_i32, lang.cast_f64_i64
         if let Some(suffix) = path[1].strip_prefix("cast_") {
             // Parse "i64_i32" -> (from: i64, to: i32)
-            if let Some((from_str, to_str)) = suffix.split_once('_') {
-                if let (Some(from), Some(to)) =
-                    (LangPrimitive::from_str(from_str), LangPrimitive::from_str(to_str))
-                {
-                    return Expression::lang_intrinsic_ref(
-                        LangIntrinsic::Cast { from, to },
-                        span,
-                    );
-                }
+            if let Some((from_str, to_str)) = suffix.split_once('_')
+                && let (Some(from), Some(to)) = (
+                    LangPrimitive::from_str(from_str),
+                    LangPrimitive::from_str(to_str),
+                )
+            {
+                return Expression::lang_intrinsic_ref(LangIntrinsic::Cast { from, to }, span);
             }
         }
 
         // Pointer intrinsics with type arguments
         // Extract type argument from path (e.g., cast_ptr[Int], sizeof[T])
-        let type_arg = extract_type_arguments_from_path(node, ctx)
-            .and_then(|args| args.into_iter().next());
+        let type_arg =
+            extract_type_arguments_from_path(node, ctx).and_then(|args| args.into_iter().next());
         let infer_ty = || Ty::infer(span.clone());
 
         match path[1].as_str() {
@@ -175,7 +173,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "ptr_from_address" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::PtrFromAddress {
@@ -183,10 +181,10 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "ptr_to_address" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::PtrToAddress, span);
-            }
+            },
             "ptr_to" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::PtrTo {
@@ -194,7 +192,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "ptr_read" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::PtrRead {
@@ -202,7 +200,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "ptr_write" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::PtrWrite {
@@ -210,13 +208,13 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "ptr_offset" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::PtrOffset, span);
-            }
+            },
             "ptr_is_null" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::PtrIsNull, span);
-            }
+            },
             "cast_ptr" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::CastPtr {
@@ -224,7 +222,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "sizeof" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::SizeOf {
@@ -232,7 +230,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             "alignof" => {
                 return Expression::lang_intrinsic_ref(
                     LangIntrinsic::AlignOf {
@@ -240,28 +238,28 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                     },
                     span,
                 );
-            }
+            },
             // Boolean (i1) intrinsics
             "i1_eq" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::I1Eq, span);
-            }
+            },
             "i1_and" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::I1And, span);
-            }
+            },
             "i1_or" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::I1Or, span);
-            }
+            },
             "i1_not" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::I1Not, span);
-            }
+            },
             // Atomic intrinsics
             "atomic_add" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::AtomicAdd, span);
-            }
+            },
             "atomic_sub" => {
                 return Expression::lang_intrinsic_ref(LangIntrinsic::AtomicSub, span);
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Parse lang intrinsics: i64_add, i64_signed_div, f64_mul, etc.
@@ -284,66 +282,53 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
         ValuePathResolution::Symbol { symbol_id, ty } => {
             // Check if this is an enum case - always use EnumCase expression
             // (both generic like Option[Int].None and non-generic like Color.Red)
-            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
-                if symbol.metadata().kind() == KestrelSymbolKind::EnumCase {
-                    // Check if this enum case is accessed via a qualified type path with explicit type args
-                    // e.g., Result[Int, Bool].Ok or Option[String].Some
-                    if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
-                        if let Some((_, substitutions)) = qualified_ty.as_enum_with_subs() {
-                            if !substitutions.is_empty() {
-                                // Apply substitutions to the type (callable type for cases with values,
-                                // or enum type for simple cases)
-                                let substituted_ty = ty.apply_substitutions(substitutions);
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::EnumCase
+            {
+                // Check if this enum case is accessed via a qualified type path with explicit type args
+                // e.g., Result[Int, Bool].Ok or Option[String].Some
+                if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx)
+                    && let Some((_, substitutions)) = qualified_ty.as_enum_with_subs()
+                    && !substitutions.is_empty()
+                {
+                    // Apply substitutions to the type (callable type for cases with values,
+                    // or enum type for simple cases)
+                    let substituted_ty = ty.apply_substitutions(substitutions);
 
-                                if get_callable_behavior(&symbol).is_some() {
-                                    // Enum case with associated values (like Ok, Some)
-                                    // Return SymbolRef with substituted callable type
-                                    return Expression::symbol_ref(
-                                        symbol_id,
-                                        substituted_ty,
-                                        false,
-                                        span,
-                                    );
-                                } else {
-                                    // Simple enum case (like None)
-                                    return Expression::enum_case(symbol_id, substituted_ty, span);
-                                }
-                            }
-                        }
+                    if get_callable_behavior(&symbol).is_some() {
+                        // Enum case with associated values (like Ok, Some)
+                        // Return SymbolRef with substituted callable type
+                        return Expression::symbol_ref(symbol_id, substituted_ty, false, span);
+                    } else {
+                        // Simple enum case (like None)
+                        return Expression::enum_case(symbol_id, substituted_ty, span);
                     }
+                }
 
-                    // No explicit type args - handle simple cases without CallableBehavior
-                    if get_callable_behavior(&symbol).is_none() {
-                        return Expression::enum_case(symbol_id, ty, span);
-                    }
+                // No explicit type args - handle simple cases without CallableBehavior
+                if get_callable_behavior(&symbol).is_none() {
+                    return Expression::enum_case(symbol_id, ty, span);
                 }
             }
 
             // Check if this is a static method accessed via a qualified type path
             // e.g., Box[Int].wrap where wrap is a static method
-            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx) {
-                if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
-                    if let Some(callable) = get_callable_behavior(&symbol) {
-                        if callable.is_static() {
-                            // Get struct symbol from qualified type
-                            if let Some((struct_sym, _)) = qualified_ty.as_struct_with_subs() {
-                                // Create TypeRef receiver with qualified type
-                                let type_ref = Expression::type_ref(
-                                    struct_sym.metadata().id(),
-                                    qualified_ty,
-                                    span.clone(),
-                                );
-                                // Return MethodRef for resolve_method_call to handle
-                                let method_name = symbol.metadata().name().value.clone();
-                                return Expression::method_ref(
-                                    type_ref,
-                                    vec![symbol_id],
-                                    method_name,
-                                    span,
-                                );
-                            }
-                        }
-                    }
+            if let Some(qualified_ty) = extract_qualified_type_from_path(node, ctx)
+                && let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && let Some(callable) = get_callable_behavior(&symbol)
+                && callable.is_static()
+            {
+                // Get struct symbol from qualified type
+                if let Some((struct_sym, _)) = qualified_ty.as_struct_with_subs() {
+                    // Create TypeRef receiver with qualified type
+                    let type_ref = Expression::type_ref(
+                        struct_sym.metadata().id(),
+                        qualified_ty,
+                        span.clone(),
+                    );
+                    // Return MethodRef for resolve_method_call to handle
+                    let method_name = symbol.metadata().name().value.clone();
+                    return Expression::method_ref(type_ref, vec![symbol_id], method_name, span);
                 }
             }
 
@@ -362,10 +347,10 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
 
             // For now, module-level symbols (functions) are not mutable lvalues
             Expression::symbol_ref(symbol_id, final_ty, false, span)
-        }
+        },
         ValuePathResolution::Overloaded { candidates } => {
             Expression::overloaded_ref(candidates, span)
-        }
+        },
         ValuePathResolution::NotFound { segment, index } => {
             // Report undefined name error
             let error_span = if index < path_with_spans.len() {
@@ -379,7 +364,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             Expression::error(span)
-        }
+        },
         ValuePathResolution::Ambiguous {
             segment,
             index,
@@ -398,100 +383,97 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             };
             ctx.diagnostics.add_diagnostic(error.into_diagnostic());
             Expression::error(span)
-        }
+        },
         ValuePathResolution::NotAValue { symbol_id } => {
             // Check if this is a field that needs implicit self access
-            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id }) {
-                if symbol.metadata().kind() == KestrelSymbolKind::Field {
-                    // Check if this is a static field - static fields don't use implicit self
-                    use kestrel_semantic_tree::symbol::field::FieldSymbol;
-                    let is_static = symbol
+            if let Some(symbol) = ctx.model.query(SymbolFor { id: symbol_id })
+                && symbol.metadata().kind() == KestrelSymbolKind::Field
+            {
+                // Check if this is a static field - static fields don't use implicit self
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                let is_static = symbol
+                    .as_ref()
+                    .downcast_ref::<FieldSymbol>()
+                    .map(|f| f.is_static())
+                    .unwrap_or(false);
+
+                // This is a field reference like `x` that should become `self.x`
+                // Look for 'self' in local scope (but not for static fields)
+                if !is_static && let Some(self_local_id) = ctx.local_scope.lookup("self") {
+                    let self_local = ctx.local_scope.get_local(self_local_id);
+                    let self_ty = self_local
                         .as_ref()
-                        .downcast_ref::<FieldSymbol>()
-                        .map(|f| f.is_static())
+                        .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.ty().clone())
+                        .unwrap_or_else(|| Ty::error(span.clone()));
+                    let self_mutable = self_local
+                        .as_ref()
+                        .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable())
                         .unwrap_or(false);
 
-                    // This is a field reference like `x` that should become `self.x`
-                    // Look for 'self' in local scope (but not for static fields)
-                    if !is_static {
-                        if let Some(self_local_id) = ctx.local_scope.lookup("self") {
-                        let self_local = ctx.local_scope.get_local(self_local_id);
-                        let self_ty = self_local
-                            .as_ref()
-                            .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.ty().clone())
+                    // Create self reference
+                    let self_expr =
+                        Expression::local_ref(self_local_id, self_ty, self_mutable, span.clone());
+
+                    // Get field type and mutability from FieldSymbol
+                    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                    let (field_ty, field_mutable) = symbol
+                        .downcast_ref::<FieldSymbol>()
+                        .map(|f| (f.field_type().clone(), f.is_mutable()))
+                        .unwrap_or_else(|| (Ty::error(span.clone()), false));
+
+                    let field_name = symbol.metadata().name().value.clone();
+                    return Expression::field_access(
+                        self_expr,
+                        field_name,
+                        field_mutable,
+                        field_ty,
+                        span,
+                    );
+                }
+                // If no self, fall through to create type_ref
+                // For static fields, we need to handle them specially
+                if is_static {
+                    // Get the parent (struct/enum) to create a TypeRef base
+                    if let Some(parent) = symbol.metadata().parent() {
+                        use super::utils::create_struct_type_with_type_args;
+                        use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+
+                        let parent_id = parent.metadata().id();
+                        let parent_ty = parent
+                            .clone()
+                            .downcast_arc::<StructSymbol>()
+                            .ok()
+                            .map(|struct_sym| {
+                                create_struct_type_with_type_args(
+                                    &(struct_sym
+                                        as std::sync::Arc<
+                                            dyn Symbol<
+                                                kestrel_semantic_tree::language::KestrelLanguage,
+                                            >,
+                                        >),
+                                    &[],
+                                    span.clone(),
+                                    ctx,
+                                )
+                            })
+                            .unwrap_or_else(|| Ty::infer(span.clone()));
+
+                        // Create TypeRef for the parent type
+                        let type_ref = Expression::type_ref(parent_id, parent_ty, span.clone());
+
+                        // Get field type from TypedBehavior
+                        let field_ty = symbol
+                            .metadata()
+                            .get_behavior::<TypedBehavior>()
+                            .map(|tb| tb.ty().clone())
                             .unwrap_or_else(|| Ty::error(span.clone()));
-                        let self_mutable = self_local
-                            .as_ref()
-                            .map(|l: &kestrel_semantic_tree::symbol::local::Local| l.is_mutable())
-                            .unwrap_or(false);
-
-                        // Create self reference
-                        let self_expr = Expression::local_ref(
-                            self_local_id,
-                            self_ty,
-                            self_mutable,
-                            span.clone(),
-                        );
-
-                        // Get field type and mutability from FieldSymbol
-                        use kestrel_semantic_tree::symbol::field::FieldSymbol;
-                        let (field_ty, field_mutable) = symbol
-                            .downcast_ref::<FieldSymbol>()
-                            .map(|f| (f.field_type().clone(), f.is_mutable()))
-                            .unwrap_or_else(|| (Ty::error(span.clone()), false));
 
                         let field_name = symbol.metadata().name().value.clone();
                         return Expression::field_access(
-                            self_expr,
-                            field_name,
-                            field_mutable,
-                            field_ty,
-                            span,
+                            type_ref, field_name,
+                            false, // static fields are not mutable through this access
+                            field_ty, span,
                         );
-                        }
-                    }
-                    // If no self, fall through to create type_ref
-                    // For static fields, we need to handle them specially
-                    if is_static {
-                        // Get the parent (struct/enum) to create a TypeRef base
-                        if let Some(parent) = symbol.metadata().parent() {
-                            use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-                            use super::utils::create_struct_type_with_type_args;
-
-                            let parent_id = parent.metadata().id();
-                            let parent_ty = parent
-                                .clone()
-                                .downcast_arc::<StructSymbol>()
-                                .ok()
-                                .map(|struct_sym| {
-                                    create_struct_type_with_type_args(
-                                        &(struct_sym as std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>),
-                                        &[],
-                                        span.clone(),
-                                        ctx,
-                                    )
-                                })
-                                .unwrap_or_else(|| Ty::infer(span.clone()));
-
-                            // Create TypeRef for the parent type
-                            let type_ref = Expression::type_ref(parent_id, parent_ty, span.clone());
-
-                            // Get field type from TypedBehavior
-                            let field_ty = symbol
-                                .metadata()
-                                .get_behavior::<TypedBehavior>()
-                                .map(|tb| tb.ty().clone())
-                                .unwrap_or_else(|| Ty::error(span.clone()));
-
-                            let field_name = symbol.metadata().name().value.clone();
-                            return Expression::field_access(
-                                type_ref,
-                                field_name,
-                                false, // static fields are not mutable through this access
-                                field_ty,
-                                span,
-                            );
-                        }
                     }
                 }
             }
@@ -523,7 +505,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
                 })
                 .unwrap_or_else(|| Ty::infer(span.clone()));
             Expression::type_ref(symbol_id, ty, span)
-        }
+        },
         ValuePathResolution::TypeParameter { symbol_id } => {
             // This is a type parameter reference (e.g., T in `T()` or `T.create()`)
             // For multi-segment paths like T.create, the db returns TypeParameter
@@ -548,7 +530,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             } else {
                 base
             }
-        }
+        },
         ValuePathResolution::EnumCaseValue {
             symbol_id,
             ty,
@@ -572,7 +554,7 @@ pub fn resolve_path_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContex
             } else {
                 base
             }
-        }
+        },
     }
 }
 
@@ -594,11 +576,11 @@ fn get_function_context(ctx: &BodyResolutionContext) -> String {
             // We can check by looking for 'self' in local scope, but we already know
             // 'self' wasn't found, so this must be a static method
             "static method".to_string()
-        }
+        },
         _ => {
             // Not in a struct/protocol, so it's a free function
             "free function".to_string()
-        }
+        },
     }
 }
 
@@ -614,37 +596,35 @@ fn extract_path_segments_with_spans(
     if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
         // Path contains PathElements
         for element in path_node.children() {
-            if element.kind() == SyntaxKind::PathElement {
-                if let Some((name, span)) =
+            if element.kind() == SyntaxKind::PathElement
+                && let Some((name, span)) =
                     extract_path_element_name_with_span(&element, source, file_id)
-                {
-                    segments.push((name, span));
-                }
+            {
+                segments.push((name, span));
             }
         }
     } else {
         // Direct identifiers
         for child in node.children() {
-            if child.kind() == SyntaxKind::PathElement {
-                if let Some((name, span)) =
+            if child.kind() == SyntaxKind::PathElement
+                && let Some((name, span)) =
                     extract_path_element_name_with_span(&child, source, file_id)
-                {
-                    segments.push((name, span));
-                }
+            {
+                segments.push((name, span));
             }
         }
 
         // Fallback: look for Name or Identifier tokens
         if segments.is_empty() {
             for elem in node.children_with_tokens() {
-                if let Some(token) = elem.as_token() {
-                    if token.kind() == SyntaxKind::Identifier {
-                        let span = token.text_range();
-                        segments.push((
-                            token.text().to_string(),
-                            Span::new(file_id, span.start().into()..span.end().into()),
-                        ));
-                    }
+                if let Some(token) = elem.as_token()
+                    && token.kind() == SyntaxKind::Identifier
+                {
+                    let span = token.text_range();
+                    segments.push((
+                        token.text().to_string(),
+                        Span::new(file_id, span.start().into()..span.end().into()),
+                    ));
                 }
             }
         }
@@ -826,20 +806,20 @@ fn extract_type_arguments_from_path(
             // Find the last Dot token position (if any)
             let mut last_dot_pos = None;
             for (i, child) in children.iter().enumerate() {
-                if let Some(token) = child.as_token() {
-                    if token.kind() == SyntaxKind::Dot {
-                        last_dot_pos = Some(i);
-                    }
+                if let Some(token) = child.as_token()
+                    && token.kind() == SyntaxKind::Dot
+                {
+                    last_dot_pos = Some(i);
                 }
             }
 
             // If there's a dot, only look for TypeArgumentList AFTER the last dot
             if let Some(dot_pos) = last_dot_pos {
                 for child in children.iter().skip(dot_pos + 1) {
-                    if let Some(node) = child.as_node() {
-                        if node.kind() == SyntaxKind::TypeArgumentList {
-                            return Some(node.clone());
-                        }
+                    if let Some(node) = child.as_node()
+                        && node.kind() == SyntaxKind::TypeArgumentList
+                    {
+                        return Some(node.clone());
                     }
                 }
                 // Multi-segment path but no type args after last dot
@@ -848,10 +828,10 @@ fn extract_type_arguments_from_path(
 
             // No dot - single segment path, check for direct TypeArgumentList
             for child in children.iter() {
-                if let Some(node) = child.as_node() {
-                    if node.kind() == SyntaxKind::TypeArgumentList {
-                        return Some(node.clone());
-                    }
+                if let Some(node) = child.as_node()
+                    && node.kind() == SyntaxKind::TypeArgumentList
+                {
+                    return Some(node.clone());
                 }
             }
 
@@ -1122,14 +1102,14 @@ fn extract_qualified_type_from_path(
                 // Generic type without explicit args - return base type for inference
                 return Some(base_ty);
             }
-        }
+        },
         TyKind::Enum { symbol, .. } => {
             if !symbol.type_parameters().is_empty() {
                 // Generic enum without explicit args - return base type for inference
                 return Some(base_ty);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     // Non-generic type without type args - return None to use original path
@@ -1138,10 +1118,7 @@ fn extract_qualified_type_from_path(
 
 /// Parse a lang intrinsic name like "i64_add", "i64_signed_div", "f64_mul", etc.
 fn parse_lang_intrinsic(name: &str) -> Option<kestrel_semantic_tree::expr::LangIntrinsic> {
-    use kestrel_semantic_tree::expr::{
-        FloatBinaryOp, FloatUnaryOp, IntBinaryOp, IntUnaryOp, LangIntrinsic, LangPrimitive,
-        SignedOp,
-    };
+    use kestrel_semantic_tree::expr::LangPrimitive;
 
     // Try each primitive prefix: i1_, i8_, i16_, i32_, i64_, f32_, f64_
     let primitives = [

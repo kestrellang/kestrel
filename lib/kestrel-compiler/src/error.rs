@@ -30,10 +30,10 @@ impl fmt::Display for CompileError {
         match self {
             CompileError::SemanticErrors => {
                 write!(f, "compilation failed due to semantic errors")
-            }
+            },
             CompileError::NoSemanticModel => {
                 write!(f, "no semantic model was produced")
-            }
+            },
             CompileError::LoweringFailed(diagnostics) => {
                 writeln!(f, "lowering to execution graph failed:")?;
                 for diag in diagnostics {
@@ -49,22 +49,22 @@ impl fmt::Display for CompileError {
                     }
                 }
                 Ok(())
-            }
+            },
             CompileError::NoMainFunction => {
                 write!(f, "no 'main' function found")
-            }
+            },
             CompileError::CodegenFailed(e) => {
                 write!(f, "code generation failed: {}", e)
-            }
+            },
             CompileError::IoError(e) => {
                 write!(f, "I/O error: {}", e)
-            }
+            },
             CompileError::ExecutionFailed(e) => {
                 write!(f, "execution failed: {}", e)
-            }
+            },
             CompileError::InvalidTarget(e) => {
                 write!(f, "invalid target: {}", e)
-            }
+            },
         }
     }
 }

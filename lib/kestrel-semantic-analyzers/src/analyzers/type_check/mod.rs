@@ -4,15 +4,15 @@ use crate::analyzer::Analyzer;
 use crate::context::AnalysisContext;
 
 use kestrel_semantic_model::CallableParamTypesForCall;
-use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_type_inference::TypeOracle;
 use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+use kestrel_semantic_tree::builtins::LanguageFeature;
 use kestrel_semantic_tree::expr::{
     CallArgument, ElseBranch, ExprKind, Expression, IfCondition, compute_block_type,
 };
 use kestrel_semantic_tree::stmt::{Statement, StatementKind};
 use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_type_inference::TypeOracle;
 use semantic_tree::symbol::Symbol;
 
 mod diagnostics;
@@ -88,10 +88,10 @@ impl Analyzer for TypeCheckAnalyzer {
         match &expr.kind {
             ExprKind::Return { value } => {
                 self.check_return(value.as_ref().map(|v| v.as_ref()), expr, ctx);
-            }
+            },
             ExprKind::Assignment { target, value } => {
                 self.check_assignment(target, value, ctx);
-            }
+            },
             ExprKind::If {
                 conditions,
                 then_branch,
@@ -111,24 +111,24 @@ impl Analyzer for TypeCheckAnalyzer {
                     expr,
                     ctx,
                 );
-            }
+            },
             ExprKind::While { condition, .. } => {
                 self.check_while_condition(condition, ctx);
-            }
+            },
             ExprKind::Match { arms, .. } => {
                 for arm in arms {
                     if let Some(guard) = &arm.guard {
                         self.check_guard_condition(guard, ctx);
                     }
                 }
-            }
+            },
             ExprKind::Call { arguments, .. } | ExprKind::ImplicitStructInit { arguments, .. } => {
                 self.check_call_arguments(expr, arguments, ctx);
-            }
+            },
             ExprKind::Array(elements) => {
                 self.check_array_elements(elements, expr, ctx);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -200,7 +200,7 @@ impl TypeCheckAnalyzer {
                         context: "return value".to_string(),
                     });
                 }
-            }
+            },
             None => {
                 if !expected_ty.is_unit() && !is_initializer {
                     ctx.report(TypeMismatchError {
@@ -210,7 +210,7 @@ impl TypeCheckAnalyzer {
                         context: "return value".to_string(),
                     });
                 }
-            }
+            },
         }
     }
 
@@ -236,10 +236,12 @@ impl TypeCheckAnalyzer {
         }
 
         // Check BooleanConditional conformance
-        if let Some(protocol_id) = ctx.model.builtin_protocol(LanguageFeature::BooleanConditional) {
-            if ctx.model.conforms_to(&condition.ty, protocol_id) {
-                return;
-            }
+        if let Some(protocol_id) = ctx
+            .model
+            .builtin_protocol(LanguageFeature::BooleanConditional)
+            && ctx.model.conforms_to(&condition.ty, protocol_id)
+        {
+            return;
         }
 
         ctx.report(ConditionNotBoolError {
@@ -298,10 +300,12 @@ impl TypeCheckAnalyzer {
         }
 
         // Check BooleanConditional conformance
-        if let Some(protocol_id) = ctx.model.builtin_protocol(LanguageFeature::BooleanConditional) {
-            if ctx.model.conforms_to(&condition.ty, protocol_id) {
-                return;
-            }
+        if let Some(protocol_id) = ctx
+            .model
+            .builtin_protocol(LanguageFeature::BooleanConditional)
+            && ctx.model.conforms_to(&condition.ty, protocol_id)
+        {
+            return;
         }
 
         ctx.report(ConditionNotBoolError {
@@ -322,10 +326,12 @@ impl TypeCheckAnalyzer {
         }
 
         // Check BooleanConditional conformance
-        if let Some(protocol_id) = ctx.model.builtin_protocol(LanguageFeature::BooleanConditional) {
-            if ctx.model.conforms_to(&condition.ty, protocol_id) {
-                return;
-            }
+        if let Some(protocol_id) = ctx
+            .model
+            .builtin_protocol(LanguageFeature::BooleanConditional)
+            && ctx.model.conforms_to(&condition.ty, protocol_id)
+        {
+            return;
         }
 
         ctx.report(ConditionNotBoolError {

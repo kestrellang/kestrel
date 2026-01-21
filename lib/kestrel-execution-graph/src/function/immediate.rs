@@ -245,7 +245,7 @@ impl fmt::Display for ImmediateDisplay<'_> {
                     IntBits::I64 => "i64",
                 };
                 write!(f, "{}.literal {}", prefix, value)
-            }
+            },
             ImmediateKind::FloatLiteral { bits, value } => {
                 let prefix = match bits {
                     FloatBits::F16 => "f16",
@@ -253,7 +253,7 @@ impl fmt::Display for ImmediateDisplay<'_> {
                     FloatBits::F64 => "f64",
                 };
                 write!(f, "{}.literal {}", prefix, value)
-            }
+            },
             ImmediateKind::BoolLiteral(b) => write!(f, "{}", b),
             ImmediateKind::StringLiteral(s) => write!(f, "str.literal {:?}", s),
             ImmediateKind::StringPointer(s) => write!(f, "str.ptr {:?}", s),
@@ -271,7 +271,7 @@ impl fmt::Display for ImmediateDisplay<'_> {
                     write!(f, "]")?;
                 }
                 Ok(())
-            }
+            },
             ImmediateKind::WitnessMethod {
                 protocol,
                 method,
@@ -284,10 +284,10 @@ impl fmt::Display for ImmediateDisplay<'_> {
                     method,
                     self.ctx.ty(*for_type).display(self.ctx)
                 )
-            }
+            },
             ImmediateKind::NullPtr(ty) => {
                 write!(f, "ptr.null[{}]", self.ctx.ty(*ty).display(self.ctx))
-            }
+            },
             ImmediateKind::Error => write!(f, "<error>"),
         }
     }

@@ -178,20 +178,20 @@ impl DeclarationBinder for SubscriptBinder {
         }
 
         // Bind setter body (if present)
-        if let Some(setter) = subscript.setter() {
-            if let Some(setter_body) = find_setter_body(&body_node) {
-                resolve_setter_body(
-                    symbol,
-                    &setter,
-                    &setter_body,
-                    &params,
-                    &return_type,
-                    context,
-                    &source,
-                    file_id,
-                    where_clause,
-                );
-            }
+        if let Some(setter) = subscript.setter()
+            && let Some(setter_body) = find_setter_body(&body_node)
+        {
+            resolve_setter_body(
+                symbol,
+                &setter,
+                &setter_body,
+                &params,
+                &return_type,
+                context,
+                &source,
+                file_id,
+                where_clause,
+            );
         }
     }
 }
@@ -287,10 +287,10 @@ fn bind_setter_signature(
 /// Handles both shorthand syntax (direct CodeBlock) and explicit syntax (GetterClause).
 fn find_getter_body(body_node: &SyntaxNode) -> Option<SyntaxNode> {
     // Check for explicit getter: SubscriptBody -> PropertyAccessors -> GetterClause -> CodeBlock
-    if let Some(accessors) = find_child(body_node, SyntaxKind::PropertyAccessors) {
-        if let Some(getter_clause) = find_child(&accessors, SyntaxKind::GetterClause) {
-            return find_child(&getter_clause, SyntaxKind::CodeBlock);
-        }
+    if let Some(accessors) = find_child(body_node, SyntaxKind::PropertyAccessors)
+        && let Some(getter_clause) = find_child(&accessors, SyntaxKind::GetterClause)
+    {
+        return find_child(&getter_clause, SyntaxKind::CodeBlock);
     }
 
     // Shorthand syntax: SubscriptBody -> CodeBlock
@@ -302,10 +302,10 @@ fn find_getter_body(body_node: &SyntaxNode) -> Option<SyntaxNode> {
 /// Only present in explicit syntax with SetterClause.
 fn find_setter_body(body_node: &SyntaxNode) -> Option<SyntaxNode> {
     // Explicit setter: SubscriptBody -> PropertyAccessors -> SetterClause -> CodeBlock
-    if let Some(accessors) = find_child(body_node, SyntaxKind::PropertyAccessors) {
-        if let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause) {
-            return find_child(&setter_clause, SyntaxKind::CodeBlock);
-        }
+    if let Some(accessors) = find_child(body_node, SyntaxKind::PropertyAccessors)
+        && let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause)
+    {
+        return find_child(&setter_clause, SyntaxKind::CodeBlock);
     }
 
     None
@@ -328,7 +328,8 @@ fn resolve_getter_body(
 
     // Create a local scope for the getter body
     let getter_dyn: Arc<dyn Symbol<KestrelLanguage>> = getter.clone();
-    let mut local_scope = create_local_scope_for_body(getter_dyn.clone(), "__subscript_getter_temp");
+    let mut local_scope =
+        create_local_scope_for_body(getter_dyn.clone(), "__subscript_getter_temp");
 
     // Get receiver kind from CallableBehavior
     let callable = getter.metadata().get_behavior::<CallableBehavior>();
@@ -338,12 +339,10 @@ fn resolve_getter_body(
         .unwrap_or(false);
 
     // If this is an instance getter, inject `self` as the first local (immutable)
-    if has_receiver {
-        if let Some(self_type) = get_self_type(subscript_symbol) {
-            let decl_span = getter.metadata().span().clone();
-            let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
-            local_scope.bind("self".to_string(), self_type, false, self_span);
-        }
+    if has_receiver && let Some(self_type) = get_self_type(subscript_symbol) {
+        let decl_span = getter.metadata().span().clone();
+        let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
+        local_scope.bind("self".to_string(), self_type, false, self_span);
     }
 
     // Add parameters to local scope
@@ -394,7 +393,8 @@ fn resolve_setter_body(
 
     // Create a local scope for the setter body
     let setter_dyn: Arc<dyn Symbol<KestrelLanguage>> = setter.clone();
-    let mut local_scope = create_local_scope_for_body(setter_dyn.clone(), "__subscript_setter_temp");
+    let mut local_scope =
+        create_local_scope_for_body(setter_dyn.clone(), "__subscript_setter_temp");
 
     // Get receiver kind from CallableBehavior
     let callable = setter.metadata().get_behavior::<CallableBehavior>();
@@ -404,12 +404,10 @@ fn resolve_setter_body(
         .unwrap_or(false);
 
     // If this is an instance setter, inject `self` as the first local (mutable)
-    if has_receiver {
-        if let Some(self_type) = get_self_type(subscript_symbol) {
-            let decl_span = setter.metadata().span().clone();
-            let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
-            local_scope.bind("self".to_string(), self_type, true, self_span);
-        }
+    if has_receiver && let Some(self_type) = get_self_type(subscript_symbol) {
+        let decl_span = setter.metadata().span().clone();
+        let self_span = Span::new(decl_span.file_id, decl_span.start..decl_span.start);
+        local_scope.bind("self".to_string(), self_type, true, self_span);
     }
 
     // Add subscript parameters to local scope
@@ -478,7 +476,7 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_struct(struct_arc, substitutions, parent_span))
-        }
+        },
         KestrelSymbolKind::Enum => {
             // Create concrete enum type with type parameters mapping to themselves
             let enum_arc = Arc::clone(&parent).downcast_arc::<EnumSymbol>().ok()?;
@@ -491,18 +489,18 @@ fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
                 }
             }
             Some(Ty::generic_enum(enum_arc, substitutions, parent_span))
-        }
+        },
         KestrelSymbolKind::Protocol => {
             // For protocol subscripts, Self remains abstract
             Some(Ty::self_type(parent_span))
-        }
+        },
         KestrelSymbolKind::Extension => {
             // For extension subscripts, use the target type
             parent
                 .metadata()
                 .get_behavior::<ExtensionTargetBehavior>()
                 .map(|b| b.target_type().clone())
-        }
+        },
         _ => None,
     }
 }
@@ -516,12 +514,12 @@ fn resolve_return_type_from_syntax(
     ctx: &mut BindingContext,
 ) -> Ty {
     // Find the return type node: SubscriptDeclaration -> ReturnType -> Ty
-    if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
-        if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
-            let mut type_ctx =
-                TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
-            return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
-        }
+    if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType)
+        && let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty)
+    {
+        let mut type_ctx =
+            TypeSyntaxContext::new(ctx.model, ctx.diagnostics, source, file_id, context_id);
+        return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 
     // No explicit return type - this is an error for subscripts

@@ -95,7 +95,7 @@ fn extract_return_type(ty: &SemanticTy) -> SemanticTy {
             // Shouldn't happen - closure should have function type
             // Return unit as fallback
             SemanticTy::unit(ty.span().clone())
-        }
+        },
     }
 }
 
@@ -331,12 +331,12 @@ fn create_closure_function(
         Some((_, env_struct_name)) => {
             let env_struct_ty = ctx.mir.ty_named(*env_struct_name, vec![]);
             ctx.mir.ty_ref(env_struct_ty)
-        }
+        },
         None => {
             // Non-capturing closure: use a raw pointer type for the unused env parameter
             let i8_ty = ctx.mir.intern_type(MirTy::I8);
             ctx.mir.ty_ptr(i8_ty)
-        }
+        },
     };
 
     let param_types: Vec<_> = params

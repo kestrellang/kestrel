@@ -165,7 +165,7 @@ impl<'src> TreeBuilder<'src> {
                 Event::StartNode(kind) => {
                     builder.start_node((*kind).into());
                     self.pos += 1;
-                }
+                },
                 Event::AddToken(kind, span) => {
                     // Extract values before modifying self
                     let kind = *kind;
@@ -180,16 +180,16 @@ impl<'src> TreeBuilder<'src> {
                     builder.token(kind.into(), text);
                     self.source_pos = span_end;
                     self.pos += 1;
-                }
+                },
                 Event::FinishNode => {
                     builder.finish_node();
                     self.pos += 1;
-                }
+                },
                 Event::Error { .. } => {
                     // Skip error events when building the tree
                     // Errors can be extracted from the event list separately
                     self.pos += 1;
-                }
+                },
             }
         }
     }

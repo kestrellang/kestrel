@@ -128,7 +128,13 @@ pub fn generate_function_thunk(
         // Create temp for result, call, and return
         let result_local = ctx.create_temp("result", return_type);
         let result_place = Place::local(result_local);
-        ctx.emit_assign(result_place.clone(), Rvalue::Call { callee, args: call_args });
+        ctx.emit_assign(
+            result_place.clone(),
+            Rvalue::Call {
+                callee,
+                args: call_args,
+            },
+        );
         ctx.emit_return(Value::Place(result_place));
     }
 
@@ -216,7 +222,13 @@ pub fn generate_witness_thunk(
     } else {
         let result_local = ctx.create_temp("result", return_type);
         let result_place = Place::local(result_local);
-        ctx.emit_assign(result_place.clone(), Rvalue::Call { callee, args: call_args });
+        ctx.emit_assign(
+            result_place.clone(),
+            Rvalue::Call {
+                callee,
+                args: call_args,
+            },
+        );
         ctx.emit_return(Value::Place(result_place));
     }
 

@@ -16,10 +16,9 @@ use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::local::LocalId;
-use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::setter::SetterSymbol;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use semantic_tree::symbol::Symbol;
 
@@ -56,7 +55,7 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
                     func_symbol.metadata().span().clone(),
                 ));
                 return;
-            }
+            },
         }
     };
 
@@ -104,14 +103,12 @@ pub fn lower_function(ctx: &mut LoweringContext, func_symbol: &Arc<FunctionSymbo
     ctx.mir.function_mut(func_id).ret = mir_ret_ty;
 
     // Prepare and add self parameter if this is a method
-    if let Some(ref callable) = callable {
-        if let Some(receiver) = callable.receiver() {
-            if let Some(self_ty) =
-                compute_self_param_type(ctx, receiver, func_symbol, &parent_type_params)
-            {
-                ctx.mir.function_builder(func_id).param("self", self_ty);
-            }
-        }
+    if let Some(ref callable) = callable
+        && let Some(receiver) = callable.receiver()
+        && let Some(self_ty) =
+            compute_self_param_type(ctx, receiver, func_symbol, &parent_type_params)
+    {
+        ctx.mir.function_builder(func_id).param("self", self_ty);
     }
 
     // Add other parameters
@@ -252,7 +249,7 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
                 init_symbol.metadata().span().clone(),
             ));
             return;
-        }
+        },
     };
 
     // Get callable behavior for parameter info
@@ -388,7 +385,7 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
         None => {
             // No resolved body - skip (might be a computed property without a body yet)
             return;
-        }
+        },
     };
 
     // Get callable behavior for parameter/return info
@@ -419,16 +416,15 @@ pub fn lower_getter(ctx: &mut LoweringContext, getter_symbol: &Arc<GetterSymbol>
     }
 
     // Now lower return type with type params in scope
-    let mir_ret_ty = lower_type(ctx, &return_ty);
+    let mir_ret_ty = lower_type(ctx, return_ty);
     ctx.mir.function_mut(func_id).ret = mir_ret_ty;
 
     // Add self parameter if this is an instance getter
-    if let Some(receiver) = callable.receiver() {
-        if let Some(self_ty) =
+    if let Some(receiver) = callable.receiver()
+        && let Some(self_ty) =
             compute_getter_self_param_type(ctx, receiver, getter_symbol, &parent_type_params)
-        {
-            ctx.mir.function_builder(func_id).param("self", self_ty);
-        }
+    {
+        ctx.mir.function_builder(func_id).param("self", self_ty);
     }
 
     // Enter the function context
@@ -507,7 +503,7 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
         None => {
             // No resolved body - skip
             return;
-        }
+        },
     };
 
     // Get callable behavior for parameter info
@@ -537,12 +533,11 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
     }
 
     // Add self parameter if this is an instance setter
-    if let Some(receiver) = callable.receiver() {
-        if let Some(self_ty) =
+    if let Some(receiver) = callable.receiver()
+        && let Some(self_ty) =
             compute_setter_self_param_type(ctx, receiver, setter_symbol, &parent_type_params)
-        {
-            ctx.mir.function_builder(func_id).param("self", self_ty);
-        }
+    {
+        ctx.mir.function_builder(func_id).param("self", self_ty);
     }
 
     // Add newValue parameter
@@ -568,9 +563,8 @@ pub fn lower_setter(ctx: &mut LoweringContext, setter_symbol: &Arc<SetterSymbol>
     let mir_locals = ctx.mir.function(func_id).locals.clone();
 
     // Map all parameter locals
-    for i in 0..param_count {
-        let mir_local = mir_locals[i];
-        ctx.map_local(LocalId(i), mir_local);
+    for (i, mir_local) in mir_locals.iter().take(param_count).enumerate() {
+        ctx.map_local(LocalId(i), *mir_local);
     }
 
     // Create entry block
@@ -844,10 +838,10 @@ fn collect_closure_local_ids_from_stmt(stmt: &Statement, ids: &mut HashSet<Local
             if let Some(expr) = value {
                 collect_closure_local_ids_from_expr(expr, ids);
             }
-        }
+        },
         StatementKind::Expr(expr) => {
             collect_closure_local_ids_from_expr(expr, ids);
-        }
+        },
         StatementKind::GuardLet {
             conditions,
             else_block,
@@ -861,10 +855,10 @@ fn collect_closure_local_ids_from_stmt(stmt: &Statement, ids: &mut HashSet<Local
             if let Some(expr) = &else_block.yield_expr {
                 collect_closure_local_ids_from_expr(expr, ids);
             }
-        }
+        },
         StatementKind::Deinit { .. } => {
             // Deinit statement doesn't contain closures
-        }
+        },
     }
 }
 
@@ -901,7 +895,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             if let Some(tail) = tail_expr {
                 collect_closure_local_ids_from_expr(tail, ids);
             }
-        }
+        },
 
         // Recurse into all expression kinds that can contain sub-expressions
         ExprKind::Call {
@@ -911,7 +905,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
@@ -921,7 +915,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
         ExprKind::DeferredMethodCall {
             receiver,
             arguments,
@@ -931,21 +925,21 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
         ExprKind::DelegatingInit { arguments, .. } => {
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
         ExprKind::Assignment { target, value } => {
             collect_closure_local_ids_from_expr(target, ids);
             collect_closure_local_ids_from_expr(value, ids);
-        }
+        },
         ExprKind::If {
             conditions,
             then_branch,
@@ -965,7 +959,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 match else_b {
                     ElseBranch::ElseIf(else_if) => {
                         collect_closure_local_ids_from_expr(else_if, ids);
-                    }
+                    },
                     ElseBranch::Block { statements, value } => {
                         for stmt in statements {
                             collect_closure_local_ids_from_stmt(stmt, ids);
@@ -973,10 +967,10 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                         if let Some(val) = value {
                             collect_closure_local_ids_from_expr(val, ids);
                         }
-                    }
+                    },
                 }
             }
-        }
+        },
         ExprKind::Match { scrutinee, arms } => {
             collect_closure_local_ids_from_expr(scrutinee, ids);
             for arm in arms {
@@ -985,7 +979,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
                 }
                 collect_closure_local_ids_from_expr(&arm.body, ids);
             }
-        }
+        },
         ExprKind::Block { statements, value } => {
             for stmt in statements {
                 collect_closure_local_ids_from_stmt(stmt, ids);
@@ -993,7 +987,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             if let Some(val) = value {
                 collect_closure_local_ids_from_expr(val, ids);
             }
-        }
+        },
         ExprKind::While {
             condition, body, ..
         } => {
@@ -1001,7 +995,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             for stmt in body {
                 collect_closure_local_ids_from_stmt(stmt, ids);
             }
-        }
+        },
         ExprKind::WhileLet {
             conditions, body, ..
         } => {
@@ -1011,51 +1005,51 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             for stmt in body {
                 collect_closure_local_ids_from_stmt(stmt, ids);
             }
-        }
+        },
         ExprKind::Loop { body, .. } => {
             for stmt in body {
                 collect_closure_local_ids_from_stmt(stmt, ids);
             }
-        }
+        },
         ExprKind::Tuple(exprs) | ExprKind::Array(exprs) => {
             for e in exprs {
                 collect_closure_local_ids_from_expr(e, ids);
             }
-        }
+        },
         ExprKind::Grouping(inner) => {
             collect_closure_local_ids_from_expr(inner, ids);
-        }
+        },
         ExprKind::FieldAccess { object, .. } => {
             collect_closure_local_ids_from_expr(object, ids);
-        }
+        },
         ExprKind::TupleIndex { tuple, .. } => {
             collect_closure_local_ids_from_expr(tuple, ids);
-        }
+        },
         ExprKind::MethodRef { receiver, .. } => {
             collect_closure_local_ids_from_expr(receiver, ids);
-        }
+        },
         ExprKind::PrimitiveMethodRef { receiver, .. } => {
             collect_closure_local_ids_from_expr(receiver, ids);
-        }
+        },
         ExprKind::Return { value } => {
             if let Some(e) = value {
                 collect_closure_local_ids_from_expr(e, ids);
             }
-        }
+        },
         ExprKind::ImplicitMemberAccess { arguments, .. } => {
             if let Some(args) = arguments {
                 for arg in args {
                     collect_closure_local_ids_from_expr(&arg.value, ids);
                 }
             }
-        }
+        },
 
         // Lang intrinsics - recurse into arguments
         ExprKind::LangIntrinsic { arguments, .. } => {
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
 
         // Subscript call - recurse into receiver and arguments
         ExprKind::SubscriptCall {
@@ -1067,7 +1061,7 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
             for arg in arguments {
                 collect_closure_local_ids_from_expr(&arg.value, ids);
             }
-        }
+        },
 
         // Leaf expressions that don't contain sub-expressions
         ExprKind::Literal(_)
@@ -1081,6 +1075,6 @@ fn collect_closure_local_ids_from_expr(expr: &Expression, ids: &mut HashSet<Loca
         | ExprKind::Break { .. }
         | ExprKind::Continue { .. }
         | ExprKind::LangIntrinsicRef(_)
-        | ExprKind::Error => {}
+        | ExprKind::Error => {},
     }
 }

@@ -3,6 +3,9 @@ name = "kestrel-semantic-tree"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }

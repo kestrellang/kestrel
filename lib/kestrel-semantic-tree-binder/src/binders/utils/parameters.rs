@@ -46,7 +46,7 @@ fn extract_access_mode(param_node: &SyntaxNode) -> ParameterAccessMode {
             match token.kind() {
                 SyntaxKind::Mutating => return ParameterAccessMode::Mutating,
                 SyntaxKind::Consuming => return ParameterAccessMode::Consuming,
-                _ => {}
+                _ => {},
             }
         }
     }

@@ -14,7 +14,8 @@ mod function_body {
 
     #[test]
     fn function_without_body_errors() {
-        Test::new("module Test\nfunc missingBody() -> lang.i64").expect(HasError("requires a body"));
+        Test::new("module Test\nfunc missingBody() -> lang.i64")
+            .expect(HasError("requires a body"));
     }
 
     #[test]

@@ -24,10 +24,10 @@ pub fn extract_type_parameters(
     let mut type_params = Vec::new();
 
     for child in type_param_list.children() {
-        if child.kind() == SyntaxKind::TypeParameter {
-            if let Some(param) = parse_type_parameter(&child, source, file_id, parent.clone()) {
-                type_params.push(Arc::new(param));
-            }
+        if child.kind() == SyntaxKind::TypeParameter
+            && let Some(param) = parse_type_parameter(&child, source, file_id, parent.clone())
+        {
+            type_params.push(Arc::new(param));
         }
     }
 
@@ -69,29 +69,29 @@ fn extract_type_param_name(
     file_id: usize,
 ) -> Option<(String, kestrel_span::Span)> {
     for child in syntax.children_with_tokens() {
-        if let Some(token) = child.into_token() {
-            if token.kind() == SyntaxKind::Identifier {
+        if let Some(token) = child.into_token()
+            && token.kind() == SyntaxKind::Identifier
+        {
+            let text_range = token.text_range();
+            let span: kestrel_span::Span = Span::new(
+                file_id,
+                (text_range.start().into())..(text_range.end().into()),
+            );
+            return Some((token.text().to_string(), span));
+        }
+    }
+
+    if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
+        for child in name_node.children_with_tokens() {
+            if let Some(token) = child.into_token()
+                && token.kind() == SyntaxKind::Identifier
+            {
                 let text_range = token.text_range();
                 let span: kestrel_span::Span = Span::new(
                     file_id,
                     (text_range.start().into())..(text_range.end().into()),
                 );
                 return Some((token.text().to_string(), span));
-            }
-        }
-    }
-
-    if let Some(name_node) = find_child(syntax, SyntaxKind::Name) {
-        for child in name_node.children_with_tokens() {
-            if let Some(token) = child.into_token() {
-                if token.kind() == SyntaxKind::Identifier {
-                    let text_range = token.text_range();
-                    let span: kestrel_span::Span = Span::new(
-                        file_id,
-                        (text_range.start().into())..(text_range.end().into()),
-                    );
-                    return Some((token.text().to_string(), span));
-                }
             }
         }
     }
@@ -105,6 +105,7 @@ fn extract_default_type(syntax: &SyntaxNode, source: &str, file_id: usize) -> Op
     extract_ty_from_node(&ty_node, source, file_id)
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> Option<Ty> {
     let span = get_node_span(ty_node, file_id);
     let variant_node = ty_node.children().next()?;
@@ -138,7 +139,7 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
                 // Other path types can't be fully resolved at parse time
                 Some(Ty::error(span))
             }
-        }
+        },
         SyntaxKind::TyTuple => {
             let elements: Vec<Ty> = variant_node
                 .children()
@@ -146,7 +147,7 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str, file_id: usize) -> O
                 .filter_map(|c| extract_ty_from_node(&c, source, file_id))
                 .collect();
             Some(Ty::tuple(elements, span))
-        }
+        },
         _ => None,
     }
 }
@@ -170,13 +171,13 @@ pub fn extract_where_clause(
                 if let Some(constraint) = parse_type_bound(&child, source, file_id, type_params) {
                     constraints.push(constraint);
                 }
-            }
+            },
             SyntaxKind::TypeEquality => {
                 if let Some(constraint) = parse_type_equality(&child, source, file_id) {
                     constraints.push(constraint);
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -185,7 +186,7 @@ pub fn extract_where_clause(
 
 fn parse_type_bound(
     syntax: &SyntaxNode,
-    source: &str,
+    _source: &str,
     file_id: usize,
     type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<Constraint> {

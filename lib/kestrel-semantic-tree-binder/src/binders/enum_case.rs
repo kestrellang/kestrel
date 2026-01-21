@@ -152,23 +152,23 @@ fn resolve_enum_case_parameter(
 
 fn get_parent_enum_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>, span: kestrel_span::Span) -> Ty {
     // Get parent enum symbol
-    if let Some(parent) = symbol.metadata().parent() {
-        if let Ok(enum_sym) = parent.downcast_arc::<EnumSymbol>() {
-            let type_params = enum_sym.type_parameters();
-            if type_params.is_empty() {
-                // Non-generic enum - return simple enum type
-                return Ty::r#enum(enum_sym, span);
-            } else {
-                // Generic enum - create type with type parameter references
-                // e.g., for Option[T], return Option[T] where T maps to TypeParameter(T)
-                // This allows type inference to properly unify when called
-                let mut substitutions = Substitutions::new();
-                for param in &type_params {
-                    let param_ty = Ty::type_parameter(param.clone(), span.clone());
-                    substitutions.insert(param.metadata().id(), param_ty);
-                }
-                return Ty::generic_enum(enum_sym, substitutions, span);
+    if let Some(parent) = symbol.metadata().parent()
+        && let Ok(enum_sym) = parent.downcast_arc::<EnumSymbol>()
+    {
+        let type_params = enum_sym.type_parameters();
+        if type_params.is_empty() {
+            // Non-generic enum - return simple enum type
+            return Ty::r#enum(enum_sym, span);
+        } else {
+            // Generic enum - create type with type parameter references
+            // e.g., for Option[T], return Option[T] where T maps to TypeParameter(T)
+            // This allows type inference to properly unify when called
+            let mut substitutions = Substitutions::new();
+            for param in &type_params {
+                let param_ty = Ty::type_parameter(param.clone(), span.clone());
+                substitutions.insert(param.metadata().id(), param_ty);
             }
+            return Ty::generic_enum(enum_sym, substitutions, span);
         }
     }
     Ty::error(span)

@@ -198,7 +198,7 @@ fn associated_type_target_parser<'tokens>()
                 None => {
                     // Simple case: just an identifier
                     AssociatedTypeTargetData::Simple(first_name)
-                }
+                },
                 Some(((type_args, dot_span), name_span)) => {
                     // Qualified case: first_name[type_args]?.name
                     // Reconstruct protocol_path as a TyVariant::Path
@@ -211,7 +211,7 @@ fn associated_type_target_parser<'tokens>()
                         dot_span,
                         name_span,
                     }
-                }
+                },
             }
         })
         .boxed()
@@ -238,7 +238,13 @@ pub fn type_alias_declaration_parser_internal<'tokens>()
         .then(token(Token::Semicolon).or_not())
         .map(
             |(
-                (((((((attributes, visibility), type_span), target), type_params), bounds), where_clause), aliased),
+                (
+                    (
+                        (((((attributes, visibility), type_span), target), type_params), bounds),
+                        where_clause,
+                    ),
+                    aliased,
+                ),
                 semicolon_span,
             )| {
                 TypeAliasDeclarationData {
@@ -273,13 +279,13 @@ where
     {
         Ok(data) => {
             emit_type_alias_declaration(sink, data);
-        }
+        },
         Err(errors) => {
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), *span);
             }
-        }
+        },
     }
 }
 

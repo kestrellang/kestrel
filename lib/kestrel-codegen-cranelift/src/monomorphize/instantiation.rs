@@ -24,12 +24,24 @@ pub struct FunctionInstantiation {
 impl FunctionInstantiation {
     /// Create a new function instantiation.
     pub fn new(func_id: Id<Function>, type_args: Vec<Id<Ty>>) -> Self {
-        Self { func_id, type_args, self_type: None }
+        Self {
+            func_id,
+            type_args,
+            self_type: None,
+        }
     }
 
     /// Create a new function instantiation with a Self type.
-    pub fn with_self_type(func_id: Id<Function>, type_args: Vec<Id<Ty>>, self_type: Id<Ty>) -> Self {
-        Self { func_id, type_args, self_type: Some(self_type) }
+    pub fn with_self_type(
+        func_id: Id<Function>,
+        type_args: Vec<Id<Ty>>,
+        self_type: Id<Ty>,
+    ) -> Self {
+        Self {
+            func_id,
+            type_args,
+            self_type: Some(self_type),
+        }
     }
 
     /// Create an instantiation for a non-generic function.
