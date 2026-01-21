@@ -307,7 +307,7 @@ extend Optional[T]: Serialize where T: Serialize {
 
 extend Array[T]: Serialize where T: Serialize {
     public func serialize[S](mutating to serializer: S) -> Result[(), S.Error] where S: Serializer {
-        let arr = /* try */ serializer.beginArray(length: self.count);
+        let arr = try serializer.beginArray(length: self.count);
         /* for item in self {
             try arr.serializeElement(value: item)
         } */

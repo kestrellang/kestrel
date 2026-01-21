@@ -5,6 +5,7 @@ use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
+use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -17,7 +18,8 @@ use crate::context::LoweringContext;
 
 use super::{
     generate_witnesses_for_enum, generate_witnesses_for_extension, generate_witnesses_for_struct,
-    lower_enum, lower_function, lower_getter, lower_protocol, lower_setter, lower_struct,
+    lower_deinit, lower_enum, lower_function, lower_getter, lower_protocol, lower_setter,
+    lower_struct,
 };
 
 /// Lower a symbol to MIR.
@@ -175,8 +177,10 @@ pub fn lower_item(ctx: &mut LoweringContext, symbol: &Arc<dyn Symbol<KestrelLang
         },
 
         KestrelSymbolKind::Deinit => {
-            // Deinit blocks will generate drop instructions in the future
-            // For now, just skip - drop handling is Phase 5.3
+            // Lower deinit as a function
+            if let Ok(deinit_symbol) = symbol.clone().downcast_arc::<DeinitSymbol>() {
+                lower_deinit(ctx, &deinit_symbol);
+            }
         },
 
         KestrelSymbolKind::Getter => {

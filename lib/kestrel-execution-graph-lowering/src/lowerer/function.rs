@@ -16,7 +16,8 @@ use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::getter::GetterSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
-use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::symbol::local::{LocalContainer, LocalId};
+use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::setter::SetterSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -330,6 +331,127 @@ pub fn lower_initializer(ctx: &mut LoweringContext, init_symbol: &Arc<Initialize
     let locals = init_symbol.locals();
 
     // Map parameter locals
+    for (i, local) in locals.iter().take(param_count).enumerate() {
+        let mir_local_id = mir_locals[i];
+        ctx.map_local(local.id(), mir_local_id);
+    }
+
+    // Create and map non-parameter locals
+    for local in locals.iter().skip(param_count) {
+        let mir_ty = lower_type(ctx, local.ty());
+        let mir_local_id = ctx.create_local(local.name().to_string(), mir_ty);
+        ctx.map_local(local.id(), mir_local_id);
+    }
+
+    // Create entry block
+    let entry_block = ctx.create_block();
+    ctx.set_current_block(entry_block);
+    ctx.mir.function_mut(func_id).entry_block = Some(entry_block);
+
+    // Lower statements
+    for stmt in &body.statements {
+        lower_statement(ctx, stmt);
+
+        if ctx.is_block_terminated() {
+            break;
+        }
+    }
+
+    // Lower yield expression (if any) for side effects, then return unit.
+    if !ctx.is_block_terminated() {
+        if let Some(yield_expr) = body.yield_expr.as_ref() {
+            let _ = lower_expression(ctx, yield_expr);
+        }
+        if !ctx.is_block_terminated() {
+            ctx.emit_return_unit();
+        }
+    }
+
+    ctx.exit_function();
+}
+
+/// Lower a deinit to MIR.
+///
+/// Deinits are lowered as functions with signature:
+/// `func Type.deinit(self: &var Type) -> ()`
+pub fn lower_deinit(ctx: &mut LoweringContext, deinit_symbol: &Arc<DeinitSymbol>) {
+    // Get the resolved body
+    let body = match deinit_symbol
+        .metadata()
+        .get_behavior::<ResolvedExecutableBehavior>()
+    {
+        Some(behavior) => behavior.body().clone(),
+        None => {
+            ctx.emit_error(LoweringError::missing_body(
+                "deinit",
+                deinit_symbol.metadata().span().clone(),
+            ));
+            return;
+        },
+    };
+
+    // Generate qualified name
+    let name = qualified_name_for_symbol(ctx, &(deinit_symbol.clone() as _));
+
+    // Deinits always return unit
+    let mir_ret_ty = ctx.mir.ty_unit();
+
+    // Create the function
+    let func_id = ctx.mir.add_function(name, mir_ret_ty).id();
+
+    // IMPORTANT: Register type parameters BEFORE lowering any types.
+    // Get parent type parameters (for deinits inside generic structs/enums)
+    let parent_type_params = get_deinit_parent_type_parameters(deinit_symbol);
+    for tp in &parent_type_params {
+        let tp_name = tp.metadata().name().value.clone();
+        let tp_def =
+            kestrel_execution_graph::TypeParamDef::new(tp_name, TypeParamOwner::Function(func_id));
+        let tp_id = ctx.mir.type_params.alloc(tp_def);
+        ctx.mir.function_mut(func_id).type_params.push(tp_id);
+        ctx.map_type_param(tp.metadata().id(), tp_id);
+    }
+
+    // NOW we can lower types with type parameters in scope
+
+    // Prepare self parameter type (&var Type)
+    let self_param_ty = if let Some(parent) = deinit_symbol.metadata().parent() {
+        let parent_name = qualified_name_for_symbol(ctx, &parent);
+        // Build type arguments from parent's type parameters
+        let type_args: Vec<_> = parent_type_params
+            .iter()
+            .filter_map(|tp| {
+                ctx.get_type_param(tp.metadata().id()).map(|mir_tp| {
+                    ctx.mir
+                        .intern_type(kestrel_execution_graph::MirTy::TypeParam(mir_tp))
+                })
+            })
+            .collect();
+        let parent_ty = ctx.mir.ty_named(parent_name, type_args);
+        Some(ctx.mir.ty_ref_mut(parent_ty))
+    } else {
+        None
+    };
+
+    // Add self parameter
+    if let Some(self_ty) = self_param_ty {
+        ctx.mir.function_builder(func_id).param("self", self_ty);
+    }
+
+    // Deinit has no other parameters
+
+    // Enter the function context
+    ctx.enter_function(func_id);
+
+    // Map semantic locals to MIR locals
+    // Copy the locals vector to avoid borrow issues
+    let (param_count, mir_locals) = {
+        let func_def = ctx.mir.function(func_id);
+        (func_def.params.len(), func_def.locals.clone())
+    };
+
+    let locals = deinit_symbol.locals();
+
+    // Map parameter locals (just self)
     for (i, local) in locals.iter().take(param_count).enumerate() {
         let mir_local_id = mir_locals[i];
         ctx.map_local(local.id(), mir_local_id);
@@ -794,6 +916,29 @@ fn get_initializer_parent_type_parameters(
     use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
 
     if let Some(parent) = init_symbol.metadata().parent() {
+        // Try to downcast to StructSymbol
+        if let Ok(struct_symbol) = parent.clone().downcast_arc::<StructSymbol>() {
+            return struct_symbol.type_parameters();
+        }
+        // Try to downcast to EnumSymbol
+        if let Ok(enum_symbol) = parent.clone().downcast_arc::<EnumSymbol>() {
+            return enum_symbol.type_parameters();
+        }
+        // Try to downcast to ExtensionSymbol
+        if let Ok(extension_symbol) = parent.downcast_arc::<ExtensionSymbol>() {
+            return extension_symbol.referenced_type_parameters();
+        }
+    }
+    vec![]
+}
+
+/// Get type parameters from the parent struct, enum, or extension (for deinits).
+fn get_deinit_parent_type_parameters(
+    deinit_symbol: &Arc<DeinitSymbol>,
+) -> Vec<Arc<TypeParameterSymbol>> {
+    use kestrel_semantic_tree::symbol::extension::ExtensionSymbol;
+
+    if let Some(parent) = deinit_symbol.metadata().parent() {
         // Try to downcast to StructSymbol
         if let Ok(struct_symbol) = parent.clone().downcast_arc::<StructSymbol>() {
             return struct_symbol.type_parameters();

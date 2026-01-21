@@ -244,6 +244,22 @@ fn unify(
             Ok(SolveResult::Solved)
         },
 
+        // Error types unify with anything (suppress cascading errors)
+        (TyKind::Error, _) | (_, TyKind::Error) => Ok(SolveResult::Solved),
+
+        // Never (bottom type) unifies with anything.
+        // IMPORTANT: Never should NOT substitute an Infer type, because Never is the
+        // bottom type that can coerce to any other type. If we have:
+        //   match x { true => 42, false => return }
+        // The match type should be Int (from the first arm), not Never.
+        // When Infer is unified with Never, we succeed without substituting,
+        // allowing another constraint to give Infer a concrete type.
+        (TyKind::Never, TyKind::Infer) | (TyKind::Infer, TyKind::Never) => {
+            // Don't substitute - leave the Infer type open for other constraints
+            Ok(SolveResult::Solved)
+        },
+        (TyKind::Never, _) | (_, TyKind::Never) => Ok(SolveResult::Solved),
+
         // One is an inference placeholder - substitute it
         (TyKind::Infer, _) => {
             if occurs_check(ty_a.id(), &ty_b, ctx) {
@@ -267,12 +283,6 @@ fn unify(
             ctx.substitutions_mut().insert(ty_b.id(), ty_a.clone());
             Ok(SolveResult::Solved)
         },
-
-        // Error types unify with anything (suppress cascading errors)
-        (TyKind::Error, _) | (_, TyKind::Error) => Ok(SolveResult::Solved),
-
-        // Never unifies with anything (bottom type)
-        (TyKind::Never, _) | (_, TyKind::Never) => Ok(SolveResult::Solved),
 
         // UnresolvedFunction with Function - check param info compatibility
         (

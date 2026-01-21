@@ -8,7 +8,7 @@ mod struct_lowerer;
 mod witness;
 
 pub use enum_lowerer::lower_enum;
-pub use function::{lower_function, lower_getter, lower_setter};
+pub use function::{lower_deinit, lower_function, lower_getter, lower_setter};
 pub use item::lower_item;
 pub use protocol::lower_protocol;
 pub use struct_lowerer::lower_struct;

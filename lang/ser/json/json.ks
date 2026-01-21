@@ -7,7 +7,7 @@
 // import std.json.(Json, JsonValue)
 //
 // // Parse JSON
-// let value = /* try */Json.parse("{\"name\": \"Alice\", \"age\": 30}")
+// let value = try Json.parse("{\"name\": \"Alice\", \"age\": 30}")
 //
 // // Access values
 // let name = value["name"].asString()  // Optional["Alice"]
@@ -21,10 +21,10 @@
 //
 // // Serialize any Serialize type
 // let point = Point(x: 10, y: 20)
-// let json = /* try */Json.serialize(point)  // "{\"x\":10,\"y\":20}"
+// let json = try Json.serialize(point)  // "{\"x\":10,\"y\":20}"
 //
 // // Deserialize to any Deserialize type
-// let point: Point = /* try */Json.deserialize("{\"x\":10,\"y\":20}")
+// let point: Point = try Json.deserialize("{\"x\":10,\"y\":20}")
 // ```
 
 module std.json
@@ -220,14 +220,14 @@ extend JsonValue: Serialize {
             .Number(v) => serializer.serializeFloat64(value: v),
             .String(v) => serializer.serializeString(value: v),
             .Array(arr) => {
-                let arrSerializer = /* try */ serializer.beginArray(length: arr.count);
+                let arrSerializer = try serializer.beginArray(length: arr.count);
                 /* for item in arr {
                     try arrSerializer.serializeElement(value: item)
                 } */
                 arrSerializer.end()
             },
             .Object(obj) => {
-                let objSerializer = /*try*/ serializer.beginObject(name: "", fieldCount: obj.count);
+                let objSerializer = try serializer.beginObject(name: "", fieldCount: obj.count);
                 /* for (key, value) in obj {
                     try objSerializer.serializeField(name: key, value: value)
                 } */
@@ -262,19 +262,15 @@ public struct Json {
     // Serialize any Serialize type to JSON string
     public static func serialize[T](value: T) -> Result[String, JsonError] where T: Serialize {
         var serializer = JsonSerializer();
-        match value.serialize(to: serializer) {
-            .Ok(_) => serializer.finish(),
-            .Err(e) => .Err(e)
-        }
+        try value.serialize(to: serializer);
+        serializer.finish()
     }
 
     // Serialize with pretty printing
     public static func serialize[T](value: T, pretty: Bool) -> Result[String, JsonError] where T: Serialize {
         var serializer = JsonSerializer(pretty: pretty);
-        match value.serialize(to: serializer) {
-            .Ok(_) => serializer.finish(),
-            .Err(e) => .Err(e)
-        }
+        try value.serialize(to: serializer);
+        serializer.finish()
     }
 
     // Deserialize JSON string to any Deserialize type
@@ -296,7 +292,7 @@ struct JsonParser {
 
     public func parse() -> Result[JsonValue, JsonError] {
         self.skipWhitespace();
-        let value = /* try */self.parseValue();
+        let value = try self.parseValue();
         self.skipWhitespace();
         if self.position < self.input.byteCount {
             return .Err(JsonError(message: "unexpected characters after JSON value", at: self.position))
@@ -395,7 +391,7 @@ struct JsonParser {
                     114 => result.append(codePoint: CodePoint(value: 13)),  // \r
                     116 => result.append(codePoint: CodePoint(value: 9)),   // \t
                     117 => { // \uXXXX
-                        let hex = /* try */self.parseHexEscape();
+                        let hex = try self.parseHexEscape();
                         result.append(codePoint: CodePoint(value: hex))
                     },
                     _ => return .Err(JsonError(message: "invalid escape sequence", at: self.position - 1))
@@ -514,7 +510,7 @@ struct JsonParser {
         }
 
         loop {
-            let value = /* try */self.parseValue();
+            let value = try self.parseValue();
             elements.append(value);
 
             self.skipWhitespace();
@@ -557,7 +553,7 @@ struct JsonParser {
                 return .Err(JsonError(message: "expected string key", at: self.position))
             }
 
-            let key = /* try */self.parseString();
+            let key = try self.parseString();
 
             self.skipWhitespace();
 
@@ -565,7 +561,7 @@ struct JsonParser {
                 return .Err(JsonError(message: "expected ':'", at: self.position));
             }
 
-            let value = /* try */self.parseValue();
+            let value = try self.parseValue();
             entries(key) = value;
 
             self.skipWhitespace();
@@ -873,7 +869,7 @@ public struct JsonSerializer: Serializer {
 
     // Compound types
     public mutating func serializeArray[S](values: Array[S]) -> Result[(), JsonError] where S: Serialize {
-        var arr = /* try */self.beginArray(length: values.count);
+        var arr = try self.beginArray(length: values.count);
         /* for item in values {
             try arr.serializeElement(value: item)
         } */
@@ -881,7 +877,7 @@ public struct JsonSerializer: Serializer {
     }
 
     public mutating func serializeMap[K, V](entries: Array[(K, V)]) -> Result[(), JsonError] where K: Serialize, V: Serialize {
-        var obj = /* try */self.beginObject(name: "", fieldCount: entries.count);
+        var obj = try self.beginObject(name: "", fieldCount: entries.count);
         /* for (key, value) in entries {
             // For JSON, keys should be strings
             // This is a simplification; full impl would serialize key to string
@@ -981,7 +977,7 @@ public struct JsonDeserializer: Deserializer {
         if let value = self.peeked {
             return .Ok(value)
         }
-        let value = /* try */self.parser.parseValue();
+        let value = try self.parser.parseValue();
         self.peeked = .Some(value);
         .Ok(value)
     }
@@ -996,10 +992,7 @@ public struct JsonDeserializer: Deserializer {
 
     // Primitive deserialization
     public mutating func deserializeNil() -> Result[(), JsonError] {
-        let value = /* try */match self.takeValue() {
-            .Ok(value) => value,
-            .Err(e) => return .Err(e)
-        };
+        let value = try self.takeValue();
         match value {
             .Null => .Ok(()),
             _ => .Err(JsonError(message: "expected null"))
@@ -1007,10 +1000,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeBool() -> Result[Bool, JsonError] {
-        let value = /* try */match self.takeValue()  {
-            .Ok(value) => value,
-            .Err(e) => return .Err(e)
-        };
+        let value = try self.takeValue();
         match value {
             .Bool(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected boolean"))
@@ -1018,10 +1008,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeInt() -> Result[Int, JsonError] {
-        let value = /* try */match self.takeValue()  {
-            .Ok(value) => value,
-            .Err(e) => return .Err(e)
-        };
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(Int(v)),
             _ => .Err(JsonError(message: "expected integer"))
@@ -1029,7 +1016,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeInt8() -> Result[Int8, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(Int8(v)),
             _ => .Err(JsonError(message: "expected integer"))
@@ -1037,7 +1024,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeInt16() -> Result[Int16, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(Int16(v)),
             _ => .Err(JsonError(message: "expected integer"))
@@ -1045,7 +1032,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeInt32() -> Result[Int32, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(Int32(v)),
             _ => .Err(JsonError(message: "expected integer"))
@@ -1053,7 +1040,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeInt64() -> Result[Int64, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(Int64(v)),
             _ => .Err(JsonError(message: "expected integer"))
@@ -1061,7 +1048,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeUInt() -> Result[UInt, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(UInt(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
@@ -1069,7 +1056,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeUInt8() -> Result[UInt8, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(UInt8(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
@@ -1077,7 +1064,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeUInt16() -> Result[UInt16, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(UInt16(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
@@ -1085,7 +1072,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeUInt32() -> Result[UInt32, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(UInt32(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
@@ -1093,7 +1080,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeUInt64() -> Result[UInt64, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(UInt64(v)),
             _ => .Err(JsonError(message: "expected unsigned integer"))
@@ -1101,7 +1088,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeFloat32() -> Result[Float32, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(Float32(v)),
             _ => .Err(JsonError(message: "expected float"))
@@ -1109,7 +1096,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeFloat64() -> Result[Float64, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Number(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected float"))
@@ -1117,7 +1104,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeString() -> Result[String, JsonError] {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .String(v) => .Ok(v),
             _ => .Err(JsonError(message: "expected string"))
@@ -1126,7 +1113,7 @@ public struct JsonDeserializer: Deserializer {
 
     // Compound types
     public mutating func deserializeArray[T]() -> Result[Array[T], JsonError] where T: Deserialize {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Array(arr) => {
                 var result: Array[T] = [];
@@ -1134,7 +1121,7 @@ public struct JsonDeserializer: Deserializer {
                     // Re-serialize and deserialize each item
                     // This is inefficient but type-safe
                     var itemDeserializer = JsonDeserializer(input: Json.stringify(item));
-                    let deserialized = /* try */T.deserialize(from: itemDeserializer);
+                    let deserialized = try T.deserialize(from: itemDeserializer);
                     result.append(deserialized);
                 } */
                 .Ok(result)
@@ -1144,17 +1131,17 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeMap[K, V]() -> Result[Dictionary[K, V], JsonError] where K: Deserialize, K: Hashable, V: Deserialize {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Object(obj) => {
                 var result: Dictionary[K, V] = [];
                 /* for (key, val) in obj {
                     // Deserialize key and value
                     var keyDeserializer = JsonDeserializer(input: "\"" + key + "\"");
-                    let deserializedKey = /* try */K.deserialize(from: keyDeserializer);
+                    let deserializedKey = try K.deserialize(from: keyDeserializer);
 
                     var valDeserializer = JsonDeserializer(input: Json.stringify(val));
-                    let deserializedVal = /* try */V.deserialize(from: valDeserializer);
+                    let deserializedVal = try V.deserialize(from: valDeserializer);
 
                     result(deserializedKey) = deserializedVal
                 } */
@@ -1165,7 +1152,7 @@ public struct JsonDeserializer: Deserializer {
     }
 
     public mutating func deserializeObject[V](visitor: V.Visitor) -> Result[V, JsonError] where V: Deserialize {
-        let value = /* try */self.takeValue();
+        let value = try self.takeValue();
         match value {
             .Object(obj) => {
                 var access = JsonObjectAccess(object: obj);
@@ -1239,8 +1226,8 @@ public struct JsonValueVisitor: ObjectVisitor {
 
     public mutating func visit[A](mutating access: A) -> Result[JsonValue, A.Error] where A: ObjectAccess {
         var entries: Dictionary[String, JsonValue] = [];
-        while let field = /* try */access.nextField() {
-            let value = /* try */access.value[JsonValue]();
+        while let field = try access.nextField() {
+            let value = try access.value[JsonValue]();
             entries(field) = value
         }
         .Ok(.Object(entries))

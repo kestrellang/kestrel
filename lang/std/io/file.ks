@@ -151,11 +151,8 @@ public struct File: Read, Write, not Copyable {
 
     // Rewind to start
     public func rewind() -> Result[(), Error] {
-        // TODO: add try back
-        match self.seek(to: .Start(0)) {
-            .Ok(_) => .Ok(()),
-            .Err(e) => .Err(e)
-        }
+        try self.seek(to: .Start(0));
+        .Ok(())
     }
 
     // Get raw file descriptor
@@ -175,47 +172,31 @@ public struct File: Read, Write, not Copyable {
 
 // Read entire file to string
 public func readFileString(path: String) -> Result[String, Error] {
-    // TODO: add try back
-    match File.open(path) {
-        .Ok(file) => {
-            var bytes = Array[UInt8]();
-            // TODO: add try back
-            match readAll(file, into: bytes) {
-                .Ok(_) => {
-                    // Create string from bytes
-                    // Note: This requires String to have a constructor from bytes
-                    // For now we'll build it character by character
-                    var result = "";
-                    var i: Int64 = 0;
-                    let count = bytes.count();
-                    while i < count {
-                        // This is inefficient but works for now
-                        // TODO: Add String.fromUtf8Bytes() method
-                        i = i + 1
-                    }
-                    .Ok(result)
-                },
-                .Err(e) => .Err(e)
-            }
-        },
-        .Err(e) => .Err(e)
+    let file = try File.open(path);
+    var bytes = Array[UInt8]();
+    try readAll(file, into: bytes);
+    // Create string from bytes
+    // Note: This requires String to have a constructor from bytes
+    // For now we'll build it character by character
+    var result = "";
+    var i: Int64 = 0;
+    let count = bytes.count();
+    while i < count {
+        // This is inefficient but works for now
+        // TODO: Add String.fromUtf8Bytes() method
+        i = i + 1
     }
+    .Ok(result)
 }
 
 // Write string to file
 public func writeFileString(path: String, content: String) -> Result[(), Error] {
-    // TODO: add try back
-    match File.create(path) {
-        .Ok(file) => writeStr(file, content),
-        .Err(e) => .Err(e)
-    }
+    let file = try File.create(path);
+    writeStr(file, content)
 }
 
 // Append string to file
 public func appendFileString(path: String, content: String) -> Result[(), Error] {
-    // TODO: add try back
-    match File.openAppend(path) {
-        .Ok(file) => writeStr(file, content),
-        .Err(e) => .Err(e)
-    }
+    let file = try File.openAppend(path);
+    writeStr(file, content)
 }

@@ -10,6 +10,7 @@ use kestrel_semantic_tree::behavior::executable::{ExecutableBehavior, ResolvedEx
 use kestrel_semantic_tree::behavior::extension_target::ExtensionTargetBehavior;
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::deinit::DeinitSymbol;
 use kestrel_semantic_tree::symbol::enum_symbol::EnumSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
@@ -126,11 +127,12 @@ impl Analyzer for TypeInferenceAnalyzer {
     ) {
         let kind = symbol.metadata().kind();
 
-        // Only process functions, initializers, getters, and setters
+        // Only process functions, initializers, getters, setters, and deinits
         if kind != KestrelSymbolKind::Function
             && kind != KestrelSymbolKind::Initializer
             && kind != KestrelSymbolKind::Getter
             && kind != KestrelSymbolKind::Setter
+            && kind != KestrelSymbolKind::Deinit
         {
             return;
         }
@@ -169,6 +171,12 @@ impl Analyzer for TypeInferenceAnalyzer {
         } else if let Some(init) = symbol.as_ref().downcast_ref::<InitializerSymbol>() {
             apply_solution_to_locals(
                 init as &dyn LocalContainer,
+                &solution,
+                concrete_self_type.as_ref(),
+            );
+        } else if let Some(deinit) = symbol.as_ref().downcast_ref::<DeinitSymbol>() {
+            apply_solution_to_locals(
+                deinit as &dyn LocalContainer,
                 &solution,
                 concrete_self_type.as_ref(),
             );

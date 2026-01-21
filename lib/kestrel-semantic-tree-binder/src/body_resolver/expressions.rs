@@ -1250,10 +1250,15 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     // Push scope for continue arm
     ctx.local_scope.push_scope();
 
+    // Create a single inference type for the value binding.
+    // This type will be shared between the local binding, pattern, and body reference
+    // so that type inference can connect them properly.
+    let value_ty = Ty::infer(span.clone());
+
     // Bind 'value' local for .Continue(value) pattern
     let value_local_id = ctx.local_scope.bind(
         "$try_value".to_string(), // Use synthetic name to avoid conflicts
-        Ty::infer(span.clone()),
+        value_ty.clone(),
         false,
         span.clone(),
     );
@@ -1263,7 +1268,7 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         value_local_id,
         Mutability::Immutable,
         "$try_value".to_string(),
-        Ty::infer(span.clone()),
+        value_ty.clone(),
         span.clone(),
     );
     let continue_binding = EnumPatternBinding::unlabeled(value_binding_pattern, span.clone());
@@ -1274,8 +1279,9 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     );
 
     // Body for continue arm: just reference the value
+    // Use the same type as the binding pattern so type inference connects them
     let continue_body =
-        Expression::local_ref(value_local_id, Ty::infer(span.clone()), false, span.clone());
+        Expression::local_ref(value_local_id, value_ty, false, span.clone());
     let continue_arm = MatchArm::new(continue_pattern, continue_body, span.clone());
 
     ctx.local_scope.pop_scope();
@@ -1283,10 +1289,15 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
     // Push scope for break arm
     ctx.local_scope.push_scope();
 
+    // Create a single inference type for the early binding.
+    // This type will be shared between the local binding, pattern, and body reference
+    // so that type inference can connect them properly.
+    let early_ty = Ty::infer(span.clone());
+
     // Bind 'early' local for .Break(early) pattern
     let early_local_id = ctx.local_scope.bind(
         "$try_early".to_string(),
-        Ty::infer(span.clone()),
+        early_ty.clone(),
         false,
         span.clone(),
     );
@@ -1296,7 +1307,7 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         early_local_id,
         Mutability::Immutable,
         "$try_early".to_string(),
-        Ty::infer(span.clone()),
+        early_ty.clone(),
         span.clone(),
     );
     let break_binding = EnumPatternBinding::unlabeled(early_binding_pattern, span.clone());
@@ -1309,10 +1320,10 @@ fn resolve_try_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) ->
         .function_return_type()
         .unwrap_or_else(|| Ty::error(span.clone()));
 
-    // Reference to the early local
+    // Reference to the early local - use the same type as the binding pattern
     let early_ref = Expression::local_ref(
         early_local_id,
-        Ty::infer(span.clone()),
+        early_ty,
         false,
         span.clone(),
     );
