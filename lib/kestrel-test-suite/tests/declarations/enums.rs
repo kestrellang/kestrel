@@ -1317,3 +1317,213 @@ mod regression {
         .expect(Compiles);
     }
 }
+
+/// Tests for enum cases without labels (positional parameters).
+/// The feature allows cases like `case Some(T)` instead of `case Some(value: T)`.
+/// Synthetic parameter names `_0`, `_1`, etc. are generated internally.
+mod unlabeled_cases {
+    use super::*;
+
+    #[test]
+    fn single_unlabeled_parameter() {
+        Test::new(
+            r#"module Test
+            enum Option[T] {
+                case Some(T)
+                case None
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Option").is(SymbolKind::Enum));
+    }
+
+    #[test]
+    fn multiple_unlabeled_parameters() {
+        Test::new(
+            r#"module Test
+            enum Pair[A, B] {
+                case Value(A, B)
+                case Empty
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Pair").is(SymbolKind::Enum));
+    }
+
+    #[test]
+    fn mixed_labeled_and_unlabeled_cases() {
+        Test::new(
+            r#"module Test
+            enum Message {
+                case Text(lang.str)
+                case Number(value: lang.i64)
+                case Pair(lang.str, lang.i64)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Message").is(SymbolKind::Enum));
+    }
+
+    #[test]
+    fn unlabeled_case_construction() {
+        Test::new(
+            r#"module Test
+            enum Option[T] {
+                case Some(T)
+                case None
+            }
+            func wrap(value: lang.i64) -> Option[lang.i64] {
+                Option.Some(value)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn unlabeled_case_pattern_matching() {
+        Test::new(
+            r#"module Test
+            enum Option[T] {
+                case Some(T)
+                case None
+            }
+            func unwrap(opt: Option[lang.i64]) -> lang.i64 {
+                match opt {
+                    .Some(let v) => v
+                    .None => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_unlabeled_pattern_matching() {
+        Test::new(
+            r#"module Test
+            enum Pair[A, B] {
+                case Value(A, B)
+                case Empty
+            }
+            func first(p: Pair[lang.i64, lang.str]) -> lang.i64 {
+                match p {
+                    .Value(let a, let _b) => a
+                    .Empty => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn result_enum_unlabeled() {
+        Test::new(
+            r#"module Test
+            enum Result[T, E] {
+                case Ok(T)
+                case Err(E)
+            }
+            func getValue(r: Result[lang.i64, lang.str]) -> lang.i64 {
+                match r {
+                    .Ok(let v) => v
+                    .Err(let _e) => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn either_enum_unlabeled() {
+        Test::new(
+            r#"module Test
+            enum Either[L, R] {
+                case Left(L)
+                case Right(R)
+            }
+            func fold[L, R, Out](
+                either: Either[L, R],
+                onLeft: (L) -> Out,
+                onRight: (R) -> Out
+            ) -> Out {
+                match either {
+                    .Left(let l) => onLeft(l)
+                    .Right(let r) => onRight(r)
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn three_unlabeled_parameters() {
+        Test::new(
+            r#"module Test
+            enum Triple[A, B, C] {
+                case Value(A, B, C)
+                case Empty
+            }
+            func get_middle(t: Triple[lang.i64, lang.str, lang.i1]) -> lang.str {
+                match t {
+                    .Value(let _a, let b, let _c) => b
+                    .Empty => ""
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn recursive_enum_unlabeled() {
+        Test::new(
+            r#"module Test
+            indirect enum List[T] {
+                case Cons(T, List[T])
+                case Nil
+            }
+            func head(list: List[lang.i64]) -> lang.i64 {
+                match list {
+                    .Cons(let h, let _t) => h
+                    .Nil => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn nested_unlabeled_enums() {
+        Test::new(
+            r#"module Test
+            enum Inner[T] {
+                case Value(T)
+                case None
+            }
+            enum Outer[T] {
+                case Wrapped(Inner[T])
+                case Empty
+            }
+            func unwrap_nested(o: Outer[lang.i64]) -> lang.i64 {
+                match o {
+                    .Wrapped(let inner) => match inner {
+                        .Value(let v) => v
+                        .None => 0
+                    }
+                    .Empty => 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}

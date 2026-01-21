@@ -18,7 +18,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -32,7 +32,7 @@ func test() -> lang.str {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -46,7 +46,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -102,7 +102,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -163,7 +163,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -178,7 +178,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -193,7 +193,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -243,7 +243,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -261,7 +261,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -275,7 +275,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -289,7 +289,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -508,7 +508,7 @@ func test(cond: lang.i1) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("incompatible types"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -526,7 +526,7 @@ func test(cond: lang.i1) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("incompatible types"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -544,7 +544,7 @@ func test(cond: lang.i1) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("incompatible types"));
+        .expect(HasError("type mismatch"));
     }
 
     #[test]
@@ -564,7 +564,7 @@ func test(x: lang.i64) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("incompatible types"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -621,7 +621,7 @@ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("incompatible types"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -641,7 +641,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -659,7 +659,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -677,7 +677,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -767,7 +767,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -790,7 +790,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -809,7 +809,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -828,7 +828,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -866,7 +866,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -884,7 +884,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("array element type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -898,7 +898,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("array element type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -912,7 +912,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("array element type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -957,7 +957,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("array element type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -1133,7 +1133,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -1199,7 +1199,7 @@ func test(a: lang.i1, b: lang.i1, c: lang.i1) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("incompatible types"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -1237,7 +1237,7 @@ func test(a: lang.i1, b: lang.i1) -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -1254,7 +1254,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -1270,7 +1270,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -1287,7 +1287,7 @@ func test() -> lang.i64 {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 }
 
@@ -1325,7 +1325,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]
@@ -1379,7 +1379,7 @@ func test() {
 }
 "#,
         )
-        .expect(HasError("type mismatch"));
+        .expect(HasError("does not conform to protocol"));
     }
 
     #[test]

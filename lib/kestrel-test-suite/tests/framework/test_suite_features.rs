@@ -377,3 +377,89 @@ mod prelude {
         .expect(Symbol::new("Handle").has(Behavior::IsCopyable(false)));
     }
 }
+
+mod run_expectations {
+    use super::*;
+
+    #[test]
+    fn exit_code_expectation() {
+        // Test that we can verify exit codes
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                42
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(ExitCode(42));
+    }
+
+    #[test]
+    fn runs_expectation_with_zero_exit() {
+        // Runs expects exit code 0
+        Test::new(
+            r#"module Test
+
+            func main() -> lang.i64 {
+                0
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Runs);
+    }
+
+    #[test]
+    fn exit_code_from_expression() {
+        // Verify more complex exit codes
+        Test::new(
+            r#"module Test
+
+            func add(a: lang.i64, b: lang.i64) -> lang.i64 {
+                lang.i64_add(a, b)
+            }
+
+            func main() -> lang.i64 {
+                add(20, 22)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(ExitCode(42));
+    }
+}
+
+mod stdlib {
+    use super::*;
+
+    #[test]
+    fn with_stdlib_loads_stdlib_files() {
+        // Test that with_stdlib() makes stdlib available
+        // Note: This may fail if stdlib has compilation issues, but demonstrates the feature
+        Test::new(
+            r#"module Test
+
+            // Just test that stdlib compiles alongside user code
+            func main() -> lang.i64 {
+                0
+            }
+        "#,
+        )
+        .with_stdlib()
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn without_stdlib_is_default() {
+        // Verify that without_stdlib() is the default behavior
+        Test::new(
+            r#"module Test
+            struct Foo {}
+        "#,
+        )
+        .without_stdlib()
+        .expect(Compiles);
+    }
+}
