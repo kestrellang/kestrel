@@ -1,6 +1,6 @@
 //! MIR to Cranelift type translation.
 
-use crate::monomorphize::{Substitution, resolve_associated_type};
+use crate::monomorphize::{Substitution, build_substitution, resolve_associated_type};
 use kestrel_codegen::TargetConfig;
 use kestrel_execution_graph::{Id, MirContext, MirTy, Ty};
 
@@ -132,12 +132,23 @@ pub fn is_pass_by_value_ext(ctx: &MirContext, ty: Id<Ty>, is_extern: bool) -> bo
 }
 
 pub fn get_wrapper_primitive(ctx: &MirContext, ty: Id<Ty>) -> Option<Id<Ty>> {
-    if let MirTy::Named { name, .. } = ctx.ty(ty) {
+    if let MirTy::Named { name, type_args } = ctx.ty(ty) {
         if let Some((_, struct_def)) = ctx.structs.iter().find(|(_, s)| s.name == *name) {
             if struct_def.fields.len() == 1 {
                 let field_id = struct_def.fields[0];
                 let field_def = &ctx.fields[field_id];
-                return Some(field_def.ty);
+                let mut field_ty = field_def.ty;
+
+                // Apply substitution from struct's type params to concrete type args
+                let type_params = &struct_def.type_params;
+                if !type_params.is_empty() && type_params.len() == type_args.len() {
+                    let subst = build_substitution(ctx, type_params, type_args);
+                    if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx, field_ty) {
+                        field_ty = substituted_ty;
+                    }
+                }
+
+                return Some(field_ty);
             }
         }
     }

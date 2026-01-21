@@ -2,7 +2,7 @@
 
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::monomorphize::Substitution;
+use crate::monomorphize::{Substitution, build_substitution};
 use crate::place::compile_place_read;
 use crate::rvalue::compile_value;
 
@@ -300,7 +300,8 @@ fn get_place_type(
 
             // Find the struct and get the field type
             if let MirTy::Named {
-                name: type_name, ..
+                name: type_name,
+                type_args,
             } = parent_ty
             {
                 let type_name_data = ctx.mir.name(*type_name);
@@ -310,7 +311,18 @@ fn get_place_type(
                         for field_id in &struct_def.fields {
                             let field_def = &ctx.mir.fields[*field_id];
                             if field_def.name == *name {
-                                return Ok(field_def.ty);
+                                let mut field_ty = field_def.ty;
+
+                                // Apply substitution from struct's type params to concrete type args
+                                let type_params = &struct_def.type_params;
+                                if !type_params.is_empty() && type_params.len() == type_args.len() {
+                                    let subst = build_substitution(ctx.mir, type_params, type_args);
+                                    if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
+                                        field_ty = substituted_ty;
+                                    }
+                                }
+
+                                return Ok(field_ty);
                             }
                         }
                         return Err(CodegenError::Unsupported(format!(
@@ -359,7 +371,7 @@ fn get_place_type(
                 let enum_ty_id = get_place_type(ctx, grandparent)?;
                 let enum_ty = ctx.mir.ty(enum_ty_id);
 
-                if let MirTy::Named { name, .. } = enum_ty {
+                if let MirTy::Named { name, type_args } = enum_ty {
                     let name_data = ctx.mir.name(*name);
                     for (_, enum_def) in ctx.mir.enums.iter() {
                         if ctx.mir.name(enum_def.name) == name_data {
@@ -383,7 +395,18 @@ fn get_place_type(
                             }
                             let field_id = fields[*index];
                             let field_def = &ctx.mir.fields[field_id];
-                            return Ok(field_def.ty);
+                            let mut field_ty = field_def.ty;
+
+                            // Apply substitution from enum's type params to concrete type args
+                            let type_params = &enum_def.type_params;
+                            if !type_params.is_empty() && type_params.len() == type_args.len() {
+                                let subst = build_substitution(ctx.mir, type_params, type_args);
+                                if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
+                                    field_ty = substituted_ty;
+                                }
+                            }
+
+                            return Ok(field_ty);
                         }
                     }
                 }
@@ -392,7 +415,8 @@ fn get_place_type(
             // Regular struct or tuple
             match parent_ty {
                 MirTy::Named {
-                    name: type_name, ..
+                    name: type_name,
+                    type_args,
                 } => {
                     let type_name_data = ctx.mir.name(*type_name);
                     for (_, struct_def) in ctx.mir.structs.iter() {
@@ -407,7 +431,18 @@ fn get_place_type(
                             }
                             let field_id = fields[*index];
                             let field_def = &ctx.mir.fields[field_id];
-                            return Ok(field_def.ty);
+                            let mut field_ty = field_def.ty;
+
+                            // Apply substitution from struct's type params to concrete type args
+                            let type_params = &struct_def.type_params;
+                            if !type_params.is_empty() && type_params.len() == type_args.len() {
+                                let subst = build_substitution(ctx.mir, type_params, type_args);
+                                if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
+                                    field_ty = substituted_ty;
+                                }
+                            }
+
+                            return Ok(field_ty);
                         }
                     }
                     Err(CodegenError::Unsupported(format!(

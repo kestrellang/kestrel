@@ -22,7 +22,7 @@
 - [x] Multi-file compilation
 - [x] Aggregate return ABI (SRET)
 - [x] BooleanConditional protocol
-- [x] Build standard library 
+- [x] Build standard library
 - [x] Build IO
 - [x] Build pong
 - [x] String escape codes
@@ -30,14 +30,14 @@
 - [x] Remove old STD
 - [x] Move IO into standard library
 - [x] Build with std by default, add --no-std flag.
-- [x] Fix matches on non-primitive types 
+- [x] Fix matches on non-primitive types
 - [x] Add Formattable protocol
 - [x] Remove deinit + copyable warning
 - [x] Error for try
 - [x] Fix test suite
 - [ ] Reference counting
-- [ ] Add tests for features
-- [ ] Add tests for STD
+- [x] Add tests for features
+- [x] Add tests for STD
 
 ## Phase 14
 

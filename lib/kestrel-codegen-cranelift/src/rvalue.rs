@@ -173,8 +173,8 @@ pub fn compile_rvalue(
                 compile_value(ctx, func_def, subst, lhs, builder, local_map, stack_locals)?;
             let rhs_val =
                 compile_value(ctx, func_def, subst, rhs, builder, local_map, stack_locals)?;
-            let (_, lhs_ty_opt) = get_value_layout(ctx, lhs, local_map)?;
-            let (_, rhs_ty_opt) = get_value_layout(ctx, rhs, local_map)?;
+            let (_, lhs_ty_opt) = get_value_layout(ctx, lhs, local_map, subst)?;
+            let (_, rhs_ty_opt) = get_value_layout(ctx, rhs, local_map, subst)?;
 
             let lhs_val = ensure_primitive_value(ctx, subst, lhs_val, lhs_ty_opt, builder)?;
             let rhs_val = ensure_primitive_value(ctx, subst, rhs_val, rhs_ty_opt, builder)?;
@@ -185,7 +185,7 @@ pub fn compile_rvalue(
         Rvalue::UnaryOp { op, operand } => {
             let operand_val =
                 compile_value(ctx, func_def, subst, operand, builder, local_map, stack_locals)?;
-            let (_, ty_opt) = get_value_layout(ctx, operand, local_map)?;
+            let (_, ty_opt) = get_value_layout(ctx, operand, local_map, subst)?;
             let operand_val = ensure_primitive_value(ctx, subst, operand_val, ty_opt, builder)?;
             compile_unop(ctx, *op, operand_val, builder)
         }
@@ -399,7 +399,7 @@ pub fn compile_rvalue(
             // Check if the value being written is an aggregate type
             // This is more reliable than checking the pointer's pointee type because
             // the value type can be directly substituted without needing intermediate types
-            if let Ok((_, Some(val_ty))) = get_value_layout(ctx, value, local_map) {
+            if let Ok((_, Some(val_ty))) = get_value_layout(ctx, value, local_map, subst) {
                 let concrete_val_ty = subst.apply_ty_readonly(ctx.mir, val_ty).unwrap_or(val_ty);
                 if is_aggregate_value_type(ctx.mir, concrete_val_ty) {
                     copy_aggregate_value(ctx, concrete_val_ty, ptr_val, val, builder);
@@ -539,9 +539,9 @@ fn compile_construct(
     // Get the struct layout to determine size and field offsets
     let mir_ty = ctx.mir.ty(ty);
 
-    // Find the struct ID from the type
-    let struct_id = match mir_ty {
-        MirTy::Named { name, .. } => {
+    // Find the struct ID and type_args from the type
+    let (struct_id, type_args) = match mir_ty {
+        MirTy::Named { name, type_args } => {
             // Look up struct by name
             let name_data = ctx.mir.name(*name);
             let mut found_struct = None;
@@ -552,9 +552,15 @@ fn compile_construct(
                     break;
                 }
             }
-            found_struct.ok_or_else(|| {
+            let struct_id = found_struct.ok_or_else(|| {
                 CodegenError::Unsupported(format!("struct not found: {}", name_data))
-            })?
+            })?;
+            // Apply substitution to type_args to replace any type parameters with concrete types
+            let type_args: Vec<_> = type_args
+                .iter()
+                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
+                .collect();
+            (struct_id, type_args)
         }
         _ => {
             return Err(CodegenError::Unsupported(format!(
@@ -565,7 +571,7 @@ fn compile_construct(
     };
 
     // Get struct layout with field offsets
-    let struct_layout = ctx.layouts.struct_layout(struct_id);
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
     let layout = struct_layout.layout;
     let field_offsets = struct_layout.field_offsets.clone();
 
@@ -588,6 +594,15 @@ fn compile_construct(
 
     // Store each field at its offset
     let struct_def = ctx.mir.struct_def(struct_id);
+    let type_params: Vec<_> = struct_def.type_params.clone();
+
+    // Build substitution from struct's type params to concrete type args
+    let struct_subst = if !type_params.is_empty() && type_params.len() == type_args.len() {
+        Some(build_substitution(ctx.mir, &type_params, &type_args))
+    } else {
+        None
+    };
+
     for (field_name, field_value) in fields {
         let offset = field_offsets
             .get(field_name)
@@ -617,11 +632,13 @@ fn compile_construct(
             stack_locals,
         )?;
 
-        // Apply substitution to get the concrete field type
-        // This is important for generic structs where field types might be type parameters
-        let concrete_field_ty = subst
-            .apply_ty_readonly(ctx.mir, field_ty)
-            .unwrap_or(field_ty);
+        // Apply the struct's type param -> type arg substitution to get the concrete field type
+        // This handles generic struct fields like T becoming Int64 for Storage[Int64]
+        let concrete_field_ty = if let Some(ref struct_subst) = struct_subst {
+            struct_subst.apply_ty_readonly(ctx.mir, field_ty).unwrap_or(field_ty)
+        } else {
+            subst.apply_ty_readonly(ctx.mir, field_ty).unwrap_or(field_ty)
+        };
 
         // Check if this is a nested aggregate - if so, copy its data
         if is_aggregate_value_type(ctx.mir, concrete_field_ty) {
@@ -665,7 +682,7 @@ fn compile_tuple(
 
     // First pass: compute element layouts and offsets
     for value in values {
-        let (elem_layout, elem_ty) = get_value_layout(ctx, value, local_map)?;
+        let (elem_layout, elem_ty) = get_value_layout(ctx, value, local_map, subst)?;
 
         // Align to element's alignment
         current_offset = (current_offset + elem_layout.align - 1) & !(elem_layout.align - 1);
@@ -817,15 +834,19 @@ fn compile_stack_alloc(
 
 /// Get the layout of a value and optionally its type ID.
 /// Returns (Layout, Option<type_id>).
+/// The `subst` parameter is used to substitute type parameters before computing layout.
 fn get_value_layout(
     ctx: &mut CodegenContext<'_>,
     value: &Value,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<(kestrel_codegen::Layout, Option<Id<Ty>>), CodegenError> {
     match value {
         Value::Place(place) => {
-            let ty = get_place_type(ctx, place, local_map)?;
-            let layout = ctx.layouts.layout_of(ty);
+            let ty = get_place_type(ctx, place, local_map, subst)?;
+            // Apply substitution before computing layout
+            let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
+            let layout = ctx.layouts.layout_of(concrete_ty);
             Ok((layout, Some(ty)))
         }
         Value::Immediate(imm) => {
@@ -873,7 +894,7 @@ fn compile_call_arg(
     stack_locals: &std::collections::HashSet<Id<Local>>,
     is_extern: bool,
 ) -> Result<CraneliftValue, CodegenError> {
-    let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map)?;
+    let (layout, ty_opt) = get_value_layout(ctx, &arg.value, local_map, subst)?;
     let concrete_ty = ty_opt.map(|ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty));
     let is_aggregate = concrete_ty
         .map(|ty| is_aggregate_value_type(ctx.mir, ty))
@@ -1090,10 +1111,15 @@ fn compile_enum_variant(
 ) -> Result<CraneliftValue, CodegenError> {
     let mir_ty = ctx.mir.ty(enum_ty);
 
-    // Find the enum ID from the type
-    let enum_id = match mir_ty {
-        MirTy::Named { name, .. } => {
+    // Find the enum ID and type arguments from the type
+    let (enum_id, enum_type_args) = match mir_ty {
+        MirTy::Named { name, type_args } => {
             let name_data = ctx.mir.name(*name);
+            // Apply substitution to type_args to get concrete types
+            let type_args: Vec<_> = type_args
+                .iter()
+                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
+                .collect();
             let mut found_enum = None;
             for (id, def) in ctx.mir.enums.iter() {
                 let def_name = ctx.mir.name(def.name);
@@ -1102,9 +1128,10 @@ fn compile_enum_variant(
                     break;
                 }
             }
-            found_enum.ok_or_else(|| {
+            let enum_id = found_enum.ok_or_else(|| {
                 CodegenError::Unsupported(format!("enum not found: {}", name_data))
-            })?
+            })?;
+            (enum_id, type_args)
         }
         _ => {
             return Err(CodegenError::Unsupported(format!(
@@ -1114,8 +1141,11 @@ fn compile_enum_variant(
         }
     };
 
+    // Apply substitution to get concrete type before computing layout
+    let concrete_enum_ty = subst.apply_ty_readonly(ctx.mir, enum_ty).unwrap_or(enum_ty);
+
     // Get the enum layout
-    let enum_layout = ctx.layouts.layout_of(enum_ty);
+    let enum_layout = ctx.layouts.layout_of(concrete_enum_ty);
 
     // Allocate stack slot for the enum
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -1148,21 +1178,42 @@ fn compile_enum_variant(
 
     // If there's a payload, store the fields after the discriminant
     if !payload.is_empty() {
-        // Get the payload struct layout
+        // Get the payload struct layout for this specific case
         let payload_struct_id = case_def.struct_def.ok_or_else(|| {
             CodegenError::Unsupported(format!("enum case {} has no struct_def", variant))
         })?;
-        let payload_layout = ctx.layouts.struct_layout(payload_struct_id);
+        // Pass the enum's type_args since payload struct uses the same type parameters
+        let payload_layout = ctx.layouts.struct_layout(payload_struct_id, &enum_type_args);
         let field_offsets = payload_layout.field_offsets.clone();
 
-        // Discriminant is 4 bytes; payload starts after alignment padding.
+        // Compute the payload offset based on the MAXIMUM payload alignment across all cases.
+        // This ensures all cases have a consistent payload offset.
+        let case_ids: Vec<_> = enum_def.cases.clone();
+        let mut max_payload_layout = Layout::zero(1);
+        for cid in &case_ids {
+            let cd = &ctx.mir.enum_cases[*cid];
+            if let Some(struct_id) = cd.struct_def {
+                let pl = ctx.layouts.struct_layout(struct_id, &enum_type_args);
+                if pl.layout.align > max_payload_layout.align
+                    || (pl.layout.align == max_payload_layout.align
+                        && pl.layout.size > max_payload_layout.size) {
+                    max_payload_layout = pl.layout;
+                }
+            }
+        }
+
         let discriminant_layout = Layout::new(4, 4);
-        let (payload_offset, _) = discriminant_layout.append(payload_layout.layout);
+        let (payload_offset, _) = discriminant_layout.append(max_payload_layout);
         let payload_base_offset = payload_offset as i32;
 
         // Get the struct definition to find field names in order
         let payload_struct = ctx.mir.struct_def(payload_struct_id);
         let field_ids: Vec<_> = payload_struct.fields.clone();
+
+        // Build a substitution from enum's type parameters to its type arguments.
+        // This is needed because field types in payload structs reference the enum's
+        // type parameters (e.g., T in Result[T, E]), not the caller's type parameters.
+        let enum_subst = build_substitution(ctx.mir, &enum_def.type_params, &enum_type_args);
 
         for (i, value) in payload.iter().enumerate() {
             if i >= field_ids.len() {
@@ -1181,10 +1232,20 @@ fn compile_enum_variant(
 
             // Check if this is a nested struct
             let field_ty = field_def.ty;
-            // Apply substitution to get concrete type for generic enums
-            let concrete_field_ty = subst
+            // Apply enum's substitution to get concrete type for generic enums.
+            // Use enum_subst (built from enum's type params -> type args) instead of
+            // the caller's subst, since field types reference the enum's type params.
+            let concrete_field_ty = enum_subst
                 .apply_ty_readonly(ctx.mir, field_ty)
                 .unwrap_or(field_ty);
+
+            // Skip Unit types - they have zero size and shouldn't be stored.
+            // Unit values are compiled as 64-bit 0 for phi node compatibility,
+            // but storing them would write 8 bytes and corrupt adjacent memory.
+            if matches!(ctx.mir.ty(concrete_field_ty), MirTy::Unit) {
+                continue;
+            }
+
             if is_aggregate_value_type(ctx.mir, concrete_field_ty) {
                 // Copy nested struct data
                 let dest_ptr = if total_offset == 0 {
@@ -1273,8 +1334,8 @@ fn compile_ref(
                 compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the field offset
-            let parent_ty = get_place_type(ctx, parent, local_map)?;
-            let (field_offset, _field_ty) = get_field_info(ctx, parent_ty, name)?;
+            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
+            let (field_offset, _field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
 
             if field_offset == 0 {
                 Ok(struct_ptr)
@@ -1289,8 +1350,8 @@ fn compile_ref(
                 compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
 
             // Get the field offset
-            let parent_ty = get_place_type(ctx, parent, local_map)?;
-            let (field_offset, _field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
+            let (field_offset, _field_ty) = get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
 
             if field_offset == 0 {
                 Ok(parent_ptr)
@@ -1303,8 +1364,8 @@ fn compile_ref(
             // Taking a reference to a downcast - return pointer to payload
             let enum_ptr =
                 compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-            let enum_ty = get_place_type(ctx, parent, local_map)?;
-            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant)?;
+            let enum_ty = get_place_type(ctx, parent, local_map, subst)?;
+            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant, subst)?;
             Ok(builder
                 .ins()
                 .iadd_imm(enum_ptr, payload_offset as i64))
@@ -1322,6 +1383,7 @@ fn get_place_type(
     ctx: &mut CodegenContext<'_>,
     place: &Place,
     local_map: &HashMap<Id<Local>, Variable>,
+    subst: &Substitution,
 ) -> Result<Id<Ty>, CodegenError> {
     match &place.kind {
         PlaceKind::Local(local_id) => {
@@ -1330,21 +1392,21 @@ fn get_place_type(
         }
 
         PlaceKind::Field { parent, name } => {
-            let parent_ty = get_place_type(ctx, parent, local_map)?;
-            let (_, field_ty) = get_field_info(ctx, parent_ty, name)?;
+            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
+            let (_, field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
             Ok(field_ty)
         }
 
         PlaceKind::Index { parent, index } => {
-            let parent_ty = get_place_type(ctx, parent, local_map)?;
-            let (_, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index)?;
+            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
+            let (_, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
             Ok(field_ty)
         }
 
-        PlaceKind::Downcast { parent, .. } => get_place_type(ctx, parent, local_map),
+        PlaceKind::Downcast { parent, .. } => get_place_type(ctx, parent, local_map, subst),
 
         PlaceKind::Deref(inner) => {
-            let inner_ty = get_place_type(ctx, inner, local_map)?;
+            let inner_ty = get_place_type(ctx, inner, local_map, subst)?;
             get_pointee_type(ctx, inner_ty)
         }
     }
@@ -1366,12 +1428,18 @@ fn get_field_info(
     ctx: &mut CodegenContext<'_>,
     parent_ty: Id<Ty>,
     field_name: &str,
+    subst: &Substitution,
 ) -> Result<(usize, Id<Ty>), CodegenError> {
     let mir_ty = ctx.mir.ty(parent_ty).clone();
 
     let (struct_id, type_args) = match mir_ty {
         MirTy::Named { name, type_args } => {
             let name_data = ctx.mir.name(name);
+            // Apply substitution to type_args to replace any type parameters
+            let type_args: Vec<_> = type_args
+                .iter()
+                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
+                .collect();
             let mut found = None;
             for (id, def) in ctx.mir.structs.iter() {
                 if ctx.mir.name(def.name) == name_data {
@@ -1392,8 +1460,8 @@ fn get_field_info(
         }
     };
 
-    // Get field offset from layout
-    let struct_layout = ctx.layouts.struct_layout(struct_id);
+    // Get field offset from layout (pass substituted type_args for generic structs)
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
     let offset = *struct_layout
         .field_offsets
         .get(field_name)
@@ -1435,6 +1503,7 @@ fn get_field_by_index(
     parent_place: &Place,
     parent_ty: Id<Ty>,
     index: usize,
+    subst: &Substitution,
 ) -> Result<(usize, Id<Ty>), CodegenError> {
     // Check if the parent is a downcast - in that case, we need to find the variant struct
     if let PlaceKind::Downcast {
@@ -1443,11 +1512,12 @@ fn get_field_by_index(
     } = &parent_place.kind
     {
         // Get the enum type from the grandparent
-        let enum_ty = get_place_type(ctx, grandparent, &HashMap::new())?;
+        let enum_ty = get_place_type(ctx, grandparent, &HashMap::new(), subst)?;
         let mir_ty = ctx.mir.ty(enum_ty);
 
-        if let MirTy::Named { name, .. } = mir_ty {
+        if let MirTy::Named { name, type_args } = mir_ty {
             let name_data = ctx.mir.name(*name);
+            let type_args = type_args.clone();
 
             // Find the enum
             for (enum_id, enum_def) in ctx.mir.enums.iter() {
@@ -1467,7 +1537,8 @@ fn get_field_by_index(
                         ))
                     })?;
 
-                    return get_struct_field_by_index(ctx, struct_id, index);
+                    // Pass the enum's type_args since payload struct uses the same type parameters
+                    return get_struct_field_by_index(ctx, struct_id, &type_args, index, subst);
                 }
             }
 
@@ -1482,13 +1553,14 @@ fn get_field_by_index(
     let mir_ty = ctx.mir.ty(parent_ty);
 
     match mir_ty {
-        MirTy::Named { name, .. } => {
+        MirTy::Named { name, type_args } => {
             let name_data = ctx.mir.name(*name);
+            let type_args = type_args.clone();
 
             // Try to find as struct
             for (struct_id, def) in ctx.mir.structs.iter() {
                 if ctx.mir.name(def.name) == name_data {
-                    return get_struct_field_by_index(ctx, struct_id, index);
+                    return get_struct_field_by_index(ctx, struct_id, &type_args, index, subst);
                 }
             }
 
@@ -1509,9 +1581,11 @@ fn get_field_by_index(
             }
 
             // Calculate offset by summing sizes of previous elements
+            // Apply substitution to element types to get correct layouts
             let mut offset = 0usize;
             for (i, elem_ty) in elements.iter().enumerate() {
-                let elem_layout = ctx.layouts.layout_of(*elem_ty);
+                let concrete_ty = subst.apply_ty_readonly(ctx.mir, *elem_ty).unwrap_or(*elem_ty);
+                let elem_layout = ctx.layouts.layout_of(concrete_ty);
                 // Align to this element's alignment
                 offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
                 if i == index {
@@ -1533,7 +1607,9 @@ fn get_field_by_index(
 fn get_struct_field_by_index(
     ctx: &mut CodegenContext<'_>,
     struct_id: kestrel_execution_graph::Id<kestrel_execution_graph::Struct>,
+    type_args: &[Id<Ty>],
     index: usize,
+    subst: &Substitution,
 ) -> Result<(usize, Id<Ty>), CodegenError> {
     let struct_def = ctx.mir.struct_def(struct_id);
     let fields: Vec<_> = struct_def.fields.clone();
@@ -1551,8 +1627,14 @@ fn get_struct_field_by_index(
     let field_name = &field_def.name;
     let field_ty = field_def.ty;
 
-    // Get field offset from layout
-    let struct_layout = ctx.layouts.struct_layout(struct_id);
+    // Apply substitution to type_args to get concrete types
+    let concrete_type_args: Vec<_> = type_args
+        .iter()
+        .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
+        .collect();
+
+    // Get field offset from layout (pass substituted type_args for generic structs)
+    let struct_layout = ctx.layouts.struct_layout(struct_id, &concrete_type_args);
     let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
         CodegenError::Unsupported(format!("field offset not found: {}", field_name))
     })?;
@@ -1573,7 +1655,7 @@ fn ensure_primitive_value(
     let concrete_ty = subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty);
     if is_aggregate_value_type(ctx.mir, concrete_ty) {
         // It's an aggregate wrapper, load the primitive value
-        if let Ok((field_offset, field_ty)) = get_field_info(ctx, concrete_ty, "value") {
+        if let Ok((field_offset, field_ty)) = get_field_info(ctx, concrete_ty, "value", subst) {
             let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
             Ok(builder
                 .ins()
@@ -1584,7 +1666,7 @@ fn ensure_primitive_value(
                     let field_id = struct_def.fields[0];
                     let field_def = &ctx.mir.fields[field_id];
                     if let Ok((field_offset, field_ty)) =
-                        get_field_info(ctx, concrete_ty, &field_def.name)
+                        get_field_info(ctx, concrete_ty, &field_def.name, subst)
                     {
                         let cl_field_ty = translate_type(ctx.mir, field_ty, ctx.target);
                         return Ok(builder.ins().load(
@@ -1660,12 +1742,13 @@ fn wrap_extern_return_value(
     let struct_ptr = builder.ins().stack_addr(ptr_type, slot, 0);
 
     // Find field offset and store primitive
-    if let MirTy::Named { name, .. } = ctx.mir.ty(concrete_ret_ty) {
+    if let MirTy::Named { name, type_args } = ctx.mir.ty(concrete_ret_ty) {
+        let type_args = type_args.clone();
         if let Some((struct_id, struct_def)) = ctx.mir.structs.iter().find(|(_, s)| s.name == *name)
         {
             if struct_def.fields.len() == 1 {
                 let field_def = &ctx.mir.fields[struct_def.fields[0]];
-                let struct_layout = ctx.layouts.struct_layout(struct_id);
+                let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args);
                 let field_offset = struct_layout
                     .field_offsets
                     .get(&field_def.name)
@@ -1698,7 +1781,7 @@ fn compile_ptr_offset(
     let ptr_val = compile_value(ctx, func_def, subst, ptr, builder, local_map, stack_locals)?;
     let offset_val =
         compile_value(ctx, func_def, subst, offset, builder, local_map, stack_locals)?;
-    let (_, offset_ty_opt) = get_value_layout(ctx, offset, local_map)?;
+    let (_, offset_ty_opt) = get_value_layout(ctx, offset, local_map, subst)?;
 
     let mut offset_val = ensure_primitive_value(ctx, subst, offset_val, offset_ty_opt, builder)?;
 
@@ -2752,14 +2835,25 @@ fn get_field_type_for_call(
 ) -> Result<Id<Ty>, CodegenError> {
     let mir_ty = ctx.mir.ty(parent_ty);
 
-    if let MirTy::Named { name, .. } = mir_ty {
+    if let MirTy::Named { name, type_args } = mir_ty {
         let name_data = ctx.mir.name(*name);
         for (_struct_id, def) in ctx.mir.structs.iter() {
             if ctx.mir.name(def.name) == name_data {
                 for field_id in &def.fields {
                     let field_def = &ctx.mir.fields[*field_id];
                     if field_def.name == field_name {
-                        return Ok(field_def.ty);
+                        let mut field_ty = field_def.ty;
+
+                        // Apply substitution from struct's type params to concrete type args
+                        let type_params = &def.type_params;
+                        if !type_params.is_empty() && type_params.len() == type_args.len() {
+                            let subst = build_substitution(ctx.mir, type_params, type_args);
+                            if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
+                                field_ty = substituted_ty;
+                            }
+                        }
+
+                        return Ok(field_ty);
                     }
                 }
             }
@@ -2791,14 +2885,25 @@ fn get_field_type_by_index_for_call(
                 )))
             }
         }
-        MirTy::Named { name, .. } => {
+        MirTy::Named { name, type_args } => {
             let name_data = ctx.mir.name(*name);
             for (_struct_id, def) in ctx.mir.structs.iter() {
                 if ctx.mir.name(def.name) == name_data {
                     if index < def.fields.len() {
                         let field_id = def.fields[index];
                         let field_def = &ctx.mir.fields[field_id];
-                        return Ok(field_def.ty);
+                        let mut field_ty = field_def.ty;
+
+                        // Apply substitution from struct's type params to concrete type args
+                        let type_params = &def.type_params;
+                        if !type_params.is_empty() && type_params.len() == type_args.len() {
+                            let subst = build_substitution(ctx.mir, type_params, type_args);
+                            if let Ok(substituted_ty) = subst.apply_ty_readonly(ctx.mir, field_ty) {
+                                field_ty = substituted_ty;
+                            }
+                        }
+
+                        return Ok(field_ty);
                     }
                 }
             }
@@ -2936,8 +3041,8 @@ fn compile_apply_partial(
 
     // 3. Allocate and populate the environment struct
     let env_ptr = if let Some(env_struct_id) = env_struct_id {
-        // Get the environment struct layout
-        let env_layout = ctx.layouts.struct_layout(env_struct_id);
+        // Get the environment struct layout (env structs are non-generic, so empty type_args)
+        let env_layout = ctx.layouts.struct_layout(env_struct_id, &[]);
         let layout = env_layout.layout;
         let field_offsets = env_layout.field_offsets.clone();
 
@@ -3378,6 +3483,13 @@ fn compile_thick_call(
             }
         }
         MirTy::FuncThick { params, ret } => {
+            // Apply substitution to params and ret to handle generic closures
+            let params: Vec<_> = params
+                .iter()
+                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
+                .collect();
+            let ret = subst.apply_ty_readonly(ctx.mir, *ret).unwrap_or(*ret);
+
             // For thick function types, the value is a struct with func_ptr and env_ptr
             let place_value =
                 compile_place_read(ctx, place, builder, local_map, subst, stack_locals)?;
@@ -3407,11 +3519,11 @@ fn compile_thick_call(
 
             let call_conv = builder.func.signature.call_conv;
             let mut sig = Signature::new(call_conv);
-            let needs_sret = needs_sret_for_type(ctx.mir, *ret);
+            let needs_sret = needs_sret_for_type(ctx.mir, ret);
             let mut ret_ptr = None;
             if needs_sret {
                 sig.params.push(AbiParam::new(ptr_type));
-                let layout = ctx.layouts.layout_of(*ret);
+                let layout = ctx.layouts.layout_of(ret);
                 let size = if layout.size == 0 { 1 } else { layout.size };
                 let align = if layout.align == 0 { 1 } else { layout.align };
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -3426,15 +3538,15 @@ fn compile_thick_call(
             sig.params.push(AbiParam::new(ptr_type));
 
             // Then add the regular parameters
-            for param_ty in params {
+            for param_ty in &params {
                 let cl_type = translate_type(ctx.mir, *param_ty, ctx.target);
                 sig.params.push(AbiParam::new(cl_type));
             }
 
             // Add return type if not unit
-            let ret_mir_ty = ctx.mir.ty(*ret);
+            let ret_mir_ty = ctx.mir.ty(ret);
             if !matches!(ret_mir_ty, MirTy::Unit) && !needs_sret {
-                let cl_type = translate_type(ctx.mir, *ret, ctx.target);
+                let cl_type = translate_type(ctx.mir, ret, ctx.target);
                 sig.returns.push(AbiParam::new(cl_type));
             }
 
@@ -3480,7 +3592,7 @@ fn compile_thick_call(
                 return Ok(builder.ins().iconst(ptr_type, 0));
             } else {
                 // Check if return type is string - if so, copy the fat pointer
-                if matches!(ctx.mir.ty(*ret), MirTy::Str) {
+                if matches!(ctx.mir.ty(ret), MirTy::Str) {
                     return Ok(copy_string_return_value(ctx, results[0], builder));
                 }
                 return Ok(results[0]);
