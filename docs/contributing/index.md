@@ -10,6 +10,7 @@ This guide helps you understand the Kestrel compiler codebase and contribute eff
 | [Quick Reference](quick-reference.md) | File paths, common imports, task locations | Looking up where to make changes |
 | [Patterns](patterns.md) | Naming conventions, code patterns, testing | Writing code that matches existing style |
 | [Workflows](workflows.md) | Step-by-step guides for common tasks | Adding features, diagnostics, tests |
+| [Git](git.md) | Branching strategy, PRs, issues | Contributing code changes |
 
 ## Related Documentation
 

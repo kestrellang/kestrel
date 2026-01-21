@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, nightly]
 
 env:
   RUSTFLAGS: "-D warnings"
@@ -20,6 +20,9 @@ jobs:
         with:
           toolchain: 1.92.0
           components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Rust fmt
         run: cargo fmt --check

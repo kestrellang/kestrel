@@ -413,7 +413,7 @@ If the test fails, it shows what symbols actually exist.
 
 ## Git Workflow
 
-Based on observed commit patterns in this repo:
+See [Git](git.md) for the full branching strategy, PR requirements, and issue workflow.
 
 ### Commit Messages
 ```

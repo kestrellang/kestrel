@@ -2,8 +2,14 @@
 
 A statically-typed programming language with Swift-inspired syntax, protocol-based polymorphism, and value semantics.
 
-![Pong game written in Kestrel](public/pong.gif)
-![Snake game written in Kestrel](public/snake.gif)
+## What It Does
+
+Games built with Kestrel:
+
+<p>
+<img src="public/pong.gif" alt="Pong game written in Kestrel" width="400">
+<img src="public/snake.gif" alt="Snake game written in Kestrel" width="400">
+</p>
 
 ## Features
 

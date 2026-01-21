@@ -1,0 +1,86 @@
+name: Create Issue Branch
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout nightly
+        uses: actions/checkout@v4
+        with:
+          ref: nightly
+          fetch-depth: 0
+
+      - name: Determine branch prefix
+        id: prefix
+        run: |
+          LABELS="${{ join(github.event.issue.labels.*.name, ',') }}"
+          if echo "$LABELS" | grep -q "bug"; then
+            echo "prefix=fix" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=feature" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create branch name
+        id: branch
+        run: |
+          # Sanitize title for branch name
+          TITLE="${{ github.event.issue.title }}"
+          SANITIZED=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
+          BRANCH="${{ steps.prefix.outputs.prefix }}/${{ github.event.issue.number }}-${SANITIZED}"
+          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create branch and issue file
+        run: |
+          git checkout -b "${{ steps.branch.outputs.name }}"
+
+          mkdir -p .issues
+
+          cat > ".issues/${{ github.event.issue.number }}.md" << 'EOF'
+          # Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+          **Author:** @${{ github.event.issue.user.login }}
+          **Created:** ${{ github.event.issue.created_at }}
+          **URL:** ${{ github.event.issue.html_url }}
+
+          ## Description
+
+          ${{ github.event.issue.body }}
+          EOF
+
+          git add ".issues/${{ github.event.issue.number }}.md"
+          git commit -m "issue: add description for #${{ github.event.issue.number }}"
+          git push origin "${{ steps.branch.outputs.name }}"
+
+      - name: Create draft PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${{ steps.prefix.outputs.prefix }}: ${{ github.event.issue.title }}`,
+              head: '${{ steps.branch.outputs.name }}',
+              base: 'nightly',
+              body: `Closes #${{ github.event.issue.number }}\n\n## Summary\n\n_Describe your changes here_\n\n## Test Plan\n\n- [ ] Tests pass\n- [ ] Formatted with \`cargo fmt\`\n- [ ] No clippy warnings`,
+              draft: true
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Branch created: \`${{ steps.branch.outputs.name }}\`\nDraft PR: ${pr.data.html_url}\n\nTo start working:\n\`\`\`bash\ngit fetch origin\ngit checkout ${{ steps.branch.outputs.name }}\n\`\`\``
+            });
