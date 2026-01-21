@@ -6,14 +6,14 @@
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_model::SemanticModel;
+use kestrel_semantic_model::{SemanticModel, SymbolFor};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::ty::WhereClause;
+use kestrel_semantic_tree::ty::{Ty, WhereClause};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
@@ -177,6 +177,18 @@ impl<'a> BodyResolutionContext<'a> {
     /// Get immutable access to the move tracker.
     pub fn move_tracker(&self) -> &MoveTracker {
         &self.move_tracker
+    }
+
+    /// Get the return type of the current function.
+    ///
+    /// Used for try expressions to determine R in `R.fromResidual(early)`.
+    /// Returns None if the function cannot be found or has no callable behavior.
+    pub fn function_return_type(&self) -> Option<Ty> {
+        use super::utils::get_callable_behavior;
+
+        let symbol = self.model.query(SymbolFor { id: self.function_id })?;
+        let callable = get_callable_behavior(&symbol)?;
+        Some(callable.return_type().clone())
     }
 }
 

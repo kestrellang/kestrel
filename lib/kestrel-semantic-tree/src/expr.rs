@@ -1026,6 +1026,20 @@ pub enum ExprKind {
         arguments: Vec<CallArgument>,
     },
 
+    /// Deferred static method call on a type that may contain inference variables.
+    /// Used for `try` expressions where we need to call `R.fromResidual(early)`
+    /// and R is the function's return type (which may have inference variables).
+    ///
+    /// Type inference will resolve this when the target type becomes concrete.
+    DeferredStaticCall {
+        /// The type to call the static method on (may contain inference variables)
+        target_ty: Ty,
+        /// The static method name
+        method_name: String,
+        /// Arguments to the method call
+        arguments: Vec<CallArgument>,
+    },
+
     /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
     /// The compiler generates a memberwise initializer that assigns each argument to
     /// the corresponding field in declaration order.
@@ -1511,6 +1525,14 @@ impl Expression {
                     method_name,
                     args.join(", ")
                 )
+            },
+            ExprKind::DeferredStaticCall {
+                target_ty,
+                method_name,
+                arguments,
+            } => {
+                let args: Vec<String> = arguments.iter().map(|a| a.value.debug_compact()).collect();
+                format!("{}.{}({})", target_ty, method_name, args.join(", "))
             },
             ExprKind::ImplicitStructInit {
                 struct_type,
@@ -2142,6 +2164,29 @@ impl Expression {
             id: ExprId::new(),
             kind: ExprKind::DeferredMethodCall {
                 receiver: Box::new(receiver),
+                method_name,
+                arguments,
+            },
+            ty: result_ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a deferred static method call expression.
+    /// Used for `try` expressions where we call `R.fromResidual(early)` and R is
+    /// the function's return type (which may have inference variables).
+    pub fn deferred_static_call(
+        target_ty: Ty,
+        method_name: String,
+        arguments: Vec<CallArgument>,
+        result_ty: Ty,
+        span: Span,
+    ) -> Self {
+        Expression {
+            id: ExprId::new(),
+            kind: ExprKind::DeferredStaticCall {
+                target_ty,
                 method_name,
                 arguments,
             },

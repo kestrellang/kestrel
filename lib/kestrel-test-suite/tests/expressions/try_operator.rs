@@ -18,7 +18,6 @@ mod basic {
     use super::*;
 
     #[test]
-    #[ignore]
     fn tryable_protocol_definition() {
         Test::new(
             r#"module Test
@@ -33,7 +32,6 @@ mod basic {
     }
 
     #[test]
-    #[ignore]
     fn from_residual_protocol_definition() {
         Test::new(
             r#"module Test
@@ -52,7 +50,6 @@ mod basic {
     }
 
     #[test]
-    #[ignore]
     fn option_as_tryable() {
         Test::new(
             r#"module Test
@@ -67,8 +64,8 @@ mod basic {
 
                 func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
                     match self {
-                        case .Some(let v) => Prelude.ControlFlow.Continue(v)
-                        case .None => Prelude.ControlFlow.Break(NoneEarly())
+                        .Some(v) => Prelude.ControlFlow.Continue(v),
+                        .None => Prelude.ControlFlow.Break(NoneEarly())
                     }
                 }
             }
@@ -78,7 +75,6 @@ mod basic {
     }
 
     #[test]
-    #[ignore]
     fn result_as_tryable() {
         Test::new(
             r#"module Test
@@ -92,8 +88,8 @@ mod basic {
 
                 func tryExtract() -> Prelude.ControlFlow[T, E] {
                     match self {
-                        case .Ok(let v) => Prelude.ControlFlow.Continue(v)
-                        case .Err(let e) => Prelude.ControlFlow.Break(e)
+                        .Ok(v) => Prelude.ControlFlow.Continue(v),
+                        .Err(e) => Prelude.ControlFlow.Break(e)
                     }
                 }
             }
@@ -107,7 +103,6 @@ mod try_expression {
     use super::*;
 
     #[test]
-    #[ignore]
     fn try_on_option() {
         Test::new(
             r#"module Test
@@ -122,8 +117,8 @@ mod try_expression {
 
                 func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
                     match self {
-                        case .Some(let v) => Prelude.ControlFlow.Continue(v)
-                        case .None => Prelude.ControlFlow.Break(NoneEarly())
+                        .Some(v) => Prelude.ControlFlow.Continue(v),
+                        .None => Prelude.ControlFlow.Break(NoneEarly())
                     }
                 }
             }
@@ -142,7 +137,6 @@ mod try_expression {
     }
 
     #[test]
-    #[ignore]
     fn try_on_result() {
         Test::new(
             r#"module Test
@@ -159,8 +153,8 @@ mod try_expression {
 
                 func tryExtract() -> Prelude.ControlFlow[T, E] {
                     match self {
-                        case .Ok(let v) => Prelude.ControlFlow.Continue(v)
-                        case .Err(let e) => Prelude.ControlFlow.Break(e)
+                        .Ok(v) => Prelude.ControlFlow.Continue(v),
+                        .Err(e) => Prelude.ControlFlow.Break(e)
                     }
                 }
             }
@@ -185,7 +179,6 @@ mod try_expression {
     }
 
     #[test]
-    #[ignore]
     fn multiple_try_in_function() {
         Test::new(
             r#"module Test
@@ -200,8 +193,8 @@ mod try_expression {
 
                 func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
                     match self {
-                        case .Some(let v) => Prelude.ControlFlow.Continue(v)
-                        case .None => Prelude.ControlFlow.Break(NoneEarly())
+                        .Some(v) => Prelude.ControlFlow.Continue(v),
+                        .None => Prelude.ControlFlow.Break(NoneEarly())
                     }
                 }
             }
@@ -221,7 +214,6 @@ mod try_expression {
     }
 
     #[test]
-    #[ignore]
     fn try_in_expression_context() {
         Test::new(
             r#"module Test
@@ -236,8 +228,8 @@ mod try_expression {
 
                 func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
                     match self {
-                        case .Some(let v) => Prelude.ControlFlow.Continue(v)
-                        case .None => Prelude.ControlFlow.Break(NoneEarly())
+                        .Some(v) => Prelude.ControlFlow.Continue(v),
+                        .None => Prelude.ControlFlow.Break(NoneEarly())
                     }
                 }
             }
@@ -259,7 +251,6 @@ mod control_flow {
     use super::*;
 
     #[test]
-    #[ignore]
     fn control_flow_structure() {
         Test::new(
             r#"module Test
@@ -273,14 +264,13 @@ mod control_flow {
     }
 
     #[test]
-    #[ignore]
     fn match_on_control_flow() {
         Test::new(
             r#"module Test
             func extract(cf: Prelude.ControlFlow[lang.i64, lang.str]) -> lang.i64 {
                 match cf {
-                    case .Continue(let value) => value
-                    case .Break(let _msg) => 0
+                    .Continue(value) => value,
+                    .Break(_msg) => 0
                 }
             }
         "#,
@@ -293,7 +283,6 @@ mod errors {
     use super::*;
 
     #[test]
-    #[ignore]
     fn try_on_non_tryable_type() {
         Test::new(
             r#"module Test
@@ -310,7 +299,6 @@ mod errors {
     }
 
     #[test]
-    #[ignore]
     fn try_return_type_mismatch() {
         Test::new(
             r#"module Test
@@ -325,8 +313,8 @@ mod errors {
 
                 func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
                     match self {
-                        case .Some(let v) => Prelude.ControlFlow.Continue(v)
-                        case .None => Prelude.ControlFlow.Break(NoneEarly())
+                        .Some(v) => Prelude.ControlFlow.Continue(v),
+                        .None => Prelude.ControlFlow.Break(NoneEarly())
                     }
                 }
             }
@@ -336,7 +324,7 @@ mod errors {
             }
         "#,
         )
-        .expect(HasError("FromResidual"));
+        .expect(HasError("fromResidual"));
     }
 }
 
@@ -344,7 +332,6 @@ mod precedence {
     use super::*;
 
     #[test]
-    #[ignore]
     fn try_high_precedence() {
         // try should bind tighter than binary operators
         // try a + b should be (try a) + b, not try (a + b)
@@ -361,8 +348,8 @@ mod precedence {
 
                 func tryExtract() -> Prelude.ControlFlow[T, NoneEarly] {
                     match self {
-                        case .Some(let v) => Prelude.ControlFlow.Continue(v)
-                        case .None => Prelude.ControlFlow.Break(NoneEarly())
+                        .Some(v) => Prelude.ControlFlow.Continue(v),
+                        .None => Prelude.ControlFlow.Break(NoneEarly())
                     }
                 }
             }
