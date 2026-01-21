@@ -154,6 +154,7 @@ fn is_statement_like_expr(expr: &ExprVariant) -> bool {
             | ExprVariant::While { .. }
             | ExprVariant::WhileLet { .. }
             | ExprVariant::Loop { .. }
+            | ExprVariant::Match { .. }
     )
 }
 

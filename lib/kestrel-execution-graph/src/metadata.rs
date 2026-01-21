@@ -94,6 +94,14 @@ pub enum Origin {
         closure_span: Span,
     },
 
+    /// Generated as a thunk for a function reference used as a thick callable.
+    /// Thunks bridge the calling convention gap between regular functions and
+    /// thick function pointers by accepting an env_ptr parameter and ignoring it.
+    FunctionThunk {
+        /// The original function being wrapped.
+        original_function: Id<crate::id::QualifiedName>,
+    },
+
     /// Synthesized by a pass.
     Synthesized { pass_name: String, reason: String },
 }

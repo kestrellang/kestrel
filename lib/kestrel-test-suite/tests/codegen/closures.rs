@@ -337,7 +337,7 @@ fn function_pointer_in_struct() {
         r#"module Test
 
 struct Handler {
-    let func: (std.num.Int64) -> std.num.Int64
+    let f: (std.num.Int64) -> std.num.Int64
 }
 
 func triple(x: std.num.Int64) -> std.num.Int64 {
@@ -345,8 +345,8 @@ func triple(x: std.num.Int64) -> std.num.Int64 {
 }
 
 func main() -> lang.i64 {
-    let h = Handler(func: triple);
-    if (h.func)(14) != 42 { return 1 }
+    let h = Handler(f: triple);
+    if (h.f)(14) != 42 { return 1 }
     0
 }
 "#,

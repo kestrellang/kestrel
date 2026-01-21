@@ -409,10 +409,9 @@ pub fn lower_expression(ctx: &mut LoweringContext, expr: &Expression) -> Value {
                         | KestrelSymbolKind::Initializer
                         | KestrelSymbolKind::EnumCase => {
                             // Function/callable reference as first-class value
-                            let func_name = qualified_name_for_symbol(ctx, &sym);
-                            // For now, emit without type args - generic function references
-                            // would need the substitutions from the expression context
-                            Value::Immediate(Immediate::function_ref(func_name))
+                            // We need to generate a thunk to adapt the calling convention
+                            // from thin (no env) to thick (env as first param).
+                            lower_function_ref_as_value(ctx, &sym, &expr.ty, &expr.span)
                         }
                         KestrelSymbolKind::Field => {
                             // Global variable access - not yet supported
@@ -5442,4 +5441,67 @@ fn find_protocol_for_extension_method(
     }
 
     None
+}
+
+/// Lower a function reference being used as a first-class value.
+///
+/// When a function is used as a value (e.g., `let f = myFunction`), we need to
+/// wrap it in a thunk that adapts its calling convention to match the thick
+/// function calling convention used by closures.
+///
+/// The thunk accepts `(env_ptr, ...args...)` and ignores env_ptr, forwarding
+/// only the args to the original function.
+fn lower_function_ref_as_value(
+    ctx: &mut LoweringContext,
+    sym: &std::sync::Arc<dyn semantic_tree::symbol::Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+    expr_ty: &Ty,
+    _span: &kestrel_span::Span,
+) -> Value {
+    use kestrel_execution_graph::Rvalue;
+
+    // Get the function's qualified name
+    let func_name = qualified_name_for_symbol(ctx, sym);
+
+    // Extract parameter and return types from the expression's type
+    let (param_types, return_type) = match expr_ty.kind() {
+        TyKind::Function { params, return_type } => {
+            let mir_params: Vec<_> = params.iter().map(|p| lower_type(ctx, p)).collect();
+            let mir_ret = lower_type(ctx, return_type);
+            (mir_params, mir_ret)
+        }
+        _ => {
+            // Expression type is not a function - this shouldn't happen after type checking
+            // Fall back to old behavior (direct function ref)
+            return Value::Immediate(Immediate::function_ref(func_name));
+        }
+    };
+
+    // Generate or retrieve the thunk for this function
+    // For now, we don't handle generic type args - that would need more work
+    let type_args: Vec<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>> = vec![];
+    let thunk_name = ctx.get_or_create_function_thunk(
+        func_name,
+        &param_types,
+        return_type,
+        &type_args,
+    );
+
+    // Create a thick callable via ApplyPartial with empty captures
+    // This produces a struct { thunk_ptr, null_env }
+    let thick_ty = ctx.mir.intern_type(kestrel_execution_graph::MirTy::FuncThick {
+        params: param_types,
+        ret: return_type,
+    });
+    let result_local = ctx.create_temp("func_ref", thick_ty);
+    let result_place = Place::local(result_local);
+
+    ctx.emit_assign(
+        result_place.clone(),
+        Rvalue::ApplyPartial {
+            func: thunk_name,
+            captures: vec![],
+        },
+    );
+
+    Value::Place(result_place)
 }

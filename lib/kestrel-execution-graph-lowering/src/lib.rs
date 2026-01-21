@@ -26,6 +26,7 @@ mod match_lowering;
 mod name;
 mod pattern;
 mod stmt;
+mod thunk;
 mod ty;
 
 pub use context::LoweringContext;

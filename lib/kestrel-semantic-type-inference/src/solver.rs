@@ -1538,7 +1538,7 @@ fn check_fully_resolved(ctx: &mut InferenceContext<'_>) {
 
 fn check_resolved_id(id: TyId, ctx: &InferenceContext<'_>, unresolved: &mut Vec<(TyId, Span)>) {
     let ty = resolve_type(ctx, id);
-    if matches!(ty.kind(), TyKind::Infer) {
+    if matches!(ty.kind(), TyKind::Infer | TyKind::UnresolvedFunction { .. }) {
         unresolved.push((id, ty.span().clone()));
     }
 }

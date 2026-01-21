@@ -6,6 +6,8 @@ use kestrel_execution_graph::{
     BasicBlock, Block, CallArg, Callee, Function, Id, Immediate, Local, MirContext, Place,
     QualifiedName, Rvalue, StatementKind, Terminator, TerminatorKind, Ty, TypeParam, Value,
 };
+
+use crate::thunk::{ThunkCache, ThunkKey};
 use kestrel_reporting::{Diagnostic, IntoDiagnostic};
 use kestrel_semantic_model::SemanticModel;
 use kestrel_semantic_tree::behavior::copy_semantics::CopySemanticsBehavior;
@@ -122,6 +124,10 @@ pub struct LoweringContext<'a> {
 
     /// Counter for generating unique deinit flag names.
     deinit_flag_counter: u32,
+
+    /// Cache of generated thunks for function references.
+    /// Maps (function name, type args) to the thunk name.
+    thunk_cache: ThunkCache,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -141,6 +147,7 @@ impl<'a> LoweringContext<'a> {
             temp_counter: 0,
             closure_counter: 0,
             deinit_flag_counter: 0,
+            thunk_cache: HashMap::new(),
         }
     }
 
@@ -1406,6 +1413,85 @@ impl<'a> LoweringContext<'a> {
             }
             _ => {}
         }
+    }
+
+    // ==========================================================================
+    // Thunk Generation for Function References
+    // ==========================================================================
+
+    /// Get or create a thunk for a function reference.
+    ///
+    /// When a regular function is used as a function value (stored in a variable,
+    /// passed as argument, etc.), we need a thunk that adapts its calling convention
+    /// to the thick function convention used by closures.
+    ///
+    /// Returns the thunk's qualified name, which can be used with ApplyPartial.
+    pub fn get_or_create_function_thunk(
+        &mut self,
+        func_name: Id<QualifiedName>,
+        param_types: &[Id<Ty>],
+        return_type: Id<Ty>,
+        type_args: &[Id<Ty>],
+    ) -> Id<QualifiedName> {
+        let key = ThunkKey {
+            func_name,
+            type_args: type_args.to_vec(),
+        };
+
+        // Check cache first
+        if let Some(&thunk_name) = self.thunk_cache.get(&key) {
+            return thunk_name;
+        }
+
+        // Generate the thunk
+        let thunk_name = crate::thunk::generate_function_thunk(
+            self,
+            func_name,
+            param_types,
+            return_type,
+            type_args,
+        );
+
+        // Cache it
+        self.thunk_cache.insert(key, thunk_name);
+
+        thunk_name
+    }
+
+    /// Get or create a thunk for a witness method reference.
+    ///
+    /// Similar to function thunks, but for protocol method references.
+    pub fn get_or_create_witness_thunk(
+        &mut self,
+        protocol_name: Id<QualifiedName>,
+        method_name: &str,
+        for_type: Id<Ty>,
+        param_types: &[Id<Ty>],
+        return_type: Id<Ty>,
+    ) -> Id<QualifiedName> {
+        // For witness thunks, we use a synthetic key that includes protocol, method, and type
+        // We'll store it with the protocol name as func_name and use type_args to distinguish
+        let key = ThunkKey {
+            func_name: protocol_name,
+            type_args: vec![for_type], // Use for_type as a distinguishing type arg
+        };
+
+        if let Some(&thunk_name) = self.thunk_cache.get(&key) {
+            return thunk_name;
+        }
+
+        let thunk_name = crate::thunk::generate_witness_thunk(
+            self,
+            protocol_name,
+            method_name,
+            for_type,
+            param_types,
+            return_type,
+        );
+
+        self.thunk_cache.insert(key, thunk_name);
+
+        thunk_name
     }
 }
 

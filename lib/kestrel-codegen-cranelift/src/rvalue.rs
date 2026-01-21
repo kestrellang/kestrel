@@ -1881,6 +1881,7 @@ fn compile_immediate(
             } else {
                 cl_types::I32
             };
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
             // Apply substitution to type args
             let concrete_args: Vec<_> = type_args
@@ -1933,7 +1934,27 @@ fn compile_immediate(
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
             // Get the address of the function
             let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
-            Ok(func_ptr)
+
+            // Create a thick function struct: { func_ptr, env_ptr }
+            // For a plain function reference, env_ptr is null.
+            // This ensures compatibility with FuncThick types which all function types
+            // are lowered to in the MIR.
+            let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                (ptr_size * 2) as u32,
+                ptr_size as u8,
+            ));
+            let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
+
+            // Store func_ptr at offset 0
+            builder.ins().store(MemFlags::new(), func_ptr, thick_ptr, 0);
+            // Store null env_ptr at offset ptr_size
+            let null_env = builder.ins().iconst(ptr_type, 0);
+            builder
+                .ins()
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
+
+            Ok(thick_ptr)
         }
 
         ImmediateKind::WitnessMethod {
@@ -1966,6 +1987,7 @@ fn compile_immediate(
             } else {
                 cl_types::I32
             };
+            let ptr_size = if ctx.target.is_64bit() { 8 } else { 4 };
 
             // Look up the function by name to get func_id for mangling
             let func_lookup = ctx
@@ -1992,7 +2014,27 @@ fn compile_immediate(
 
             let func_ref = ctx.module.declare_func_in_func(*cl_func_id, builder.func);
             let func_ptr = builder.ins().func_addr(ptr_type, func_ref);
-            Ok(func_ptr)
+
+            // Create a thick function struct: { func_ptr, env_ptr }
+            // For a witness method reference, env_ptr is null.
+            // This ensures compatibility with FuncThick types which all function types
+            // are lowered to in the MIR.
+            let thick_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                (ptr_size * 2) as u32,
+                ptr_size as u8,
+            ));
+            let thick_ptr = builder.ins().stack_addr(ptr_type, thick_slot, 0);
+
+            // Store func_ptr at offset 0
+            builder.ins().store(MemFlags::new(), func_ptr, thick_ptr, 0);
+            // Store null env_ptr at offset ptr_size
+            let null_env = builder.ins().iconst(ptr_type, 0);
+            builder
+                .ins()
+                .store(MemFlags::new(), null_env, thick_ptr, ptr_size as i32);
+
+            Ok(thick_ptr)
         }
 
         ImmediateKind::NullPtr(_) => Ok(builder.ins().iconst(cl_types::I64, 0)),
