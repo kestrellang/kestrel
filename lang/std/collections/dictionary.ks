@@ -1,11 +1,11 @@
-// Dictionary[K, V] - hash map
+// Dictionary[K, V] - hash map with COW (Copy-on-Write) semantics
 
 module std.collections
 
 import std.core.(Bool, Equatable, Cloneable)
 import std.num.(Int64, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, ArcBox)
 import std.iter.(Iterator, Iterable)
 
 // Compute next power of two, minimum 8
@@ -73,58 +73,53 @@ public struct DictionaryIterator[K, V]: Iterator {
     }
 }
 
-// Dictionary[K, V] - simple hash map using open addressing with linear probing
-// Note: Keys must be Equatable. Proper hashing requires Hashable which isn't fully implemented.
-// This implementation uses a simple hash based on the raw bytes of the key.
-public struct Dictionary[K, V]: Iterable where K: Equatable {
-    type Item = DictionaryEntry[K, V]
-    type Iter = DictionaryIterator[K, V]
-
-    // Made internal (not private) so extensions can access
+// DictionaryStorage[K, V] - internal storage for Dictionary
+struct DictionaryStorage[K, V]: Cloneable where K: Equatable {
     var entries: Pointer[DictionaryEntry[K, V]]
     var len: Int64
     var cap: Int64
     var placeholderKey: K
     var placeholderValue: V
 
-    // Create empty dictionary - requires placeholder key/value for future resizing
-    public init(placeholderKey: K, placeholderValue: V) {
-        self.entries = Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]());
-        self.len = Int64(intLiteral: 0);
-        self.cap = Int64(intLiteral: 0);
+    init(entries entries: Pointer[DictionaryEntry[K, V]], len len: Int64, cap cap: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
+        self.entries = entries;
+        self.len = len;
+        self.cap = cap;
         self.placeholderKey = placeholderKey;
         self.placeholderValue = placeholderValue;
     }
 
-    // Create with initial capacity - requires a placeholder key/value for initialization
-    public init(capacity capacity: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
-        let actualCap = nextPowerOfTwo(capacity);
-        self.placeholderKey = placeholderKey;
-        self.placeholderValue = placeholderValue;
-        if actualCap > Int64(intLiteral: 0) {
-            let layout = Layout.array[DictionaryEntry[K, V]](actualCap);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if result.isSome() {
-                self.entries = result.unwrap().cast[DictionaryEntry[K, V]]();
-                self.len = Int64(intLiteral: 0);
-                self.cap = actualCap;
-                // Initialize all entries as unoccupied
-                var i: Int64 = Int64(intLiteral: 0);
-                while i < actualCap {
-                    self.entries.offset(by: i).write(DictionaryEntry(
-                        placeholderKey: placeholderKey,
-                        placeholderValue: placeholderValue
-                    ));
-                    i = i + Int64(intLiteral: 1)
-                }
-            } else {
-                lang.panic("Dictionary allocation failed")
+    // Deep clone - allocate new buffer and copy entries
+    func clone() -> DictionaryStorage[K, V] {
+        if self.cap == Int64(intLiteral: 0) {
+            return DictionaryStorage(
+                entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0),
+                placeholderKey: self.placeholderKey,
+                placeholderValue: self.placeholderValue
+            )
+        }
+        let layout = Layout.array[DictionaryEntry[K, V]](self.cap);
+        var allocator = SystemAllocator();
+        let result = allocator.allocate(layout);
+        if result.isSome() {
+            let newEntries = result.unwrap().cast[DictionaryEntry[K, V]]();
+            // Copy entries
+            var i: Int64 = Int64(intLiteral: 0);
+            while i < self.cap {
+                newEntries.offset(by: i).write(self.entries.offset(by: i).read());
+                i = i + Int64(intLiteral: 1)
             }
+            DictionaryStorage(
+                entries: newEntries,
+                len: self.len,
+                cap: self.cap,
+                placeholderKey: self.placeholderKey,
+                placeholderValue: self.placeholderValue
+            )
         } else {
-            self.entries = Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]());
-            self.len = Int64(intLiteral: 0);
-            self.cap = Int64(intLiteral: 0)
+            lang.panic("DictionaryStorage clone allocation failed")
         }
     }
 
@@ -135,37 +130,113 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
             allocator.deallocate(self.entries.asRaw(), layout)
         }
     }
+}
+
+// Dictionary[K, V] - hash map with COW semantics using ArcBox
+public struct Dictionary[K, V]: Iterable where K: Equatable {
+    type Item = DictionaryEntry[K, V]
+    type Iter = DictionaryIterator[K, V]
+
+    private var storage: ArcBox[DictionaryStorage[K, V]]
+
+    // Helper accessors for storage fields
+    private func entries() -> Pointer[DictionaryEntry[K, V]] { self.storage.getValue().entries }
+    private func len() -> Int64 { self.storage.getValue().len }
+    private func cap() -> Int64 { self.storage.getValue().cap }
+    private func placeholderKey() -> K { self.storage.getValue().placeholderKey }
+    private func placeholderValue() -> V { self.storage.getValue().placeholderValue }
+
+    // Ensure unique storage for mutation (COW)
+    private mutating func makeUnique() {
+        if self.storage.isUnique() == false {
+            self.storage = self.storage.deepClone()
+        }
+    }
+
+    // Private init for internal use (from storage)
+    private init(storage storage: ArcBox[DictionaryStorage[K, V]]) {
+        self.storage = storage;
+    }
+
+    // Create empty dictionary - requires placeholder key/value for future resizing
+    public init(placeholderKey: K, placeholderValue: V) {
+        self.storage = ArcBox(DictionaryStorage(
+            entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
+            len: Int64(intLiteral: 0),
+            cap: Int64(intLiteral: 0),
+            placeholderKey: placeholderKey,
+            placeholderValue: placeholderValue
+        ));
+    }
+
+    // Create with initial capacity - requires a placeholder key/value for initialization
+    public init(capacity capacity: Int64, placeholderKey placeholderKey: K, placeholderValue placeholderValue: V) {
+        let actualCap = nextPowerOfTwo(capacity);
+        if actualCap > Int64(intLiteral: 0) {
+            let layout = Layout.array[DictionaryEntry[K, V]](actualCap);
+            var allocator = SystemAllocator();
+            let result = allocator.allocate(layout);
+            if result.isSome() {
+                let newEntries = result.unwrap().cast[DictionaryEntry[K, V]]();
+                // Initialize all entries as unoccupied
+                var i: Int64 = Int64(intLiteral: 0);
+                while i < actualCap {
+                    newEntries.offset(by: i).write(DictionaryEntry(
+                        placeholderKey: placeholderKey,
+                        placeholderValue: placeholderValue
+                    ));
+                    i = i + Int64(intLiteral: 1)
+                }
+                self.storage = ArcBox(DictionaryStorage(
+                    entries: newEntries,
+                    len: Int64(intLiteral: 0),
+                    cap: actualCap,
+                    placeholderKey: placeholderKey,
+                    placeholderValue: placeholderValue
+                ))
+            } else {
+                lang.panic("Dictionary allocation failed")
+            }
+        } else {
+            self.storage = ArcBox(DictionaryStorage(
+                entries: Pointer(raw: lang.ptr_null[DictionaryEntry[K, V]]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0),
+                placeholderKey: placeholderKey,
+                placeholderValue: placeholderValue
+            ))
+        }
+    }
 
     // Simple hash function - XOR shift based on the UInt64 representation
     // This works for types whose first 8 bytes are meaningful (Int64, UInt64, pointers, etc.)
     // For proper hashing, types should implement Hashable protocol
     private func hashKey(key: K) -> UInt64 {
-        // Read the key's memory as raw bytes and compute a simple hash
-        // This is a simplified approach - proper implementation needs Hashable
-        let keyPtr = self.entries;  // Dummy - we just need something to satisfy the compiler
         // Use a constant hash for now (all keys hash to same bucket - O(n) but correct)
         // TODO: Implement proper hashing when Hashable protocol is complete
         UInt64(intLiteral: 0)
     }
 
     // Properties
-    public func count() -> Int64 { self.len }
-    public func getCapacity() -> Int64 { self.cap }
-    public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
+    public func count() -> Int64 { self.len() }
+    public func getCapacity() -> Int64 { self.cap() }
+    public func isEmpty() -> Bool { self.len() == Int64(intLiteral: 0) }
 
     // Find entry by key using linear search (since hash is constant)
     private func findEntry(key: K) -> Optional[Int64] {
-        if self.cap == Int64(intLiteral: 0) {
+        let myCap = self.cap();
+        if myCap == Int64(intLiteral: 0) {
             let none: Optional[Int64] = .None;
             return none
         }
 
+        let myEntries = self.entries();
         var i: Int64 = Int64(intLiteral: 0);
         var result: Optional[Int64] = .None;
         var done: Bool = false;
 
-        while i < self.cap and done == false {
-            let entry = self.entries.offset(by: i).read();
+        while i < myCap and done == false {
+            let entry = myEntries.offset(by: i).read();
             if entry.occupied == true and entry.key.equals(key) == true {
                 result = .Some(i);
                 done = true
@@ -177,12 +248,14 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
     // Find first unoccupied slot
     private func findEmptySlot() -> Optional[Int64] {
+        let myCap = self.cap();
+        let myEntries = self.entries();
         var i: Int64 = Int64(intLiteral: 0);
         var result: Optional[Int64] = .None;
         var done: Bool = false;
 
-        while i < self.cap and done == false {
-            let entry = self.entries.offset(by: i).read();
+        while i < myCap and done == false {
+            let entry = myEntries.offset(by: i).read();
             if entry.occupied == false {
                 result = .Some(i);
                 done = true
@@ -194,54 +267,63 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
     // Ensure we have capacity for more entries (resize at 75% load)
     private mutating func ensureCapacity() {
-        let threshold = self.cap * Int64(intLiteral: 3) / Int64(intLiteral: 4);
-        if self.len >= threshold or self.cap == Int64(intLiteral: 0) {
-            self.resize(self.placeholderKey, self.placeholderValue)
+        let myCap = self.cap();
+        let myLen = self.len();
+        let threshold = myCap * Int64(intLiteral: 3) / Int64(intLiteral: 4);
+        if myLen >= threshold or myCap == Int64(intLiteral: 0) {
+            self.resize()
         }
     }
 
     // Resize the hash table
-    private mutating func resize(placeholderKey: K, placeholderValue: V) {
-        let newCap: Int64 = if self.cap == Int64(intLiteral: 0) {
+    private mutating func resize() {
+        self.makeUnique();
+        let s = self.storage.getValue();
+        let newCap: Int64 = if s.cap == Int64(intLiteral: 0) {
             Int64(intLiteral: 8)
         } else {
-            self.cap * Int64(intLiteral: 2)
+            s.cap * Int64(intLiteral: 2)
         };
 
-        let oldEntries = self.entries;
-        let oldCap = self.cap;
+        let oldEntries = s.entries;
+        let oldCap = s.cap;
 
         // Allocate new table
         let layout = Layout.array[DictionaryEntry[K, V]](newCap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
         if result.isSome() {
-            self.entries = result.unwrap().cast[DictionaryEntry[K, V]]();
-            self.cap = newCap;
-            self.len = Int64(intLiteral: 0);
+            let newEntries = result.unwrap().cast[DictionaryEntry[K, V]]();
 
             // Initialize new entries
             var i: Int64 = Int64(intLiteral: 0);
             while i < newCap {
-                self.entries.offset(by: i).write(DictionaryEntry(
-                    placeholderKey: placeholderKey,
-                    placeholderValue: placeholderValue
+                newEntries.offset(by: i).write(DictionaryEntry(
+                    placeholderKey: s.placeholderKey,
+                    placeholderValue: s.placeholderValue
                 ));
                 i = i + Int64(intLiteral: 1)
             }
 
             // Copy old entries
+            var newLen: Int64 = Int64(intLiteral: 0);
+            var slotIndex: Int64 = Int64(intLiteral: 0);
             i = Int64(intLiteral: 0);
             while i < oldCap {
                 let entry = oldEntries.offset(by: i).read();
                 if entry.occupied {
-                    // Find empty slot and insert
-                    let maybeSlot = self.findEmptySlot();
-                    if maybeSlot.isSome() {
-                        let slotIndex = maybeSlot.unwrap();
-                        self.entries.offset(by: slotIndex).write(entry);
-                        self.len = self.len + Int64(intLiteral: 1)
-                    } else {
+                    // Find empty slot in new table
+                    var foundSlot: Bool = false;
+                    while slotIndex < newCap and foundSlot == false {
+                        let slotEntry = newEntries.offset(by: slotIndex).read();
+                        if slotEntry.occupied == false {
+                            newEntries.offset(by: slotIndex).write(entry);
+                            newLen = newLen + Int64(intLiteral: 1);
+                            foundSlot = true
+                        }
+                        slotIndex = slotIndex + Int64(intLiteral: 1)
+                    }
+                    if foundSlot == false {
                         lang.panic("Dictionary resize failed - no empty slot found")
                     }
                 }
@@ -253,6 +335,14 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
                 let oldLayout = Layout.array[DictionaryEntry[K, V]](oldCap);
                 allocator.deallocate(oldEntries.asRaw(), oldLayout)
             }
+
+            self.storage.setValue(DictionaryStorage(
+                entries: newEntries,
+                len: newLen,
+                cap: newCap,
+                placeholderKey: s.placeholderKey,
+                placeholderValue: s.placeholderValue
+            ))
         } else {
             lang.panic("Dictionary resize failed")
         }
@@ -262,7 +352,7 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
     public func getValue(key: K) -> Optional[V] {
         let maybeIndex = self.findEntry(key);
         if maybeIndex.isSome() {
-            let entry = self.entries.offset(by: maybeIndex.unwrap()).read();
+            let entry = self.entries().offset(by: maybeIndex.unwrap()).read();
             .Some(entry.value)
         } else {
             .None
@@ -279,9 +369,11 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
         // Check if key already exists
         let maybeIndex = self.findEntry(key);
         if maybeIndex.isSome() == true {
+            self.makeUnique();
             let index = maybeIndex.unwrap();
-            let oldEntry = self.entries.offset(by: index).read();
-            self.entries.offset(by: index).write(DictionaryEntry(
+            let myEntries = self.entries();
+            let oldEntry = myEntries.offset(by: index).read();
+            myEntries.offset(by: index).write(DictionaryEntry(
                 key: key,
                 value: value,
                 hash: UInt64(intLiteral: 0),
@@ -292,18 +384,21 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
         // Need to insert - ensure capacity first
         self.ensureCapacity();
+        self.makeUnique();
 
         // Find empty slot
         let maybeSlot = self.findEmptySlot();
         if maybeSlot.isSome() {
+            var s = self.storage.getValue();
             let slotIndex = maybeSlot.unwrap();
-            self.entries.offset(by: slotIndex).write(DictionaryEntry(
+            s.entries.offset(by: slotIndex).write(DictionaryEntry(
                 key: key,
                 value: value,
                 hash: UInt64(intLiteral: 0),
                 occupied: true
             ));
-            self.len = self.len + Int64(intLiteral: 1)
+            s.len = s.len + Int64(intLiteral: 1);
+            self.storage.setValue(s)
         } else {
             lang.panic("Dictionary insert failed - no empty slot")
         }
@@ -317,18 +412,21 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
         let maybeIndex = self.findEntry(key);
 
         if maybeIndex.isSome() {
+            self.makeUnique();
+            var s = self.storage.getValue();
             let index = maybeIndex.unwrap();
-            let entry = self.entries.offset(by: index).read();
+            let entry = s.entries.offset(by: index).read();
             let removedValue = entry.value;
 
             // Mark as unoccupied (keep key/value as placeholder)
-            self.entries.offset(by: index).write(DictionaryEntry(
+            s.entries.offset(by: index).write(DictionaryEntry(
                 key: entry.key,
                 value: entry.value,
                 hash: UInt64(intLiteral: 0),
                 occupied: false
             ));
-            self.len = self.len - Int64(intLiteral: 1);
+            s.len = s.len - Int64(intLiteral: 1);
+            self.storage.setValue(s);
 
             return .Some(removedValue)
         }
@@ -339,11 +437,13 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
 
     // Clear all entries
     public mutating func clear() {
+        self.makeUnique();
+        var s = self.storage.getValue();
         var i: Int64 = Int64(intLiteral: 0);
-        while i < self.cap {
-            let entry = self.entries.offset(by: i).read();
+        while i < s.cap {
+            let entry = s.entries.offset(by: i).read();
             // Keep key/value but mark unoccupied
-            self.entries.offset(by: i).write(DictionaryEntry(
+            s.entries.offset(by: i).write(DictionaryEntry(
                 key: entry.key,
                 value: entry.value,
                 hash: UInt64(intLiteral: 0),
@@ -351,16 +451,22 @@ public struct Dictionary[K, V]: Iterable where K: Equatable {
             ));
             i = i + Int64(intLiteral: 1)
         }
-        self.len = Int64(intLiteral: 0)
+        s.len = Int64(intLiteral: 0);
+        self.storage.setValue(s)
     }
 
     // Iteration
     public func iter() -> DictionaryIterator[K, V] {
-        DictionaryIterator(entries: self.entries, capacity: self.cap)
+        DictionaryIterator(entries: self.entries(), capacity: self.cap())
     }
 
     // Get internal data for views
-    public func getEntries() -> Pointer[DictionaryEntry[K, V]] { self.entries }
+    public func getEntries() -> Pointer[DictionaryEntry[K, V]] { self.entries() }
+
+    // Cloneable - shallow clone (COW)
+    public func clone() -> Dictionary[K, V] {
+        Dictionary(storage: self.storage.clone())
+    }
 }
 
 // Equatable when K and V are Equatable
@@ -395,44 +501,8 @@ extend Dictionary[K, V]: Equatable where K: Equatable, V: Equatable {
     }
 }
 
-// Cloneable when K and V are Cloneable
-extend Dictionary[K, V]: Cloneable where K: Cloneable, V: Cloneable {
-    public func clone() -> Dictionary[K, V] {
-        let selfCount = self.count();
-        let selfCap = self.getCapacity();
-        let selfEntries = self.getEntries();
-
-        if selfCount == Int64(intLiteral: 0) {
-            return Dictionary(self.placeholderKey.clone(), self.placeholderValue.clone())
-        }
-
-        // Find first entry to use as placeholder
-        var firstKey: K = selfEntries.offset(by: Int64(intLiteral: 0)).read().key;
-        var firstValue: V = selfEntries.offset(by: Int64(intLiteral: 0)).read().value;
-        var i: Int64 = Int64(intLiteral: 0);
-        var foundFirst: Bool = false;
-        while i < selfCap and foundFirst == false {
-            let entry = selfEntries.offset(by: i).read();
-            if entry.occupied {
-                firstKey = entry.key;
-                firstValue = entry.value;
-                foundFirst = true
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-
-        var result = Dictionary(capacity: selfCount, placeholderKey: firstKey.clone(), placeholderValue: firstValue.clone());
-        i = Int64(intLiteral: 0);
-        while i < selfCap {
-            let entry = selfEntries.offset(by: i).read();
-            if entry.occupied {
-                let _ = result.insert(entry.key.clone(), entry.value.clone());
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-        result
-    }
-}
+// Cloneable conformance
+extend Dictionary[K, V]: Cloneable {}
 
 // KeysIterator must be defined before KeysView
 public struct KeysIterator[K, V]: Iterator where K: Equatable {
@@ -513,10 +583,10 @@ public struct ValuesView[K, V]: Iterable where K: Equatable {
 // Extension to add keys() and values() methods
 extend Dictionary[K, V] where K: Equatable {
     public func keys() -> KeysView[K, V] {
-        KeysView(entries: self.entries, capacity: self.cap)
+        KeysView(entries: self.getEntries(), capacity: self.getCapacity())
     }
 
     public func values() -> ValuesView[K, V] {
-        ValuesView(entries: self.entries, capacity: self.cap)
+        ValuesView(entries: self.getEntries(), capacity: self.getCapacity())
     }
 }

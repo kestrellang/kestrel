@@ -41,6 +41,13 @@ public struct ArcBox[T] {
         self.ptr.read().value
     }
 
+    // Set the stored value (for in-place mutation)
+    public func setValue(value: T) {
+        var storage = self.ptr.read();
+        storage.value = value;
+        self.ptr.write(storage);
+    }
+
     // Check if this is the only reference
     public func isUnique() -> Bool {
         self.ptr.read().refCount == Int64(intLiteral: 1)

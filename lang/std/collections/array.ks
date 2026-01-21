@@ -1,11 +1,11 @@
-// Array[T] - dynamic growable array
+// Array[T] - dynamic growable array with COW (Copy-on-Write) semantics
 
 module std.collections
 
 import std.core.(Bool, Equatable, Comparable, Cloneable)
 import std.num.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice)
+import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, ArcBox)
 import std.iter.(Iterator, Iterable)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 
@@ -33,28 +33,85 @@ public struct ArrayIterator[T]: Iterator {
     }
 }
 
-// Array[T] - simple dynamic array using SystemAllocator
-public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
-    type Item = T
-    type Iter = ArrayIterator[T]
-    type Element = T
+// ArrayStorage[T] - internal storage for Array (ptr, len, cap)
+struct ArrayStorage[T]: Cloneable {
+    var ptr: Pointer[T]
+    var len: Int64
+    var cap: Int64
 
-    private var ptr: Pointer[T]
-    private var len: Int64
-    private var cap: Int64
-
-    // Private init for internal use
-    private init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64) {
+    init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64) {
         self.ptr = ptr;
         self.len = len;
         self.cap = cap;
     }
 
+    // Deep clone - allocate new buffer and copy elements
+    func clone() -> ArrayStorage[T] {
+        if self.len == Int64(intLiteral: 0) {
+            return ArrayStorage(
+                ptr: Pointer(raw: lang.ptr_null[T]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0)
+            )
+        }
+        let layout = Layout.array[T](self.len);
+        var allocator = SystemAllocator();
+        let result = allocator.allocate(layout);
+        if result.isSome() {
+            let newPtr = result.unwrap().cast[T]();
+            // Copy elements
+            var i: Int64 = Int64(intLiteral: 0);
+            while i < self.len {
+                newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
+                i = i + Int64(intLiteral: 1)
+            }
+            ArrayStorage(ptr: newPtr, len: self.len, cap: self.len)
+        } else {
+            lang.panic("ArrayStorage clone allocation failed")
+        }
+    }
+
+    deinit {
+        if self.cap > Int64(intLiteral: 0) {
+            let layout = Layout.array[T](self.cap);
+            var allocator = SystemAllocator();
+            allocator.deallocate(self.ptr.asRaw(), layout)
+        }
+    }
+}
+
+// Array[T] - dynamic array with COW semantics using ArcBox
+public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral {
+    type Item = T
+    type Iter = ArrayIterator[T]
+    type Element = T
+
+    private var storage: ArcBox[ArrayStorage[T]]
+
+    // Helper accessors for storage fields
+    private func ptr() -> Pointer[T] { self.storage.getValue().ptr }
+    private func len() -> Int64 { self.storage.getValue().len }
+    private func cap() -> Int64 { self.storage.getValue().cap }
+
+    // Ensure unique storage for mutation (COW)
+    private mutating func makeUnique() {
+        if self.storage.isUnique() == false {
+            self.storage = self.storage.deepClone()
+        }
+    }
+
+    // Private init for internal use (from storage)
+    private init(storage storage: ArcBox[ArrayStorage[T]]) {
+        self.storage = storage;
+    }
+
     // Create empty array
     public init() {
-        self.ptr = Pointer(raw: lang.ptr_null[T]());
-        self.len = Int64(intLiteral: 0);
-        self.cap = Int64(intLiteral: 0);
+        self.storage = ArcBox(ArrayStorage(
+            ptr: Pointer(raw: lang.ptr_null[T]()),
+            len: Int64(intLiteral: 0),
+            cap: Int64(intLiteral: 0)
+        ));
     }
 
     // Create with capacity
@@ -64,16 +121,20 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if result.isSome() {
-                self.ptr = result.unwrap().cast[T]();
-                self.len = Int64(intLiteral: 0);
-                self.cap = capacity
+                self.storage = ArcBox(ArrayStorage(
+                    ptr: result.unwrap().cast[T](),
+                    len: Int64(intLiteral: 0),
+                    cap: capacity
+                ))
             } else {
                 lang.panic("Array allocation failed")
             }
         } else {
-            self.ptr = Pointer(raw: lang.ptr_null[T]());
-            self.len = Int64(intLiteral: 0);
-            self.cap = Int64(intLiteral: 0)
+            self.storage = ArcBox(ArrayStorage(
+                ptr: Pointer(raw: lang.ptr_null[T]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0)
+            ))
         }
     }
 
@@ -90,58 +151,59 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if result.isSome() {
-                self.ptr = result.unwrap().cast[T]();
-                self.len = Int64(intLiteral: 0);
-                self.cap = elementCount;
+                let newPtr = result.unwrap().cast[T]();
+                var currentLen: Int64 = Int64(intLiteral: 0);
                 // Copy elements from literal slice
                 var iter = elements.iter();
                 var done: Bool = false;
                 while done == false {
                     let item = iter.next();
                     if item.isSome() {
-                        self.ptr.offset(by: self.len).write(item.unwrap());
-                        self.len = self.len + Int64(intLiteral: 1)
+                        newPtr.offset(by: currentLen).write(item.unwrap());
+                        currentLen = currentLen + Int64(intLiteral: 1)
                     } else {
                         done = true
                     }
                 }
+                self.storage = ArcBox(ArrayStorage(
+                    ptr: newPtr,
+                    len: currentLen,
+                    cap: elementCount
+                ))
             } else {
                 lang.panic("Array allocation failed")
             }
         } else {
-            self.ptr = Pointer(raw: lang.ptr_null[T]());
-            self.len = Int64(intLiteral: 0);
-            self.cap = Int64(intLiteral: 0)
-        }
-    }
-
-    deinit {
-        if self.cap > Int64(intLiteral: 0) {
-            let layout = Layout.array[T](self.cap);
-            var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            self.storage = ArcBox(ArrayStorage(
+                ptr: Pointer(raw: lang.ptr_null[T]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0)
+            ))
         }
     }
 
     // Properties
-    public func count() -> Int64 { self.len }
-    public func capacity() -> Int64 { self.cap }
-    public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
-    public func pointer() -> Pointer[T] { self.ptr }
+    public func count() -> Int64 { self.len() }
+    public func capacity() -> Int64 { self.cap() }
+    public func isEmpty() -> Bool { self.len() == Int64(intLiteral: 0) }
+    public func pointer() -> Pointer[T] { self.ptr() }
 
     // Get a slice view of the array
     public func asSlice() -> Slice[T] {
-        Slice(pointer: self.ptr, count: self.len)
+        Slice(pointer: self.ptr(), count: self.len())
     }
 
     // Grow capacity if needed
     private mutating func grow(minCapacity: Int64) {
-        if self.cap >= minCapacity {
+        let myCap = self.cap();
+        if myCap >= minCapacity {
             return
         }
 
+        self.makeUnique();
+
         // Calculate new capacity
-        var newCap: Int64 = self.cap;
+        var newCap: Int64 = myCap;
         if newCap == Int64(intLiteral: 0) {
             newCap = Int64(intLiteral: 4)
         }
@@ -155,19 +217,19 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let result = allocator.allocate(newLayout);
         if result.isSome() {
             let newPtr = result.unwrap().cast[T]();
+            let oldStorage = self.storage.getValue();
             // Copy existing elements
             var i: Int64 = Int64(intLiteral: 0);
-            while i < self.len {
-                newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
+            while i < oldStorage.len {
+                newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
                 i = i + Int64(intLiteral: 1)
             }
             // Free old buffer
-            if self.cap > Int64(intLiteral: 0) {
-                let oldLayout = Layout.array[T](self.cap);
-                allocator.deallocate(self.ptr.asRaw(), oldLayout)
+            if oldStorage.cap > Int64(intLiteral: 0) {
+                let oldLayout = Layout.array[T](oldStorage.cap);
+                allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
-            self.ptr = newPtr;
-            self.cap = newCap
+            self.storage.setValue(ArrayStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
         } else {
             lang.panic("Array grow failed")
         }
@@ -175,50 +237,46 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
     // Unchecked element access
     public func getUnchecked(index: Int64) -> T {
-        self.ptr.offset(by: index).read()
+        self.ptr().offset(by: index).read()
     }
 
     // Unchecked write
-    public func setUnchecked(index: Int64, value: T) {
-        self.ptr.offset(by: index).write(value)
+    public mutating func setUnchecked(index: Int64, value: T) {
+        self.makeUnique();
+        self.ptr().offset(by: index).write(value)
     }
 
     // Safe element access
     public func getValue(at index: Int64) -> Optional[T] {
-        if index >= Int64(intLiteral: 0) and index < self.len {
-            .Some(self.ptr.offset(by: index).read())
+        let myLen = self.len();
+        if index >= Int64(intLiteral: 0) and index < myLen {
+            .Some(self.ptr().offset(by: index).read())
         } else {
             .None
         }
     }
 
-    // Subscripts commented out due to compiler issue with parameter binding
-    // public subscript(safe index: Int64) -> Optional[T] {
-    //     get {
-    //         if index >= Int64(intLiteral: 0) and index < self.len {
-    //             .Some(self.ptr.offset(by: index).read())
-    //         } else {
-    //             .None
-    //         }
-    //     }
-    // }
-    // public subscript(unchecked index: Int64) -> T {
-    //     get { self.ptr.offset(by: index).read() }
-    //     set { self.ptr.offset(by: index).write(newValue) }
-    // }
-
     // Append element
     public mutating func append(element: T) {
-        self.grow(self.len + Int64(intLiteral: 1));
-        self.ptr.offset(by: self.len).write(element);
-        self.len = self.len + Int64(intLiteral: 1)
+        let myLen = self.len();
+        self.grow(myLen + Int64(intLiteral: 1));
+        self.makeUnique();
+        var s = self.storage.getValue();
+        s.ptr.offset(by: s.len).write(element);
+        s.len = s.len + Int64(intLiteral: 1);
+        self.storage.setValue(s)
     }
 
     // Pop last element
     public mutating func pop() -> Optional[T] {
-        if self.len > Int64(intLiteral: 0) {
-            self.len = self.len - Int64(intLiteral: 1);
-            .Some(self.ptr.offset(by: self.len).read())
+        let myLen = self.len();
+        if myLen > Int64(intLiteral: 0) {
+            self.makeUnique();
+            var s = self.storage.getValue();
+            s.len = s.len - Int64(intLiteral: 1);
+            let value = s.ptr.offset(by: s.len).read();
+            self.storage.setValue(s);
+            .Some(value)
         } else {
             .None
         }
@@ -226,13 +284,16 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
     // Clear all elements
     public mutating func clear() {
-        self.len = Int64(intLiteral: 0)
+        self.makeUnique();
+        var s = self.storage.getValue();
+        s.len = Int64(intLiteral: 0);
+        self.storage.setValue(s)
     }
 
     // First element
     public func first() -> Optional[T] {
-        if self.len > Int64(intLiteral: 0) {
-            .Some(self.ptr.read())
+        if self.len() > Int64(intLiteral: 0) {
+            .Some(self.ptr().read())
         } else {
             .None
         }
@@ -240,8 +301,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
     // Last element
     public func last() -> Optional[T] {
-        if self.len > Int64(intLiteral: 0) {
-            .Some(self.ptr.offset(by: self.len - Int64(intLiteral: 1)).read())
+        let myLen = self.len();
+        if myLen > Int64(intLiteral: 0) {
+            .Some(self.ptr().offset(by: myLen - Int64(intLiteral: 1)).read())
         } else {
             .None
         }
@@ -249,52 +311,68 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
     // Insert at index
     public mutating func insert(element: T, at index: Int64) {
-        if index < Int64(intLiteral: 0) or index > self.len {
+        let myLen = self.len();
+        if index < Int64(intLiteral: 0) or index > myLen {
             lang.panic("Array.insert: index out of bounds")
         }
-        self.grow(self.len + Int64(intLiteral: 1));
+        self.grow(myLen + Int64(intLiteral: 1));
+        self.makeUnique();
+        var s = self.storage.getValue();
         // Shift elements right
-        var i: Int64 = self.len;
+        var i: Int64 = s.len;
         while i > index {
-            self.ptr.offset(by: i).write(self.ptr.offset(by: i - Int64(intLiteral: 1)).read());
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i - Int64(intLiteral: 1)).read());
             i = i - Int64(intLiteral: 1)
         }
-        self.ptr.offset(by: index).write(element);
-        self.len = self.len + Int64(intLiteral: 1)
+        s.ptr.offset(by: index).write(element);
+        s.len = s.len + Int64(intLiteral: 1);
+        self.storage.setValue(s)
     }
 
     // Remove at index
     public mutating func remove(at index: Int64) -> T {
-        if index < Int64(intLiteral: 0) or index >= self.len {
+        let myLen = self.len();
+        if index < Int64(intLiteral: 0) or index >= myLen {
             lang.panic("Array.remove: index out of bounds")
         }
-        let removed = self.ptr.offset(by: index).read();
+        self.makeUnique();
+        var s = self.storage.getValue();
+        let removed = s.ptr.offset(by: index).read();
         // Shift elements left
         var i: Int64 = index;
-        while i < self.len - Int64(intLiteral: 1) {
-            self.ptr.offset(by: i).write(self.ptr.offset(by: i + Int64(intLiteral: 1)).read());
+        while i < s.len - Int64(intLiteral: 1) {
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i + Int64(intLiteral: 1)).read());
             i = i + Int64(intLiteral: 1)
         }
-        self.len = self.len - Int64(intLiteral: 1);
+        s.len = s.len - Int64(intLiteral: 1);
+        self.storage.setValue(s);
         removed
     }
 
     // Iterable
     public func iter() -> ArrayIterator[T] {
-        ArrayIterator(ptr: self.ptr, remaining: self.len)
+        ArrayIterator(ptr: self.ptr(), remaining: self.len())
     }
 
     // Reverse in place
     public mutating func reverse() {
+        self.makeUnique();
+        var s = self.storage.getValue();
         var left: Int64 = Int64(intLiteral: 0);
-        var right: Int64 = self.len - Int64(intLiteral: 1);
+        var right: Int64 = s.len - Int64(intLiteral: 1);
         while left < right {
-            let temp = self.ptr.offset(by: left).read();
-            self.ptr.offset(by: left).write(self.ptr.offset(by: right).read());
-            self.ptr.offset(by: right).write(temp);
+            let temp = s.ptr.offset(by: left).read();
+            s.ptr.offset(by: left).write(s.ptr.offset(by: right).read());
+            s.ptr.offset(by: right).write(temp);
             left = left + Int64(intLiteral: 1);
             right = right - Int64(intLiteral: 1)
         }
+        self.storage.setValue(s)
+    }
+
+    // Cloneable - shallow clone (COW)
+    public func clone() -> Array[T] {
+        Array(storage: self.storage.clone())
     }
 }
 
@@ -318,16 +396,5 @@ extend Array[T]: Equatable where T: Equatable {
     }
 }
 
-// Cloneable when T is Cloneable
-extend Array[T]: Cloneable where T: Cloneable {
-    public func clone() -> Array[T] {
-        let selfCount = self.count();
-        var result = Array(capacity: selfCount);
-        var i: Int64 = Int64(intLiteral: 0);
-        while i < selfCount {
-            result.append(self.getUnchecked(i).clone());
-            i = i + Int64(intLiteral: 1)
-        }
-        result
-    }
-}
+// Cloneable conformance
+extend Array[T]: Cloneable {}

@@ -1,11 +1,11 @@
-// String - UTF-8 encoded string
+// String - UTF-8 encoded string with COW (Copy-on-Write) semantics
 
 module std.text
 
 import std.core.(Bool, Equatable, Comparable, Cloneable, Formattable, Ordering, Addable, ExpressibleByStringLiteral)
 import std.num.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, ArcBox)
 import std.iter.(Iterator, Iterable)
 import std.text.(CodePoint, decodeUtf8, encodeUtf8)
 import std.ffi.(memcpy)
@@ -126,21 +126,80 @@ public struct SplitIterator: Iterator {
     }
 }
 
-// String - UTF-8 encoded, dynamically sized string
+// StringStorage - internal storage for String (ptr, len, cap)
+struct StringStorage: Cloneable {
+    var ptr: Pointer[UInt8]
+    var len: Int64
+    var cap: Int64
+
+    init(ptr ptr: Pointer[UInt8], len len: Int64, cap cap: Int64) {
+        self.ptr = ptr;
+        self.len = len;
+        self.cap = cap;
+    }
+
+    // Deep clone - allocate new buffer and copy bytes
+    func clone() -> StringStorage {
+        if self.len == Int64(intLiteral: 0) {
+            return StringStorage(
+                ptr: Pointer(raw: lang.ptr_null[UInt8]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0)
+            )
+        }
+        let layout = Layout.array[UInt8](self.len);
+        var allocator = SystemAllocator();
+        let result = allocator.allocate(layout);
+        if result.isSome() {
+            let newPtr = result.unwrap().cast[UInt8]();
+            // Copy bytes
+            var i: Int64 = Int64(intLiteral: 0);
+            while i < self.len {
+                newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
+                i = i + Int64(intLiteral: 1)
+            }
+            StringStorage(ptr: newPtr, len: self.len, cap: self.len)
+        } else {
+            lang.panic("StringStorage clone allocation failed")
+        }
+    }
+
+    deinit {
+        if self.cap > Int64(intLiteral: 0) {
+            let layout = Layout.array[UInt8](self.cap);
+            var allocator = SystemAllocator();
+            allocator.deallocate(self.ptr.asRaw(), layout)
+        }
+    }
+}
+
+// String - UTF-8 encoded, dynamically sized string with COW semantics
 public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral {
     type Item = CodePoint
     type Iter = StringIterator
     type Output = String
 
-    private var ptr: Pointer[UInt8]
-    private var len: Int64
-    private var cap: Int64
+    private var storage: ArcBox[StringStorage]
+
+    // Helper accessors for storage fields
+    private func ptr() -> Pointer[UInt8] { self.storage.getValue().ptr }
+    private func len() -> Int64 { self.storage.getValue().len }
+    private func cap() -> Int64 { self.storage.getValue().cap }
+
+    // Ensure unique storage for mutation (COW)
+    private mutating func makeUnique() {
+        if self.storage.isUnique() == false {
+            self.storage = self.storage.deepClone()
+        }
+    }
 
     // Create empty string
     public init() {
-        self.ptr = Pointer(raw: lang.ptr_null[UInt8]());
-        self.len = Int64(intLiteral: 0);
-        self.cap = Int64(intLiteral: 0);
+        self.storage = ArcBox(StringStorage(
+            ptr: Pointer(raw: lang.ptr_null[UInt8]()),
+            len: Int64(intLiteral: 0),
+            cap: Int64(intLiteral: 0)
+        ));
     }
 
     // Create with capacity
@@ -150,16 +209,20 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if result.isSome() {
-                self.ptr = result.unwrap().cast[UInt8]();
-                self.len = Int64(intLiteral: 0);
-                self.cap = capacity
+                self.storage = ArcBox(StringStorage(
+                    ptr: result.unwrap().cast[UInt8](),
+                    len: Int64(intLiteral: 0),
+                    cap: capacity
+                ))
             } else {
                 lang.panic("String allocation failed")
             }
         } else {
-            self.ptr = Pointer(raw: lang.ptr_null[UInt8]());
-            self.len = Int64(intLiteral: 0);
-            self.cap = Int64(intLiteral: 0)
+            self.storage = ArcBox(StringStorage(
+                ptr: Pointer(raw: lang.ptr_null[UInt8]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0)
+            ))
         }
     }
 
@@ -171,28 +234,31 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if result.isSome() {
-                self.ptr = result.unwrap().cast[UInt8]();
-                self.len = byteCount;
-                self.cap = byteCount;
+                let newPtr = result.unwrap().cast[UInt8]();
                 // Copy bytes from literal
                 let srcPtr: lang.ptr[lang.i8] = ptr;
-                let dstPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](self.ptr.asRaw().raw);
+                let dstPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](newPtr.asRaw().raw);
                 let _ = memcpy(dstPtr, srcPtr, length);
+                self.storage = ArcBox(StringStorage(
+                    ptr: newPtr,
+                    len: byteCount,
+                    cap: byteCount
+                ))
             } else {
                 lang.panic("String allocation failed")
             }
         } else {
-            self.ptr = Pointer(raw: lang.ptr_null[UInt8]());
-            self.len = Int64(intLiteral: 0);
-            self.cap = Int64(intLiteral: 0)
+            self.storage = ArcBox(StringStorage(
+                ptr: Pointer(raw: lang.ptr_null[UInt8]()),
+                len: Int64(intLiteral: 0),
+                cap: Int64(intLiteral: 0)
+            ))
         }
     }
 
-    // Private: create from byte pointer without copying (takes ownership)
-    private init(ptr ptr: Pointer[UInt8], len len: Int64, cap cap: Int64) {
-        self.ptr = ptr;
-        self.len = len;
-        self.cap = cap;
+    // Private: create from storage (for COW clone)
+    private init(storage storage: ArcBox[StringStorage]) {
+        self.storage = storage;
     }
 
     // Internal: create from bytes without validation (for split)
@@ -211,31 +277,25 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 newPtr.offset(by: i).write(ptr.offset(by: i).read());
                 i = i + Int64(intLiteral: 1)
             }
-            String(ptr: newPtr, len: count, cap: count)
+            String(storage: ArcBox(StringStorage(ptr: newPtr, len: count, cap: count)))
         } else {
             lang.panic("String allocation failed")
         }
     }
 
-    deinit {
-        if self.cap > Int64(intLiteral: 0) {
-            let layout = Layout.array[UInt8](self.cap);
-            var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
-        }
-    }
-
     // Properties
-    public func byteCount() -> Int64 { self.len }
-    public func capacity() -> Int64 { self.cap }
-    public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
+    public func byteCount() -> Int64 { self.len() }
+    public func capacity() -> Int64 { self.cap() }
+    public func isEmpty() -> Bool { self.len() == Int64(intLiteral: 0) }
 
     // Count code points (not bytes)
     public func count() -> Int64 {
+        let myLen = self.len();
+        let myPtr = self.ptr();
         var n: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
-        while i < self.len {
-            let byte = self.ptr.offset(by: i).read();
+        while i < myLen {
+            let byte = myPtr.offset(by: i).read();
             // Count leading bytes only (not continuation bytes 10xxxxxx)
             let byteVal: lang.i32 = lang.cast_i8_i32(byte.raw);
             if lang.i32_ne(lang.i32_and(byteVal, 0xC0), 0x80) {
@@ -248,39 +308,28 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Byte access
     public func byteAt(index: Int64) -> Optional[UInt8] {
-        if index >= Int64(intLiteral: 0) and index < self.len {
-            .Some(self.ptr.offset(by: index).read())
+        let myLen = self.len();
+        if index >= Int64(intLiteral: 0) and index < myLen {
+            .Some(self.ptr().offset(by: index).read())
         } else {
             .None
         }
     }
 
     public func byteAtUnchecked(index: Int64) -> UInt8 {
-        self.ptr.offset(by: index).read()
+        self.ptr().offset(by: index).read()
     }
-
-    // Subscripts for byte access - commented out due to compiler issue with parameter binding
-    // public subscript(safe index: Int64) -> Optional[UInt8] {
-    //     get {
-    //         if index >= Int64(intLiteral: 0) and index < self.len {
-    //             .Some(self.ptr.offset(by: index).read())
-    //         } else {
-    //             .None
-    //         }
-    //     }
-    // }
-    // public subscript(unchecked index: Int64) -> UInt8 {
-    //     get { self.ptr.offset(by: index).read() }
-    //     set { self.ptr.offset(by: index).write(newValue) }
-    // }
 
     // Grow capacity
     private mutating func grow(minCapacity: Int64) {
-        if self.cap >= minCapacity {
+        let myCap = self.cap();
+        if myCap >= minCapacity {
             return
         }
 
-        var newCap: Int64 = self.cap;
+        self.makeUnique();
+
+        var newCap: Int64 = myCap;
         if newCap == Int64(intLiteral: 0) {
             newCap = Int64(intLiteral: 16)
         }
@@ -293,19 +342,19 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         let result = allocator.allocate(newLayout);
         if result.isSome() {
             let newPtr = result.unwrap().cast[UInt8]();
+            let oldStorage = self.storage.getValue();
             // Copy existing bytes
             var i: Int64 = Int64(intLiteral: 0);
-            while i < self.len {
-                newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
+            while i < oldStorage.len {
+                newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
                 i = i + Int64(intLiteral: 1)
             }
             // Free old buffer
-            if self.cap > Int64(intLiteral: 0) {
-                let oldLayout = Layout.array[UInt8](self.cap);
-                allocator.deallocate(self.ptr.asRaw(), oldLayout)
+            if oldStorage.cap > Int64(intLiteral: 0) {
+                let oldLayout = Layout.array[UInt8](oldStorage.cap);
+                allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
-            self.ptr = newPtr;
-            self.cap = newCap
+            self.storage.setValue(StringStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
         } else {
             lang.panic("String grow failed")
         }
@@ -313,46 +362,62 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Append string
     public mutating func append(other: String) {
-        if other.len == Int64(intLiteral: 0) {
+        let otherLen = other.len();
+        if otherLen == Int64(intLiteral: 0) {
             return
         }
-        self.grow(self.len + other.len);
+        let myLen = self.len();
+        self.grow(myLen + otherLen);
+        self.makeUnique();
+        var s = self.storage.getValue();
+        let otherPtr = other.ptr();
         var i: Int64 = Int64(intLiteral: 0);
-        while i < other.len {
-            self.ptr.offset(by: self.len).write(other.ptr.offset(by: i).read());
-            self.len = self.len + Int64(intLiteral: 1);
+        while i < otherLen {
+            s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
+            s.len = s.len + Int64(intLiteral: 1);
             i = i + Int64(intLiteral: 1)
         }
+        self.storage.setValue(s)
     }
 
     // Append code point
     public mutating func appendCodePoint(cp: CodePoint) {
         let utf8Len = cp.utf8Length();
-        self.grow(self.len + utf8Len);
+        self.grow(self.len() + utf8Len);
+        self.makeUnique();
+        var s = self.storage.getValue();
         // Encode to buffer
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](self.ptr.asRaw().raw);
-        let written = encodeUtf8(cp, rawPtr, at: self.len);
-        self.len = self.len + written
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](s.ptr.asRaw().raw);
+        let written = encodeUtf8(cp, rawPtr, at: s.len);
+        s.len = s.len + written;
+        self.storage.setValue(s)
     }
 
     // Append byte (unchecked - caller must ensure valid UTF-8)
     public mutating func appendByte(byte: UInt8) {
-        self.grow(self.len + Int64(intLiteral: 1));
-        self.ptr.offset(by: self.len).write(byte);
-        self.len = self.len + Int64(intLiteral: 1)
+        self.grow(self.len() + Int64(intLiteral: 1));
+        self.makeUnique();
+        var s = self.storage.getValue();
+        s.ptr.offset(by: s.len).write(byte);
+        s.len = s.len + Int64(intLiteral: 1);
+        self.storage.setValue(s)
     }
 
     // Clear
     public mutating func clear() {
-        self.len = Int64(intLiteral: 0)
+        self.makeUnique();
+        var s = self.storage.getValue();
+        s.len = Int64(intLiteral: 0);
+        self.storage.setValue(s)
     }
 
     // Substring by byte indices
     public func substringBytes(from start: Int64, to end: Int64) -> String {
-        if start >= end or start < Int64(intLiteral: 0) or end > self.len {
+        let myLen = self.len();
+        if start >= end or start < Int64(intLiteral: 0) or end > myLen {
             return String()
         }
-        String.fromBytesUnchecked(self.ptr.offset(by: start), end - start)
+        String.fromBytesUnchecked(self.ptr().offset(by: start), end - start)
     }
 
     // Search
@@ -361,21 +426,25 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     public func find(substring: String) -> Optional[Int64] {
-        if substring.len == Int64(intLiteral: 0) {
+        let subLen = substring.len();
+        let myLen = self.len();
+        if subLen == Int64(intLiteral: 0) {
             return .Some(Int64(intLiteral: 0))
         }
-        if substring.len > self.len {
+        if subLen > myLen {
             return .None
         }
 
+        let myPtr = self.ptr();
+        let subPtr = substring.ptr();
         var i: Int64 = Int64(intLiteral: 0);
-        let lastStart = self.len - substring.len;
+        let lastStart = myLen - subLen;
         while i <= lastStart {
             var matches: Bool = true;
             var j: Int64 = Int64(intLiteral: 0);
-            while j < substring.len and matches {
-                let a = self.ptr.offset(by: i + j).read();
-                let b = substring.ptr.offset(by: j).read();
+            while j < subLen and matches {
+                let a = myPtr.offset(by: i + j).read();
+                let b = subPtr.offset(by: j).read();
                 if a.equals(b) == false {
                     matches = false
                 }
@@ -390,14 +459,17 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     public func startsWith(prefix: String) -> Bool {
-        if prefix.len > self.len {
+        let prefixLen = prefix.len();
+        if prefixLen > self.len() {
             return false
         }
+        let myPtr = self.ptr();
+        let prefixPtr = prefix.ptr();
         var i: Int64 = Int64(intLiteral: 0);
         var matches: Bool = true;
-        while i < prefix.len and matches {
-            let a = self.ptr.offset(by: i).read();
-            let b = prefix.ptr.offset(by: i).read();
+        while i < prefixLen and matches {
+            let a = myPtr.offset(by: i).read();
+            let b = prefixPtr.offset(by: i).read();
             if a.equals(b) == false {
                 matches = false
             }
@@ -407,15 +479,19 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     public func endsWith(suffix: String) -> Bool {
-        if suffix.len > self.len {
+        let suffixLen = suffix.len();
+        let myLen = self.len();
+        if suffixLen > myLen {
             return false
         }
-        let offset = self.len - suffix.len;
+        let offset = myLen - suffixLen;
+        let myPtr = self.ptr();
+        let suffixPtr = suffix.ptr();
         var i: Int64 = Int64(intLiteral: 0);
         var matches: Bool = true;
-        while i < suffix.len and matches {
-            let a = self.ptr.offset(by: offset + i).read();
-            let b = suffix.ptr.offset(by: i).read();
+        while i < suffixLen and matches {
+            let a = myPtr.offset(by: offset + i).read();
+            let b = suffixPtr.offset(by: i).read();
             if a.equals(b) == false {
                 matches = false
             }
@@ -430,27 +506,12 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     public func trimStart() -> String {
-        var start: Int64 = Int64(intLiteral: 0);
-        while start < self.len {
-            let byte = self.ptr.offset(by: start).read();
-            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-            // space=32, tab=9, newline=10, carriage return=13
-            let isWhitespace = lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13));
-            if Bool(boolLiteral: isWhitespace) {
-                start = start + Int64(intLiteral: 1)
-            } else {
-                // break out
-                start = self.len + Int64(intLiteral: 1)
-            }
-        }
-        if start > self.len {
-            start = start - Int64(intLiteral: 1) - self.len + self.len
-        }
-        // Reconstruct start as the first non-whitespace position
+        let myLen = self.len();
+        let myPtr = self.ptr();
         var realStart: Int64 = Int64(intLiteral: 0);
         var done: Bool = false;
-        while realStart < self.len and done == false {
-            let byte = self.ptr.offset(by: realStart).read();
+        while realStart < myLen and done == false {
+            let byte = myPtr.offset(by: realStart).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13));
             if Bool(boolLiteral: isWs) {
@@ -459,15 +520,17 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 done = true
             }
         }
-        self.substringBytes(from: realStart, to: self.len)
+        self.substringBytes(from: realStart, to: myLen)
     }
 
     public func trimEnd() -> String {
-        var endPos: Int64 = self.len;
+        let myLen = self.len();
+        let myPtr = self.ptr();
+        var endPos: Int64 = myLen;
         var done: Bool = false;
         while endPos > Int64(intLiteral: 0) and done == false {
             let idx = endPos - Int64(intLiteral: 1);
-            let byte = self.ptr.offset(by: idx).read();
+            let byte = myPtr.offset(by: idx).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWhitespace = lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13));
             if Bool(boolLiteral: isWhitespace) {
@@ -481,10 +544,12 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Case conversion (ASCII only)
     public func lowercase() -> String {
-        var result = String(capacity: self.len);
+        let myLen = self.len();
+        let myPtr = self.ptr();
+        var result = String(capacity: myLen);
         var i: Int64 = Int64(intLiteral: 0);
-        while i < self.len {
-            let byte = self.ptr.offset(by: i).read();
+        while i < myLen {
+            let byte = myPtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // A-Z: 65-90 -> a-z: 97-122
             let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
@@ -499,10 +564,12 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     }
 
     public func uppercase() -> String {
-        var result = String(capacity: self.len);
+        let myLen = self.len();
+        let myPtr = self.ptr();
+        var result = String(capacity: myLen);
         var i: Int64 = Int64(intLiteral: 0);
-        while i < self.len {
-            let byte = self.ptr.offset(by: i).read();
+        while i < myLen {
+            let byte = myPtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // a-z: 97-122 -> A-Z: 65-90
             let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
@@ -518,21 +585,25 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Replace
     public func replace(pattern: String, with replacement: String) -> String {
-        if pattern.len == Int64(intLiteral: 0) {
+        let patternLen = pattern.len();
+        if patternLen == Int64(intLiteral: 0) {
             return self.clone()
         }
 
+        let myLen = self.len();
+        let myPtr = self.ptr();
+        let patternPtr = pattern.ptr();
         var result = String();
         var i: Int64 = Int64(intLiteral: 0);
 
-        while i < self.len {
+        while i < myLen {
             // Check for pattern match
             var matches: Bool = true;
-            if i + pattern.len <= self.len {
+            if i + patternLen <= myLen {
                 var j: Int64 = Int64(intLiteral: 0);
-                while j < pattern.len and matches {
-                    let a = self.ptr.offset(by: i + j).read();
-                    let b = pattern.ptr.offset(by: j).read();
+                while j < patternLen and matches {
+                    let a = myPtr.offset(by: i + j).read();
+                    let b = patternPtr.offset(by: j).read();
                     if a.equals(b) == false {
                         matches = false
                     }
@@ -544,9 +615,9 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
             if matches {
                 result.append(replacement);
-                i = i + pattern.len
+                i = i + patternLen
             } else {
-                result.appendByte(self.ptr.offset(by: i).read());
+                result.appendByte(myPtr.offset(by: i).read());
                 i = i + Int64(intLiteral: 1)
             }
         }
@@ -556,16 +627,16 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     // Split
     public func split(separator: String) -> SplitIterator {
         SplitIterator(
-            ptr: self.ptr,
-            length: self.len,
-            sepPtr: separator.ptr,
-            sepLen: separator.len
+            ptr: self.ptr(),
+            length: self.len(),
+            sepPtr: separator.ptr(),
+            sepLen: separator.len()
         )
     }
 
     // Iterable
     public func iter() -> StringIterator {
-        StringIterator(ptr: self.ptr, length: self.len)
+        StringIterator(ptr: self.ptr(), length: self.len())
     }
 
     // Addable
@@ -577,14 +648,18 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Equatable
     public func equals(other: String) -> Bool {
-        if self.len != other.len {
+        let myLen = self.len();
+        let otherLen = other.len();
+        if myLen != otherLen {
             return false
         }
+        let myPtr = self.ptr();
+        let otherPtr = other.ptr();
         var i: Int64 = Int64(intLiteral: 0);
         var equal: Bool = true;
-        while i < self.len and equal {
-            let a = self.ptr.offset(by: i).read();
-            let b = other.ptr.offset(by: i).read();
+        while i < myLen and equal {
+            let a = myPtr.offset(by: i).read();
+            let b = otherPtr.offset(by: i).read();
             if a.equals(b) == false {
                 equal = false
             }
@@ -595,15 +670,19 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     // Comparable (lexicographic byte comparison)
     public func compare(other: String) -> Ordering {
-        var minLen: Int64 = self.len;
-        if other.len < minLen {
-            minLen = other.len
+        let myLen = self.len();
+        let otherLen = other.len();
+        var minLen: Int64 = myLen;
+        if otherLen < minLen {
+            minLen = otherLen
         }
 
+        let myPtr = self.ptr();
+        let otherPtr = other.ptr();
         var i: Int64 = Int64(intLiteral: 0);
         while i < minLen {
-            let a = self.ptr.offset(by: i).read();
-            let b = other.ptr.offset(by: i).read();
+            let a = myPtr.offset(by: i).read();
+            let b = otherPtr.offset(by: i).read();
             let cmp = a.compare(b);
             let eql: Ordering = .Equal;
             if cmp.equals(eql) == false {
@@ -612,31 +691,18 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
             i = i + Int64(intLiteral: 1)
         }
 
-        if self.len < other.len {
+        if myLen < otherLen {
             .Less
-        } else if self.len > other.len {
+        } else if myLen > otherLen {
             .Greater
         } else {
             .Equal
         }
     }
 
-    // Hashable - TODO: implement when Hasher has writeU8
-    // public mutating func hash(into hasher: Hasher) {
-    //     var i: Int64 = Int64(intLiteral: 0);
-    //     while i < self.len {
-    //         let byte = self.ptr.offset(by: i).read();
-    //         hasher.writeU8(byte);
-    //         i = i + Int64(intLiteral: 1)
-    //     }
-    // }
-
-    // Cloneable
+    // Cloneable - shallow clone (COW)
     public func clone() -> String {
-        if self.len == Int64(intLiteral: 0) {
-            return String()
-        }
-        String.fromBytesUnchecked(self.ptr, self.len)
+        String(storage: self.storage.clone())
     }
 
     // Formattable
