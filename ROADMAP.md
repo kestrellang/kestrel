@@ -596,7 +596,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 ### Expressions
 
-- [ ] Try Operator
+- [x] Try Operator
 - [ ] For Loops
 - [ ] And / Or Short Circuiting
 - [ ] Null Coalescing Operator

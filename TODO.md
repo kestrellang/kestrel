@@ -44,7 +44,7 @@
 - [ ] For loops
 - [ ] Character Literals
 - [ ] Compound Assignment Operators
-- [ ] Try Expressions
+- [x] Try Expressions
 - [ ] Array type syntax [Item]
 - [ ] Dictionary type syntax [Key: Value]
 - [ ] Optional type syntax Type?
